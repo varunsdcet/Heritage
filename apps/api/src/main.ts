@@ -32,10 +32,14 @@ app.use(
         cb(null, true);
         return;
       }
-      // Reflect any heritage host during launch
-      if (origin.includes("46.202.163.202") || origin.includes("localhost")) {
-        cb(null, true);
-        return;
+      try {
+        const parsed = new URL(origin);
+        if (parsed.hostname === "46.202.163.202") {
+          cb(null, true);
+          return;
+        }
+      } catch {
+        // Invalid origins are rejected below.
       }
       cb(null, false);
     },
@@ -108,7 +112,7 @@ app.use("/admin", adminRouter);
 
 app.get("/public/verify", async (req, res, next) => {
   try {
-    const q = String(req.query.studentNumber ?? req.query.q ?? "")
+    const q = String(req.query.studentNumber ?? "")
       .trim()
       .toUpperCase();
     if (!q) {
@@ -117,12 +121,7 @@ app.get("/public/verify", async (req, res, next) => {
     }
     const { prisma } = await import("@myheritage/db");
     const hit = await prisma.student.findFirst({
-      where: {
-        OR: [
-          { studentNumber: { equals: q, mode: "insensitive" } },
-          { person: { email: { contains: q.toLowerCase(), mode: "insensitive" } } },
-        ],
-      },
+      where: { studentNumber: { equals: q, mode: "insensitive" } },
       select: { id: true },
     });
     res.json({ match: Boolean(hit) });

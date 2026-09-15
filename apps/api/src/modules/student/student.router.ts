@@ -193,6 +193,9 @@ studentRouter.post("/assignments/:assignmentId/files", async (req, res, next) =>
     const content = decodeAndValidateFile(input);
     const [assignment] = await getAssignments(user.institutionId, student.id, req.params.assignmentId);
     if (!assignment) throw httpError("Assignment not found", "NOT_FOUND", 404);
+    if (assignment.gradeItems.length > 0) {
+      throw httpError("Graded work is locked", "SUBMISSION_LOCKED", 409);
+    }
     if (assignment.dueAt && assignment.dueAt.getTime() < Date.now()) {
       throw httpError("The submission deadline has passed", "SUBMISSION_LOCKED", 409);
     }
@@ -280,10 +283,27 @@ studentRouter.delete("/submission-files/:fileId", async (req, res, next) => {
         archivedAt: null,
         submission: { institutionId: user.institutionId, studentId: student.id },
       },
-      include: { submission: { include: { assignment: true } } },
+      include: {
+        submission: {
+          include: {
+            assignment: {
+              include: {
+                gradeItems: {
+                  where: { institutionId: user.institutionId, studentId: student.id, status: "published" },
+                  select: { id: true },
+                },
+              },
+            },
+          },
+        },
+      },
     });
     if (!file) throw httpError("Submission file not found", "NOT_FOUND", 404);
-    if (file.submission.status !== "draft" || (file.submission.assignment.dueAt?.getTime() ?? Infinity) < Date.now()) {
+    if (
+      file.submission.status !== "draft" ||
+      file.submission.assignment.gradeItems.length > 0 ||
+      (file.submission.assignment.dueAt?.getTime() ?? Infinity) < Date.now()
+    ) {
       throw httpError("The submission file is locked", "SUBMISSION_LOCKED", 409);
     }
 
@@ -321,6 +341,9 @@ studentRouter.post("/assignments/:assignmentId/submit", async (req, res, next) =
     if (submission.status === "submitted") {
       res.json(SubmitStudentAssignmentResponse.parse({ submission: presentSubmission(submission), alreadySubmitted: true }));
       return;
+    }
+    if (assignment.gradeItems.length > 0) {
+      throw httpError("Graded work is locked", "SUBMISSION_LOCKED", 409);
     }
     if (submission.files.length === 0) {
       throw httpError("Upload at least one file before submitting", "VALIDATION_ERROR", 400);

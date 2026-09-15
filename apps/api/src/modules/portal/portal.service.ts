@@ -22,15 +22,25 @@ export type PortalView = {
 };
 
 function roleFor(user: SessionClaims, path: string): PortalView["role"] {
-  if (path.startsWith("/admin")) return "admin";
-  if (path.startsWith("/instructor") || path.startsWith("/m/instructor")) return "instructor";
-  if (path.startsWith("/applicant")) return "applicant";
-  if (path.startsWith("/employer")) return "employer";
-  if (user.roles.includes("instructor") && path.startsWith("/m/")) return "instructor";
-  if (user.roles.includes("admin") || user.roles.includes("registrar")) {
-    if (path.startsWith("/admin")) return "admin";
+  const requested: PortalView["role"] = path.startsWith("/admin")
+    ? "admin"
+    : path.startsWith("/instructor") || path.startsWith("/m/instructor")
+      ? "instructor"
+      : path.startsWith("/applicant")
+        ? "applicant"
+        : path.startsWith("/employer")
+          ? "employer"
+          : "student";
+  const permitted =
+    (requested === "admin" && (user.roles.includes("admin") || user.roles.includes("registrar"))) ||
+    (requested === "instructor" && user.roles.includes("instructor")) ||
+    (requested === "applicant" && user.roles.includes("applicant")) ||
+    (requested === "employer" && user.roles.includes("employer")) ||
+    (requested === "student" && user.roles.includes("student"));
+  if (!permitted) {
+    throw Object.assign(new Error("Forbidden"), { code: "FORBIDDEN", status: 403 });
   }
-  return "student";
+  return requested;
 }
 
 function titleFromPath(path: string): string {
@@ -107,7 +117,9 @@ async function coursesFor(user: SessionClaims): Promise<PortalRow[]> {
     include: { section: { include: { course: true, term: true } } },
   });
   const instructorIds = [...new Set(enrolments.map((e) => e.section.instructorPersonId))];
-  const instructors = await prisma.person.findMany({ where: { id: { in: instructorIds } } });
+  const instructors = await prisma.person.findMany({
+    where: { id: { in: instructorIds }, institutionId: user.institutionId },
+  });
   const names = new Map(instructors.map((p) => [p.id, `${p.givenName} ${p.familyName}`]));
   return enrolments.map((e) => ({
     primary: `${e.section.course.code} · ${e.section.course.title}`,
@@ -149,8 +161,42 @@ async function gradesFor(user: SessionClaims): Promise<{ metrics: PortalView["me
 }
 
 async function calendarFor(user: SessionClaims): Promise<PortalRow[]> {
+  let sectionIds: string[] = [];
+  if (user.roles.includes("admin") || user.roles.includes("registrar")) {
+    const sections = await prisma.section.findMany({
+      where: { institutionId: user.institutionId },
+      select: { id: true },
+    });
+    sectionIds = sections.map((section) => section.id);
+  } else if (user.roles.includes("instructor")) {
+    const sections = await prisma.section.findMany({
+      where: { institutionId: user.institutionId, instructorPersonId: user.personId },
+      select: { id: true },
+    });
+    sectionIds = sections.map((section) => section.id);
+  } else {
+    const student = await prisma.student.findFirst({
+      where: { institutionId: user.institutionId, personId: user.personId },
+      select: { id: true },
+    });
+    if (student) {
+      const enrolments = await prisma.enrolment.findMany({
+        where: {
+          institutionId: user.institutionId,
+          studentId: student.id,
+          status: { in: ["enrolled", "completed"] },
+        },
+        select: { sectionId: true },
+      });
+      sectionIds = enrolments.map((enrolment) => enrolment.sectionId);
+    }
+  }
   const assignments = await prisma.assignment.findMany({
-    where: { institutionId: user.institutionId, dueAt: { not: null } },
+    where: {
+      institutionId: user.institutionId,
+      sectionId: { in: sectionIds },
+      dueAt: { not: null },
+    },
     include: { section: { include: { course: true } } },
     orderBy: { dueAt: "asc" },
     take: 20,

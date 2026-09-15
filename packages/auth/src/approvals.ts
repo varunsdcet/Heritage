@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { RoleName } from "@myheritage/contracts";
-import { prisma } from "@myheritage/db";
+import { prisma, type Prisma } from "@myheritage/db";
 import { writeAuditAndOutbox } from "@myheritage/events";
 
 export async function requireApproval(input: {
@@ -15,9 +15,10 @@ export async function requireApproval(input: {
   eventName?: string;
   purpose?: string;
   source?: string;
+  tx?: Prisma.TransactionClient;
 }) {
   const correlationId = input.correlationId ?? randomUUID();
-  return prisma.$transaction(async (tx) => {
+  const createRequest = async (tx: Prisma.TransactionClient) => {
     const row = await tx.approvalRequest.create({
       data: {
         institutionId: input.institutionId,
@@ -43,7 +44,8 @@ export async function requireApproval(input: {
       outboxPayload: { approvalRequestId: row.id },
     });
     return row;
-  });
+  };
+  return input.tx ? createRequest(input.tx) : prisma.$transaction(createRequest);
 }
 
 export async function decideApproval(input: {
