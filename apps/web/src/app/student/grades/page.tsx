@@ -1,26 +1,66 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { StudentGradesResponse } from "@myheritage/contracts";
 import {
   AppShell,
+  Banner,
   Breadcrumb,
   Button,
   EmptyState,
+  Panel,
   RecordHeader,
   StatusPill,
 } from "@myheritage/ui";
-import { api, clearSession, loadSession, type Session } from "@/lib/api";
+import { ApiError, api, clearSession, loadSession, type Session } from "@/lib/api";
 import { resolveNav } from "@/lib/nav";
+
+type GradeViewState = "loading" | "ready" | "permission-denied" | "offline" | "archived" | "error";
 
 export default function StudentGradesPage() {
   const router = useRouter();
   const [session, setSession] = useState<Session | null>(null);
   const [data, setData] = useState<StudentGradesResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [viewState, setViewState] = useState<GradeViewState>("loading");
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [askingId, setAskingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+
+  const loadGrades = useCallback(
+    async (activeSession: Session) => {
+      setViewState("loading");
+      setLoadError(null);
+      try {
+        const response = await api<StudentGradesResponse>("/grades/me", {}, activeSession.accessToken);
+        setData(response);
+        setViewState("ready");
+      } catch (err) {
+        setData(null);
+        if (err instanceof ApiError && err.status === 401) {
+          clearSession();
+          router.replace("/login");
+          return;
+        }
+        if (err instanceof ApiError && err.status === 403) {
+          setViewState("permission-denied");
+          return;
+        }
+        if (err instanceof ApiError && err.status === 410) {
+          setViewState("archived");
+          return;
+        }
+        if ((typeof navigator !== "undefined" && !navigator.onLine) || err instanceof TypeError) {
+          setViewState("offline");
+          return;
+        }
+        setLoadError(err instanceof Error ? err.message : "Failed to load grades");
+        setViewState("error");
+      }
+    },
+    [router],
+  );
 
   useEffect(() => {
     const s = loadSession();
@@ -29,15 +69,18 @@ export default function StudentGradesPage() {
       return;
     }
     setSession(s);
-    api<StudentGradesResponse>("/grades/me", {}, s.accessToken)
-      .then(setData)
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load grades"));
-  }, [router]);
+    if (!s.roles.includes("student")) {
+      setViewState("permission-denied");
+      return;
+    }
+    void loadGrades(s);
+  }, [loadGrades, router]);
 
   async function askAboutGrade(gradeItemId: string) {
     if (!session) return;
     setAskingId(gradeItemId);
     setMessage(null);
+    setActionError(null);
     try {
       await api(
         "/messages/ask-grade",
@@ -53,13 +96,15 @@ export default function StudentGradesPage() {
       );
       setMessage("Message sent to your instructor.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not send message");
+      setActionError(err instanceof Error ? err.message : "Could not send message");
     } finally {
       setAskingId(null);
     }
   }
 
   if (!session) return null;
+
+  const visibleCourses = data?.courses.filter((course) => course.items.length > 0) ?? [];
 
   return (
     <AppShell
@@ -98,13 +143,43 @@ export default function StudentGradesPage() {
           ) : null
         }
       />
-      {error ? <p style={{ color: "var(--mh-danger)" }}>{error}</p> : null}
-      {message ? <p style={{ color: "var(--mh-olive)" }}>{message}</p> : null}
-      {!data ? <p>Loading…</p> : null}
-      {data && data.courses.every((c) => c.items.length === 0) ? (
+      {actionError ? <Banner tone="danger">{actionError}</Banner> : null}
+      {message ? <Banner tone="success">{message}</Banner> : null}
+      {viewState === "loading" ? (
+        <Panel>
+          <EmptyState title="Loading grades" body="Checking for your latest published results." />
+        </Panel>
+      ) : null}
+      {viewState === "permission-denied" ? (
+        <Panel>
+          <EmptyState title="Permission denied" body="This grade record is available only to the enrolled student." />
+        </Panel>
+      ) : null}
+      {viewState === "offline" ? (
+        <Panel>
+          <EmptyState title="You're offline" body="Reconnect to load your published grades." />
+          <Button type="button" onClick={() => void loadGrades(session)}>
+            Try again
+          </Button>
+        </Panel>
+      ) : null}
+      {viewState === "archived" ? (
+        <Panel>
+          <EmptyState title="Grades archived" body="This grade record has been archived. Contact the registrar if you need access." />
+        </Panel>
+      ) : null}
+      {viewState === "error" ? (
+        <Panel>
+          <EmptyState title="Grades unavailable" body={loadError ?? "The grade record could not be loaded."} />
+          <Button type="button" onClick={() => void loadGrades(session)}>
+            Try again
+          </Button>
+        </Panel>
+      ) : null}
+      {viewState === "ready" && visibleCourses.length === 0 ? (
         <EmptyState title="No published grades" body="Draft grades are hidden until they are approved and published." />
       ) : null}
-      {data?.courses.map((course) => (
+      {viewState === "ready" && visibleCourses.map((course) => (
         <section
           key={course.sectionId}
           style={{

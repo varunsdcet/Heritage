@@ -39,7 +39,7 @@ gradesRouter.get("/me", requireAuth, requireRoles("student"), async (req, res, n
       include: {
         section: { include: { course: true } },
         gradeItems: {
-          where: { status: "published" },
+          where: { institutionId: user.institutionId, status: "published" },
           include: { assignment: true },
         },
       },
@@ -52,7 +52,9 @@ gradesRouter.get("/me", requireAuth, requireRoles("student"), async (req, res, n
     const instructorMap = new Map(instructors.map((p) => [p.id, `${p.givenName} ${p.familyName}`]));
 
     const courses = enrolments.map((e) => {
-      const items = e.gradeItems.map((g) => ({
+      // Keep a second application-layer guard so a future include/query change
+      // cannot expose a non-published grade to the student response.
+      const items = e.gradeItems.filter((g) => g.status === "published").map((g) => ({
         id: g.id,
         title: g.assignment.title,
         weightPercent: g.assignment.weightPercent,

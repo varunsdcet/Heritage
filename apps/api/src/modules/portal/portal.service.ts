@@ -123,12 +123,12 @@ async function gradesFor(user: SessionClaims): Promise<{ metrics: PortalView["me
   });
   if (!student) return { metrics: [], rows: [] };
   const grades = await prisma.gradeItem.findMany({
-    where: { institutionId: user.institutionId, studentId: student.id },
+    where: { institutionId: user.institutionId, studentId: student.id, status: "published" },
     include: { assignment: { include: { section: { include: { course: true } } } } },
     orderBy: { updatedAt: "desc" },
   });
   const published = grades.filter((g) => g.status === "published");
-  const rows = (published.length ? published : grades).map((g) => ({
+  const rows = published.map((g) => ({
     primary: `${g.assignment.section.course.code} · ${g.assignment.title}`,
     secondary: `Status: ${g.status}`,
     meta: g.score != null ? `${g.score}/${g.maxScore} ${g.letter ?? ""}`.trim() : "Pending",
@@ -140,7 +140,7 @@ async function gradesFor(user: SessionClaims): Promise<{ metrics: PortalView["me
       : "—";
   return {
     metrics: [
-      { label: "Items", value: String(grades.length) },
+      { label: "Items", value: String(published.length) },
       { label: "Published", value: String(published.length) },
       { label: "Avg %", value: String(avg) },
     ],
