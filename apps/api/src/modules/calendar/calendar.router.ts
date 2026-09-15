@@ -23,7 +23,7 @@ calendarRouter.get("/me", requireAuth, async (req, res, next) => {
       });
       if (student) {
         const enrolments = await prisma.enrolment.findMany({
-          where: { studentId: student.id, status: "enrolled" },
+          where: { institutionId: user.institutionId, studentId: student.id, status: "enrolled" },
           select: { sectionId: true },
         });
         sectionIds = enrolments.map((e) => e.sectionId);
@@ -50,6 +50,15 @@ calendarRouter.get("/me", requireAuth, async (req, res, next) => {
           })
         : [];
 
+    const sessions =
+      sectionIds.length > 0
+        ? await prisma.classSession.findMany({
+            where: { institutionId: user.institutionId, sectionId: { in: sectionIds } },
+            include: { section: { include: { course: true } } },
+            orderBy: { startsAt: "asc" },
+          })
+        : [];
+
     const deadlineEvents = assignments.map((a) => ({
       id: `asg-${a.id}`,
       title: `${a.title} due`,
@@ -60,8 +69,36 @@ calendarRouter.get("/me", requireAuth, async (req, res, next) => {
       type: "deadline" as const,
     }));
 
+    const classEvents = sessions.map((session) => ({
+      id: `session-${session.id}`,
+      title: session.title,
+      startsAt: session.startsAt.toISOString(),
+      endsAt: session.endsAt?.toISOString() ?? null,
+      location: session.location,
+      courseCode: session.section.course.code,
+      type: "class" as const,
+      joinUrl: session.joinUrl?.startsWith("https://") ? session.joinUrl : null,
+    }));
+
+    const items = [...classEvents, ...deadlineEvents].sort((a, b) =>
+      a.startsAt.localeCompare(b.startsAt),
+    );
+
     res.json({
-      items: deadlineEvents,
+      items,
+      events: items.map((item) => ({
+        id: item.id,
+        kind: item.type === "class" ? "class" : "assignment_deadline",
+        sectionId:
+          item.type === "class"
+            ? sessions.find((session) => `session-${session.id}` === item.id)?.sectionId ?? null
+            : assignments.find((assignment) => `asg-${assignment.id}` === item.id)?.sectionId ?? null,
+        title: item.title,
+        startsAt: item.startsAt,
+        endsAt: item.endsAt,
+        location: item.location,
+        joinUrl: "joinUrl" in item ? item.joinUrl : null,
+      })),
       termCode: term?.code ?? "2026F",
     });
   } catch (err) {

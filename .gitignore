@@ -15,7 +15,7 @@ coverage
 apps/api/openapi.generated.json
 packages/db/prisma/*.db
 packages/db/prisma/*.db-journal
-var/uploads/
+**/var/uploads/
 
 .vscode/
 .idea/

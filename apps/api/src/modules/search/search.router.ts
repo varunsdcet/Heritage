@@ -12,13 +12,113 @@ searchRouter.get("/", requireAuth, async (req, res, next) => {
       res.json({ groups: [] });
       return;
     }
+    if (user.roles.includes("student") && !user.roles.some((role) => role === "admin" || role === "registrar")) {
+      const student = await prisma.student.findFirst({
+        where: { institutionId: user.institutionId, personId: user.personId },
+      });
+      if (!student) {
+        res.json({ groups: [] });
+        return;
+      }
+      const [enrolments, assignments, resources] = await Promise.all([
+        prisma.enrolment.findMany({
+          where: {
+            institutionId: user.institutionId,
+            studentId: student.id,
+            status: { in: ["enrolled", "completed"] },
+            section: {
+              institutionId: user.institutionId,
+              course: {
+                institutionId: user.institutionId,
+                OR: [
+                  { code: { contains: q, mode: "insensitive" } },
+                  { title: { contains: q, mode: "insensitive" } },
+                ],
+              },
+            },
+          },
+          include: { section: { include: { course: true } } },
+          take: 8,
+        }),
+        prisma.assignment.findMany({
+          where: {
+            institutionId: user.institutionId,
+            title: { contains: q, mode: "insensitive" },
+            section: {
+              institutionId: user.institutionId,
+              enrolments: {
+                some: {
+                  institutionId: user.institutionId,
+                  studentId: student.id,
+                  status: { in: ["enrolled", "completed"] },
+                },
+              },
+            },
+          },
+          include: { section: { include: { course: true } } },
+          take: 8,
+        }),
+        prisma.portalRecord.findMany({
+          where: {
+            institutionId: user.institutionId,
+            role: "student",
+            screenPath: { in: ["/student/library", "/student/resources"] },
+            OR: [
+              { audienceAccountId: null },
+              { audienceAccountId: user.accountId },
+            ],
+            AND: [
+              {
+                OR: [
+                  { primaryText: { contains: q, mode: "insensitive" } },
+                  { secondaryText: { contains: q, mode: "insensitive" } },
+                ],
+              },
+            ],
+          },
+          take: 8,
+        }),
+      ]);
+      res.json({
+        groups: [
+          {
+            type: "courses",
+            items: enrolments.map((entry) => ({
+              id: entry.sectionId,
+              label: `${entry.section.course.code} · ${entry.section.course.title}`,
+              sub: entry.section.code,
+              href: `/student/courses/${entry.sectionId}`,
+            })),
+          },
+          {
+            type: "assignments",
+            items: assignments.map((assignment) => ({
+              id: assignment.id,
+              label: assignment.title,
+              sub: assignment.section.course.code,
+              href: `/student/assignments/${assignment.id}`,
+            })),
+          },
+          {
+            type: "resources",
+            items: resources.map((resource) => ({
+              id: resource.id,
+              label: resource.primaryText,
+              sub: resource.secondaryText,
+              href: resource.href,
+            })),
+          },
+        ].filter((group) => group.items.length > 0),
+      });
+      return;
+    }
     const people = await prisma.person.findMany({
       where: {
         institutionId: user.institutionId,
         OR: [
-          { givenName: { contains: q } },
-          { familyName: { contains: q } },
-          { email: { contains: q } },
+          { givenName: { contains: q, mode: "insensitive" } },
+          { familyName: { contains: q, mode: "insensitive" } },
+          { email: { contains: q, mode: "insensitive" } },
         ],
       },
       take: 8,
@@ -26,7 +126,10 @@ searchRouter.get("/", requireAuth, async (req, res, next) => {
     const courses = await prisma.course.findMany({
       where: {
         institutionId: user.institutionId,
-        OR: [{ code: { contains: q.toUpperCase() } }, { title: { contains: q } }],
+        OR: [
+          { code: { contains: q, mode: "insensitive" } },
+          { title: { contains: q, mode: "insensitive" } },
+        ],
       },
       take: 8,
     });

@@ -16,6 +16,7 @@ import { portalRouter } from "./modules/portal/portal.router.js";
 import { adminRouter } from "./modules/admin/admin.router.js";
 import { instructorRouter } from "./modules/instructor/instructor.router.js";
 import { errorHandler } from "./middleware/error-handler.js";
+import { studentRouter } from "./modules/student/student.router.js";
 
 const app: Express = express();
 const allowedOrigins = (process.env.WEB_ORIGIN ??
@@ -41,6 +42,7 @@ app.use(
     credentials: true,
   }),
 );
+app.use("/student", express.json({ limit: "15mb" }));
 app.use(express.json());
 app.use((req, _res, next) => {
   (req as express.Request & { correlationId: string }).correlationId =
@@ -90,6 +92,7 @@ app.get("/api/docs", (_req, res) => {
 app.use("/auth", authRouter);
 app.use("/me", meRouter);
 app.use("/instructor", instructorRouter);
+app.use("/student", studentRouter);
 app.use("/courses", coursesRouter);
 app.use("/notifications", notificationsRouter);
 app.use("/calendar", calendarRouter);
