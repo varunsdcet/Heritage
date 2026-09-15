@@ -23,6 +23,7 @@ type CourseItem = {
   credits?: number;
   status?: string;
   progressPct?: number;
+  progressPercent?: number | null;
   nextItem?: string;
 };
 
@@ -107,7 +108,7 @@ export default function StudentHomePage() {
         setCourses(
           (c.items ?? []).map((course) => ({
             ...course,
-            progressPct: course.progressPct ?? undefined,
+            progressPct: course.progressPct ?? course.progressPercent ?? undefined,
           })),
         );
         setCalendar(cal.items ?? []);
@@ -299,7 +300,13 @@ export default function StudentHomePage() {
                       {online || idx === 0 ? (
                         <button
                           type="button"
-                          onClick={() => router.push(ev.joinUrl || `/student/courses/${courses[0]?.sectionId ?? ""}`)}
+                          onClick={() => {
+                            if (ev.joinUrl?.startsWith("https://")) {
+                              window.open(ev.joinUrl, "_blank", "noopener,noreferrer");
+                              return;
+                            }
+                            router.push(`/student/courses/${courses[0]?.sectionId ?? ""}`);
+                          }}
                           style={{
                             border: "none",
                             borderRadius: 6,

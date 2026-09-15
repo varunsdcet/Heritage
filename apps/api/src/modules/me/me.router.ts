@@ -11,8 +11,8 @@ import { writeAuditAndOutbox } from "@myheritage/events";
 
 export const meRouter: Router = Router();
 
-function validationError(issues: unknown) {
-  return Object.assign(new Error("Invalid request"), { code: "VALIDATION_ERROR", status: 400, issues });
+function validationError(issues: unknown, message = "Invalid request") {
+  return Object.assign(new Error(message), { code: "VALIDATION_ERROR", status: 400, issues });
 }
 
 meRouter.get("/home", requireAuth, async (req, res, next) => {
@@ -117,13 +117,13 @@ meRouter.get("/home", requireAuth, async (req, res, next) => {
     });
     const enrolmentCount = student
       ? await prisma.enrolment.count({
-          where: { studentId: student.id, status: "enrolled" },
+          where: { institutionId: user.institutionId, studentId: student.id, status: "enrolled" },
         })
       : 0;
 
     const grades = student
       ? await prisma.gradeItem.findMany({
-          where: { studentId: student.id, status: "published" },
+          where: { institutionId: user.institutionId, studentId: student.id, status: "published" },
         })
       : [];
     const gpa =
@@ -140,7 +140,12 @@ meRouter.get("/home", requireAuth, async (req, res, next) => {
           where: {
             institutionId: user.institutionId,
             dueAt: { not: null },
-            section: { enrolments: { some: { studentId: student.id, status: "enrolled" } } },
+            section: {
+              institutionId: user.institutionId,
+              enrolments: {
+                some: { institutionId: user.institutionId, studentId: student.id, status: "enrolled" },
+              },
+            },
           },
           include: { section: { include: { course: true } } },
           orderBy: { dueAt: "asc" },
@@ -235,7 +240,10 @@ meRouter.patch("/preferences", requireAuth, async (req, res, next) => {
     try {
       new Intl.DateTimeFormat("en-CA", { timeZone: parsed.data.timezone }).format();
     } catch {
-      throw validationError([{ path: ["timezone"], message: "Timezone must be a valid IANA timezone" }]);
+      throw validationError(
+        [{ path: ["timezone"], message: "Timezone must be a valid IANA timezone" }],
+        "Timezone must be a valid IANA timezone",
+      );
     }
     const account = await prisma.account.findFirst({
       where: { id: user.accountId, institutionId: user.institutionId, personId: user.personId },
