@@ -9,32 +9,32 @@ datasource db {
 }
 
 model Institution {
-  id           String   @id @default(uuid())
+  id            String   @id @default(uuid())
   institutionId String
-  name         String
-  legalName    String
-  timezone     String   @default("America/Vancouver")
-  currency     String   @default("CAD")
-  addressLine1 String
-  city         String
-  region       String
-  postalCode   String
-  country      String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  rowVersion   Int      @default(1)
+  name          String
+  legalName     String
+  timezone      String   @default("America/Vancouver")
+  currency      String   @default("CAD")
+  addressLine1  String
+  city          String
+  region        String
+  postalCode    String
+  country       String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  rowVersion    Int      @default(1)
 }
 
 model Person {
-  id            String   @id @default(uuid())
+  id            String    @id @default(uuid())
   institutionId String
   givenName     String
   familyName    String
   email         String
   dateOfBirth   String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  rowVersion    Int      @default(1)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  rowVersion    Int       @default(1)
   accounts      Account[]
   students      Student[]
 
@@ -43,18 +43,19 @@ model Person {
 }
 
 model Account {
-  id            String   @id @default(uuid())
+  id            String         @id @default(uuid())
   institutionId String
   personId      String
   email         String
   passwordHash  String
-  status        String   @default("active")
-  mfaEnabled    Boolean  @default(false)
-  rolesJson     String   @default("[]")
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  rowVersion    Int      @default(1)
-  person        Person   @relation(fields: [personId], references: [id])
+  status        String         @default("active")
+  mfaEnabled    Boolean        @default(false)
+  timezone      String         @default("America/Vancouver")
+  rolesJson     String         @default("[]")
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  rowVersion    Int            @default(1)
+  person        Person         @relation(fields: [personId], references: [id])
   sessions      Session[]
   notifications Notification[]
 
@@ -81,45 +82,46 @@ model Session {
 }
 
 model SecurityPolicy {
-  id                         String @id @default(uuid())
-  institutionId              String @unique
-  maxConcurrentSessions      Int    @default(3)
-  sharedIpAlertWindowMinutes Int    @default(5)
-  adminIpAllowlistCidrsJson  String @default("[]")
-  passwordMinLength          Int    @default(10)
+  id                         String   @id @default(uuid())
+  institutionId              String   @unique
+  maxConcurrentSessions      Int      @default(3)
+  sharedIpAlertWindowMinutes Int      @default(5)
+  adminIpAllowlistCidrsJson  String   @default("[]")
+  passwordMinLength          Int      @default(10)
   createdAt                  DateTime @default(now())
   updatedAt                  DateTime @updatedAt
   rowVersion                 Int      @default(1)
 }
 
 model Student {
-  id            String   @id @default(uuid())
+  id            String       @id @default(uuid())
   institutionId String
   personId      String
   studentNumber String
   programName   String
-  standing      String   @default("good")
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  rowVersion    Int      @default(1)
-  person        Person   @relation(fields: [personId], references: [id])
+  standing      String       @default("good")
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  rowVersion    Int          @default(1)
+  person        Person       @relation(fields: [personId], references: [id])
   enrolments    Enrolment[]
   gradeItems    GradeItem[]
+  submissions   Submission[]
 
   @@unique([institutionId, studentNumber])
   @@index([institutionId])
 }
 
 model Term {
-  id            String   @id @default(uuid())
+  id            String    @id @default(uuid())
   institutionId String
   code          String
   name          String
   startsOn      String
   endsOn        String
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  rowVersion    Int      @default(1)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  rowVersion    Int       @default(1)
   sections      Section[]
 
   @@unique([institutionId, code])
@@ -127,14 +129,14 @@ model Term {
 }
 
 model Course {
-  id            String   @id @default(uuid())
+  id            String    @id @default(uuid())
   institutionId String
   code          String
   title         String
   credits       Float
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  rowVersion    Int      @default(1)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  rowVersion    Int       @default(1)
   sections      Section[]
 
   @@unique([institutionId, code])
@@ -142,34 +144,35 @@ model Course {
 }
 
 model Section {
-  id                 String   @id @default(uuid())
+  id                 String         @id @default(uuid())
   institutionId      String
   courseId           String
   termId             String
   code               String
   instructorPersonId String
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-  rowVersion         Int      @default(1)
-  course             Course   @relation(fields: [courseId], references: [id])
-  term               Term     @relation(fields: [termId], references: [id])
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  rowVersion         Int            @default(1)
+  course             Course         @relation(fields: [courseId], references: [id])
+  term               Term           @relation(fields: [termId], references: [id])
   enrolments         Enrolment[]
   assignments        Assignment[]
+  classSessions      ClassSession[]
 
   @@index([institutionId])
 }
 
 model Enrolment {
-  id            String   @id @default(uuid())
+  id            String      @id @default(uuid())
   institutionId String
   sectionId     String
   studentId     String
-  status        String   @default("enrolled")
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  rowVersion    Int      @default(1)
-  section       Section  @relation(fields: [sectionId], references: [id])
-  student       Student  @relation(fields: [studentId], references: [id])
+  status        String      @default("enrolled")
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  rowVersion    Int         @default(1)
+  section       Section     @relation(fields: [sectionId], references: [id])
+  student       Student     @relation(fields: [studentId], references: [id])
   gradeItems    GradeItem[]
 
   @@unique([sectionId, studentId])
@@ -177,24 +180,84 @@ model Enrolment {
 }
 
 model Assignment {
-  id            String   @id @default(uuid())
+  id            String       @id @default(uuid())
   institutionId String
   sectionId     String
   title         String
   maxScore      Float
   weightPercent Float
   dueAt         DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  rowVersion    Int      @default(1)
-  section       Section  @relation(fields: [sectionId], references: [id])
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  rowVersion    Int          @default(1)
+  section       Section      @relation(fields: [sectionId], references: [id])
   gradeItems    GradeItem[]
+  submissions   Submission[]
 
   @@index([institutionId])
 }
 
+model Submission {
+  id            String       @id @default(uuid())
+  institutionId String
+  assignmentId  String
+  studentId     String
+  submittedAt   DateTime?
+  status        String       @default("draft")
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  rowVersion    Int          @default(1)
+  assignment    Assignment   @relation(fields: [assignmentId], references: [id])
+  student       Student      @relation(fields: [studentId], references: [id])
+  files         FileObject[]
+
+  @@unique([assignmentId, studentId])
+  @@index([institutionId])
+  @@index([studentId, status])
+}
+
+model FileObject {
+  id             String     @id @default(uuid())
+  institutionId  String
+  submissionId   String
+  path           String
+  filename       String
+  mimeType       String
+  sizeBytes      Int
+  classification String     @default("confidential")
+  version        Int
+  archivedAt     DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  rowVersion     Int        @default(1)
+  submission     Submission @relation(fields: [submissionId], references: [id])
+
+  @@unique([submissionId, version])
+  @@index([institutionId])
+  @@index([submissionId, archivedAt])
+}
+
+model ClassSession {
+  id            String    @id @default(uuid())
+  institutionId String
+  sectionId     String
+  title         String
+  startsAt      DateTime
+  endsAt        DateTime?
+  location      String?
+  joinUrl       String?
+  deliveryMode  String    @default("in_person")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  rowVersion    Int       @default(1)
+  section       Section   @relation(fields: [sectionId], references: [id])
+
+  @@index([institutionId, startsAt])
+  @@index([sectionId, startsAt])
+}
+
 model GradeItem {
-  id            String   @id @default(uuid())
+  id            String     @id @default(uuid())
   institutionId String
   assignmentId  String
   studentId     String
@@ -202,11 +265,11 @@ model GradeItem {
   score         Float?
   maxScore      Float
   letter        String?
-  status        String   @default("draft")
+  status        String     @default("draft")
   publishedAt   DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  rowVersion    Int      @default(1)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  rowVersion    Int        @default(1)
   assignment    Assignment @relation(fields: [assignmentId], references: [id])
   student       Student    @relation(fields: [studentId], references: [id])
   enrolment     Enrolment  @relation(fields: [enrolmentId], references: [id])
@@ -217,19 +280,19 @@ model GradeItem {
 }
 
 model ApprovalRequest {
-  id                     String   @id @default(uuid())
-  institutionId          String
-  type                   String
-  subjectRef             String
-  proposedDiffJson       String
-  requestedBy            String
+  id                        String   @id @default(uuid())
+  institutionId             String
+  type                      String
+  subjectRef                String
+  proposedDiffJson          String
+  requestedBy               String
   requiredApproverRolesJson String
-  requiredCount          Int
-  status                 String   @default("pending")
-  decisionsJson          String   @default("[]")
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
-  rowVersion             Int      @default(1)
+  requiredCount             Int
+  status                    String   @default("pending")
+  decisionsJson             String   @default("[]")
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+  rowVersion                Int      @default(1)
 
   @@index([institutionId, status])
 }
@@ -270,46 +333,46 @@ model EventOutbox {
 }
 
 model Notification {
-  id                  String   @id @default(uuid())
-  institutionId       String
-  recipientAccountId  String
-  channel             String
-  title               String
-  body                String
-  readAt              DateTime?
-  templateKey         String?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
-  rowVersion          Int      @default(1)
-  recipient           Account  @relation(fields: [recipientAccountId], references: [id])
+  id                 String    @id @default(uuid())
+  institutionId      String
+  recipientAccountId String
+  channel            String
+  title              String
+  body               String
+  readAt             DateTime?
+  templateKey        String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  rowVersion         Int       @default(1)
+  recipient          Account   @relation(fields: [recipientAccountId], references: [id])
 
   @@index([institutionId])
   @@index([recipientAccountId])
 }
 
 model MessageThread {
-  id                        String   @id @default(uuid())
+  id                        String    @id @default(uuid())
   institutionId             String
   subject                   String
   participantAccountIdsJson String
-  createdAt                 DateTime @default(now())
-  updatedAt                 DateTime @updatedAt
-  rowVersion                Int      @default(1)
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+  rowVersion                Int       @default(1)
   messages                  Message[]
 
   @@index([institutionId])
 }
 
 model Message {
-  id                 String   @id @default(uuid())
+  id                 String        @id @default(uuid())
   institutionId      String
   threadId           String
   senderAccountId    String
   body               String
   relatedGradeItemId String?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-  rowVersion         Int      @default(1)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  rowVersion         Int           @default(1)
   thread             MessageThread @relation(fields: [threadId], references: [id])
 
   @@index([institutionId])
@@ -328,27 +391,31 @@ model IdempotencyKey {
   @@unique([institutionId, key, method, path])
 }
 
-/** Live portal rows for screens without a dedicated domain table yet. Always seeded — never client-hardcoded. */
+/**
+ * Live portal rows for screens without a dedicated domain table yet. Always seeded — never client-hardcoded.
+ */
 model PortalRecord {
-  id            String   @id @default(uuid())
-  institutionId String
-  screenPath    String
-  role          String
-  primaryText   String
-  secondaryText String?
-  metaText      String?
-  href          String?
-  sortOrder     Int      @default(0)
+  id                String   @id @default(uuid())
+  institutionId     String
+  screenPath        String
+  role              String
+  primaryText       String
+  secondaryText     String?
+  metaText          String?
+  href              String?
+  sortOrder         Int      @default(0)
   audienceAccountId String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  rowVersion    Int      @default(1)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  rowVersion        Int      @default(1)
 
   @@index([institutionId, screenPath])
   @@index([institutionId, role])
 }
 
-/** Admin SIS screen live payload (rows/kpis/detail blobs). Served by GET /admin/sis/screen — never rendered from client fixtures alone. */
+/**
+ * Admin SIS screen live payload (rows/kpis/detail blobs). Served by GET /admin/sis/screen — never rendered from client fixtures alone.
+ */
 model SisScreenState {
   id            String   @id @default(uuid())
   institutionId String

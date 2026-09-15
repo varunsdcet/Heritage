@@ -69,6 +69,9 @@ const ids = {
   gradeLucasHw: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa08",
   gradeFatimaClinic: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa09",
   approval2: "dddddddd-dddd-4ddd-8ddd-dddddddddd02",
+  submissionMarcusProject: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeee01",
+  sessionCsOnline: "ffffffff-ffff-4fff-8fff-fffffffff001",
+  sessionAccRoom: "ffffffff-ffff-4fff-8fff-fffffffff002",
 };
 
 type PortalSeed = {
@@ -213,8 +216,11 @@ async function main() {
   await prisma.auditEvent.deleteMany();
   await prisma.approvalRequest.deleteMany();
   await prisma.gradeItem.deleteMany();
+  await prisma.fileObject.deleteMany().catch(() => undefined);
+  await prisma.submission.deleteMany().catch(() => undefined);
   await prisma.assignment.deleteMany();
   await prisma.enrolment.deleteMany();
+  await prisma.classSession.deleteMany().catch(() => undefined);
   await prisma.section.deleteMany();
   await prisma.course.deleteMany();
   await prisma.term.deleteMany();
@@ -391,6 +397,42 @@ async function main() {
         dueAt: new Date("2026-10-28T23:59:00.000Z"),
       },
     ],
+  });
+
+  await prisma.classSession.createMany({
+    data: [
+      {
+        id: ids.sessionCsOnline,
+        institutionId: INST,
+        sectionId: ids.sectionCs,
+        title: "Algorithms · Graph Traversal",
+        startsAt: new Date("2026-09-17T17:00:00.000Z"),
+        endsAt: new Date("2026-09-17T18:20:00.000Z"),
+        location: "Online",
+        joinUrl: "https://meet.example.edu/cs301-01",
+        deliveryMode: "online",
+      },
+      {
+        id: ids.sessionAccRoom,
+        institutionId: INST,
+        sectionId: ids.sectionAcc,
+        title: "Financial Accounting · Ledgers",
+        startsAt: new Date("2026-09-18T19:00:00.000Z"),
+        endsAt: new Date("2026-09-18T20:20:00.000Z"),
+        location: "Business Centre 204",
+        deliveryMode: "in_person",
+      },
+    ],
+  });
+
+  await prisma.submission.create({
+    data: {
+      id: ids.submissionMarcusProject,
+      institutionId: INST,
+      assignmentId: ids.asgProject,
+      studentId: ids.marcusStudent,
+      status: "draft",
+    },
   });
 
   await prisma.gradeItem.createMany({
