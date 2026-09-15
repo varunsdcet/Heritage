@@ -12,6 +12,9 @@ export async function requireApproval(input: {
   requiredApproverRoles: RoleName[];
   requiredCount?: number;
   correlationId?: string;
+  eventName?: string;
+  purpose?: string;
+  source?: string;
 }) {
   const correlationId = input.correlationId ?? randomUUID();
   return prisma.$transaction(async (tx) => {
@@ -31,11 +34,11 @@ export async function requireApproval(input: {
     await writeAuditAndOutbox(tx, {
       institutionId: input.institutionId,
       actorId: input.requestedBy,
-      eventName: "GradeItem.publishRequested",
-      purpose: "consequential_write",
+      eventName: input.eventName ?? "GradeItem.publishRequested",
+      purpose: input.purpose ?? "consequential_write",
       before: null,
       after: { approvalRequestId: row.id, type: input.type },
-      source: "approvals.require",
+      source: input.source ?? "approvals.require",
       correlationId,
       outboxPayload: { approvalRequestId: row.id },
     });
