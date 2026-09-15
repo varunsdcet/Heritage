@@ -1,0 +1,165 @@
+/** Fixture payloads aligned with FD-07 seed (Heritage College / Fall 2026). */
+export const fixtures = {
+  student: {
+    standing: "good",
+    programName: "Computer Science",
+    enrolledCourses: 2,
+    gpa: 3.7,
+    nextDeadline: {
+      title: "CS301 Project 1",
+      dueAt: "2026-10-15T23:59:00.000Z",
+      courseCode: "CS301",
+    },
+    announcements: [
+      {
+        id: "ann-1",
+        title: "Fall reading week",
+        body: "No classes Oct 13–17. Advising remains open online.",
+      },
+      {
+        id: "ann-2",
+        title: "Library extended hours",
+        body: "Main library open until 11pm through midterms.",
+      },
+    ],
+  },
+  instructor: {
+    sections: [
+      {
+        sectionId: "77777777-7777-4777-8777-777777777701",
+        code: "CS301-01",
+        title: "Algorithms",
+        enrolmentCount: 3,
+      },
+    ],
+    tasks: [
+      { id: "task-1", label: "Enter Midterm Exam drafts", sectionCode: "CS301-01" },
+      { id: "task-2", label: "Publish Project 1 when ready", sectionCode: "CS301-01" },
+    ],
+  },
+  admin: {
+    pendingApprovals: 0,
+    openAlerts: 1,
+    activeStudents: 3,
+    announcements: [
+      {
+        id: "ann-a1",
+        title: "Grade publish policy",
+        body: "All grade publishes require registrar approval before students see them.",
+      },
+    ],
+  },
+  courses: {
+    student: [
+      {
+        sectionId: "77777777-7777-4777-8777-777777777701",
+        code: "CS301",
+        title: "Algorithms",
+        credits: 3,
+        termCode: "2026F",
+        instructorName: "Elena Vance",
+        status: "enrolled",
+      },
+      {
+        sectionId: "77777777-7777-4777-8777-777777777702",
+        code: "ACC201",
+        title: "Financial Accounting",
+        credits: 3,
+        termCode: "2026F",
+        instructorName: "James Pendelton",
+        status: "enrolled",
+      },
+    ],
+    instructor: [
+      {
+        sectionId: "77777777-7777-4777-8777-777777777701",
+        code: "CS301",
+        title: "Algorithms",
+        credits: 3,
+        termCode: "2026F",
+        enrolmentCount: 3,
+        status: "teaching",
+      },
+    ],
+    admin: [
+      {
+        sectionId: "77777777-7777-4777-8777-777777777701",
+        code: "CS301",
+        title: "Algorithms",
+        credits: 3,
+        termCode: "2026F",
+        instructorName: "Elena Vance",
+        enrolmentCount: 3,
+        status: "active",
+      },
+      {
+        sectionId: "77777777-7777-4777-8777-777777777702",
+        code: "ACC201",
+        title: "Financial Accounting",
+        credits: 3,
+        termCode: "2026F",
+        instructorName: "James Pendelton",
+        enrolmentCount: 1,
+        status: "active",
+      },
+    ],
+  },
+  notifications: [
+    {
+      id: "notif-fixture-1",
+      channel: "in_app",
+      title: "Welcome to MyHeritage",
+      body: "Your campus account is ready. Check grades and calendar from Home.",
+      readAt: null,
+      createdAt: "2026-09-01T12:00:00.000Z",
+      templateKey: "welcome",
+    },
+    {
+      id: "notif-fixture-2",
+      channel: "in_app",
+      title: "CS301 Midterm posted soon",
+      body: "Instructors are finalizing midterm drafts for Algorithms.",
+      readAt: null,
+      createdAt: "2026-09-10T09:30:00.000Z",
+      templateKey: "grade.upcoming",
+    },
+  ],
+  calendar: [
+    {
+      id: "cal-1",
+      title: "CS301 lecture",
+      startsAt: "2026-09-16T16:00:00.000Z",
+      endsAt: "2026-09-16T17:20:00.000Z",
+      location: "Building A · Room 204",
+      courseCode: "CS301",
+      type: "class",
+    },
+    {
+      id: "cal-2",
+      title: "ACC201 lecture",
+      startsAt: "2026-09-17T14:00:00.000Z",
+      endsAt: "2026-09-17T15:20:00.000Z",
+      location: "Building B · Room 110",
+      courseCode: "ACC201",
+      type: "class",
+    },
+    {
+      id: "cal-3",
+      title: "Project 1 due",
+      startsAt: "2026-10-15T23:59:00.000Z",
+      endsAt: "2026-10-15T23:59:00.000Z",
+      location: "Online submission",
+      courseCode: "CS301",
+      type: "deadline",
+    },
+    {
+      id: "cal-4",
+      title: "Advising drop-in",
+      startsAt: "2026-09-18T18:00:00.000Z",
+      endsAt: "2026-09-18T20:00:00.000Z",
+      location: "Student Success Centre",
+      courseCode: null,
+      type: "campus",
+    },
+  ],
+};

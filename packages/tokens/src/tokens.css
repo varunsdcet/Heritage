@@ -1,0 +1,35 @@
+:root {
+  --mh-bg: #F6F7F4;
+  --mh-surface: #FFFFFF;
+  --mh-surface-muted: #F9FAF6;
+  --mh-text: #1A1C19;
+  --mh-text-muted: #5C5F5A;
+  --mh-text-subtle: #8D928A;
+  --mh-border: #E1E3DC;
+  --mh-border-strong: #C9CEC2;
+  --mh-brand: #017F3F;
+  --mh-brand-dark: #0E4632;
+  --mh-brand-soft: #E6F5EC;
+  --mh-olive: #5F7A1F;
+  --mh-olive-soft: #F7FAF0;
+  --mh-accent-olive: #849F38;
+  --mh-warning: #8A5A00;
+  --mh-warning-soft: #FEF3C7;
+  --mh-danger: #BA1A1A;
+  --mh-danger-soft: #FCEAEA;
+  --mh-ai: #1D4ED8;
+  --mh-ai-soft: #EFF6FF;
+  --mh-radius-sm: 4px;
+  --mh-radius-md: 6px;
+  --mh-radius-lg: 8px;
+  --mh-radius-xl: 12px;
+  --mh-radius-pill: 999px;
+  --mh-font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
+  --mh-font-display: "Inter", "Segoe UI", system-ui, sans-serif;
+  --mh-body: 16px;
+  --mh-body-compact: 14px;
+  --mh-h1: 28px;
+  --mh-h2: 22px;
+  --mh-h3: 18px;
+  --mh-h4: 15px;
+}

@@ -1,0 +1,500 @@
+"use client";
+
+import type { ReactNode } from "react";
+import { useMemo, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+
+type NavItem = {
+  label: string;
+  href: string;
+  icon: string;
+  indent?: boolean;
+};
+
+type NavEntry = { type: "item"; item: NavItem } | { type: "label"; label: string };
+
+const NAV: NavEntry[] = [
+  { type: "item", item: { label: "Dashboard", href: "/admin", icon: "home" } },
+  { type: "label", label: "RECRUIT" },
+  { type: "item", item: { label: "Admissions", href: "/admin/f/ad-01-admissions-dashboard", icon: "bar-chart", indent: true } },
+  { type: "item", item: { label: "Applications", href: "/admin/f/ad-02-application-queue", icon: "file-text", indent: true } },
+  { type: "item", item: { label: "Interviews", href: "/admin/f/ad-06-interview-workspace", icon: "calendar", indent: true } },
+  { type: "item", item: { label: "Offers", href: "/admin/f/ad-08-offer-builder", icon: "award", indent: true } },
+  { type: "item", item: { label: "CRM", href: "/admin/f/crm-01-dashboard", icon: "users", indent: true } },
+  { type: "label", label: "STUDENTS" },
+  { type: "item", item: { label: "Student 360", href: "/admin/f/rg-01-student-360", icon: "user", indent: true } },
+  { type: "item", item: { label: "Success Alerts", href: "/admin/f/ss-01-success-dashboard", icon: "bell", indent: true } },
+  { type: "item", item: { label: "Cases", href: "/admin/f/ss-04-case", icon: "briefcase", indent: true } },
+  { type: "item", item: { label: "Action Plans", href: "/admin/f/ss-05-action-plan", icon: "list", indent: true } },
+  { type: "item", item: { label: "Registrar", href: "/admin/f/rg-00-registrar-dashboard", icon: "school", indent: true } },
+  { type: "label", label: "ACADEMICS" },
+  { type: "item", item: { label: "Programs", href: "/admin/f/ac-03-programs", icon: "book", indent: true } },
+  { type: "item", item: { label: "Labs", href: "/admin/f/lb-01-lab-dashboard", icon: "flask", indent: true } },
+  { type: "item", item: { label: "Practicum", href: "/admin/f/pr-01-practicum-dashboard", icon: "briefcase", indent: true } },
+  { type: "label", label: "FINANCE" },
+  { type: "item", item: { label: "Dashboard", href: "/admin/f/fn-01-finance-dashboard", icon: "pie", indent: true } },
+  { type: "item", item: { label: "Accounts", href: "/admin/f/fn-02-student-account", icon: "card", indent: true } },
+  { type: "label", label: "SYSTEM" },
+  { type: "item", item: { label: "AI Hub", href: "/admin/f/ai-01-ai-dashboard", icon: "sparkle" } },
+  { type: "item", item: { label: "Compliance", href: "/admin/f/cp-01-compliance-dashboard", icon: "shield" } },
+  { type: "item", item: { label: "Forms", href: "/admin/f/fm-01-form-list", icon: "file-text" } },
+  { type: "item", item: { label: "Rules", href: "/admin/f/rl-01-rule-sets", icon: "list" } },
+  { type: "item", item: { label: "Workflows", href: "/admin/f/wf-01-workflow-list", icon: "briefcase" } },
+  { type: "item", item: { label: "Platform", href: "/admin/f/pl-07-institution-settings", icon: "settings" } },
+];
+
+const GLOBAL_PATHS = new Set([
+  "/admin",
+  "/admin/search",
+  "/admin/notifications",
+  "/admin/profile",
+  "/admin/analytics",
+  "/admin/approvals",
+  "/admin/calendar",
+  "/admin/security",
+  "/admin/help",
+  "/admin/jobs",
+  "/admin/operations",
+  "/admin/settings",
+  "/admin/corrections",
+  "/admin/audit",
+]);
+
+const GLOBAL_NAV = [
+  { label: "Home", href: "/admin" },
+  { label: "Search", href: "/admin/search" },
+  { label: "Notifications", href: "/admin/notifications" },
+  { label: "Profile", href: "/admin/profile" },
+  { label: "Analytics", href: "/admin/analytics" },
+  { label: "Approvals", href: "/admin/approvals" },
+  { label: "Calendar", href: "/admin/calendar" },
+  { label: "Security", href: "/admin/security" },
+  { label: "Help", href: "/admin/help" },
+  { label: "Jobs", href: "/admin/jobs" },
+  { label: "Operations", href: "/admin/operations" },
+  { label: "Settings", href: "/admin/settings" },
+  { label: "Corrections", href: "/admin/corrections" },
+  { label: "Audit", href: "/admin/audit" },
+];
+
+const SEARCH_PALETTE = [
+  {
+    title: "Students",
+    items: [
+      {
+        label: "Sarah Mitchell",
+        detail: "Bachelor of Nursing (BSN)",
+        badge: "Active",
+        badgeTone: "active" as const,
+        href: "/admin/f/rg-01-student-360",
+      },
+      {
+        label: "Sarah Mitchelson",
+        detail: "Computer Science (AS)",
+        badge: "Active",
+        badgeTone: "active" as const,
+        href: "/admin/f/rg-01-student-360",
+      },
+    ],
+  },
+  {
+    title: "Applications",
+    items: [
+      {
+        label: "Sarah Mitchell",
+        detail: "Application #APP-4521 — Bachelor of Nursing",
+        badge: "In Review",
+        badgeTone: "review" as const,
+        href: "/admin/f/ad-03-application-detail",
+      },
+    ],
+  },
+  {
+    title: "Courses",
+    empty: "No matching courses found",
+    items: [] as Array<{
+      label: string;
+      detail: string;
+      badge: string;
+      badgeTone: "active" | "review";
+      href: string;
+    }>,
+  },
+];
+
+function NavIcon({ name, active }: { name: string; active?: boolean }) {
+  const stroke = active ? "#017F3F" : "#8D928A";
+  const common = {
+    width: 16,
+    height: 16,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke,
+    strokeWidth: 2,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true as const,
+  };
+
+  switch (name) {
+    case "home":
+      return (
+        <svg {...common}>
+          <path d="M3 10.5 12 3l9 7.5" />
+          <path d="M5 9.5V21h14V9.5" />
+        </svg>
+      );
+    case "bar-chart":
+      return (
+        <svg {...common}>
+          <path d="M4 20V10M12 20V4M20 20v-7" />
+        </svg>
+      );
+    case "file-text":
+      return (
+        <svg {...common}>
+          <path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+          <path d="M14 2v6h6M9 13h6M9 17h6M9 9h1" />
+        </svg>
+      );
+    case "calendar":
+      return (
+        <svg {...common}>
+          <rect x="3" y="5" width="18" height="16" rx="2" />
+          <path d="M3 10h18M8 3v4M16 3v4" />
+        </svg>
+      );
+    case "award":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="9" r="5" />
+          <path d="M8.5 13.5 7 21l5-2.5L17 21l-1.5-7.5" />
+        </svg>
+      );
+    case "user":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="8" r="4" />
+          <path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6" />
+        </svg>
+      );
+    case "bell":
+      return (
+        <svg {...common}>
+          <path d="M6 9a6 6 0 1 1 12 0c0 7 3 7 3 7H3s3 0 3-7" />
+          <path d="M10 20a2 2 0 0 0 4 0" />
+        </svg>
+      );
+    case "briefcase":
+      return (
+        <svg {...common}>
+          <rect x="3" y="7" width="18" height="13" rx="2" />
+          <path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+        </svg>
+      );
+    case "list":
+      return (
+        <svg {...common}>
+          <path d="M8 7h12M8 12h12M8 17h12M4 7h.01M4 12h.01M4 17h.01" />
+        </svg>
+      );
+    case "book":
+      return (
+        <svg {...common}>
+          <path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2V5z" />
+          <path d="M6 3v14" />
+        </svg>
+      );
+    case "pie":
+      return (
+        <svg {...common}>
+          <path d="M12 3a9 9 0 1 0 9 9h-9V3z" />
+          <path d="M14 3.2A9 9 0 0 1 20.8 10H14V3.2z" />
+        </svg>
+      );
+    case "card":
+      return (
+        <svg {...common}>
+          <rect x="2" y="5" width="20" height="14" rx="2" />
+          <path d="M2 10h20" />
+        </svg>
+      );
+    case "sparkle":
+      return (
+        <svg {...common}>
+          <path d="M12 3l1.5 5.5L19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5L12 3z" />
+        </svg>
+      );
+    case "shield":
+      return (
+        <svg {...common}>
+          <path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-3z" />
+          <path d="m9 12 2 2 4-4" />
+        </svg>
+      );
+    case "settings":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9c.3.6.9 1 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+        </svg>
+      );
+    case "users":
+      return (
+        <svg {...common}>
+          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+          <circle cx="9" cy="7" r="4" />
+          <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+        </svg>
+      );
+    case "school":
+      return (
+        <svg {...common}>
+          <path d="m12 3 9 5-9 5-9-5 9-5z" />
+          <path d="M5 10.5V17c0 1.5 3 3 7 3s7-1.5 7-3v-6.5" />
+        </svg>
+      );
+    case "flask":
+      return (
+        <svg {...common}>
+          <path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-9V3" />
+        </svg>
+      );
+    default:
+      return <span style={{ width: 16, height: 16 }} />;
+  }
+}
+
+function GlobalSubnav({ activePath }: { activePath: string }) {
+  const router = useRouter();
+  return (
+    <aside className="mh-sis-platform-nav" aria-label="Global">
+      <div className="mh-sis-platform-nav__label">Global</div>
+      {GLOBAL_NAV.map((item) => (
+        <button
+          key={item.href}
+          type="button"
+          className={`mh-sis-platform-nav__item${activePath === item.href ? " is-active" : ""}`}
+          onClick={() => router.push(item.href)}
+        >
+          {item.label}
+        </button>
+      ))}
+    </aside>
+  );
+}
+
+export function AdminSisShell({
+  children,
+  activeHref = "/admin",
+  breadcrumbs = ["Home", "System Admin", "Dashboard"],
+  userName = "Admin User",
+  userRole = "Registrar's Office",
+}: {
+  children: ReactNode;
+  activeHref?: string;
+  breadcrumbs?: string[];
+  userName?: string;
+  userRole?: string;
+}) {
+  const router = useRouter();
+  const pathname = usePathname() || activeHref;
+  const [searchQ, setSearchQ] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const showGlobalNav = GLOBAL_PATHS.has(pathname);
+
+  const paletteSections = useMemo(() => {
+    const q = searchQ.trim().toLowerCase();
+    if (q.length < 2) return [];
+    return SEARCH_PALETTE.map((section) => ({
+      ...section,
+      items: section.items.filter((row) => `${row.label} ${row.detail}`.toLowerCase().includes(q)),
+    })).filter((section) => section.items.length > 0 || Boolean(section.empty));
+  }, [searchQ]);
+
+  const showPalette = searchOpen && searchQ.trim().length >= 2;
+
+  return (
+    <div className="mh-sis" data-figma="01-Admin-Dashboard">
+      {showPalette ? (
+        <button
+          type="button"
+          className="mh-sis__search-backdrop"
+          aria-label="Close search"
+          onClick={() => setSearchOpen(false)}
+        />
+      ) : null}
+      <aside className="mh-sis__sidebar">
+        <div className="mh-sis__logo">
+          <span className="mh-sis__logo-icon">H</span>
+          <span className="mh-sis__logo-text">
+            <span className="mh-sis__logo-title">Heritage</span>
+            <span className="mh-sis__logo-sub">SIS Admin</span>
+          </span>
+        </div>
+
+        <nav className="mh-sis__nav" aria-label="Admin">
+          {NAV.map((entry, idx) => {
+            if (entry.type === "label") {
+              return (
+                <div key={`label-${entry.label}-${idx}`} className="mh-sis__nav-label">
+                  {entry.label}
+                </div>
+              );
+            }
+            const { item } = entry;
+            const active = activeHref === item.href;
+            return (
+              <button
+                key={item.href + item.label}
+                type="button"
+                className={`mh-sis__nav-item${active ? " is-active" : ""}${item.indent ? " is-indent" : ""}`}
+                onClick={() => router.push(item.href)}
+              >
+                {active ? <span className="mh-sis__nav-marker" /> : null}
+                <span className="mh-sis__nav-icon">
+                  <NavIcon name={item.icon} active={active} />
+                </span>
+                <span className="mh-sis__nav-text">{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+      </aside>
+
+      <div className="mh-sis__main">
+        <header className="mh-sis__header">
+          <div className="mh-sis__crumbs">
+            {breadcrumbs.map((crumb, i) => (
+              <span key={crumb} className="mh-sis__crumb">
+                {i > 0 ? (
+                  <img src="/brand/icons/chevron-right.svg" alt="" width={12} height={12} className="mh-sis__crumb-chevron" />
+                ) : null}
+                <span className={i === breadcrumbs.length - 1 ? "is-current" : undefined}>{crumb}</span>
+              </span>
+            ))}
+          </div>
+
+          <div className="mh-sis__header-actions">
+            <div className="mh-sis__search-wrap">
+              <label className={`mh-sis__search mh-sis__search--input${showPalette ? " is-open" : ""}`}>
+                <img src="/brand/icons/search.svg" alt="" width={14} height={14} />
+                <input
+                  value={searchQ}
+                  onChange={(e) => {
+                    setSearchQ(e.target.value);
+                    setSearchOpen(true);
+                  }}
+                  onFocus={() => setSearchOpen(true)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      router.push("/admin/search");
+                      setSearchOpen(false);
+                    }
+                    if (e.key === "Escape") setSearchOpen(false);
+                  }}
+                  placeholder="Search SIS Admin..."
+                  aria-label="Search SIS Admin"
+                  aria-expanded={showPalette}
+                />
+                {searchQ ? (
+                  <button
+                    type="button"
+                    className="mh-sis__search-clear"
+                    aria-label="Clear search"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      setSearchQ("");
+                      setSearchOpen(false);
+                    }}
+                  >
+                    ×
+                  </button>
+                ) : null}
+              </label>
+              {showPalette ? (
+                <div className="mh-sis__search-palette" role="listbox" data-figma-id="178:5">
+                  {paletteSections.map((section) => (
+                    <div key={section.title} className="mh-sis__search-section">
+                      <div className="mh-sis__search-section-title">{section.title}</div>
+                      {section.items.length ? (
+                        section.items.map((hit) => (
+                          <button
+                            key={hit.href + hit.label + hit.detail}
+                            type="button"
+                            className="mh-sis__search-palette-item"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => {
+                              router.push(hit.href);
+                              setSearchOpen(false);
+                              setSearchQ("");
+                            }}
+                          >
+                            <span className="mh-sis__search-palette-copy">
+                              <strong>{hit.label}</strong>
+                              <span>{hit.detail}</span>
+                            </span>
+                            <span
+                              className={`mh-sis__search-pill${hit.badgeTone === "review" ? " is-review" : " is-active"}`}
+                            >
+                              {hit.badge}
+                            </span>
+                          </button>
+                        ))
+                      ) : section.empty ? (
+                        <p className="mh-sis__search-empty">{section.empty}</p>
+                      ) : null}
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    className="mh-sis__search-palette-all"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      router.push("/admin/search");
+                      setSearchOpen(false);
+                    }}
+                  >
+                    {`View all results for "${searchQ.trim()}" →`}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+            <button type="button" className="mh-sis__copilot" onClick={() => router.push("/admin/ai")}>
+              <img src="/brand/icons/sparkle.svg" alt="" width={14} height={14} />
+              <span>Ask Heritage AI</span>
+            </button>
+            <button type="button" className="mh-sis__bell" aria-label="Notifications" onClick={() => router.push("/admin/notifications")}>
+              <img src="/brand/icons/bell.svg" alt="" width={16} height={16} />
+            </button>
+            <div className="mh-sis__profile">
+              <span className="mh-sis__avatar" aria-hidden>
+                {userName
+                  .split(" ")
+                  .filter(Boolean)
+                  .slice(0, 2)
+                  .map((p) => p[0]?.toUpperCase())
+                  .join("") || "AU"}
+              </span>
+              <span className="mh-sis__profile-meta">
+                <span className="mh-sis__profile-name">{userName}</span>
+                <span className="mh-sis__profile-role">{userRole}</span>
+              </span>
+            </div>
+          </div>
+        </header>
+
+        <div className="mh-sis__scroll">
+          {showGlobalNav ? (
+            <div className="mh-sis-platform-layout">
+              <GlobalSubnav activePath={pathname} />
+              <div className="mh-sis-platform-content">{children}</div>
+            </div>
+          ) : (
+            children
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
