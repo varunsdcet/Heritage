@@ -1,0 +1,7 @@
+id,title,actors,mode,writes,approval,shell,status
+SH-01,Sign in,all,WRITE,session,n/a,shared,in_progress
+SH-12,Approval inbox,admin|registrar,WRITE,approval_decision,n/a,admin,in_progress
+ST-07,Student grades,student,READ,none,n/a,student,in_progress
+ST-21,Ask about grade,student,WRITE,message,n/a,student,in_progress
+IN-07,Gradebook,instructor,WRITE,grade_draft|publish_request,approval,instructor,in_progress
+MB-08,Mobile grades read-only,instructor,READ,none,n/a,mobile,scaffolded

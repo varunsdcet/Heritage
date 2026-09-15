@@ -1,0 +1,52 @@
+import { z } from "zod";
+
+export const Uuid = z.string().uuid();
+export const InstitutionId = Uuid;
+export const IsoDateTime = z.string().datetime({ offset: true }).or(z.string().datetime());
+export const MoneyCad = z.object({
+  amountCents: z.number().int(),
+  currency: z.literal("CAD"),
+});
+
+export const PaginationQuery = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(25),
+});
+
+export const PaginatedMeta = z.object({
+  page: z.number().int(),
+  pageSize: z.number().int(),
+  total: z.number().int(),
+});
+
+export const ErrorEnvelope = z.object({
+  error: z.object({
+    code: z.string(),
+    message: z.string(),
+    details: z.unknown().optional(),
+    correlationId: z.string(),
+  }),
+});
+
+export const AuditEnvelope = z.object({
+  actorId: Uuid,
+  purpose: z.string(),
+  before: z.unknown().nullable(),
+  after: z.unknown().nullable(),
+  source: z.string(),
+  correlationId: z.string(),
+  eventName: z.string(),
+  version: z.number().int().positive(),
+});
+
+export const BaseEntity = z.object({
+  id: Uuid,
+  institutionId: InstitutionId,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  rowVersion: z.number().int().positive(),
+});
+
+export type ErrorEnvelope = z.infer<typeof ErrorEnvelope>;
+export type AuditEnvelope = z.infer<typeof AuditEnvelope>;
+export type MoneyCad = z.infer<typeof MoneyCad>;

@@ -1,0 +1,250 @@
+import { Router } from "express";
+import { z } from "zod";
+import {
+  GradebookResponse,
+  PublishGradesRequest,
+  StudentGradesResponse,
+  UpsertGradeRequest,
+} from "@myheritage/contracts";
+import { prisma } from "@myheritage/db";
+import { requireApproval } from "@myheritage/auth";
+import { writeAuditAndOutbox } from "@myheritage/events";
+import { requireAuth, requireRoles, type AuthedRequest } from "../../middleware/auth.js";
+
+export const gradesRouter: Router = Router();
+
+function letterFor(score: number, max: number) {
+  const pct = (score / max) * 100;
+  if (pct >= 90) return "A";
+  if (pct >= 85) return "A-";
+  if (pct >= 80) return "B+";
+  if (pct >= 75) return "B";
+  if (pct >= 70) return "B-";
+  if (pct >= 65) return "C+";
+  if (pct >= 60) return "C";
+  if (pct >= 50) return "D";
+  return "F";
+}
+
+gradesRouter.get("/me", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    const student = await prisma.student.findFirst({
+      where: { institutionId: user.institutionId, personId: user.personId },
+    });
+    if (!student) throw Object.assign(new Error("Student not found"), { code: "NOT_FOUND", status: 404 });
+
+    const enrolments = await prisma.enrolment.findMany({
+      where: { institutionId: user.institutionId, studentId: student.id, status: "enrolled" },
+      include: {
+        section: { include: { course: true } },
+        gradeItems: {
+          where: { status: "published" },
+          include: { assignment: true },
+        },
+      },
+    });
+
+    const instructorIds = [...new Set(enrolments.map((e) => e.section.instructorPersonId))];
+    const instructors = await prisma.person.findMany({
+      where: { id: { in: instructorIds }, institutionId: user.institutionId },
+    });
+    const instructorMap = new Map(instructors.map((p) => [p.id, `${p.givenName} ${p.familyName}`]));
+
+    const courses = enrolments.map((e) => {
+      const items = e.gradeItems.map((g) => ({
+        id: g.id,
+        title: g.assignment.title,
+        weightPercent: g.assignment.weightPercent,
+        score: g.score,
+        maxScore: g.maxScore,
+        letter: g.letter,
+        status: g.status as "published",
+        publishedAt: g.publishedAt?.toISOString() ?? null,
+        underReview: false,
+      }));
+      const weighted = items.reduce(
+        (acc, item) => {
+          if (item.score == null) return acc;
+          return {
+            w: acc.w + item.weightPercent,
+            s: acc.s + (item.score / item.maxScore) * item.weightPercent,
+          };
+        },
+        { w: 0, s: 0 },
+      );
+      const currentPercent = weighted.w ? Math.round((weighted.s / weighted.w) * 1000) / 10 : null;
+      return {
+        sectionId: e.sectionId,
+        code: e.section.course.code,
+        title: e.section.course.title,
+        instructorName: instructorMap.get(e.section.instructorPersonId) ?? "Instructor",
+        credits: e.section.course.credits,
+        currentPercent,
+        letter: currentPercent == null ? null : letterFor(currentPercent, 100),
+        items,
+      };
+    });
+
+    const withScores = courses.filter((c) => c.currentPercent != null);
+    const cumulativeGpa =
+      withScores.length === 0
+        ? 0
+        : Math.round(
+            (withScores.reduce((sum, c) => sum + (c.currentPercent as number), 0) / withScores.length / 25) *
+              100,
+          ) / 100;
+
+    await prisma.auditEvent.create({
+      data: {
+        institutionId: user.institutionId,
+        actorId: user.accountId,
+        eventName: "Student.grades.view",
+        purpose: "read",
+        beforeJson: null,
+        afterJson: JSON.stringify({ studentId: student.id }),
+        source: "grades.me",
+        correlationId: (req as AuthedRequest).correlationId,
+        version: 1,
+      },
+    });
+
+    res.json(
+      StudentGradesResponse.parse({
+        cumulativeGpa,
+        standing: student.standing as "good" | "warning" | "probation" | "alert",
+        courses,
+      }),
+    );
+  } catch (err) {
+    next(err);
+  }
+});
+
+gradesRouter.get(
+  "/:sectionId",
+  requireAuth,
+  requireRoles("instructor", "admin"),
+  async (req, res, next) => {
+    try {
+      const user = (req as AuthedRequest).user;
+      const sectionId = z.string().uuid().parse(req.params.sectionId);
+      const section = await prisma.section.findFirst({
+        where: { id: sectionId, institutionId: user.institutionId },
+        include: { course: true, assignments: true, enrolments: { include: { student: { include: { person: true } }, gradeItems: true } } },
+      });
+      if (!section) throw Object.assign(new Error("Section not found"), { code: "NOT_FOUND", status: 404 });
+
+      const payload = GradebookResponse.parse({
+        sectionId: section.id,
+        courseCode: section.course.code,
+        courseTitle: section.course.title,
+        assignments: section.assignments.map((a) => ({
+          id: a.id,
+          title: a.title,
+          maxScore: a.maxScore,
+          weightPercent: a.weightPercent,
+        })),
+        rows: section.enrolments.map((e) => ({
+          studentId: e.studentId,
+          studentNumber: e.student.studentNumber,
+          name: `${e.student.person.givenName} ${e.student.person.familyName}`,
+          cells: section.assignments.map((a) => {
+            const cell = e.gradeItems.find((g) => g.assignmentId === a.id);
+            return {
+              gradeItemId: cell?.id ?? "00000000-0000-4000-8000-000000000000",
+              assignmentId: a.id,
+              score: cell?.score ?? null,
+              maxScore: a.maxScore,
+              status: (cell?.status ?? "draft") as "draft" | "pending_publish" | "published" | "under_review",
+              rowVersion: cell?.rowVersion ?? 1,
+            };
+          }),
+        })),
+      });
+      res.json(payload);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+gradesRouter.patch("/:id", requireAuth, requireRoles("instructor", "admin"), async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    const id = z.string().uuid().parse(req.params.id);
+    const body = UpsertGradeRequest.parse(req.body);
+    const existing = await prisma.gradeItem.findFirst({ where: { id, institutionId: user.institutionId } });
+    if (!existing) throw Object.assign(new Error("Grade not found"), { code: "NOT_FOUND", status: 404 });
+    if (existing.status === "published") {
+      throw Object.assign(new Error("Published grades are read-only"), { code: "CONFLICT", status: 409 });
+    }
+    if (existing.rowVersion !== body.rowVersion) {
+      throw Object.assign(new Error("Stale row_version"), { code: "CONFLICT", status: 409 });
+    }
+    const letter = letterFor(body.score, existing.maxScore);
+    const updated = await prisma.$transaction(async (tx) => {
+      const row = await tx.gradeItem.update({
+        where: { id },
+        data: { score: body.score, letter, status: "draft", rowVersion: { increment: 1 } },
+      });
+      await writeAuditAndOutbox(tx, {
+        institutionId: user.institutionId,
+        actorId: user.accountId,
+        eventName: "GradeItem.updated",
+        purpose: "gradebook_edit",
+        before: existing,
+        after: row,
+        source: "grade-items.patch",
+        correlationId: (req as AuthedRequest).correlationId,
+      });
+      return row;
+    });
+    res.json(updated);
+  } catch (err) {
+    next(err);
+  }
+});
+
+gradesRouter.post(
+  "/:sectionId/publish",
+  requireAuth,
+  requireRoles("instructor", "admin"),
+  async (req, res, next) => {
+    try {
+      const user = (req as AuthedRequest).user;
+      const sectionId = z.string().uuid().parse(req.params.sectionId);
+      const body = PublishGradesRequest.parse(req.body);
+      const grades = await prisma.gradeItem.findMany({
+        where: {
+          id: { in: body.gradeItemIds },
+          institutionId: user.institutionId,
+          assignment: { sectionId },
+        },
+      });
+      if (grades.length !== body.gradeItemIds.length) {
+        throw Object.assign(new Error("One or more grade items not found"), { code: "NOT_FOUND", status: 404 });
+      }
+      await prisma.gradeItem.updateMany({
+        where: { id: { in: body.gradeItemIds } },
+        data: { status: "pending_publish" },
+      });
+      const approval = await requireApproval({
+        institutionId: user.institutionId,
+        type: "grade.publish",
+        subjectRef: `section:${sectionId}`,
+        proposedDiff: {
+          gradeItemIds: body.gradeItemIds,
+          studentIds: [...new Set(grades.map((g) => g.studentId))],
+        },
+        requestedBy: user.accountId,
+        requiredApproverRoles: ["admin", "registrar"],
+        requiredCount: 1,
+        correlationId: (req as AuthedRequest).correlationId,
+      });
+      res.status(202).json({ approvalRequestId: approval.id, status: approval.status });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
