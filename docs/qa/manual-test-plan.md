@@ -26,7 +26,7 @@ The test pack is grounded in the current repository. A generated route or visibl
 
 ## 2. Scope and source-of-truth warning
 
-`tools/register/register_v2.csv` currently registers only `SH-01`, `SH-12`, `ST-07`, `ST-21`, `IN-07`, and `MB-08`. Tests for course administration, uploads, deletion, joining classes, profiles, search, and notifications are useful discovery tests, but those capabilities require register and contract coverage before their future pass criteria can become authoritative.
+`tools/register/register_v2.csv` registers the complete student surface from `ST-01` through `ST-22`. `docs/spec/student-portal.md` and the shared student contracts define the authoritative rules for enrolment-scoped courses, class links, assignment files, profiles, search, notifications, grades, and messages. Advanced screens that remain marked `scaffolded` must still be treated as read-only until their write contracts are approved.
 
 Each test has one of these support labels:
 
@@ -217,7 +217,7 @@ Proposed future flow:
 6. Archive/delete it with confirmation.
 7. Verify unauthorized roles cannot view, download, replace, or delete it.
 
-Current baseline expectation: no real multipart/file upload or download API exists. Visual upload areas must not report a successful persistent upload.
+Current baseline expectation: assignment files persist through the student submission API with a 10 MiB allowlist, signature checks, opaque tenant-scoped storage paths, versioning, recoverable archive, and submission locking. Direct download and malware-scanning infrastructure remain outside this local phase; the UI must not claim those capabilities.
 
 ## 7. Functional coverage summary
 
@@ -229,11 +229,11 @@ Current baseline expectation: no real multipart/file upload or download API exis
 | Assign students | Admin enrolment UI/API | Duplicate enrolment, wrong account type, visibility, notification |
 | Join class | No student self-join contract/API | Confirm capability is absent; obtain product requirements |
 | Grade workflow | Partial dedicated APIs | Ownership, draft confidentiality, atomic approval, notification |
-| Upload files | Visual shells only | Prevent false success; specify security and persistence tests |
-| Delete/archive | No product delete endpoints | Confirm unavailable; specify permissions, dependencies, audit |
+| Upload files | Student assignment API/UI | Type/signature/size validation, tenant ownership, versioning, audit/outbox |
+| Delete/archive | Recoverable student file archive | Draft-only ownership, deadline/grade locks, audit/outbox |
 | Search | API plus static UI palettes | Role privacy, institution scope, navigation, special input |
 | Profile | Mostly read-only generic views | Identity, role isolation, missing edit/persistence workflow |
-| Notifications | Read-only list | Recipient isolation, ordering, duplicates, missing read/delete actions |
+| Notifications | Recipient list and idempotent read state | Recipient isolation, ordering, unread count, audit/outbox |
 
 ## 8. Non-functional checks to repeat across journeys
 

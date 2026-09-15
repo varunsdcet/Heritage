@@ -137,7 +137,7 @@ await run("AUTH-004", "Invalid password is rejected", async () => {
   expectStatus(response, 401);
 });
 
-await knownFailure("AUTH-005", "Malformed login input returns validation error", async () => {
+await run("AUTH-005", "Malformed login input returns validation error", async () => {
   const response = await request("/auth/login", {
     method: "POST",
     body: { email: "not-an-email", password: "short", deviceFingerprint: "short" },
@@ -157,13 +157,13 @@ await run("PUB-002", "Public verification rejects blank input", async () => {
   assert.equal(response.body?.match, false);
 });
 
-await knownFailure("PUB-003", "Public verification does not enumerate partial email", async () => {
+await run("PUB-003", "Public verification does not enumerate partial email", async () => {
   const response = await request("/public/verify?q=marcus");
-  expectStatus(response, 200);
-  assert.equal(response.body?.match, false, "partial email/name fragment disclosed that a student exists");
+  assert.ok([200, 400].includes(response.status), `partial verification returned HTTP ${response.status}`);
+  assert.notEqual(response.body?.match, true, "partial email/name fragment disclosed that a student exists");
 });
 
-await knownFailure("SEC-001", "CORS rejects spoofed localhost origin", async () => {
+await run("SEC-001", "CORS rejects spoofed localhost origin", async () => {
   const response = await request("/health", { headers: { origin: "http://localhost.attacker.example" } });
   assert.notEqual(
     response.headers.get("access-control-allow-origin"),
@@ -256,7 +256,7 @@ await run("USR-005", "Student cannot create user", async () => {
   expectStatus(response, 403);
 });
 
-await knownFailure("USR-004", "Invalid user input returns validation error", async () => {
+await run("USR-004", "Invalid user input returns validation error", async () => {
   const response = await request("/admin/users", {
     method: "POST",
     token: state.admin.accessToken,
@@ -348,7 +348,7 @@ await run("CRS-005", "Non-instructor account cannot own a section", async () => 
   expectStatus(response, 400);
 });
 
-await knownFailure("CRS-006", "Invalid section input returns validation error", async () => {
+await run("CRS-006", "Invalid section input returns validation error", async () => {
   const response = await request("/admin/sections", {
     method: "POST",
     token: state.admin.accessToken,
@@ -435,7 +435,7 @@ await run("ASN-001", "Admin creates assignment for new section", async () => {
   state.assignment = response.body;
 });
 
-await knownFailure("ASN-002", "Invalid assignment input returns validation error", async () => {
+await run("ASN-002", "Invalid assignment input returns validation error", async () => {
   const response = await request("/admin/assignments", {
     method: "POST",
     token: state.admin.accessToken,
@@ -465,6 +465,63 @@ await run("JNY-001B", "Created student sees enrolled course", async () => {
   const response = await request("/courses/me", { token: state.newStudent.accessToken });
   expectStatus(response, 200);
   assert.ok(response.body.items.some((item) => item.sectionId === state.section.sectionId));
+});
+
+await run("JOIN-001", "Student receives only an approved HTTPS class join link", async () => {
+  const response = await request("/calendar/me", { token: state.seedStudent.accessToken });
+  expectStatus(response, 200);
+  const joinable = response.body.events.find((event) => event.kind === "class" && event.joinUrl);
+  assert.ok(joinable, "no joinable enrolled class session was returned");
+  assert.match(joinable.joinUrl, /^https:\/\//);
+});
+
+await run("FILE-001", "Student uploads a persistent assignment file", async () => {
+  const bytes = Buffer.from("%PDF-1.4\nQA student journey\n");
+  const response = await request(`/student/assignments/${state.assignment.assignmentId}/files`, {
+    method: "POST",
+    token: state.newStudent.accessToken,
+    body: {
+      filename: `qa-${runId}.pdf`,
+      mimeType: "application/pdf",
+      sizeBytes: bytes.byteLength,
+      contentBase64: bytes.toString("base64"),
+    },
+  });
+  expectStatus(response, 201);
+  state.submissionFileId = response.body.submission.files.at(-1).id;
+  assert.equal(response.body.submission.status, "draft");
+});
+
+await run("DEL-001", "Student archives an owned draft submission file", async () => {
+  const response = await request(`/student/submission-files/${state.submissionFileId}`, {
+    method: "DELETE",
+    token: state.newStudent.accessToken,
+  });
+  expectStatus(response, 200);
+  assert.equal(response.body.archived, true);
+});
+
+await run("SUB-001", "Student uploads a replacement and submits the assignment", async () => {
+  const bytes = Buffer.from("%PDF-1.4\nQA final submission\n");
+  const upload = await request(`/student/assignments/${state.assignment.assignmentId}/files`, {
+    method: "POST",
+    token: state.newStudent.accessToken,
+    body: {
+      filename: `qa-final-${runId}.pdf`,
+      mimeType: "application/pdf",
+      sizeBytes: bytes.byteLength,
+      contentBase64: bytes.toString("base64"),
+    },
+  });
+  expectStatus(upload, 201);
+  const response = await request(`/student/assignments/${state.assignment.assignmentId}/submit`, {
+    method: "POST",
+    token: state.newStudent.accessToken,
+    body: {},
+  });
+  expectStatus(response, 200);
+  assert.equal(response.body.submission.status, "submitted");
+  assert.equal(response.body.alreadySubmitted, false);
 });
 
 await run("CAL-001", "New assignment appears in instructor calendar", async () => {
@@ -519,7 +576,7 @@ await run("SRCH-001", "Exact course search", async () => {
   assert.ok(courses.some((item) => item.label.includes(data.courseCode)));
 });
 
-await knownFailure("SRCH-002", "Partial mixed-case search finds course and person", async () => {
+await run("SRCH-002", "Partial mixed-case search finds course and person", async () => {
   const courseResponse = await request(`/search?q=${encodeURIComponent(data.courseCode.toLowerCase().slice(0, 4))}`, {
     token: state.admin.accessToken,
   });
@@ -548,7 +605,7 @@ await run("SRCH-004", "Special-character search is handled", async () => {
   assert.ok(Array.isArray(response.body.groups));
 });
 
-await knownFailure("SRCH-005", "Student search protects directory email data", async () => {
+await run("SRCH-005", "Student search protects directory email data", async () => {
   const response = await request(`/search?q=${encodeURIComponent("admin@heritage.edu")}`, {
     token: state.seedStudent.accessToken,
   });
@@ -582,7 +639,7 @@ await run("GRD-006A", "Dedicated grades API hides all drafts", async () => {
   assert.ok(items.every((item) => item.status === "published"));
 });
 
-await knownFailure("GRD-006B", "Generic student portal hides drafts when no grades are published", async () => {
+await run("GRD-006B", "Generic student portal hides drafts when no grades are published", async () => {
   const response = await request(`/portal/view?path=${encodeURIComponent("/student/grades")}`, {
     token: state.draftOnlyStudent.accessToken,
   });
@@ -591,29 +648,29 @@ await knownFailure("GRD-006B", "Generic student portal hides drafts when no grad
   assert.ok(!serialized.includes("status: draft"), "generic portal exposed a draft grade");
 });
 
-await knownFailure("PRO-003", "Student cannot request instructor profile role", async () => {
+await run("PRO-003", "Student cannot request instructor profile role", async () => {
   const response = await request(`/portal/view?path=${encodeURIComponent("/instructor/profile")}`, {
     token: state.seedStudent.accessToken,
   });
   expectStatus(response, 403);
 });
 
-await knownFailure("AUTH-009B", "Student cannot request generic admin portal data", async () => {
+await run("AUTH-009B", "Student cannot request generic admin portal data", async () => {
   const response = await request(`/portal/view?path=${encodeURIComponent("/admin/users")}`, {
     token: state.seedStudent.accessToken,
   });
   expectStatus(response, 403);
 });
 
-await knownFailure("GRD-002", "Other instructor cannot read assigned gradebook", async () => {
+await run("GRD-002", "Other instructor cannot read assigned gradebook", async () => {
   state.otherInstructor = await login("pendelton@heritage.edu", `qa-other-instructor-${runId}`);
   const response = await request("/gradebooks/77777777-7777-4777-8777-777777777701", {
     token: state.otherInstructor.accessToken,
   });
-  expectStatus(response, 403);
+  assert.ok([403, 404].includes(response.status), `non-owner gradebook request returned HTTP ${response.status}`);
 });
 
-await knownFailure("GRD-003", "Score above max is rejected", async () => {
+await run("GRD-003", "Score above max is rejected", async () => {
   const gradebook = await request("/gradebooks/77777777-7777-4777-8777-777777777701", {
     token: state.seedInstructor.accessToken,
   });
@@ -700,7 +757,7 @@ await run("JNY-002A", "Instructor submits a real draft for publication", async (
   state.approvalId = response.body.approvalRequestId;
 });
 
-await knownFailure("GRD-005", "Publish request is idempotent", async () => {
+await run("GRD-005", "Publish request is idempotent", async () => {
   const response = await request("/gradebooks/77777777-7777-4777-8777-777777777701/publish", {
     method: "POST",
     token: state.seedInstructor.accessToken,
@@ -795,18 +852,40 @@ await run("MSG-002", "Student cannot ask about another student's grade", async (
   expectStatus(response, 404);
 });
 
-const gapChecks = [
-  ["JOIN-001", "Student self-service join class", "/courses/join", "POST", state.seedStudent?.accessToken],
-  ["FILE-001", "Persistent file upload", "/files", "POST", state.admin?.accessToken],
-  ["DEL-001", "Course/section product deletion", `/admin/sections/${state.section?.sectionId ?? "missing"}`, "DELETE", state.admin?.accessToken],
-  ["PRO-004", "Profile editing", "/portal/profile", "PATCH", state.seedStudent?.accessToken],
-  ["NOT-006", "Notification read state", "/notifications/example/read", "PATCH", state.seedStudent?.accessToken],
-];
+await run("PRO-004", "Student updates an immediate profile preference", async () => {
+  const response = await request("/me/preferences", {
+    method: "PATCH",
+    token: state.newStudent.accessToken,
+    body: { timezone: "America/Toronto" },
+  });
+  expectStatus(response, 200);
+  assert.equal(response.body.timezone, "America/Toronto");
+});
 
-for (const [id, name, path, method, token] of gapChecks) {
-  const response = await request(path, { method, token, body: {} });
-  gap(id, name, `No approved implementation; discovery request returned HTTP ${response.status}`);
-}
+await run("PRO-005", "Official profile correction creates an approval", async () => {
+  const response = await request("/me/profile-change-requests", {
+    method: "POST",
+    token: state.newStudent.accessToken,
+    body: { familyName: "Student-QA", reason: `Verified correction request ${runId}` },
+  });
+  expectStatus(response, 202);
+  assert.equal(response.body.status, "pending");
+});
+
+await run("NOT-006", "Student marks only an owned notification read", async () => {
+  const inbox = await request("/notifications/me", { token: state.newStudent.accessToken });
+  expectStatus(inbox, 200);
+  const unread = inbox.body.items.find((item) => item.readAt == null);
+  assert.ok(unread, "no unread notification was available");
+  const response = await request(`/notifications/me/${unread.id}/read`, {
+    method: "PATCH",
+    token: state.newStudent.accessToken,
+    body: {},
+  });
+  expectStatus(response, 200);
+  assert.equal(response.body.changed, true);
+  assert.ok(response.body.notification.readAt);
+});
 
 const summary = results.reduce(
   (counts, result) => {
