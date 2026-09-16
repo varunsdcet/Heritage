@@ -39,7 +39,7 @@ gradesRouter.get("/me", requireAuth, requireRoles("student"), async (req, res, n
       include: {
         section: { include: { course: true } },
         gradeItems: {
-          where: { status: "published" },
+          where: { institutionId: user.institutionId, status: "published" },
           include: { assignment: true },
         },
       },
@@ -52,7 +52,9 @@ gradesRouter.get("/me", requireAuth, requireRoles("student"), async (req, res, n
     const instructorMap = new Map(instructors.map((p) => [p.id, `${p.givenName} ${p.familyName}`]));
 
     const courses = enrolments.map((e) => {
-      const items = e.gradeItems.map((g) => ({
+      // Keep a second application-layer guard so a future include/query change
+      // cannot expose a non-published grade to the student response.
+      const items = e.gradeItems.filter((g) => g.status === "published").map((g) => ({
         id: g.id,
         title: g.assignment.title,
         weightPercent: g.assignment.weightPercent,
@@ -130,7 +132,11 @@ gradesRouter.get(
       const user = (req as AuthedRequest).user;
       const sectionId = z.string().uuid().parse(req.params.sectionId);
       const section = await prisma.section.findFirst({
-        where: { id: sectionId, institutionId: user.institutionId },
+        where: {
+          id: sectionId,
+          institutionId: user.institutionId,
+          ...(user.roles.includes("admin") ? {} : { instructorPersonId: user.personId }),
+        },
         include: { course: true, assignments: true, enrolments: { include: { student: { include: { person: true } }, gradeItems: true } } },
       });
       if (!section) throw Object.assign(new Error("Section not found"), { code: "NOT_FOUND", status: 404 });
@@ -174,13 +180,32 @@ gradesRouter.patch("/:id", requireAuth, requireRoles("instructor", "admin"), asy
     const user = (req as AuthedRequest).user;
     const id = z.string().uuid().parse(req.params.id);
     const body = UpsertGradeRequest.parse(req.body);
-    const existing = await prisma.gradeItem.findFirst({ where: { id, institutionId: user.institutionId } });
+    const existing = await prisma.gradeItem.findFirst({
+      where: {
+        id,
+        institutionId: user.institutionId,
+        ...(user.roles.includes("admin")
+          ? {}
+          : {
+              assignment: {
+                institutionId: user.institutionId,
+                section: { institutionId: user.institutionId, instructorPersonId: user.personId },
+              },
+            }),
+      },
+    });
     if (!existing) throw Object.assign(new Error("Grade not found"), { code: "NOT_FOUND", status: 404 });
     if (existing.status === "published") {
       throw Object.assign(new Error("Published grades are read-only"), { code: "CONFLICT", status: 409 });
     }
     if (existing.rowVersion !== body.rowVersion) {
       throw Object.assign(new Error("Stale row_version"), { code: "CONFLICT", status: 409 });
+    }
+    if (body.score > existing.maxScore) {
+      throw Object.assign(new Error("Score cannot exceed the maximum score"), {
+        code: "VALIDATION_ERROR",
+        status: 400,
+      });
     }
     const letter = letterFor(body.score, existing.maxScore);
     const updated = await prisma.$transaction(async (tx) => {
@@ -215,6 +240,43 @@ gradesRouter.post(
       const user = (req as AuthedRequest).user;
       const sectionId = z.string().uuid().parse(req.params.sectionId);
       const body = PublishGradesRequest.parse(req.body);
+      const idempotencyKey = req.header("idempotency-key")?.trim();
+      if (!idempotencyKey) {
+        throw Object.assign(new Error("Idempotency-Key header is required"), {
+          code: "VALIDATION_ERROR",
+          status: 400,
+        });
+      }
+      const idempotencyPath = `/gradebooks/${sectionId}/publish`;
+      const existingRequest = await prisma.idempotencyKey.findUnique({
+        where: {
+          institutionId_key_method_path: {
+            institutionId: user.institutionId,
+            key: idempotencyKey,
+            method: "POST",
+            path: idempotencyPath,
+          },
+        },
+      });
+      if (existingRequest) {
+        if (existingRequest.statusCode === 0) {
+          throw Object.assign(new Error("An identical publish request is still processing"), {
+            code: "CONFLICT",
+            status: 409,
+          });
+        }
+        res.status(existingRequest.statusCode).json(JSON.parse(existingRequest.responseJson));
+        return;
+      }
+      const section = await prisma.section.findFirst({
+        where: {
+          id: sectionId,
+          institutionId: user.institutionId,
+          ...(user.roles.includes("admin") ? {} : { instructorPersonId: user.personId }),
+        },
+        select: { id: true },
+      });
+      if (!section) throw Object.assign(new Error("Section not found"), { code: "NOT_FOUND", status: 404 });
       const grades = await prisma.gradeItem.findMany({
         where: {
           id: { in: body.gradeItemIds },
@@ -225,24 +287,74 @@ gradesRouter.post(
       if (grades.length !== body.gradeItemIds.length) {
         throw Object.assign(new Error("One or more grade items not found"), { code: "NOT_FOUND", status: 404 });
       }
-      await prisma.gradeItem.updateMany({
-        where: { id: { in: body.gradeItemIds } },
-        data: { status: "pending_publish" },
-      });
-      const approval = await requireApproval({
-        institutionId: user.institutionId,
-        type: "grade.publish",
-        subjectRef: `section:${sectionId}`,
-        proposedDiff: {
-          gradeItemIds: body.gradeItemIds,
-          studentIds: [...new Set(grades.map((g) => g.studentId))],
-        },
-        requestedBy: user.accountId,
-        requiredApproverRoles: ["admin", "registrar"],
-        requiredCount: 1,
-        correlationId: (req as AuthedRequest).correlationId,
-      });
-      res.status(202).json({ approvalRequestId: approval.id, status: approval.status });
+      try {
+        const response = await prisma.$transaction(async (tx) => {
+          await tx.idempotencyKey.create({
+            data: {
+              institutionId: user.institutionId,
+              key: idempotencyKey,
+              method: "POST",
+              path: idempotencyPath,
+              responseJson: "{}",
+              statusCode: 0,
+            },
+          });
+          await tx.gradeItem.updateMany({
+            where: { id: { in: body.gradeItemIds }, institutionId: user.institutionId },
+            data: { status: "pending_publish" },
+          });
+          const approval = await requireApproval({
+            institutionId: user.institutionId,
+            type: "grade.publish",
+            subjectRef: `section:${sectionId}`,
+            proposedDiff: {
+              gradeItemIds: body.gradeItemIds,
+              studentIds: [...new Set(grades.map((g) => g.studentId))],
+            },
+            requestedBy: user.accountId,
+            requiredApproverRoles: ["admin", "registrar"],
+            requiredCount: 1,
+            correlationId: (req as AuthedRequest).correlationId,
+            tx,
+          });
+          const storedResponse = { approvalRequestId: approval.id, status: approval.status };
+          await tx.idempotencyKey.update({
+            where: {
+              institutionId_key_method_path: {
+                institutionId: user.institutionId,
+                key: idempotencyKey,
+                method: "POST",
+                path: idempotencyPath,
+              },
+            },
+            data: { responseJson: JSON.stringify(storedResponse), statusCode: 202 },
+          });
+          return storedResponse;
+        });
+        res.status(202).json(response);
+      } catch (error) {
+        if ((error as { code?: string }).code === "P2002") {
+          const completed = await prisma.idempotencyKey.findUnique({
+            where: {
+              institutionId_key_method_path: {
+                institutionId: user.institutionId,
+                key: idempotencyKey,
+                method: "POST",
+                path: idempotencyPath,
+              },
+            },
+          });
+          if (completed && completed.statusCode > 0) {
+            res.status(completed.statusCode).json(JSON.parse(completed.responseJson));
+            return;
+          }
+          throw Object.assign(new Error("An identical publish request is already processing"), {
+            code: "CONFLICT",
+            status: 409,
+          });
+        }
+        throw error;
+      }
     } catch (err) {
       next(err);
     }

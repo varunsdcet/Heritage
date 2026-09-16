@@ -1,7 +1,7 @@
 "use client";
 
-import { LiveScreen } from "@/components/LiveScreen";
+import { StudentCalendarView } from "@/components/StudentFunctionalViews";
 
 export default function Page() {
-  return <LiveScreen path="/student/calendar" />;
+  return <StudentCalendarView />;
 }

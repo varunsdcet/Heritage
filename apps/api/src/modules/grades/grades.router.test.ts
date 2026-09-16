@@ -1,0 +1,160 @@
+import type { AddressInfo } from "node:net";
+import type { Server } from "node:http";
+import express, { type NextFunction, type Request, type Response } from "express";
+import type { RoleName, SessionClaims, StudentGradesResponse as StudentGradesPayload } from "@myheritage/contracts";
+import { StudentGradesResponse } from "@myheritage/contracts";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+const testClaims = vi.hoisted(
+  () =>
+    ({
+      sub: "00000000-0000-4000-8000-000000000001",
+      accountId: "00000000-0000-4000-8000-000000000002",
+      personId: "00000000-0000-4000-8000-000000000003",
+      institutionId: "00000000-0000-4000-8000-000000000004",
+      roles: ["student"],
+      sessionId: "00000000-0000-4000-8000-000000000005",
+    }) satisfies SessionClaims,
+);
+
+const db = vi.hoisted(() => ({
+  student: { findFirst: vi.fn() },
+  enrolment: { findMany: vi.fn() },
+  person: { findMany: vi.fn() },
+  auditEvent: { create: vi.fn() },
+  institution: { findFirst: vi.fn() },
+  term: { findFirst: vi.fn() },
+  gradeItem: { findMany: vi.fn() },
+  portalRecord: { findMany: vi.fn() },
+}));
+
+vi.mock("@myheritage/db", () => ({ prisma: db }));
+vi.mock("../../middleware/auth.js", () => ({
+  requireAuth(req: Request, _res: Response, next: NextFunction) {
+    Object.assign(req, { user: testClaims, correlationId: "test-correlation" });
+    next();
+  },
+  requireRoles(..._roles: RoleName[]) {
+    return (_req: Request, _res: Response, next: NextFunction) => next();
+  },
+}));
+
+import { errorHandler } from "../../middleware/error-handler.js";
+import { buildPortalView } from "../portal/portal.service.js";
+import { gradesRouter } from "./grades.router.js";
+
+const publishedGrade = {
+  id: "10000000-0000-4000-8000-000000000001",
+  score: 88,
+  maxScore: 100,
+  letter: "A-",
+  status: "published",
+  publishedAt: new Date("2026-10-01T12:00:00.000Z"),
+  assignment: {
+    title: "Midterm Exam",
+    weightPercent: 30,
+    section: { course: { code: "CS301" } },
+  },
+};
+
+const draftGrade = {
+  id: "10000000-0000-4000-8000-000000000002",
+  score: 92,
+  maxScore: 100,
+  letter: "A",
+  status: "draft",
+  publishedAt: null,
+  assignment: {
+    title: "Programming Project",
+    weightPercent: 40,
+    section: { course: { code: "CS301" } },
+  },
+};
+
+let server: Server;
+let apiBaseUrl: string;
+
+beforeAll(async () => {
+  const app = express();
+  app.use(express.json());
+  app.use("/grades", gradesRouter);
+  app.use(errorHandler);
+  server = await new Promise<Server>((resolve) => {
+    const listener = app.listen(0, () => resolve(listener));
+  });
+  apiBaseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+});
+
+afterAll(async () => {
+  await new Promise<void>((resolve, reject) => {
+    server.close((err) => (err ? reject(err) : resolve()));
+  });
+});
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  db.student.findFirst.mockResolvedValue({ id: "20000000-0000-4000-8000-000000000001", standing: "good" });
+  db.enrolment.findMany.mockResolvedValue([
+    {
+      sectionId: "30000000-0000-4000-8000-000000000001",
+      section: {
+        instructorPersonId: "40000000-0000-4000-8000-000000000001",
+        course: { code: "CS301", title: "Algorithms", credits: 3 },
+      },
+      // Deliberately include a draft to prove the response guard does not trust
+      // only the ORM relation filter.
+      gradeItems: [publishedGrade, draftGrade],
+    },
+  ]);
+  db.person.findMany.mockResolvedValue([
+    { id: "40000000-0000-4000-8000-000000000001", givenName: "Elena", familyName: "Vance" },
+  ]);
+  db.auditEvent.create.mockResolvedValue({});
+  db.institution.findFirst.mockResolvedValue({ name: "Heritage Community College", city: "Surrey", region: "BC" });
+  db.term.findFirst.mockResolvedValue({ name: "Fall 2026", code: "2026F" });
+  db.gradeItem.findMany.mockResolvedValue([publishedGrade, draftGrade]);
+});
+
+describe("ST-07 student grade visibility", () => {
+  it("returns only the signed-in student's published grades", async () => {
+    const response = await fetch(`${apiBaseUrl}/grades/me`);
+    expect(response.status).toBe(200);
+
+    const payload: StudentGradesPayload = StudentGradesResponse.parse(await response.json());
+    expect(payload.courses).toHaveLength(1);
+    expect(payload.courses[0]?.items.map((item) => item.title)).toEqual(["Midterm Exam"]);
+    expect(JSON.stringify(payload)).not.toContain("Programming Project");
+    expect(JSON.stringify(payload)).not.toContain('"status":"draft"');
+    expect(db.enrolment.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          institutionId: testClaims.institutionId,
+          studentId: "20000000-0000-4000-8000-000000000001",
+        }),
+        include: expect.objectContaining({
+          gradeItems: expect.objectContaining({
+            where: { institutionId: testClaims.institutionId, status: "published" },
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("never falls back to draft grades on the generic student portal", async () => {
+    const view = await buildPortalView(testClaims, "/student/assessments");
+
+    expect(view.sections[0]?.rows.map((row) => row.primary)).toEqual(["CS301 · Midterm Exam"]);
+    expect(JSON.stringify(view)).not.toContain("Programming Project");
+    expect(JSON.stringify(view)).not.toContain("Status: draft");
+    expect(view.metrics).toContainEqual({ label: "Items", value: "1" });
+    expect(db.gradeItem.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          institutionId: testClaims.institutionId,
+          studentId: "20000000-0000-4000-8000-000000000001",
+          status: "published",
+        },
+      }),
+    );
+  });
+});

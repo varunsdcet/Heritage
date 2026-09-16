@@ -29,15 +29,16 @@ messagesRouter.post("/ask-grade", requireAuth, requireRoles("student"), async (r
     const instructorAccount = await prisma.account.findFirst({
       where: { institutionId: user.institutionId, personId: instructorPersonId },
     });
+    if (!instructorAccount) {
+      throw Object.assign(new Error("Instructor account not found"), { code: "NOT_FOUND", status: 404 });
+    }
 
     const result = await prisma.$transaction(async (tx) => {
       const thread = await tx.messageThread.create({
         data: {
           institutionId: user.institutionId,
           subject: body.subject ?? "Ask about this grade",
-          participantAccountIdsJson: JSON.stringify(
-            [user.accountId, instructorAccount?.id].filter(Boolean),
-          ),
+          participantAccountIdsJson: JSON.stringify([user.accountId, instructorAccount.id]),
         },
       });
       const message = await tx.message.create({
@@ -59,7 +60,7 @@ messagesRouter.post("/ask-grade", requireAuth, requireRoles("student"), async (r
         source: "messages.ask-grade",
         correlationId: (req as AuthedRequest).correlationId,
         outboxPayload: {
-          notifyAccountId: instructorAccount?.id,
+          notifyAccountId: instructorAccount.id,
           title: "Question about a grade",
           body: body.body,
         },

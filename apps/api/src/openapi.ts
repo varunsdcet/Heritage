@@ -4,8 +4,16 @@ export const openApiDocument = {
   paths: {
     "/auth/login": { post: { summary: "Password login", security: [], "x-idempotent": false } },
     "/me/home": { get: { summary: "Role-aware home feed", security: [{ bearer: [] }] } },
+    "/me/profile": { get: { summary: "Student profile", security: [{ bearer: [] }] } },
+    "/me/preferences": { patch: { summary: "Update student preferences", security: [{ bearer: [] }] } },
+    "/me/profile-change-requests": {
+      post: { summary: "Request an official profile change", security: [{ bearer: [] }] },
+    },
     "/courses/me": { get: { summary: "Courses for current user", security: [{ bearer: [] }] } },
     "/notifications/me": { get: { summary: "Notifications inbox", security: [{ bearer: [] }] } },
+    "/notifications/me/{notificationId}/read": {
+      patch: { summary: "Mark own notification read", security: [{ bearer: [] }], "x-idempotent": true },
+    },
     "/calendar/me": { get: { summary: "Calendar events", security: [{ bearer: [] }] } },
     "/grades/me": { get: { summary: "Student published grades", security: [{ bearer: [] }] } },
     "/gradebooks/{sectionId}": { get: { summary: "Instructor gradebook", security: [{ bearer: [] }] } },
@@ -17,6 +25,21 @@ export const openApiDocument = {
     "/approvals/{id}/decide": { post: { summary: "Decide approval", security: [{ bearer: [] }] } },
     "/approvals/{id}/apply": { post: { summary: "Apply approved publish", security: [{ bearer: [] }] } },
     "/messages/ask-grade": { post: { summary: "Ask about a grade", security: [{ bearer: [] }] } },
+    "/student/assignments": {
+      get: { summary: "Student assignment list", security: [{ bearer: [] }] },
+    },
+    "/student/assignments/{assignmentId}": {
+      get: { summary: "Student assignment detail", security: [{ bearer: [] }] },
+    },
+    "/student/assignments/{assignmentId}/files": {
+      post: { summary: "Upload a student submission file", security: [{ bearer: [] }] },
+    },
+    "/student/submission-files/{fileId}": {
+      delete: { summary: "Archive a student submission file", security: [{ bearer: [] }] },
+    },
+    "/student/assignments/{assignmentId}/submit": {
+      post: { summary: "Submit a student assignment", security: [{ bearer: [] }], "x-idempotent": true },
+    },
     "/search": { get: { summary: "Command-K search", security: [{ bearer: [] }] } },
   },
   components: {

@@ -16,6 +16,7 @@ import { portalRouter } from "./modules/portal/portal.router.js";
 import { adminRouter } from "./modules/admin/admin.router.js";
 import { instructorRouter } from "./modules/instructor/instructor.router.js";
 import { errorHandler } from "./middleware/error-handler.js";
+import { studentRouter } from "./modules/student/student.router.js";
 
 const app: Express = express();
 const allowedOrigins = (process.env.WEB_ORIGIN ??
@@ -31,16 +32,21 @@ app.use(
         cb(null, true);
         return;
       }
-      // Reflect any heritage host during launch
-      if (origin.includes("46.202.163.202") || origin.includes("localhost")) {
-        cb(null, true);
-        return;
+      try {
+        const parsed = new URL(origin);
+        if (parsed.hostname === "46.202.163.202") {
+          cb(null, true);
+          return;
+        }
+      } catch {
+        // Invalid origins are rejected below.
       }
       cb(null, false);
     },
     credentials: true,
   }),
 );
+app.use("/student", express.json({ limit: "15mb" }));
 app.use(express.json());
 app.use((req, _res, next) => {
   (req as express.Request & { correlationId: string }).correlationId =
@@ -90,6 +96,7 @@ app.get("/api/docs", (_req, res) => {
 app.use("/auth", authRouter);
 app.use("/me", meRouter);
 app.use("/instructor", instructorRouter);
+app.use("/student", studentRouter);
 app.use("/courses", coursesRouter);
 app.use("/notifications", notificationsRouter);
 app.use("/calendar", calendarRouter);
@@ -105,7 +112,7 @@ app.use("/admin", adminRouter);
 
 app.get("/public/verify", async (req, res, next) => {
   try {
-    const q = String(req.query.studentNumber ?? req.query.q ?? "")
+    const q = String(req.query.studentNumber ?? "")
       .trim()
       .toUpperCase();
     if (!q) {
@@ -114,12 +121,7 @@ app.get("/public/verify", async (req, res, next) => {
     }
     const { prisma } = await import("@myheritage/db");
     const hit = await prisma.student.findFirst({
-      where: {
-        OR: [
-          { studentNumber: { equals: q, mode: "insensitive" } },
-          { person: { email: { contains: q.toLowerCase(), mode: "insensitive" } } },
-        ],
-      },
+      where: { studentNumber: { equals: q, mode: "insensitive" } },
       select: { id: true },
     });
     res.json({ match: Boolean(hit) });

@@ -3,8 +3,12 @@ import { REGISTERED_ROUTES, openApiDocument } from "./openapi.js";
 const runtimeRoutes = [
   "/auth/login",
   "/me/home",
+  "/me/profile",
+  "/me/preferences",
+  "/me/profile-change-requests",
   "/courses/me",
   "/notifications/me",
+  "/notifications/me/{notificationId}/read",
   "/calendar/me",
   "/grades/me",
   "/gradebooks/{sectionId}",
@@ -14,6 +18,11 @@ const runtimeRoutes = [
   "/approvals/{id}/decide",
   "/approvals/{id}/apply",
   "/messages/ask-grade",
+  "/student/assignments",
+  "/student/assignments/{assignmentId}",
+  "/student/assignments/{assignmentId}/files",
+  "/student/submission-files/{fileId}",
+  "/student/assignments/{assignmentId}/submit",
   "/search",
 ];
 

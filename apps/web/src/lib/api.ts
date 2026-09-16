@@ -19,6 +19,18 @@ export type Session = {
   familyName: string;
 };
 
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code?: string;
+
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
 const KEY = "mh.session";
 
 export function saveSession(session: Session) {
@@ -48,9 +60,11 @@ export async function api<T>(path: string, init: RequestInit = {}, token?: strin
   const res = await fetch(`${base}${path}`, { ...init, headers });
   if (!res.ok) {
     let message = res.statusText;
+    let code: string | undefined;
     try {
-      const body = (await res.json()) as { error?: { message?: string }; message?: string };
+      const body = (await res.json()) as { error?: { code?: string; message?: string }; message?: string };
       message = body.error?.message ?? body.message ?? message;
+      code = body.error?.code;
     } catch {
       try {
         message = await res.text();
@@ -58,7 +72,7 @@ export async function api<T>(path: string, init: RequestInit = {}, token?: strin
         /* ignore */
       }
     }
-    throw new Error(message || `Request failed (${res.status})`);
+    throw new ApiError(message || `Request failed (${res.status})`, res.status, code);
   }
   return res.json() as Promise<T>;
 }

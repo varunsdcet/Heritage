@@ -48,4 +48,10 @@ export const EVENT_CATALOGUE = [
   "ApprovalRequest.decided",
   "Message.sent",
   "Student.grades.view",
+  "StudentSubmission.fileUploaded",
+  "StudentSubmission.fileArchived",
+  "StudentSubmission.submitted",
+  "Notification.read",
+  "Student.preferencesUpdated",
+  "Student.profileChangeRequested",
 ] as const;

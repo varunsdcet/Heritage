@@ -74,7 +74,7 @@ export function ScreenScaffold({
           return;
         }
         if (item === "Search") {
-          router.push(role === "admin" ? "/admin/search" : role === "student" ? "/student" : `/${role}`);
+          router.push(role === "admin" ? "/admin/search" : role === "student" ? "/student/search" : `/${role}`);
           return;
         }
         const href = resolveNav(role, item);

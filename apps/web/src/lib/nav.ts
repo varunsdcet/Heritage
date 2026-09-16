@@ -3,12 +3,14 @@ export type ShellRole = "applicant" | "student" | "instructor" | "admin" | "empl
 const STUDENT: Record<string, string> = {
   Home: "/student",
   Courses: "/student/courses",
+  Assignments: "/student/assignments",
   Schedule: "/student/calendar",
   Calendar: "/student/calendar",
   Grades: "/student/grades",
   Services: "/student/advising",
   Fees: "/student/fees",
   Messages: "/student/messages",
+  Search: "/student/search",
   More: "/student/all",
   "All screens": "/student/all",
 };

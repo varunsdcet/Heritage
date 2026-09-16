@@ -1,8 +1,19 @@
 import { Router } from "express";
 import { prisma } from "@myheritage/db";
 import { requireAuth, type AuthedRequest } from "../../middleware/auth.js";
+import {
+  RequestStudentProfileChange,
+  StudentProfileResponse,
+  UpdateStudentPreferencesRequest,
+} from "@myheritage/contracts";
+import { requireApproval } from "@myheritage/auth";
+import { writeAuditAndOutbox } from "@myheritage/events";
 
 export const meRouter: Router = Router();
+
+function validationError(issues: unknown, message = "Invalid request") {
+  return Object.assign(new Error(message), { code: "VALIDATION_ERROR", status: 400, issues });
+}
 
 meRouter.get("/home", requireAuth, async (req, res, next) => {
   try {
@@ -106,13 +117,13 @@ meRouter.get("/home", requireAuth, async (req, res, next) => {
     });
     const enrolmentCount = student
       ? await prisma.enrolment.count({
-          where: { studentId: student.id, status: "enrolled" },
+          where: { institutionId: user.institutionId, studentId: student.id, status: "enrolled" },
         })
       : 0;
 
     const grades = student
       ? await prisma.gradeItem.findMany({
-          where: { studentId: student.id, status: "published" },
+          where: { institutionId: user.institutionId, studentId: student.id, status: "published" },
         })
       : [];
     const gpa =
@@ -129,7 +140,12 @@ meRouter.get("/home", requireAuth, async (req, res, next) => {
           where: {
             institutionId: user.institutionId,
             dueAt: { not: null },
-            section: { enrolments: { some: { studentId: student.id, status: "enrolled" } } },
+            section: {
+              institutionId: user.institutionId,
+              enrolments: {
+                some: { institutionId: user.institutionId, studentId: student.id, status: "enrolled" },
+              },
+            },
           },
           include: { section: { include: { course: true } } },
           orderBy: { dueAt: "asc" },
@@ -176,5 +192,114 @@ meRouter.get("/home", requireAuth, async (req, res, next) => {
     });
   } catch (err) {
     next(err);
+  }
+});
+
+meRouter.get("/profile", requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    if (!user.roles.includes("student")) {
+      throw Object.assign(new Error("Forbidden"), { code: "FORBIDDEN", status: 403 });
+    }
+    const student = await prisma.student.findFirst({
+      where: { institutionId: user.institutionId, personId: user.personId },
+      include: { person: true },
+    });
+    const account = await prisma.account.findFirst({
+      where: { id: user.accountId, institutionId: user.institutionId, personId: user.personId },
+    });
+    if (!student || !account) {
+      throw Object.assign(new Error("Student profile not found"), { code: "NOT_FOUND", status: 404 });
+    }
+    res.json(
+      StudentProfileResponse.parse({
+        studentId: student.id,
+        studentNumber: student.studentNumber,
+        givenName: student.person.givenName,
+        familyName: student.person.familyName,
+        primaryEmail: student.person.email,
+        dateOfBirth: student.person.dateOfBirth,
+        programName: student.programName,
+        standing: student.standing,
+        timezone: account.timezone,
+      }),
+    );
+  } catch (error) {
+    next(error);
+  }
+});
+
+meRouter.patch("/preferences", requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    if (!user.roles.includes("student")) {
+      throw Object.assign(new Error("Forbidden"), { code: "FORBIDDEN", status: 403 });
+    }
+    const parsed = UpdateStudentPreferencesRequest.safeParse(req.body);
+    if (!parsed.success) throw validationError(parsed.error.issues);
+    try {
+      new Intl.DateTimeFormat("en-CA", { timeZone: parsed.data.timezone }).format();
+    } catch {
+      throw validationError(
+        [{ path: ["timezone"], message: "Timezone must be a valid IANA timezone" }],
+        "Timezone must be a valid IANA timezone",
+      );
+    }
+    const account = await prisma.account.findFirst({
+      where: { id: user.accountId, institutionId: user.institutionId, personId: user.personId },
+    });
+    if (!account) throw Object.assign(new Error("Account not found"), { code: "NOT_FOUND", status: 404 });
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const row = await tx.account.update({
+        where: { id: account.id },
+        data: { timezone: parsed.data.timezone, rowVersion: { increment: 1 } },
+      });
+      await writeAuditAndOutbox(tx, {
+        institutionId: user.institutionId,
+        actorId: user.accountId,
+        eventName: "Student.preferencesUpdated",
+        purpose: "profile_preference",
+        before: { timezone: account.timezone },
+        after: { timezone: row.timezone },
+        source: "me.preferences",
+        correlationId: (req as AuthedRequest).correlationId,
+      });
+      return row;
+    });
+    res.json({ timezone: updated.timezone });
+  } catch (error) {
+    next(error);
+  }
+});
+
+meRouter.post("/profile-change-requests", requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    if (!user.roles.includes("student")) {
+      throw Object.assign(new Error("Forbidden"), { code: "FORBIDDEN", status: 403 });
+    }
+    const parsed = RequestStudentProfileChange.safeParse(req.body);
+    if (!parsed.success) throw validationError(parsed.error.issues);
+    const student = await prisma.student.findFirst({
+      where: { institutionId: user.institutionId, personId: user.personId },
+    });
+    if (!student) throw Object.assign(new Error("Student not found"), { code: "NOT_FOUND", status: 404 });
+
+    const approval = await requireApproval({
+      institutionId: user.institutionId,
+      type: "student_profile_change",
+      subjectRef: student.id,
+      proposedDiff: parsed.data,
+      requestedBy: user.accountId,
+      requiredApproverRoles: ["registrar"],
+      correlationId: (req as AuthedRequest).correlationId,
+      eventName: "Student.profileChangeRequested",
+      purpose: "official_record_change",
+      source: "me.profile",
+    });
+    res.status(202).json({ approvalRequestId: approval.id, status: "pending" });
+  } catch (error) {
+    next(error);
   }
 });
