@@ -379,9 +379,7 @@ function QueueView({ config }: { config: SisScreenConfig }) {
             <strong>{config.infoBanner.title}</strong>
             <span>{config.infoBanner.body}</span>
           </div>
-          <button type="button" className="mh-sis-info-banner__cta">
-            {config.infoBanner.cta}
-          </button>
+          <ActionBtn label={config.infoBanner.cta} className="mh-sis-info-banner__cta" />
         </div>
       ) : (
         <div className="mh-sis-dash__welcome">
@@ -523,17 +521,29 @@ function QueueView({ config }: { config: SisScreenConfig }) {
             })}
             {config.rowActions === "refund" ? (
               <span className="mh-sis-refund-actions">
-                <button type="button" className="mh-sis-btn-return">
-                  Reject
-                </button>
-                <button type="button" className="mh-sis-btn-accept">
-                  Approve Refund
-                </button>
+                <ActionBtn
+                  label="Reject"
+                  tone="secondary"
+                  rowKey={row.id}
+                  className="mh-sis-btn-return"
+                />
+                <ActionBtn
+                  label="Approve Refund"
+                  rowKey={row.id}
+                  className="mh-sis-btn-accept"
+                />
               </span>
-            ) : config.hideRowAction ? null : (
+            ) : config.hideRowAction ? null : row.href ? (
               <span className="mh-sis-table__link">
                 {config.actionLabel || (config.path.includes("/ss-02") ? "Take Action" : "Review")}
               </span>
+            ) : (
+              <ActionBtn
+                label={config.actionLabel || (config.path.includes("/ss-02") ? "Take Action" : "Review")}
+                rowKey={row.id}
+                className="mh-sis-table__link"
+                tone="secondary"
+              />
             )}
           </button>
         ))}

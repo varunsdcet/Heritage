@@ -1184,6 +1184,7 @@ async function loadMutationOverlay(institutionId: string, path: string): Promise
   const out: SisLivePayload = {};
   if (parsed.activity) out.activity = parsed.activity;
   if (parsed._lastAction) out._lastAction = parsed._lastAction;
+  if (parsed.customPrograms) out.customPrograms = parsed.customPrograms;
   return out;
 }
 
@@ -1206,11 +1207,39 @@ async function savePayload(institutionId: string, path: string, payload: SisLive
 export async function getSisScreen(user: SessionClaims, path: string) {
   const domain = await composeFromDomain(user, path);
   const mutations = await loadMutationOverlay(user.institutionId, path);
+  const payload: SisLivePayload = { ...domain, ...mutations };
+
+  const customPrograms = Array.isArray(mutations.customPrograms)
+    ? (mutations.customPrograms as string[])
+    : [];
+  if (
+    customPrograms.length > 0 &&
+    (path.includes("ac-03") || path.includes("ac-04") || path.includes("program"))
+  ) {
+    const term = (domain.kpis as Array<{ label: string; value: string }> | undefined)?.find((k) =>
+      /term/i.test(k.label),
+    )?.value ?? "—";
+    const existing = new Set(
+      ((payload.rows as Array<{ primary?: string }> | undefined) ?? []).map((r) => r.primary).filter(Boolean),
+    );
+    const extra = customPrograms
+      .filter((p) => !existing.has(p))
+      .map((p) => ({
+        primary: p,
+        cells: [p, "0", term, "Active"],
+        badge: "Active",
+        badgeTone: "active",
+        href: "/admin/f/ac-04-program-detail",
+      }));
+    payload.rows = [...extra, ...((payload.rows as unknown[]) ?? [])];
+    payload.countLabel = `${(payload.rows as unknown[]).length} programs`;
+  }
+
   return {
     path,
     live: true as const,
     source: "domain" as const,
-    payload: { ...domain, ...mutations },
+    payload,
   };
 }
 
@@ -1267,6 +1296,72 @@ export async function runSisAction(
     rowKey: input.rowKey ?? null,
     note: input.note ?? null,
   });
+
+  if (
+    (path.includes("ac-03") || path.includes("ac-04") || path.includes("program")) &&
+    (lower.includes("create") || lower.includes("new") || lower.includes("add") || lower.includes("save"))
+  ) {
+    const programName = (input.note || input.rowKey || action.replace(/^(create|new|add|save)\s+/i, "")).trim() ||
+      `Program ${new Date().getFullYear()}`;
+    const overlayPrograms = Array.isArray(overlay.customPrograms)
+      ? ([...overlay.customPrograms] as string[])
+      : [];
+    if (!overlayPrograms.includes(programName)) overlayPrograms.unshift(programName);
+    await savePayload(user.institutionId, path, {
+      ...overlay,
+      customPrograms: overlayPrograms.slice(0, 40),
+      activity: activity.slice(0, 50),
+      _lastAction: activity[0],
+    });
+    await prisma.auditEvent.create({
+      data: {
+        institutionId: user.institutionId,
+        actorId: user.accountId,
+        eventName: "admin.program.upsert",
+        purpose: "admin_mutation",
+        afterJson: JSON.stringify({ path, programName }),
+        source: "admin.sis",
+        correlationId: randomUUID(),
+      },
+    });
+    return getSisScreen(user, path);
+  }
+
+  if (
+    (path.includes("fn-") || path.includes("finance") || path.includes("refund") || path.includes("payment")) &&
+    (lower.includes("refund") || lower.includes("reject") || lower.includes("approve"))
+  ) {
+    const decision = lower.includes("reject") ? "rejected" : "approved";
+    await prisma.auditEvent.create({
+      data: {
+        institutionId: user.institutionId,
+        actorId: user.accountId,
+        eventName: "admin.finance.decision",
+        purpose: "admin_mutation",
+        afterJson: JSON.stringify({ path, action, decision, rowKey: input.rowKey ?? null }),
+        source: "admin.sis",
+        correlationId: randomUUID(),
+      },
+    });
+  }
+
+  if (
+    (path.includes("ac-09") || path.includes("ac-10") || path.includes("ac-11") || path.includes("schedule")) &&
+    (lower.includes("schedule") || lower.includes("publish") || lower.includes("approve") || lower.includes("create section"))
+  ) {
+    await prisma.auditEvent.create({
+      data: {
+        institutionId: user.institutionId,
+        actorId: user.accountId,
+        eventName: "admin.schedule.action",
+        purpose: "admin_mutation",
+        afterJson: JSON.stringify({ path, action, rowKey: input.rowKey ?? null }),
+        source: "admin.sis",
+        correlationId: randomUUID(),
+      },
+    });
+  }
+
   await savePayload(user.institutionId, path, {
     activity: activity.slice(0, 50),
     _lastAction: activity[0],

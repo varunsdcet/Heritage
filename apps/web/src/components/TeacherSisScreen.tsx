@@ -40,18 +40,20 @@ function ActionBtn({
   href,
   tone = "primary",
   rowKey,
+  className,
 }: {
   label: string;
   href?: string;
   tone?: "primary" | "secondary";
   rowKey?: string;
+  className?: string;
 }) {
   const router = useRouter();
   const live = useOptionalTeacherLive();
   return (
     <button
       type="button"
-      className={`mh-teacher-btn mh-teacher-btn--${tone}`}
+      className={className || `mh-teacher-btn mh-teacher-btn--${tone}`}
       disabled={live?.busy}
       onClick={() => {
         if (href) {
@@ -1640,9 +1642,7 @@ function MessagesView({ config }: { config: TeacherScreenConfig }) {
         </div>
         <div className="mh-teacher-chat__composer">
           <input type="text" placeholder="Write a secure reply…" aria-label="Message" />
-          <button type="button" className="mh-teacher-btn">
-            Send
-          </button>
+          <ActionBtn label="Send" tone="secondary" />
         </div>
       </section>
 
@@ -2484,12 +2484,8 @@ function AssessmentBuilderView({ config }: { config: TeacherScreenConfig }) {
           </div>
         </div>
         <div className="mh-teacher-assess__preview-actions">
-          <button type="button" className="mh-teacher-btn mh-teacher-btn--primary mh-teacher-btn--block">
-            Publish Assessment
-          </button>
-          <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary mh-teacher-btn--block">
-            Save Draft
-          </button>
+          <ActionBtn label="Publish Assessment" />
+          <ActionBtn label="Save Draft" tone="secondary" />
         </div>
       </aside>
     </div>
@@ -2497,6 +2493,7 @@ function AssessmentBuilderView({ config }: { config: TeacherScreenConfig }) {
 }
 
 function GradingSchemesView({ config }: { config: TeacherScreenConfig }) {
+  const live = useOptionalTeacherLive();
   const data = config.gradingSchemes;
   if (!data) return null;
   return (
@@ -2505,10 +2502,10 @@ function GradingSchemesView({ config }: { config: TeacherScreenConfig }) {
         <div className="mh-teacher-schemes__head">
           <h2>{data.schemeLabel}</h2>
           <div className="mh-teacher-schemes__actions">
-            <button type="button" className="mh-teacher-schemes__btn-outline">
+            <button type="button" className="mh-teacher-schemes__btn-outline" disabled={live?.busy} onClick={() => live?.runAction?.("Custom Standard Scheme")}>
               Custom Standard Scheme
             </button>
-            <button type="button" className="mh-teacher-schemes__btn-solid">
+            <button type="button" className="mh-teacher-schemes__btn-solid" disabled={live?.busy} onClick={() => live?.runAction?.("+ New Scheme")}>
               + New Scheme
             </button>
           </div>
@@ -2644,12 +2641,8 @@ function PendingGradesView({ config }: { config: TeacherScreenConfig }) {
             <div className="mh-teacher-field mh-teacher-pending__placeholder">{data.audit.rejectPlaceholder}</div>
           </label>
           <div className="mh-teacher-pending__actions">
-            <button type="button" className="mh-teacher-pending__reject">
-              Reject Submission
-            </button>
-            <button type="button" className="mh-teacher-btn mh-teacher-btn--primary">
-              Audit &amp; Approve
-            </button>
+            <ActionBtn label="Reject Submission" tone="secondary" className="mh-teacher-pending__reject" />
+            <ActionBtn label="Audit & Approve" />
           </div>
         </aside>
       </div>

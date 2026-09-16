@@ -1,7 +1,35 @@
 "use client";
 
-import { LiveScreen } from "@/components/LiveScreen";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { api, loadSession } from "@/lib/api";
+import { StudentAssignmentDetailView, StudentAssignmentsView } from "@/components/StudentFunctionalViews";
 
+/** Figma ST-05 path — prefer live assignment detail when the student has work. */
 export default function Page() {
-  return <LiveScreen path="/student/f/st-05-assignment-detail" />;
+  const router = useRouter();
+  const [assignmentId, setAssignmentId] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    const session = loadSession();
+    if (!session) {
+      router.replace("/login");
+      return;
+    }
+    if (!session.roles.includes("student")) {
+      setReady(true);
+      return;
+    }
+    void api<{ items?: Array<{ id: string }> }>("/student/assignments", {}, session.accessToken)
+      .then((data) => {
+        setAssignmentId(data.items?.[0]?.id ?? null);
+        setReady(true);
+      })
+      .catch(() => setReady(true));
+  }, [router]);
+
+  if (!ready) return null;
+  if (assignmentId) return <StudentAssignmentDetailView assignmentId={assignmentId} />;
+  return <StudentAssignmentsView />;
 }
