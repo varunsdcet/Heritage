@@ -524,12 +524,12 @@ function QueueView({ config }: { config: SisScreenConfig }) {
                 <ActionBtn
                   label="Reject"
                   tone="secondary"
-                  rowKey={row.id}
+                  rowKey={row.primary || row.cells[0]}
                   className="mh-sis-btn-return"
                 />
                 <ActionBtn
                   label="Approve Refund"
-                  rowKey={row.id}
+                  rowKey={row.primary || row.cells[0]}
                   className="mh-sis-btn-accept"
                 />
               </span>
@@ -540,7 +540,7 @@ function QueueView({ config }: { config: SisScreenConfig }) {
             ) : (
               <ActionBtn
                 label={config.actionLabel || (config.path.includes("/ss-02") ? "Take Action" : "Review")}
-                rowKey={row.id}
+                rowKey={row.primary || row.cells[0]}
                 className="mh-sis-table__link"
                 tone="secondary"
               />
