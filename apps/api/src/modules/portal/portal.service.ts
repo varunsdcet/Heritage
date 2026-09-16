@@ -8,6 +8,14 @@ export type PortalRow = {
   href?: string;
 };
 
+export type PortalAction = {
+  label: string;
+  href?: string;
+  action?: string;
+  payload?: Record<string, unknown>;
+  variant?: "primary" | "secondary" | "ai";
+};
+
 export type PortalView = {
   path: string;
   title: string;
@@ -17,7 +25,7 @@ export type PortalView = {
   breadcrumb: string[];
   metrics: Array<{ label: string; value: string; hint?: string }>;
   sections: Array<{ title: string; rows: PortalRow[] }>;
-  actions: Array<{ label: string; href: string; variant?: "primary" | "secondary" | "ai" }>;
+  actions: PortalAction[];
   live: true;
 };
 
@@ -304,6 +312,14 @@ async function rosterFor(user: SessionClaims): Promise<PortalRow[]> {
 
 export async function buildPortalView(user: SessionClaims, path: string): Promise<PortalView> {
   const role = roleFor(user, path);
+  if (role === "applicant") {
+    const { buildApplicantView } = await import("../applicant/applicant.service.js");
+    return buildApplicantView(user, path);
+  }
+  if (role === "employer") {
+    const { buildEmployerView } = await import("../employer/employer.service.js");
+    return buildEmployerView(user, path);
+  }
   const meta = await institutionMeta(user.institutionId);
   const title = titleFromPath(path);
   const active =

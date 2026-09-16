@@ -342,11 +342,11 @@ export function RecordHeader({ title, subtitle, meta }: { title: string; subtitl
 type Role = "applicant" | "student" | "instructor" | "admin" | "employer";
 
 const MENUS: Record<Role, string[]> = {
-  applicant: ["Application", "Documents", "Messages", "Offers"],
+  applicant: ["Home", "Application", "Documents", "Messages", "Offers", "All screens"],
   student: ["Home", "Courses", "Schedule", "Grades", "Services", "Messages", "More"],
   instructor: ["Home", "Sections", "Gradebook", "Attendance", "Messages", "All screens"],
   admin: ["Overview", "Approvals Inbox", "Analytics", "Users", "Search", "Settings", "All screens"],
-  employer: ["Placements", "Hours", "Evaluations", "Agreements", "Profile"],
+  employer: ["Home", "Placements", "Hours", "Evaluations", "Agreements", "Profile"],
 };
 
 const DROPDOWN_ITEMS = new Set(["Services", "More"]);

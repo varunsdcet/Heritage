@@ -1,15 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Metric, Panel } from "@myheritage/ui";
 import { ScreenScaffold, ListPanel, MobileChrome } from "@/components/ScreenScaffold";
-import { AdminLiveScreen } from "@/components/AdminLiveScreen";
 import { AdminFigmaParityScreen } from "@/components/AdminFigmaParityScreen";
 import { TeacherSisScreen } from "@/components/TeacherSisScreen";
 import { TEACHER_SCREENS } from "@/lib/teacherCatalog";
 import { api, loadSession } from "@/lib/api";
 import type { ShellRole } from "@/lib/nav";
+
+export type PortalAction = {
+  label: string;
+  href?: string;
+  action?: string;
+  payload?: Record<string, unknown>;
+  variant?: "primary" | "secondary" | "ai";
+};
 
 export type PortalView = {
   path: string;
@@ -23,7 +30,7 @@ export type PortalView = {
     title: string;
     rows: Array<{ primary: string; secondary?: string; meta?: string; href?: string }>;
   }>;
-  actions: Array<{ label: string; href: string; variant?: "primary" | "secondary" | "ai" }>;
+  actions: PortalAction[];
   live: true;
 };
 
@@ -38,11 +45,9 @@ export function LiveScreen({
   mobileTitle?: string;
   mobileActive?: "Home" | "Courses" | "Schedule" | "Grades" | "More";
 }) {
-  // Desktop admin catalogue → Figma PNG parity (falls back to structured AdminLiveScreen).
   if (!mobile && path.startsWith("/admin")) {
     return <AdminFigmaParityScreen path={path} />;
   }
-  // Desktop teacher / faculty catalogue → structured Figma parity screens.
   if (!mobile && path.startsWith("/instructor") && TEACHER_SCREENS[path]) {
     return <TeacherSisScreen path={path} />;
   }
@@ -65,8 +70,9 @@ function GenericLiveScreen({
   const router = useRouter();
   const [view, setView] = useState<PortalView | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     const s = loadSession();
     if (!s) {
       router.replace(mobile ? "/m/login" : "/login");
@@ -77,7 +83,47 @@ function GenericLiveScreen({
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load"));
   }, [path, router, mobile]);
 
-  if (error) {
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function runAction(a: PortalAction) {
+    if (a.href && !a.action) {
+      router.push(a.href);
+      return;
+    }
+    if (!a.action) return;
+    const s = loadSession();
+    if (!s) {
+      router.replace("/login");
+      return;
+    }
+    const endpoint = path.startsWith("/employer") ? "/employer/action" : path.startsWith("/applicant") ? "/applicant/action" : null;
+    if (!endpoint) {
+      if (a.href) router.push(a.href);
+      return;
+    }
+    setBusyAction(a.label);
+    setError(null);
+    try {
+      const res = await api<{ view?: PortalView }>(
+        endpoint,
+        {
+          method: "POST",
+          body: JSON.stringify({ action: a.action, payload: a.payload, path }),
+        },
+        s.accessToken,
+      );
+      if (res.view) setView(res.view);
+      else load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Action failed");
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  if (error && !view) {
     const body = (
       <div style={{ color: "var(--mh-danger)", padding: "1rem 0" }}>
         {error}
@@ -98,6 +144,7 @@ function GenericLiveScreen({
 
   const content = (
     <>
+      {error ? <p style={{ color: "var(--mh-danger)", marginBottom: 12 }}>{error}</p> : null}
       <div style={{ display: "flex", gap: "0.65rem", flexWrap: "wrap", marginBottom: "0.85rem" }}>
         {view.metrics.map((m) => (
           <Metric key={m.label} label={m.label} value={m.value} hint={m.hint} />
@@ -108,12 +155,13 @@ function GenericLiveScreen({
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
           {view.actions.map((a) => (
             <Button
-              key={a.href + a.label}
+              key={(a.action ?? a.href ?? "") + a.label}
               type="button"
               variant={a.variant ?? "primary"}
-              onClick={() => router.push(a.href)}
+              disabled={busyAction === a.label}
+              onClick={() => runAction(a)}
             >
-              {a.label}
+              {busyAction === a.label ? "Working…" : a.label}
             </Button>
           ))}
         </div>
@@ -191,5 +239,4 @@ function GenericLiveScreen({
   );
 }
 
-/** Keep export for pages that still import ListPanel patterns during migration. */
 export { ListPanel };

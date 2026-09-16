@@ -10,7 +10,7 @@ export function AskHeritageView({
   role,
   contextPath,
 }: {
-  role: "admin" | "student" | "instructor";
+  role: "admin" | "student" | "instructor" | "applicant" | "employer";
   contextPath: string;
 }) {
   const router = useRouter();
@@ -48,15 +48,24 @@ export function AskHeritageView({
     }
   }
 
+  const crumb =
+    role === "admin"
+      ? ["Admin", "Ask Heritage"]
+      : role === "instructor"
+        ? ["Instructor", "Ask Heritage"]
+        : role === "applicant"
+          ? ["Applicant", "Ask Heritage"]
+          : role === "employer"
+            ? ["Employer", "Ask Heritage"]
+            : ["Student", "Ask Heritage"];
+
   return (
     <ScreenScaffold
       role={role}
       title="Ask Heritage"
-      subtitle="Campus AI assistant for courses, grades, fees, and policies"
-      active={role === "student" ? "Ask" : "Home"}
-      breadcrumb={
-        role === "admin" ? ["Admin", "Ask Heritage"] : role === "instructor" ? ["Instructor", "Ask Heritage"] : ["Student", "Ask Heritage"]
-      }
+      subtitle="Campus AI assistant for admissions, courses, grades, fees, practicum, and policies"
+      active={role === "student" || role === "applicant" || role === "employer" ? "Ask" : "Home"}
+      breadcrumb={crumb}
     >
       <Panel>
         <form onSubmit={onAsk} style={{ display: "grid", gap: 10 }}>
@@ -64,7 +73,7 @@ export function AskHeritageView({
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             rows={4}
-            placeholder="Ask about schedules, grades, attendance, fees, programs…"
+            placeholder="Ask about applications, offers, placements, hours, schedules, grades, fees…"
             style={{
               width: "100%",
               border: "1px solid var(--mh-border)",

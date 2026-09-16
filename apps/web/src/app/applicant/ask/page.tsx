@@ -3,5 +3,5 @@
 import { AskHeritageView } from "@/components/AskHeritageView";
 
 export default function Page() {
-  return <AskHeritageView role="applicant" contextPath="/applicant/f/ap-12-applicant-ai-drawer" />;
+  return <AskHeritageView role="applicant" contextPath="/applicant/ask" />;
 }

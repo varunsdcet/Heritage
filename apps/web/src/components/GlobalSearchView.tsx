@@ -9,7 +9,7 @@ import { ScreenScaffold } from "@/components/ScreenScaffold";
 type SearchItem = { id: string; label: string; sub?: string; href?: string };
 type SearchGroup = { type: string; items: SearchItem[] };
 
-export function GlobalSearchView({ role }: { role: "admin" | "student" | "instructor" }) {
+export function GlobalSearchView({ role }: { role: "admin" | "student" | "instructor" | "applicant" | "employer" }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [groups, setGroups] = useState<SearchGroup[]>([]);
@@ -40,13 +40,24 @@ export function GlobalSearchView({ role }: { role: "admin" | "student" | "instru
     }
   }
 
+  const crumb =
+    role === "admin"
+      ? ["Admin", "Search"]
+      : role === "instructor"
+        ? ["Instructor", "Search"]
+        : role === "applicant"
+          ? ["Applicant", "Search"]
+          : role === "employer"
+            ? ["Employer", "Search"]
+            : ["Student", "Search"];
+
   return (
     <ScreenScaffold
       role={role}
       title="Global search"
-      subtitle="Find people, courses, assignments, and campus records"
+      subtitle="Find people, courses, applications, placements, and campus records"
       active="Search"
-      breadcrumb={role === "admin" ? ["Admin", "Search"] : role === "instructor" ? ["Instructor", "Search"] : ["Student", "Search"]}
+      breadcrumb={crumb}
     >
       <Panel>
         <form onSubmit={onSearch} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>

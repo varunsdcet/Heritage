@@ -174,6 +174,20 @@ export const ALL_SCREENS: ScreenEntry[] = [
   { id: "AP-11", role: "applicant", path: "/applicant/f/ap-11-onboarding", title: "ap-11-onboarding", group: "Applicant", figmaId: "17:6200" },
   { id: "AP-12", role: "applicant", path: "/applicant/f/ap-12-applicant-ai-drawer", title: "ap-12-applicant-ai-drawer", group: "Applicant", figmaId: "17:6292" },
   { id: "AP-07", role: "applicant", path: "/applicant/offers", title: "ap-07-offer", group: "Applicant", figmaId: "17:5842" },
+  { id: "AP-MSG", role: "applicant", path: "/applicant/messages", title: "Messages", group: "Applicant" },
+  { id: "AP-TL", role: "applicant", path: "/applicant/timeline", title: "Timeline", group: "Applicant" },
+  { id: "AP-ASK", role: "applicant", path: "/applicant/ask", title: "Ask Heritage", group: "Applicant" },
+  { id: "AP-SRC", role: "applicant", path: "/applicant/search", title: "Search", group: "Applicant" },
+  { id: "AP-ALL", role: "applicant", path: "/applicant/all", title: "All applicant screens", group: "Applicant" },
+  { id: "EM-01", role: "employer", path: "/employer", title: "Employer home", group: "Employer" },
+  { id: "EM-02", role: "employer", path: "/employer/placements", title: "Placements", group: "Employer" },
+  { id: "EM-03", role: "employer", path: "/employer/hours", title: "Hours", group: "Employer" },
+  { id: "EM-04", role: "employer", path: "/employer/evaluations", title: "Evaluations", group: "Employer" },
+  { id: "EM-05", role: "employer", path: "/employer/agreements", title: "Agreements", group: "Employer" },
+  { id: "EM-06", role: "employer", path: "/employer/profile", title: "Profile", group: "Employer" },
+  { id: "EM-ASK", role: "employer", path: "/employer/ask", title: "Ask Heritage", group: "Employer" },
+  { id: "EM-SRC", role: "employer", path: "/employer/search", title: "Search", group: "Employer" },
+  { id: "EM-ALL", role: "employer", path: "/employer/all", title: "All employer screens", group: "Employer" },
   { id: "UI-state-archived", role: "shared", path: "/archive", title: "state-archived", group: "Design System", figmaId: "26:1017" },
   { id: "SH-14", role: "shared", path: "/denied", title: "sh-14-error-404", group: "Shared", figmaId: "66:390" },
   { id: "UI-component-library-button", role: "shared", path: "/design-system", title: "component-library-buttons-inputs", group: "Design System", figmaId: "26:6" },
@@ -379,6 +393,9 @@ export const ALL_SCREENS: ScreenEntry[] = [
   { id: "HUB-IN-37", role: "instructor", path: "/instructor/sections/demo", title: "Section detail demo", group: "Instructor" },
   { id: "HUB-IN-38", role: "instructor", path: "/instructor/studio", title: "AI course studio", group: "Instructor" },
   { id: "HUB-IN-39", role: "instructor", path: "/instructor/submissions", title: "Submissions", group: "Instructor" },
+  { id: "AD-ASK", role: "admin", path: "/admin/ai/ask", title: "Ask Heritage", group: "Admin" },
+  { id: "IN-ASK", role: "instructor", path: "/instructor/ask", title: "Ask Heritage", group: "Instructor" },
+  { id: "IN-SRC", role: "instructor", path: "/instructor/search", title: "Search", group: "Instructor" },
 ];
 
 export function screensForGroup(group: string) {
@@ -386,10 +403,12 @@ export function screensForGroup(group: string) {
 }
 
 export const FIGMA_COUNTS = {
-  adminUnique: 184,
-  teacherUnique: 92,
+  adminUnique: 185,
+  teacherUnique: 94,
   studentUnique: 34,
+  applicantUnique: 18,
+  employerUnique: 9,
   authUnique: 49,
   componentsUnique: 14,
-  catalogPaths: 369,
+  catalogPaths: 386,
 } as const;

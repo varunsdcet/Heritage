@@ -440,3 +440,151 @@ model PasswordResetToken {
   @@index([accountId])
   @@index([expiresAt])
 }
+
+model AdmissionsApplication {
+  id            String   @id @default(uuid())
+  institutionId String
+  accountId     String
+  personId      String
+  programName   String
+  intakeTerm    String
+  status        String   @default("draft")
+  progressPct   Int      @default(0)
+  notes         String?
+  submittedAt   DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  rowVersion    Int      @default(1)
+  documents     ApplicationDocument[]
+  offers        ApplicationOffer[]
+  timeline      ApplicationTimelineEvent[]
+
+  @@index([institutionId, accountId])
+  @@index([institutionId, status])
+}
+
+model ApplicationDocument {
+  id            String   @id @default(uuid())
+  institutionId String
+  applicationId String
+  label         String
+  status        String   @default("missing")
+  fileName      String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  rowVersion    Int      @default(1)
+  application   AdmissionsApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([institutionId, applicationId])
+}
+
+model ApplicationOffer {
+  id            String   @id @default(uuid())
+  institutionId String
+  applicationId String
+  title         String
+  status        String   @default("pending")
+  conditions    String?
+  expiresOn     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  rowVersion    Int      @default(1)
+  application   AdmissionsApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([institutionId, applicationId])
+}
+
+model ApplicationTimelineEvent {
+  id            String   @id @default(uuid())
+  institutionId String
+  applicationId String
+  title         String
+  detail        String?
+  occurredAt    DateTime @default(now())
+  createdAt     DateTime @default(now())
+  application   AdmissionsApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([institutionId, applicationId])
+}
+
+model EmployerOrg {
+  id            String   @id @default(uuid())
+  institutionId String
+  accountId     String?
+  name          String
+  siteName      String
+  contactEmail  String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  rowVersion    Int      @default(1)
+  placements    Placement[]
+  agreements    AffiliationAgreement[]
+
+  @@index([institutionId])
+  @@index([institutionId, accountId])
+}
+
+model Placement {
+  id            String   @id @default(uuid())
+  institutionId String
+  employerOrgId String
+  studentName   String
+  programName   String
+  status        String   @default("active")
+  startsOn      String?
+  endsOn        String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  rowVersion    Int      @default(1)
+  employerOrg   EmployerOrg @relation(fields: [employerOrgId], references: [id], onDelete: Cascade)
+  hours         HoursEntry[]
+  evaluations   PlacementEvaluation[]
+
+  @@index([institutionId, employerOrgId])
+}
+
+model HoursEntry {
+  id            String   @id @default(uuid())
+  institutionId String
+  placementId   String
+  weekLabel     String
+  hours         Float
+  status        String   @default("pending")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  rowVersion    Int      @default(1)
+  placement     Placement @relation(fields: [placementId], references: [id], onDelete: Cascade)
+
+  @@index([institutionId, placementId])
+}
+
+model PlacementEvaluation {
+  id            String   @id @default(uuid())
+  institutionId String
+  placementId   String
+  studentName   String
+  status        String   @default("due")
+  score         Int?
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  rowVersion    Int      @default(1)
+  placement     Placement @relation(fields: [placementId], references: [id], onDelete: Cascade)
+
+  @@index([institutionId, placementId])
+}
+
+model AffiliationAgreement {
+  id            String   @id @default(uuid())
+  institutionId String
+  employerOrgId String
+  title         String
+  status        String   @default("active")
+  renewsOn      String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  rowVersion    Int      @default(1)
+  employerOrg   EmployerOrg @relation(fields: [employerOrgId], references: [id], onDelete: Cascade)
+
+  @@index([institutionId, employerOrgId])
+}

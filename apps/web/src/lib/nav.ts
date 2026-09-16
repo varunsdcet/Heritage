@@ -48,18 +48,27 @@ const ADMIN: Record<string, string> = {
 };
 
 const APPLICANT: Record<string, string> = {
+  Home: "/applicant",
   Application: "/applicant/application",
   Documents: "/applicant/documents",
   Messages: "/applicant/messages",
   Offers: "/applicant/offers",
+  Search: "/applicant/search",
+  Ask: "/applicant/ask",
+  "All screens": "/applicant/all",
 };
 
 const EMPLOYER: Record<string, string> = {
+  Home: "/employer",
   Placements: "/employer/placements",
   Hours: "/employer/hours",
   Evaluations: "/employer/evaluations",
   Agreements: "/employer/agreements",
   Profile: "/employer/profile",
+  Messages: "/employer/profile",
+  Search: "/employer/search",
+  Ask: "/employer/ask",
+  "All screens": "/employer/all",
 };
 
 export const ROLE_NAV: Record<ShellRole, Record<string, string>> = {

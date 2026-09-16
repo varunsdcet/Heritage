@@ -72,6 +72,22 @@ const ids = {
   submissionMarcusProject: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeee01",
   sessionCsOnline: "ffffffff-ffff-4fff-8fff-fffffffff001",
   sessionAccRoom: "ffffffff-ffff-4fff-8fff-fffffffff002",
+  applicantPerson: "22222222-2222-4222-8222-222222222212",
+  employerPerson: "22222222-2222-4222-8222-222222222213",
+  applicantAccount: "33333333-3333-4333-8333-333333333311",
+  employerAccount: "33333333-3333-4333-8333-333333333312",
+  application1: "a1a1a1a1-a1a1-4a1a-8a1a-a1a1a1a1a101",
+  appDocPassport: "d0d0d0d0-d0d0-4d0d-8d0d-d0d0d0d0d001",
+  appDocTranscript: "d0d0d0d0-d0d0-4d0d-8d0d-d0d0d0d0d002",
+  appDocResume: "d0d0d0d0-d0d0-4d0d-8d0d-d0d0d0d0d003",
+  appOffer1: "o0o0o0o0-o0o0-4o0o-8o0o-o0o0o0o0o001",
+  employerOrg1: "e0e0e0e0-e0e0-4e0e-8e0e-e0e0e0e0e001",
+  placement1: "p0p0p0p0-p0p0-4p0p-8p0p-p0p0p0p0p001",
+  placement2: "p0p0p0p0-p0p0-4p0p-8p0p-p0p0p0p0p002",
+  hours1: "h0h0h0h0-h0h0-4h0h-8h0h-h0h0h0h0h001",
+  hours2: "h0h0h0h0-h0h0-4h0h-8h0h-h0h0h0h0h002",
+  eval1: "v0v0v0v0-v0v0-4v0v-8v0v-v0v0v0v0v001",
+  agreement1: "g0g0g0g0-g0g0-4g0g-8g0g-g0g0g0g0g001",
 };
 
 type PortalSeed = {
@@ -208,6 +224,16 @@ const PORTAL: PortalSeed[] = [
 async function main() {
   await prisma.sisScreenState.deleteMany().catch(() => undefined);
   await prisma.portalRecord.deleteMany().catch(() => undefined);
+  await prisma.applicationTimelineEvent.deleteMany().catch(() => undefined);
+  await prisma.applicationDocument.deleteMany().catch(() => undefined);
+  await prisma.applicationOffer.deleteMany().catch(() => undefined);
+  await prisma.admissionsApplication.deleteMany().catch(() => undefined);
+  await prisma.hoursEntry.deleteMany().catch(() => undefined);
+  await prisma.placementEvaluation.deleteMany().catch(() => undefined);
+  await prisma.affiliationAgreement.deleteMany().catch(() => undefined);
+  await prisma.placement.deleteMany().catch(() => undefined);
+  await prisma.employerOrg.deleteMany().catch(() => undefined);
+  await prisma.passwordResetToken.deleteMany().catch(() => undefined);
   await prisma.idempotencyKey.deleteMany();
   await prisma.message.deleteMany();
   await prisma.messageThread.deleteMany();
@@ -262,6 +288,8 @@ async function main() {
     { id: ids.meiPerson, givenName: "Mei", familyName: "Chen", email: "mei.chen@heritage.edu", dateOfBirth: "2003-06-03" },
     { id: ids.lucasPerson, givenName: "Lucas", familyName: "Moreau", email: "lucas.moreau@heritage.edu", dateOfBirth: "2002-12-11" },
     { id: ids.fatimaPerson, givenName: "Fatima", familyName: "Hassan", email: "fatima.hassan@heritage.edu", dateOfBirth: "2003-09-27" },
+    { id: ids.applicantPerson, givenName: "Nora", familyName: "Reyes", email: "nora.reyes@applicant.heritage.edu", dateOfBirth: "2004-01-20" },
+    { id: ids.employerPerson, givenName: "Sam", familyName: "Okello", email: "sam.okello@fraserhealth.partner" },
   ];
 
   for (const p of people) {
@@ -279,6 +307,8 @@ async function main() {
     { id: ids.meiAccount, personId: ids.meiPerson, email: "mei.chen@heritage.edu", roles: ["student"] },
     { id: ids.lucasAccount, personId: ids.lucasPerson, email: "lucas.moreau@heritage.edu", roles: ["student"] },
     { id: ids.fatimaAccount, personId: ids.fatimaPerson, email: "fatima.hassan@heritage.edu", roles: ["student"] },
+    { id: ids.applicantAccount, personId: ids.applicantPerson, email: "nora.reyes@applicant.heritage.edu", roles: ["applicant"] },
+    { id: ids.employerAccount, personId: ids.employerPerson, email: "sam.okello@fraserhealth.partner", roles: ["employer"] },
   ];
 
   for (const a of accounts) {
@@ -586,7 +616,161 @@ async function main() {
   await prisma.sisScreenState.deleteMany({ where: { institutionId: INST } });
   console.log("SisScreenState cleared (domain-composed at request time)");
 
-  console.log("FD-07 + portal seed complete. Password for all accounts: Heritage!2026");
+  await prisma.admissionsApplication.create({
+    data: {
+      id: ids.application1,
+      institutionId: INST,
+      accountId: ids.applicantAccount,
+      personId: ids.applicantPerson,
+      programName: "Nursing diploma",
+      intakeTerm: "Fall 2026",
+      status: "draft",
+      progressPct: 45,
+      notes: "International applicant · Surrey campus preference",
+      documents: {
+        create: [
+          {
+            id: ids.appDocPassport,
+            institutionId: INST,
+            label: "Passport scan",
+            status: "uploaded",
+            fileName: "passport_scan.pdf",
+          },
+          {
+            id: ids.appDocTranscript,
+            institutionId: INST,
+            label: "Official transcript",
+            status: "missing",
+          },
+          {
+            id: ids.appDocResume,
+            institutionId: INST,
+            label: "Resume / CV",
+            status: "missing",
+          },
+        ],
+      },
+      offers: {
+        create: [
+          {
+            id: ids.appOffer1,
+            institutionId: INST,
+            title: "Conditional offer · Nursing diploma",
+            status: "pending",
+            conditions: "Complete document packet + deposit within 14 days",
+            expiresOn: "2026-10-15",
+          },
+        ],
+      },
+      timeline: {
+        create: [
+          {
+            institutionId: INST,
+            title: "Application started",
+            detail: "Nursing diploma draft created",
+            occurredAt: new Date("2026-09-01T10:00:00Z"),
+          },
+          {
+            institutionId: INST,
+            title: "Passport uploaded",
+            detail: "Awaiting remaining documents",
+            occurredAt: new Date("2026-09-05T16:30:00Z"),
+          },
+        ],
+      },
+    },
+  });
+
+  await prisma.employerOrg.create({
+    data: {
+      id: ids.employerOrg1,
+      institutionId: INST,
+      accountId: ids.employerAccount,
+      name: "Fraser Health",
+      siteName: "Surrey Memorial · Clinical unit A",
+      contactEmail: "sam.okello@fraserhealth.partner",
+      agreements: {
+        create: [
+          {
+            id: ids.agreement1,
+            institutionId: INST,
+            title: "Affiliation MOU 2026–2028",
+            status: "active",
+            renewsOn: "2028-06-30",
+          },
+        ],
+      },
+      placements: {
+        create: [
+          {
+            id: ids.placement1,
+            institutionId: INST,
+            studentName: "Mei Chen",
+            programName: "Nursing · NURS400",
+            status: "active",
+            startsOn: "2026-09-08",
+            endsOn: "2026-12-12",
+            hours: {
+              create: [
+                {
+                  id: ids.hours1,
+                  institutionId: INST,
+                  weekLabel: "Week 38",
+                  hours: 32,
+                  status: "pending",
+                },
+                {
+                  id: ids.hours2,
+                  institutionId: INST,
+                  weekLabel: "Week 37",
+                  hours: 28,
+                  status: "approved",
+                },
+              ],
+            },
+            evaluations: {
+              create: [
+                {
+                  id: ids.eval1,
+                  institutionId: INST,
+                  studentName: "Mei Chen",
+                  status: "due",
+                },
+              ],
+            },
+          },
+          {
+            id: ids.placement2,
+            institutionId: INST,
+            studentName: "Fatima Hassan",
+            programName: "Nursing · NURS400",
+            status: "active",
+            startsOn: "2026-09-08",
+            endsOn: "2026-12-12",
+          },
+        ],
+      },
+    },
+  });
+
+  await prisma.messageThread.create({
+    data: {
+      institutionId: INST,
+      subject: "Admissions · document checklist",
+      participantAccountIdsJson: JSON.stringify([ids.applicantAccount, ids.adminAccount]),
+      messages: {
+        create: {
+          institutionId: INST,
+          senderAccountId: ids.adminAccount,
+          body: "Hi Nora — please upload your transcript and resume to complete the packet.",
+        },
+      },
+    },
+  });
+
+  console.log("FD-07 + portal + applicant/employer seed complete. Password for all accounts: Heritage!2026");
+  console.log("Applicant: nora.reyes@applicant.heritage.edu");
+  console.log("Employer: sam.okello@fraserhealth.partner");
 }
 
 main()

@@ -17,6 +17,8 @@ import { adminRouter } from "./modules/admin/admin.router.js";
 import { instructorRouter } from "./modules/instructor/instructor.router.js";
 import { studentRouter } from "./modules/student/student.router.js";
 import { aiRouter } from "./modules/ai/ai.router.js";
+import { applicantRouter } from "./modules/applicant/applicant.router.js";
+import { employerRouter } from "./modules/employer/employer.router.js";
 import { errorHandler } from "./middleware/error-handler.js";
 
 const app: Express = express();
@@ -113,6 +115,8 @@ app.use("/search", searchRouter);
 app.use("/ai", aiRouter);
 app.use("/catalog", catalogRouter);
 app.use("/portal", portalRouter);
+app.use("/applicant", applicantRouter);
+app.use("/employer", employerRouter);
 app.use("/admin", adminRouter);
 
 app.get("/public/verify", async (req, res, next) => {

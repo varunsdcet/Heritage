@@ -120,7 +120,7 @@ export function AdminDomainScreen({ path, title, figmaId, archetype }: Props) {
                   type="button"
                   variant={a.variant ?? "secondary"}
                   style={{ padding: "10px 14px", fontSize: 13 }}
-                  onClick={() => router.push(a.href)}
+                  onClick={() => a.href && router.push(a.href)}
                 >
                   {a.label}
                 </Button>

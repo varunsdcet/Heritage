@@ -42,6 +42,8 @@ export default function LoginPage() {
       saveSession(session);
       if (session.roles.includes("instructor")) router.push("/instructor");
       else if (session.roles.includes("admin") || session.roles.includes("registrar")) router.push("/admin");
+      else if (session.roles.includes("applicant")) router.push("/applicant");
+      else if (session.roles.includes("employer")) router.push("/employer");
       else if (session.roles.length > 1) router.push("/role-select");
       else router.push("/student");
     } catch (err) {

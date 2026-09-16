@@ -88,10 +88,10 @@ export function AdminLiveScreen({ path }: { path: string }) {
             <>
               {view.actions.slice(0, 3).map((a) => (
                 <Button
-                  key={a.href + a.label}
+                  key={(a.href ?? a.action ?? "") + a.label}
                   type="button"
                   variant={a.variant ?? "secondary"}
-                  onClick={() => router.push(a.href)}
+                  onClick={() => a.href && router.push(a.href)}
                   style={{ padding: "10px 14px", fontSize: 13 }}
                 >
                   {a.label}

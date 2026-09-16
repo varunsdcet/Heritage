@@ -71,7 +71,15 @@ export function ScreenScaffold({
       onNavigate={(item) => {
         if (item === "Ask MyHeritage") {
           router.push(
-            role === "student" ? "/student/ask" : role === "instructor" ? "/instructor/ask" : "/admin/ai/ask",
+            role === "student"
+              ? "/student/ask"
+              : role === "instructor"
+                ? "/instructor/ask"
+                : role === "applicant"
+                  ? "/applicant/ask"
+                  : role === "employer"
+                    ? "/employer/ask"
+                    : "/admin/ai/ask",
           );
           return;
         }
@@ -83,7 +91,11 @@ export function ScreenScaffold({
                 ? "/student/search"
                 : role === "instructor"
                   ? "/instructor/search"
-                  : `/${role}`,
+                  : role === "applicant"
+                    ? "/applicant/search"
+                    : role === "employer"
+                      ? "/employer/search"
+                      : `/${role}`,
           );
           return;
         }

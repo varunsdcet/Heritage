@@ -112,6 +112,120 @@ searchRouter.get("/", requireAuth, async (req, res, next) => {
       });
       return;
     }
+
+    if (user.roles.includes("applicant") && !user.roles.some((r) => r === "admin" || r === "registrar")) {
+      const app = await prisma.admissionsApplication.findFirst({
+        where: { institutionId: user.institutionId, accountId: user.accountId },
+        include: { documents: true, offers: true, timeline: true },
+      });
+      const groups: Array<{ type: string; items: Array<{ id: string; label: string; sub?: string; href?: string }> }> = [];
+      if (app) {
+        const hay = `${app.programName} ${app.status} ${app.intakeTerm}`.toLowerCase();
+        if (hay.includes(q) || q.includes("application") || q.includes("nursing")) {
+          groups.push({
+            type: "application",
+            items: [
+              {
+                id: app.id,
+                label: app.programName,
+                sub: `${app.status} · ${app.progressPct}%`,
+                href: "/applicant/application",
+              },
+            ],
+          });
+        }
+        const docs = app.documents.filter(
+          (d) => d.label.toLowerCase().includes(q) || d.status.toLowerCase().includes(q),
+        );
+        if (docs.length || q.includes("document") || q.includes("passport") || q.includes("transcript")) {
+          groups.push({
+            type: "documents",
+            items: (docs.length ? docs : app.documents).slice(0, 8).map((d) => ({
+              id: d.id,
+              label: d.label,
+              sub: d.status,
+              href: "/applicant/documents",
+            })),
+          });
+        }
+        const offers = app.offers.filter(
+          (o) => o.title.toLowerCase().includes(q) || o.status.toLowerCase().includes(q),
+        );
+        if (offers.length || q.includes("offer")) {
+          groups.push({
+            type: "offers",
+            items: (offers.length ? offers : app.offers).map((o) => ({
+              id: o.id,
+              label: o.title,
+              sub: o.status,
+              href: "/applicant/offers",
+            })),
+          });
+        }
+      }
+      res.json({ groups: groups.filter((g) => g.items.length > 0) });
+      return;
+    }
+
+    if (user.roles.includes("employer") && !user.roles.some((r) => r === "admin" || r === "registrar")) {
+      const org = await prisma.employerOrg.findFirst({
+        where: { institutionId: user.institutionId, accountId: user.accountId },
+        include: {
+          placements: { include: { hours: true, evaluations: true } },
+          agreements: true,
+        },
+      });
+      const groups: Array<{ type: string; items: Array<{ id: string; label: string; sub?: string; href?: string }> }> = [];
+      if (org) {
+        const placements = org.placements.filter(
+          (p) =>
+            p.studentName.toLowerCase().includes(q) ||
+            p.programName.toLowerCase().includes(q) ||
+            q.includes("placement"),
+        );
+        if (placements.length || q.includes("mei") || q.includes("fatima")) {
+          groups.push({
+            type: "placements",
+            items: (placements.length ? placements : org.placements).map((p) => ({
+              id: p.id,
+              label: p.studentName,
+              sub: p.programName,
+              href: "/employer/placements",
+            })),
+          });
+        }
+        const hours = org.placements.flatMap((p) =>
+          p.hours
+            .filter((h) => h.weekLabel.toLowerCase().includes(q) || h.status.toLowerCase().includes(q) || q.includes("hour"))
+            .map((h) => ({
+              id: h.id,
+              label: `${p.studentName} · ${h.weekLabel}`,
+              sub: `${h.hours}h · ${h.status}`,
+              href: "/employer/hours",
+            })),
+        );
+        if (hours.length) {
+          groups.push({ type: "hours", items: hours.slice(0, 8) });
+        }
+        const agreements = org.agreements.filter(
+          (a) => a.title.toLowerCase().includes(q) || q.includes("agreement") || q.includes("mou"),
+        );
+        if (agreements.length || q.includes("agreement")) {
+          groups.push({
+            type: "agreements",
+            items: (agreements.length ? agreements : org.agreements).map((a) => ({
+              id: a.id,
+              label: a.title,
+              sub: a.status,
+              href: "/employer/agreements",
+            })),
+          });
+        }
+      }
+      res.json({ groups: groups.filter((g) => g.items.length > 0) });
+      return;
+    }
+
     const people = await prisma.person.findMany({
       where: {
         institutionId: user.institutionId,

@@ -20,7 +20,11 @@ aiRouter.post("/ask", requireAuth, async (req, res, next) => {
       ? "admin"
       : user.roles.includes("instructor")
         ? "instructor"
-        : "student";
+        : user.roles.includes("applicant")
+          ? "applicant"
+          : user.roles.includes("employer")
+            ? "employer"
+            : "student";
 
     const person = await prisma.person.findUnique({ where: { id: user.personId } });
     const result = await askHeritageAi({
@@ -29,7 +33,7 @@ aiRouter.post("/ask", requireAuth, async (req, res, next) => {
       systemPrompt: `You are Ask Heritage for MyHeritage AI Campus OS.
 User: ${person ? `${person.givenName} ${person.familyName}` : "campus user"} (${role}).
 Screen context: ${body.contextPath || "general"}.
-Help with courses, grades, attendance, fees, programs, scheduling, admissions, and campus navigation.
+Help with courses, grades, attendance, fees, programs, scheduling, admissions applications, offers, documents, practicum placements, hours sign-off, evaluations, and campus navigation.
 Be concise. If the question needs live private data (exact balances/grades), tell them which portal screen to open.`,
     });
 

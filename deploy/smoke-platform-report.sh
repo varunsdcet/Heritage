@@ -23,6 +23,8 @@ curl -fsS "$API/health" | grep -q '"ok":true' && pass "infra" "health" || fail "
 ADMIN="$(login admin@heritage.edu)" && pass "auth" "admin" || fail "auth" "admin"
 TEACHER="$(login vance.instructor@heritage.edu)" && pass "auth" "teacher" || fail "auth" "teacher"
 STUDENT="$(login marcus.vance@heritage.edu)" && pass "auth" "student" || fail "auth" "student"
+APPLICANT="$(login nora.reyes@applicant.heritage.edu)" && pass "auth" "applicant" || fail "auth" "applicant"
+EMPLOYER="$(login sam.okello@fraserhealth.partner)" && pass "auth" "employer" || fail "auth" "employer"
 
 # Mail + forgot
 FORGOT="$(curl -sS -m 30 -X POST "$API/auth/forgot-password" -H "content-type: application/json" \
@@ -61,6 +63,32 @@ ASKA="$(curl -sS -m 60 -X POST "$API/ai/ask" -H "authorization: Bearer $ADMIN" -
   -d '{"question":"How do I open student 360 and finance?","contextPath":"/admin/ai/ask"}')"
 echo "$ASKA" | python3 -c 'import sys,json; d=json.load(sys.stdin); assert d.get("answer")' \
   && pass "ai" "admin ask heritage" || fail "ai" "admin ask"
+ASKAP="$(curl -sS -m 60 -X POST "$API/ai/ask" -H "authorization: Bearer $APPLICANT" -H "content-type: application/json" \
+  -d '{"question":"Where do I upload documents and accept my offer?","contextPath":"/applicant/ask"}')"
+echo "$ASKAP" | python3 -c 'import sys,json; d=json.load(sys.stdin); assert d.get("answer")' \
+  && pass "ai" "applicant ask heritage" || fail "ai" "applicant ask"
+ASKEM="$(curl -sS -m 60 -X POST "$API/ai/ask" -H "authorization: Bearer $EMPLOYER" -H "content-type: application/json" \
+  -d '{"question":"How do I approve student hours and submit evaluations?","contextPath":"/employer/ask"}')"
+echo "$ASKEM" | python3 -c 'import sys,json; d=json.load(sys.stdin); assert d.get("answer")' \
+  && pass "ai" "employer ask heritage" || fail "ai" "employer ask"
+
+# Applicant / employer portals
+curl -fsS -H "authorization: Bearer $APPLICANT" "$API/applicant/bootstrap" >/tmp/ap-boot.json \
+  && pass "applicant" "bootstrap" || fail "applicant" "bootstrap"
+curl -fsS -X POST "$API/applicant/action" -H "authorization: Bearer $APPLICANT" -H "content-type: application/json" \
+  -d '{"action":"upload_document","path":"/applicant/documents"}' >/tmp/ap-up.json \
+  && pass "applicant" "upload_document" || fail "applicant" "upload_document"
+curl -fsS -H "authorization: Bearer $EMPLOYER" "$API/employer/bootstrap" >/tmp/em-boot.json \
+  && pass "employer" "bootstrap" || fail "employer" "bootstrap"
+curl -fsS -X POST "$API/employer/action" -H "authorization: Bearer $EMPLOYER" -H "content-type: application/json" \
+  -d '{"action":"approve_hours","path":"/employer/hours"}' >/tmp/em-hrs.json \
+  && pass "employer" "approve_hours" || fail "employer" "approve_hours"
+SRCHA="$(curl -sS -m 15 -H "authorization: Bearer $APPLICANT" "$API/search?q=Nursing")"
+echo "$SRCHA" | python3 -c 'import sys,json; d=json.load(sys.stdin); assert any(g.get("items") for g in d.get("groups",[]))' \
+  && pass "search" "applicant Nursing" || fail "search" "applicant search"
+SRCHE="$(curl -sS -m 15 -H "authorization: Bearer $EMPLOYER" "$API/search?q=Mei")"
+echo "$SRCHE" | python3 -c 'import sys,json; d=json.load(sys.stdin); assert any(g.get("items") for g in d.get("groups",[]))' \
+  && pass "search" "employer Mei" || fail "search" "employer search"
 
 # Global search
 SRCH="$(curl -sS -m 15 -H "authorization: Bearer $ADMIN" "$API/search?q=Marcus")"
@@ -108,7 +136,7 @@ for path in /student /student/courses /student/assignments /student/grades /stud
   [[ "$code" == "200" || "$code" == "307" || "$code" == "308" ]] && pass "student-web" "$path $code" || fail "student-web" "$path $code"
 done
 
-for path in /admin/search /admin/ai/ask /admin/f/fn-01-finance-dashboard /admin/f/rg-01-student-360 /instructor/ask /instructor/search /instructor/f/t02-profile-biography /reset /login; do
+for path in /admin/search /admin/ai/ask /admin/f/fn-01-finance-dashboard /admin/f/rg-01-student-360 /instructor/ask /instructor/search /instructor/f/t02-profile-biography /applicant /applicant/ask /applicant/search /employer /employer/ask /employer/hours /reset /login; do
   code="$(curl -sS -m 8 -o /dev/null -w '%{http_code}' "$WEB$path")"
   [[ "$code" == "200" || "$code" == "307" || "$code" == "308" ]] && pass "web" "$path $code" || fail "web" "$path $code"
 done
