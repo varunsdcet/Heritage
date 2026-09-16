@@ -3,6 +3,9 @@ export const openApiDocument = {
   info: { title: "MyHeritage API", version: "0.1.0" },
   paths: {
     "/auth/login": { post: { summary: "Password login", security: [], "x-idempotent": false } },
+    "/auth/forgot-password": { post: { summary: "Request password reset email", security: [], "x-idempotent": false } },
+    "/auth/reset-password": { post: { summary: "Reset password with token", security: [], "x-idempotent": false } },
+    "/ai/ask": { post: { summary: "Ask Heritage campus AI", security: [{ bearer: [] }] } },
     "/me/home": { get: { summary: "Role-aware home feed", security: [{ bearer: [] }] } },
     "/me/profile": { get: { summary: "Student profile", security: [{ bearer: [] }] } },
     "/me/preferences": { patch: { summary: "Update student preferences", security: [{ bearer: [] }] } },

@@ -11,6 +11,7 @@ const STUDENT: Record<string, string> = {
   Fees: "/student/fees",
   Messages: "/student/messages",
   Search: "/student/search",
+  Ask: "/student/ask",
   More: "/student/all",
   "All screens": "/student/all",
 };
@@ -21,6 +22,8 @@ const INSTRUCTOR: Record<string, string> = {
   Gradebook: "/instructor/gradebook",
   Attendance: "/instructor/attendance",
   Messages: "/instructor/messages",
+  Search: "/instructor/search",
+  Ask: "/instructor/ask",
   Workshops: "/instructor/all",
   "All screens": "/instructor/all",
 };
@@ -33,6 +36,7 @@ const ADMIN: Record<string, string> = {
   Analytics: "/admin/analytics",
   Users: "/admin/users/create",
   Search: "/admin/search",
+  "Ask Heritage": "/admin/ai/ask",
   Integrations: "/admin/integrations",
   Settings: "/admin/settings",
   Recruit: "/admin/admissions",

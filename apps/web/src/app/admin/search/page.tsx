@@ -1,7 +1,7 @@
 "use client";
 
-import { AdminSisScreen } from "@/components/AdminSisScreen";
+import { GlobalSearchView } from "@/components/GlobalSearchView";
 
 export default function Page() {
-  return <AdminSisScreen path="/admin/search" />;
+  return <GlobalSearchView role="admin" />;
 }

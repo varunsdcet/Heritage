@@ -70,11 +70,21 @@ export function ScreenScaffold({
       active={active}
       onNavigate={(item) => {
         if (item === "Ask MyHeritage") {
-          router.push(role === "student" ? "/student/ask" : role === "instructor" ? "/instructor/studio" : "/admin/ai");
+          router.push(
+            role === "student" ? "/student/ask" : role === "instructor" ? "/instructor/ask" : "/admin/ai/ask",
+          );
           return;
         }
         if (item === "Search") {
-          router.push(role === "admin" ? "/admin/search" : role === "student" ? "/student/search" : `/${role}`);
+          router.push(
+            role === "admin"
+              ? "/admin/search"
+              : role === "student"
+                ? "/student/search"
+                : role === "instructor"
+                  ? "/instructor/search"
+                  : `/${role}`,
+          );
           return;
         }
         const href = resolveNav(role, item);

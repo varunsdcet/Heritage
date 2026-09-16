@@ -428,3 +428,15 @@ model SisScreenState {
   @@unique([institutionId, path])
   @@index([institutionId])
 }
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  accountId String
+  tokenHash String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([accountId])
+  @@index([expiresAt])
+}

@@ -146,6 +146,27 @@ adminRouter.post("/users", async (req, res, next) => {
       },
     });
 
+    try {
+      const { sendMailViaHumanitix, mailConfigured } = await import("../../lib/mailer.js");
+      if (mailConfigured()) {
+        await sendMailViaHumanitix({
+          email,
+          title: "Welcome to MyHeritage",
+          message: [
+            `Hello ${body.givenName},`,
+            "",
+            `Your ${body.role} account is ready on MyHeritage AI Campus OS.`,
+            `Sign in: ${(process.env.WEB_ORIGIN ?? "http://localhost:3000").split(",")[0]}`,
+            `Email: ${email}`,
+            "",
+            "— MyHeritage",
+          ].join("\n"),
+        });
+      }
+    } catch (err) {
+      console.error("welcome mail failed", err);
+    }
+
     res.status(201).json({
       accountId,
       personId,

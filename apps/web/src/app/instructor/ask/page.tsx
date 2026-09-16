@@ -3,5 +3,5 @@
 import { AskHeritageView } from "@/components/AskHeritageView";
 
 export default function Page() {
-  return <AskHeritageView role="student" contextPath="/student/ask" />;
+  return <AskHeritageView role="instructor" contextPath="/instructor" />;
 }

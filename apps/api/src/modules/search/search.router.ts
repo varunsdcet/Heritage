@@ -121,6 +121,7 @@ searchRouter.get("/", requireAuth, async (req, res, next) => {
           { email: { contains: q, mode: "insensitive" } },
         ],
       },
+      include: { students: true, accounts: true },
       take: 8,
     });
     const courses = await prisma.course.findMany({
@@ -137,11 +138,35 @@ searchRouter.get("/", requireAuth, async (req, res, next) => {
       groups: [
         {
           type: "people",
-          items: people.map((p) => ({ id: p.id, label: `${p.givenName} ${p.familyName}`, sub: p.email })),
+          items: people.map((p) => {
+            const isStudent = (p.students?.length ?? 0) > 0;
+            const roles = (p.accounts ?? []).flatMap((a) => {
+              try {
+                return JSON.parse(a.rolesJson) as string[];
+              } catch {
+                return [];
+              }
+            });
+            return {
+              id: p.id,
+              label: `${p.givenName} ${p.familyName}`,
+              sub: p.email,
+              href: isStudent
+                ? "/admin/f/rg-01-student-360"
+                : roles.includes("instructor")
+                  ? "/admin/f/ac-14-faculty"
+                  : "/admin/f/pl-01-users-and-roles",
+            };
+          }),
         },
         {
           type: "courses",
-          items: courses.map((c) => ({ id: c.id, label: `${c.code} · ${c.title}`, sub: `${c.credits} credits` })),
+          items: courses.map((c) => ({
+            id: c.id,
+            label: `${c.code} · ${c.title}`,
+            sub: `${c.credits} credits`,
+            href: "/admin/f/ac-06-course-catalogue",
+          })),
         },
       ],
     });

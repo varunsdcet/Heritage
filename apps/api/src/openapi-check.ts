@@ -24,6 +24,9 @@ const runtimeRoutes = [
   "/student/submission-files/{fileId}",
   "/student/assignments/{assignmentId}/submit",
   "/search",
+  "/ai/ask",
+  "/auth/forgot-password",
+  "/auth/reset-password",
 ];
 
 const missing = runtimeRoutes.filter((r) => !REGISTERED_ROUTES.includes(r));
