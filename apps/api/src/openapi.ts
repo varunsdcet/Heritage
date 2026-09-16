@@ -41,6 +41,12 @@ export const openApiDocument = {
       post: { summary: "Submit a student assignment", security: [{ bearer: [] }], "x-idempotent": true },
     },
     "/search": { get: { summary: "Command-K search", security: [{ bearer: [] }] } },
+    "/ai/ask": {
+      post: { summary: "Ask the grounded role-aware Campus Coach", security: [{ bearer: [] }], "x-idempotent": true },
+    },
+    "/ai/history": {
+      get: { summary: "Current account Coach history", security: [{ bearer: [] }] },
+    },
   },
   components: {
     securitySchemes: { bearer: { type: "http", scheme: "bearer" } },

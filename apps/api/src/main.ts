@@ -17,6 +17,7 @@ import { adminRouter } from "./modules/admin/admin.router.js";
 import { instructorRouter } from "./modules/instructor/instructor.router.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { studentRouter } from "./modules/student/student.router.js";
+import { aiRouter } from "./modules/ai/ai.router.js";
 
 const app: Express = express();
 const allowedOrigins = (process.env.WEB_ORIGIN ??
@@ -75,6 +76,8 @@ app.get("/api/docs", (_req, res) => {
     <li>POST /approvals/:id/apply</li>
     <li>POST /messages/ask-grade</li>
     <li>GET /search</li>
+    <li>POST /ai/ask</li>
+    <li>GET /ai/history</li>
     <li>GET /portal/view?path=</li>
     <li>GET /portal/bootstrap</li>
     <li>GET /admin/users</li>
@@ -106,6 +109,7 @@ app.use("/grade-items", gradesRouter);
 app.use("/approvals", approvalsRouter);
 app.use("/messages", messagesRouter);
 app.use("/search", searchRouter);
+app.use("/ai", aiRouter);
 app.use("/catalog", catalogRouter);
 app.use("/portal", portalRouter);
 app.use("/admin", adminRouter);

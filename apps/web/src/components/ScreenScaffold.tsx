@@ -70,7 +70,15 @@ export function ScreenScaffold({
       active={active}
       onNavigate={(item) => {
         if (item === "Ask MyHeritage") {
-          router.push(role === "student" ? "/student/ask" : role === "instructor" ? "/instructor/studio" : "/admin/ai");
+          router.push(
+            role === "student"
+              ? "/student/ask"
+              : role === "instructor"
+                ? "/instructor/ask"
+                : role === "admin"
+                  ? "/admin/ai/ask"
+                  : `/${role}/ask`,
+          );
           return;
         }
         if (item === "Search") {

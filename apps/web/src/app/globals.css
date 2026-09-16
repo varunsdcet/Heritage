@@ -10057,3 +10057,13 @@ a.mh-sis-tabs__item {
 .mh-teacher-status__chip.is-active strong {
   color: #017f3f;
 }
+/* Campus Coach */
+.mh-campus-coach-grid {
+  grid-template-columns: minmax(0, 1.6fr) minmax(280px, 0.8fr);
+}
+
+@media (max-width: 900px) {
+  .mh-campus-coach-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

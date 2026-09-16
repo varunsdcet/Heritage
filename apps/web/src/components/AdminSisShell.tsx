@@ -460,7 +460,7 @@ export function AdminSisShell({
                 </div>
               ) : null}
             </div>
-            <button type="button" className="mh-sis__copilot" onClick={() => router.push("/admin/ai")}>
+            <button type="button" className="mh-sis__copilot" onClick={() => router.push("/admin/ai/ask")}>
               <img src="/brand/icons/sparkle.svg" alt="" width={14} height={14} />
               <span>Ask Heritage AI</span>
             </button>

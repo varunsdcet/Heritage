@@ -58,6 +58,7 @@ model Account {
   person        Person         @relation(fields: [personId], references: [id])
   sessions      Session[]
   notifications Notification[]
+  aiInteractions AiInteraction[]
 
   @@unique([institutionId, email])
   @@index([institutionId])
@@ -389,6 +390,27 @@ model IdempotencyKey {
   createdAt     DateTime @default(now())
 
   @@unique([institutionId, key, method, path])
+}
+
+model AiInteraction {
+  id               String   @id @default(uuid())
+  institutionId    String
+  accountId        String
+  role             String
+  question         String
+  answer           String
+  sourcesJson      String
+  suggestedActionsJson String @default("[]")
+  tier             String   @default("read_only")
+  provider         String   @default("campus_grounding_v1")
+  status           String   @default("completed")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  rowVersion       Int      @default(1)
+  account          Account  @relation(fields: [accountId], references: [id])
+
+  @@index([institutionId, accountId, createdAt])
+  @@index([institutionId, role, createdAt])
 }
 
 /**

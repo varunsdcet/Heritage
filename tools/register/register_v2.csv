@@ -1,6 +1,7 @@
 id,title,actors,mode,writes,approval,shell,status
 SH-01,Sign in,all,WRITE,session,n/a,shared,in_progress
 SH-12,Approval inbox,admin|registrar,WRITE,approval_decision,n/a,admin,in_progress
+AI-13,Campus Coach,applicant|student|instructor|admin|employer|registrar,WRITE,ai_interaction,n/a,shared,implemented
 ST-01,Student dashboard,student,READ,none,n/a,student,implemented
 ST-02,My courses,student,READ,none,n/a,student,implemented
 ST-03,Course detail,student,READ,none,n/a,student,implemented
@@ -14,7 +15,7 @@ ST-10,Lectures,student,READ,none,n/a,student,scaffolded
 ST-11,Lecture detail,student,READ,none,n/a,student,scaffolded
 ST-12,Labs,student,READ,none,n/a,student,scaffolded
 ST-13,Lab notebook,student,WRITE,lab_notebook,n/a,student,scaffolded
-ST-14,AI tutor,student,WRITE,ai_interaction,n/a,student,scaffolded
+ST-14,AI tutor,student,WRITE,ai_interaction,n/a,student,in_progress
 ST-15,Advising,student,WRITE,advising_appointment,n/a,student,scaffolded
 ST-16,Student services,student,WRITE,service_request,approval,student,scaffolded
 ST-17,Practicum,student,WRITE,practicum_log,approval,student,scaffolded

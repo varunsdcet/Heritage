@@ -49,6 +49,10 @@ const ids = {
   meiAccount: "33333333-3333-4333-8333-333333333308",
   lucasAccount: "33333333-3333-4333-8333-333333333309",
   fatimaAccount: "33333333-3333-4333-8333-333333333310",
+  noraPerson: "22222222-2222-4222-8222-222222222212",
+  samPerson: "22222222-2222-4222-8222-222222222213",
+  noraAccount: "33333333-3333-4333-8333-333333333311",
+  samAccount: "33333333-3333-4333-8333-333333333312",
   jordanStudent: "44444444-4444-4444-8444-444444444404",
   meiStudent: "44444444-4444-4444-8444-444444444405",
   lucasStudent: "44444444-4444-4444-8444-444444444406",
@@ -208,6 +212,7 @@ const PORTAL: PortalSeed[] = [
 async function main() {
   await prisma.sisScreenState.deleteMany().catch(() => undefined);
   await prisma.portalRecord.deleteMany().catch(() => undefined);
+  await prisma.aiInteraction.deleteMany().catch(() => undefined);
   await prisma.idempotencyKey.deleteMany();
   await prisma.message.deleteMany();
   await prisma.messageThread.deleteMany();
@@ -262,6 +267,8 @@ async function main() {
     { id: ids.meiPerson, givenName: "Mei", familyName: "Chen", email: "mei.chen@heritage.edu", dateOfBirth: "2003-06-03" },
     { id: ids.lucasPerson, givenName: "Lucas", familyName: "Moreau", email: "lucas.moreau@heritage.edu", dateOfBirth: "2002-12-11" },
     { id: ids.fatimaPerson, givenName: "Fatima", familyName: "Hassan", email: "fatima.hassan@heritage.edu", dateOfBirth: "2003-09-27" },
+    { id: ids.noraPerson, givenName: "Nora", familyName: "Reyes", email: "nora.reyes@applicant.heritage.edu" },
+    { id: ids.samPerson, givenName: "Sam", familyName: "Okello", email: "sam.okello@fraserhealth.partner" },
   ];
 
   for (const p of people) {
@@ -279,6 +286,8 @@ async function main() {
     { id: ids.meiAccount, personId: ids.meiPerson, email: "mei.chen@heritage.edu", roles: ["student"] },
     { id: ids.lucasAccount, personId: ids.lucasPerson, email: "lucas.moreau@heritage.edu", roles: ["student"] },
     { id: ids.fatimaAccount, personId: ids.fatimaPerson, email: "fatima.hassan@heritage.edu", roles: ["student"] },
+    { id: ids.noraAccount, personId: ids.noraPerson, email: "nora.reyes@applicant.heritage.edu", roles: ["applicant"] },
+    { id: ids.samAccount, personId: ids.samPerson, email: "sam.okello@fraserhealth.partner", roles: ["employer"] },
   ];
 
   for (const a of accounts) {
