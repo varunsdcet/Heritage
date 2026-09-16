@@ -200,7 +200,7 @@ export function TeacherSisShell({
                 aria-label="Search catalog"
               />
             </label>
-            <button type="button" className="mh-teacher__ask-ai" onClick={() => router.push("/instructor/studio")}>
+            <button type="button" className="mh-teacher__ask-ai" onClick={() => router.push("/instructor/ask")}>
               <img src="/brand/icons/sparkle.svg" alt="" width={14} height={14} />
               Ask AI
             </button>

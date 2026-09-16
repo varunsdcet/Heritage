@@ -7,5 +7,7 @@ describe("api openapi", () => {
     expect(REGISTERED_ROUTES).toContain("/approvals");
     expect(REGISTERED_ROUTES).toContain("/student/assignments/{assignmentId}/files");
     expect(REGISTERED_ROUTES).toContain("/notifications/me/{notificationId}/read");
+    expect(REGISTERED_ROUTES).toContain("/ai/ask");
+    expect(REGISTERED_ROUTES).toContain("/ai/history");
   });
 });

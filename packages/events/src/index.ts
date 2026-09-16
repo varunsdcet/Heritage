@@ -54,4 +54,5 @@ export const EVENT_CATALOGUE = [
   "Notification.read",
   "Student.preferencesUpdated",
   "Student.profileChangeRequested",
+  "AiInteraction.created",
 ] as const;

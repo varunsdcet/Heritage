@@ -5,7 +5,6 @@ export const openApiDocument = {
     "/auth/login": { post: { summary: "Password login", security: [], "x-idempotent": false } },
     "/auth/forgot-password": { post: { summary: "Request password reset email", security: [], "x-idempotent": false } },
     "/auth/reset-password": { post: { summary: "Reset password with token", security: [], "x-idempotent": false } },
-    "/ai/ask": { post: { summary: "Ask Heritage campus AI", security: [{ bearer: [] }] } },
     "/me/home": { get: { summary: "Role-aware home feed", security: [{ bearer: [] }] } },
     "/me/profile": { get: { summary: "Student profile", security: [{ bearer: [] }] } },
     "/me/preferences": { patch: { summary: "Update student preferences", security: [{ bearer: [] }] } },
@@ -44,6 +43,12 @@ export const openApiDocument = {
       post: { summary: "Submit a student assignment", security: [{ bearer: [] }], "x-idempotent": true },
     },
     "/search": { get: { summary: "Command-K search", security: [{ bearer: [] }] } },
+    "/ai/ask": {
+      post: { summary: "Ask the grounded role-aware Campus Coach", security: [{ bearer: [] }], "x-idempotent": true },
+    },
+    "/ai/history": {
+      get: { summary: "Current account Coach history", security: [{ bearer: [] }] },
+    },
   },
   components: {
     securitySchemes: { bearer: { type: "http", scheme: "bearer" } },

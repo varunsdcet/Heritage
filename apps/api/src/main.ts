@@ -79,6 +79,7 @@ app.get("/api/docs", (_req, res) => {
     <li>POST /messages/ask-grade</li>
     <li>GET /search</li>
     <li>POST /ai/ask</li>
+    <li>GET /ai/history</li>
     <li>POST /auth/forgot-password</li>
     <li>POST /auth/reset-password</li>
     <li>GET /portal/view?path=</li>

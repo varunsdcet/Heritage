@@ -49,6 +49,10 @@ const ids = {
   meiAccount: "33333333-3333-4333-8333-333333333308",
   lucasAccount: "33333333-3333-4333-8333-333333333309",
   fatimaAccount: "33333333-3333-4333-8333-333333333310",
+  noraPerson: "22222222-2222-4222-8222-222222222212",
+  samPerson: "22222222-2222-4222-8222-222222222213",
+  noraAccount: "33333333-3333-4333-8333-333333333311",
+  samAccount: "33333333-3333-4333-8333-333333333312",
   jordanStudent: "44444444-4444-4444-8444-444444444404",
   meiStudent: "44444444-4444-4444-8444-444444444405",
   lucasStudent: "44444444-4444-4444-8444-444444444406",
@@ -224,6 +228,7 @@ const PORTAL: PortalSeed[] = [
 async function main() {
   await prisma.sisScreenState.deleteMany().catch(() => undefined);
   await prisma.portalRecord.deleteMany().catch(() => undefined);
+  await prisma.aiInteraction.deleteMany().catch(() => undefined);
   await prisma.applicationTimelineEvent.deleteMany().catch(() => undefined);
   await prisma.applicationDocument.deleteMany().catch(() => undefined);
   await prisma.applicationOffer.deleteMany().catch(() => undefined);

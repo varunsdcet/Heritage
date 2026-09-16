@@ -75,11 +75,9 @@ export function ScreenScaffold({
               ? "/student/ask"
               : role === "instructor"
                 ? "/instructor/ask"
-                : role === "applicant"
-                  ? "/applicant/ask"
-                  : role === "employer"
-                    ? "/employer/ask"
-                    : "/admin/ai/ask",
+                : role === "admin"
+                  ? "/admin/ai/ask"
+                  : `/${role}/ask`,
           );
           return;
         }

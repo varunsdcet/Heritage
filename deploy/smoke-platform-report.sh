@@ -54,20 +54,24 @@ else
   warn "mail" "no resetToken exposed (set EXPOSE_RESET_TOKEN=1)"
 fi
 
-# Ask Heritage
+# Ask Heritage / Campus Coach
 ASK="$(curl -sS -m 60 -X POST "$API/ai/ask" -H "authorization: Bearer $STUDENT" -H "content-type: application/json" \
+  -H "idempotency-key: smoke-stu-$STAMP" \
   -d '{"question":"Where do I see my grades and fees?","contextPath":"/student/ask"}')"
-echo "$ASK" | python3 -c 'import sys,json; d=json.load(sys.stdin); assert d.get("answer"); print(d.get("source"), d.get("model"))' \
+echo "$ASK" | python3 -c 'import sys,json; d=json.load(sys.stdin); assert d.get("answer"); print(d.get("tier"), d.get("role"), len(d.get("sources") or []))' \
   && pass "ai" "student ask heritage" || fail "ai" "student ask"
 ASKA="$(curl -sS -m 60 -X POST "$API/ai/ask" -H "authorization: Bearer $ADMIN" -H "content-type: application/json" \
+  -H "idempotency-key: smoke-adm-$STAMP" \
   -d '{"question":"How do I open student 360 and finance?","contextPath":"/admin/ai/ask"}')"
 echo "$ASKA" | python3 -c 'import sys,json; d=json.load(sys.stdin); assert d.get("answer")' \
   && pass "ai" "admin ask heritage" || fail "ai" "admin ask"
 ASKAP="$(curl -sS -m 60 -X POST "$API/ai/ask" -H "authorization: Bearer $APPLICANT" -H "content-type: application/json" \
+  -H "idempotency-key: smoke-app-$STAMP" \
   -d '{"question":"Where do I upload documents and accept my offer?","contextPath":"/applicant/ask"}')"
 echo "$ASKAP" | python3 -c 'import sys,json; d=json.load(sys.stdin); assert d.get("answer")' \
   && pass "ai" "applicant ask heritage" || fail "ai" "applicant ask"
 ASKEM="$(curl -sS -m 60 -X POST "$API/ai/ask" -H "authorization: Bearer $EMPLOYER" -H "content-type: application/json" \
+  -H "idempotency-key: smoke-emp-$STAMP" \
   -d '{"question":"How do I approve student hours and submit evaluations?","contextPath":"/employer/ask"}')"
 echo "$ASKEM" | python3 -c 'import sys,json; d=json.load(sys.stdin); assert d.get("answer")' \
   && pass "ai" "employer ask heritage" || fail "ai" "employer ask"

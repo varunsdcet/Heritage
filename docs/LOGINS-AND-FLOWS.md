@@ -180,11 +180,11 @@ Forgot password: `/login` → forgot → mail → `/reset?token=…` → new pas
 
 | Feature | Student | Teacher | Admin | Applicant | Employer |
 |---------|---------|---------|-------|-----------|----------|
-| Ask Heritage | `/student/ask` | `/instructor/ask` | `/admin/ai/ask` | `/applicant/ask` | `/employer/ask` |
+| Campus Coach (Ask) | `/student/ask` | `/instructor/ask` | `/admin/ai/ask` | `/applicant/ask` | `/employer/ask` |
 | Search | `/student/search` | `/instructor/search` | `/admin/search` | `/applicant/search` | `/employer/search` |
 | All screens | `/student/all` | `/instructor/all` | `/admin/all` | `/applicant/all` | `/employer/all` |
 
-API: `POST /ai/ask`, `GET /search?q=`
+API: `POST /ai/ask` (Campus Coach, grounded + `Idempotency-Key`), `GET /ai/history`, `GET /search?q=`
 
 ---
 

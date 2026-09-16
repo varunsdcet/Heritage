@@ -8,6 +8,8 @@ import {
   StudentCalendarEvent,
   StudentModuleId,
   UploadStudentSubmissionFileRequest,
+  AskCoachRequest,
+  CoachAnswer,
 } from "./index.js";
 
 describe("contracts", () => {
@@ -84,5 +86,30 @@ describe("contracts", () => {
         joinUrl: "http://unsafe.example.test/class",
       }),
     ).toThrow();
+  });
+
+  it("validates a cited read-only Coach answer", () => {
+    const request = AskCoachRequest.parse({
+      question: "What should I focus on today?",
+      contextPath: "/student",
+    });
+    expect(request.question).toContain("today");
+    expect(() =>
+      CoachAnswer.parse({
+        interactionId: "00000000-0000-4000-8000-000000000010",
+        role: "student",
+        tier: "read_only",
+        answer: "Project 1 is your next assignment.",
+        sources: [
+          {
+            id: "assignment:00000000-0000-4000-8000-000000000011",
+            title: "CS301 - Project 1",
+            uri: "/student/assignments/00000000-0000-4000-8000-000000000011",
+          },
+        ],
+        suggestedActions: [{ label: "Open assignments", href: "/student/assignments" }],
+        createdAt: "2026-09-15T20:00:00.000Z",
+      }),
+    ).not.toThrow();
   });
 });

@@ -1,7 +1,7 @@
 "use client";
 
-import { AskHeritageView } from "@/components/AskHeritageView";
+import { CampusCoach } from "@/components/CampusCoach";
 
 export default function Page() {
-  return <AskHeritageView role="admin" contextPath="/admin/ai" />;
+  return <CampusCoach role="admin" contextPath="/admin/ai/ask" />;
 }
