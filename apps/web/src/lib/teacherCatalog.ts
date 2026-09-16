@@ -3737,6 +3737,11 @@ if (_t08) {
     title: "Course Studio",
     shell: "studio",
   };
+  TEACHER_SCREENS["/instructor/sections/demo"] = {
+    ..._t08,
+    path: "/instructor/sections/demo",
+    title: "Section detail",
+  };
 }
 
 export function getTeacherScreen(path: string): TeacherScreenConfig | undefined {
