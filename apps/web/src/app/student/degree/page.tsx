@@ -1,0 +1,249 @@
+"use client";
+
+import { FormEvent, Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import type { DegreePlanAnalysis, WhatIfScenarioResponse } from "@myheritage/contracts";
+import { Banner, Button, StatusPill } from "@myheritage/ui";
+import { api, loadSession } from "@/lib/api";
+import { StudentSisShell } from "@/components/StudentSisShell";
+
+function StudentDegreeBody() {
+  const router = useRouter();
+  const search = useSearchParams();
+  const [progress, setProgress] = useState<DegreePlanAnalysis | null>(null);
+  const [whatIf, setWhatIf] = useState<WhatIfScenarioResponse | null>(null);
+  const [dropCode, setDropCode] = useState("MATH210");
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [userName, setUserName] = useState("Student");
+
+  useEffect(() => {
+    const session = loadSession();
+    if (!session) {
+      router.replace("/login");
+      return;
+    }
+    if (!session.roles.includes("student")) {
+      router.replace("/");
+      return;
+    }
+    setUserName(`${session.givenName} ${session.familyName}`.trim() || "Student");
+    api<DegreePlanAnalysis>("/student/degree-progress", {}, session.accessToken)
+      .then(async (data) => {
+        setProgress(data);
+        setLoading(false);
+        if (search.get("whatIf") === "1") {
+          const scenario = await api<WhatIfScenarioResponse>(
+            "/student/degree-scenarios",
+            { method: "POST", body: JSON.stringify({ dropCourseCodes: ["MATH210"], save: false }) },
+            session.accessToken,
+          );
+          setWhatIf(scenario);
+        }
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : "Unable to load degree progress");
+        setLoading(false);
+      });
+  }, [router, search]);
+
+  async function runWhatIf(event: FormEvent) {
+    event.preventDefault();
+    const session = loadSession();
+    if (!session) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const result = await api<WhatIfScenarioResponse>(
+        "/student/degree-scenarios",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            dropCourseCodes: dropCode.trim() ? [dropCode.trim().toUpperCase()] : [],
+            save: false,
+          }),
+        },
+        session.accessToken,
+      );
+      setWhatIf(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "What-if failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveScenario() {
+    const session = loadSession();
+    if (!session) return;
+    setSaving(true);
+    try {
+      const result = await api<WhatIfScenarioResponse>(
+        "/student/degree-scenarios",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            dropCourseCodes: dropCode.trim() ? [dropCode.trim().toUpperCase()] : [],
+            save: true,
+            label: `Saved drop ${dropCode || "plan"}`,
+          }),
+        },
+        session.accessToken,
+      );
+      setWhatIf(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const view = whatIf?.projected ?? progress;
+
+  return (
+    <StudentSisShell
+      title="Degree progress"
+      subtitle="Catalog requirements, prerequisites, and what-if plans"
+      activeHref="/student/degree"
+      userName={userName}
+    >
+      <div className="mh-student-stack">
+        {error ? <Banner tone="danger">{error}</Banner> : null}
+        {loading || !view ? (
+          <p>Loading live degree progress…</p>
+        ) : (
+          <>
+            <section className="mh-sis-dash__welcome">
+              <div className="mh-sis-dash__welcome-text">
+                <h1>{view.programName}</h1>
+                <p>
+                  Version {view.programVersionLabel} · {view.completedCredits} / {view.requiredCredits} credits
+                  satisfied · projected {view.projectedCompletionTerm ?? "not determined"}
+                </p>
+              </div>
+              <div className="mh-sis-dash__banner-actions">
+                <Button
+                  variant="ai"
+                  onClick={() =>
+                    router.push("/student/ask?q=" + encodeURIComponent("Can I graduate next summer?"))
+                  }
+                >
+                  Ask about my degree
+                </Button>
+                <Button variant="secondary" onClick={() => router.push("/student/advising")}>
+                  Book advisor
+                </Button>
+              </div>
+            </section>
+
+            <div className="mh-sis-dash__kpis">
+              <div className="mh-sis-dash__kpi">
+                <div className="mh-sis-dash__kpi-label">Remaining credits</div>
+                <div className="mh-sis-dash__kpi-value">{view.remainingCredits}</div>
+              </div>
+              <div className="mh-sis-dash__kpi">
+                <div className="mh-sis-dash__kpi-label">Open requirements</div>
+                <div className="mh-sis-dash__kpi-value">{view.remainingRequirements.length}</div>
+              </div>
+              <div className="mh-sis-dash__kpi">
+                <div className="mh-sis-dash__kpi-label">Prereq conflicts</div>
+                <div className="mh-sis-dash__kpi-value">{view.prerequisiteConflicts.length}</div>
+              </div>
+            </div>
+
+            <section className="mh-sis-dash__card" style={{ marginTop: 20 }}>
+              <h2>What-if planner</h2>
+              <p style={{ color: "var(--mh-text-muted)", marginTop: 0 }}>
+                Scenarios do not change your official enrolment until saved as a draft plan and reviewed.
+              </p>
+              <form onSubmit={runWhatIf} style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "end" }}>
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span>Drop course code</span>
+                  <input value={dropCode} onChange={(e) => setDropCode(e.target.value)} placeholder="MATH210" />
+                </label>
+                <Button type="submit" disabled={saving}>
+                  {saving ? "Running…" : "Run scenario"}
+                </Button>
+                <Button type="button" variant="secondary" disabled={saving || !whatIf} onClick={saveScenario}>
+                  Save draft scenario
+                </Button>
+              </form>
+              {whatIf ? (
+                <div style={{ marginTop: 16 }}>
+                  {whatIf.scenarioId ? (
+                    <StatusPill tone="success">Draft saved · {whatIf.scenarioId.slice(0, 8)}</StatusPill>
+                  ) : null}
+                  <ul>
+                    {whatIf.impactSummary.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </section>
+
+            <section className="mh-sis-dash__card" style={{ marginTop: 20 }}>
+              <h2>Prerequisite chain</h2>
+              <ul>
+                {view.prerequisiteGraph.map((edge) => (
+                  <li key={`${edge.requiresCourseCode}-${edge.courseCode}`}>
+                    {edge.requiresCourseCode} → {edge.courseCode}
+                  </li>
+                ))}
+              </ul>
+            </section>
+
+            <section className="mh-sis-dash__card" style={{ marginTop: 20 }}>
+              <h2>Open requirements</h2>
+              <div style={{ display: "grid", gap: 10 }}>
+                {view.remainingRequirements.map((req) => (
+                  <div key={req.id} style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                    <div>
+                      <strong>
+                        {req.code} · {req.title}
+                      </strong>
+                      <div style={{ color: "var(--mh-text-muted)", fontSize: 13 }}>
+                        {req.credits} credits
+                        {req.blockedByCourseCodes.length
+                          ? ` · blocked by ${req.blockedByCourseCodes.join(", ")}`
+                          : ""}
+                      </div>
+                    </div>
+                    <StatusPill
+                      tone={req.status === "blocked" ? "danger" : req.status === "in_progress" ? "warning" : "neutral"}
+                    >
+                      {req.status}
+                    </StatusPill>
+                  </div>
+                ))}
+                {!view.remainingRequirements.length ? (
+                  <p>All catalog requirements in this version are satisfied.</p>
+                ) : null}
+              </div>
+            </section>
+
+            <section className="mh-sis-dash__card" style={{ marginTop: 20 }}>
+              <h2>Claims</h2>
+              <ul>
+                {view.claims.map((claim) => (
+                  <li key={claim.kind + claim.text}>
+                    <strong>{claim.kind.toUpperCase()}:</strong> {claim.text}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          </>
+        )}
+      </div>
+    </StudentSisShell>
+  );
+}
+
+export default function StudentDegreePage() {
+  return (
+    <Suspense fallback={<p style={{ padding: 24 }}>Loading degree progress…</p>}>
+      <StudentDegreeBody />
+    </Suspense>
+  );
+}

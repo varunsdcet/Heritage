@@ -62,7 +62,7 @@ searchRouter.get("/", requireAuth, async (req, res, next) => {
           where: {
             institutionId: user.institutionId,
             role: "student",
-            screenPath: { in: ["/student/library", "/student/resources"] },
+            screenPath: { startsWith: "/student/" },
             OR: [
               { audienceAccountId: null },
               { audienceAccountId: user.accountId },
@@ -100,12 +100,12 @@ searchRouter.get("/", requireAuth, async (req, res, next) => {
             })),
           },
           {
-            type: "resources",
+            type: "portal",
             items: resources.map((resource) => ({
               id: resource.id,
               label: resource.primaryText,
               sub: resource.secondaryText,
-              href: resource.href,
+              href: resource.href ?? resource.screenPath,
             })),
           },
         ].filter((group) => group.items.length > 0),

@@ -155,7 +155,7 @@ function AdminHomeBody({ stats }: { stats: HomeStats | null }) {
       <section className="mh-sis-dash__card" style={{ marginTop: 20 }}>
         <h2>Module directory</h2>
         <p style={{ margin: "0 0 16px", color: "#5c635a", fontSize: 14 }}>
-          Jump into every admin module. Secondary nav appears inside each module.
+          Jump into every admin module. Open a sidebar group to reach every screen in that module.
         </p>
         <div
           style={{

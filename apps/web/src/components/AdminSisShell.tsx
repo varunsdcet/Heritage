@@ -1,81 +1,9 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-
-type NavItem = {
-  label: string;
-  href: string;
-  icon: string;
-  indent?: boolean;
-};
-
-type NavEntry = { type: "item"; item: NavItem } | { type: "label"; label: string };
-
-const NAV: NavEntry[] = [
-  { type: "item", item: { label: "Dashboard", href: "/admin", icon: "home" } },
-  { type: "label", label: "RECRUIT" },
-  { type: "item", item: { label: "Admissions", href: "/admin/f/ad-01-admissions-dashboard", icon: "bar-chart", indent: true } },
-  { type: "item", item: { label: "Applications", href: "/admin/f/ad-02-application-queue", icon: "file-text", indent: true } },
-  { type: "item", item: { label: "Interviews", href: "/admin/f/ad-06-interview-workspace", icon: "calendar", indent: true } },
-  { type: "item", item: { label: "Offers", href: "/admin/f/ad-08-offer-builder", icon: "award", indent: true } },
-  { type: "item", item: { label: "CRM", href: "/admin/f/crm-01-dashboard", icon: "users", indent: true } },
-  { type: "label", label: "STUDENTS" },
-  { type: "item", item: { label: "Student 360", href: "/admin/f/rg-01-student-360", icon: "user", indent: true } },
-  { type: "item", item: { label: "Success Alerts", href: "/admin/f/ss-01-success-dashboard", icon: "bell", indent: true } },
-  { type: "item", item: { label: "Cases", href: "/admin/f/ss-04-case", icon: "briefcase", indent: true } },
-  { type: "item", item: { label: "Action Plans", href: "/admin/f/ss-05-action-plan", icon: "list", indent: true } },
-  { type: "item", item: { label: "Registrar", href: "/admin/f/rg-00-registrar-dashboard", icon: "school", indent: true } },
-  { type: "label", label: "ACADEMICS" },
-  { type: "item", item: { label: "Programs", href: "/admin/f/ac-03-programs", icon: "book", indent: true } },
-  { type: "item", item: { label: "Labs", href: "/admin/f/lb-01-lab-dashboard", icon: "flask", indent: true } },
-  { type: "item", item: { label: "Practicum", href: "/admin/f/pr-01-practicum-dashboard", icon: "briefcase", indent: true } },
-  { type: "label", label: "FINANCE" },
-  { type: "item", item: { label: "Dashboard", href: "/admin/f/fn-01-finance-dashboard", icon: "pie", indent: true } },
-  { type: "item", item: { label: "Accounts", href: "/admin/f/fn-02-student-account", icon: "card", indent: true } },
-  { type: "label", label: "SYSTEM" },
-  { type: "item", item: { label: "AI Hub", href: "/admin/f/ai-01-ai-dashboard", icon: "sparkle" } },
-  { type: "item", item: { label: "Compliance", href: "/admin/f/cp-01-compliance-dashboard", icon: "shield" } },
-  { type: "item", item: { label: "Forms", href: "/admin/f/fm-01-form-list", icon: "file-text" } },
-  { type: "item", item: { label: "Rules", href: "/admin/f/rl-01-rule-sets", icon: "list" } },
-  { type: "item", item: { label: "Workflows", href: "/admin/f/wf-01-workflow-list", icon: "briefcase" } },
-  { type: "item", item: { label: "Platform", href: "/admin/f/pl-07-institution-settings", icon: "settings" } },
-];
-
-const GLOBAL_PATHS = new Set([
-  "/admin",
-  "/admin/search",
-  "/admin/notifications",
-  "/admin/profile",
-  "/admin/analytics",
-  "/admin/approvals",
-  "/admin/calendar",
-  "/admin/security",
-  "/admin/help",
-  "/admin/jobs",
-  "/admin/operations",
-  "/admin/settings",
-  "/admin/corrections",
-  "/admin/audit",
-]);
-
-const GLOBAL_NAV = [
-  { label: "Home", href: "/admin" },
-  { label: "Search", href: "/admin/search" },
-  { label: "Notifications", href: "/admin/notifications" },
-  { label: "Profile", href: "/admin/profile" },
-  { label: "Analytics", href: "/admin/analytics" },
-  { label: "Approvals", href: "/admin/approvals" },
-  { label: "Calendar", href: "/admin/calendar" },
-  { label: "Security", href: "/admin/security" },
-  { label: "Help", href: "/admin/help" },
-  { label: "Jobs", href: "/admin/jobs" },
-  { label: "Operations", href: "/admin/operations" },
-  { label: "Settings", href: "/admin/settings" },
-  { label: "Corrections", href: "/admin/corrections" },
-  { label: "Audit", href: "/admin/audit" },
-];
+import { ADMIN_SIDEBAR, adminChildActive, adminGroupActive } from "@/lib/adminNav";
 
 const SEARCH_PALETTE = [
   {
@@ -265,25 +193,6 @@ function NavIcon({ name, active }: { name: string; active?: boolean }) {
   }
 }
 
-function GlobalSubnav({ activePath }: { activePath: string }) {
-  const router = useRouter();
-  return (
-    <aside className="mh-sis-platform-nav" aria-label="Global">
-      <div className="mh-sis-platform-nav__label">Global</div>
-      {GLOBAL_NAV.map((item) => (
-        <button
-          key={item.href}
-          type="button"
-          className={`mh-sis-platform-nav__item${activePath === item.href ? " is-active" : ""}`}
-          onClick={() => router.push(item.href)}
-        >
-          {item.label}
-        </button>
-      ))}
-    </aside>
-  );
-}
-
 export function AdminSisShell({
   children,
   activeHref = "/admin",
@@ -301,7 +210,14 @@ export function AdminSisShell({
   const pathname = usePathname() || activeHref;
   const [searchQ, setSearchQ] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
-  const showGlobalNav = GLOBAL_PATHS.has(pathname);
+  const [openGroup, setOpenGroup] = useState<string | null>(null);
+
+  useEffect(() => {
+    const match = ADMIN_SIDEBAR.find(
+      (entry) => entry.type === "item" && adminGroupActive(pathname, entry.item) && entry.item.children,
+    );
+    setOpenGroup(match?.type === "item" ? match.item.href : null);
+  }, [pathname]);
 
   const paletteSections = useMemo(() => {
     const q = searchQ.trim().toLowerCase();
@@ -334,7 +250,7 @@ export function AdminSisShell({
         </div>
 
         <nav className="mh-sis__nav" aria-label="Admin">
-          {NAV.map((entry, idx) => {
+          {ADMIN_SIDEBAR.map((entry, idx) => {
             if (entry.type === "label") {
               return (
                 <div key={`label-${entry.label}-${idx}`} className="mh-sis__nav-label">
@@ -343,20 +259,54 @@ export function AdminSisShell({
               );
             }
             const { item } = entry;
-            const active = activeHref === item.href;
+            const active = adminGroupActive(pathname, item);
+            const expanded = Boolean(item.children) && openGroup === item.href;
             return (
-              <button
-                key={item.href + item.label}
-                type="button"
-                className={`mh-sis__nav-item${active ? " is-active" : ""}${item.indent ? " is-indent" : ""}`}
-                onClick={() => router.push(item.href)}
-              >
-                {active ? <span className="mh-sis__nav-marker" /> : null}
-                <span className="mh-sis__nav-icon">
-                  <NavIcon name={item.icon} active={active} />
-                </span>
-                <span className="mh-sis__nav-text">{item.label}</span>
-              </button>
+              <div key={item.href + item.label} className={`mh-sis__nav-group${active ? " is-active" : ""}`}>
+                <button
+                  type="button"
+                  className={`mh-sis__nav-item${active ? " is-active" : ""}`}
+                  aria-expanded={item.children ? expanded : undefined}
+                  onClick={() => {
+                    if (item.children) {
+                      setOpenGroup((value) => (value === item.href ? null : item.href));
+                      return;
+                    }
+                    setOpenGroup(null);
+                    router.push(item.href);
+                  }}
+                >
+                  {active && !item.children ? <span className="mh-sis__nav-marker" /> : null}
+                  <span className="mh-sis__nav-icon">
+                    <NavIcon name={item.icon} active={active} />
+                  </span>
+                  <span className="mh-sis__nav-text">{item.label}</span>
+                  {item.children ? (
+                    <img
+                      src={`/brand/icons/chevron-${expanded ? "down" : "right"}.svg`}
+                      alt=""
+                      width={12}
+                      height={12}
+                      className="mh-sis__nav-chevron"
+                    />
+                  ) : null}
+                </button>
+                {item.children && expanded ? (
+                  <div className="mh-sis__nav-sub">
+                    {item.children.map((child) => (
+                      <button
+                        key={child.href}
+                        type="button"
+                        className={`mh-sis__nav-subitem${adminChildActive(pathname, child) ? " is-active" : ""}`}
+                        onClick={() => router.push(child.href)}
+                      >
+                        <span className="mh-sis__nav-dot" />
+                        {child.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
             );
           })}
         </nav>
@@ -484,16 +434,7 @@ export function AdminSisShell({
           </div>
         </header>
 
-        <div className="mh-sis__scroll">
-          {showGlobalNav ? (
-            <div className="mh-sis-platform-layout">
-              <GlobalSubnav activePath={pathname} />
-              <div className="mh-sis-platform-content">{children}</div>
-            </div>
-          ) : (
-            children
-          )}
-        </div>
+        <div className="mh-sis__scroll">{children}</div>
       </div>
     </div>
   );

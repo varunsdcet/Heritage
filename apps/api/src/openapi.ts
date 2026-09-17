@@ -42,9 +42,15 @@ export const openApiDocument = {
     "/student/assignments/{assignmentId}/submit": {
       post: { summary: "Submit a student assignment", security: [{ bearer: [] }], "x-idempotent": true },
     },
+    "/student/degree-progress": {
+      get: { summary: "Student degree progress analysis", security: [{ bearer: [] }] },
+    },
+    "/student/degree-scenarios": {
+      post: { summary: "Run or save a what-if degree plan scenario", security: [{ bearer: [] }] },
+    },
     "/search": { get: { summary: "Command-K search", security: [{ bearer: [] }] } },
     "/ai/ask": {
-      post: { summary: "Ask the grounded role-aware Campus Coach", security: [{ bearer: [] }], "x-idempotent": true },
+      post: { summary: "Ask the grounded role-aware Campus Coach or Student Advisor", security: [{ bearer: [] }], "x-idempotent": true },
     },
     "/ai/history": {
       get: { summary: "Current account Coach history", security: [{ bearer: [] }] },

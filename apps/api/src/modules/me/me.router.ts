@@ -46,7 +46,7 @@ meRouter.get("/home", requireAuth, async (req, res, next) => {
         shortcuts: [
           { label: "Approval inbox", href: "/admin/approvals" },
           { label: "Search people", href: "/admin/search" },
-          { label: "All screens", href: "/admin/all" },
+          { label: "System operations", href: "/admin/f/pl-06-operations" },
         ],
         announcements: notifications.map((n) => ({ id: n.id, title: n.title, body: n.body })),
         items: [
@@ -175,7 +175,7 @@ meRouter.get("/home", requireAuth, async (req, res, next) => {
       shortcuts: [
         { label: "Grades", href: "/student/grades" },
         { label: "Calendar", href: "/student/calendar" },
-        { label: "All screens", href: "/student/all" },
+        { label: "Student services", href: "/student/advising" },
       ],
       announcements: notifications.map((n) => ({ id: n.id, title: n.title, body: n.body })),
       items: [

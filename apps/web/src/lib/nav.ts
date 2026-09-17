@@ -14,8 +14,7 @@ const STUDENT: Record<string, string> = {
   Profile: "/student/profile",
   Search: "/student/search",
   Ask: "/student/ask",
-  More: "/student/all",
-  "All screens": "/student/all",
+  More: "/student",
 };
 
 const INSTRUCTOR: Record<string, string> = {
@@ -28,8 +27,7 @@ const INSTRUCTOR: Record<string, string> = {
   Profile: "/instructor/profile",
   Search: "/instructor/search",
   Ask: "/instructor/ask",
-  Workshops: "/instructor/all",
-  "All screens": "/instructor/all",
+  Workshops: "/instructor/f/t11-workshops",
 };
 
 const ADMIN: Record<string, string> = {
@@ -50,20 +48,28 @@ const ADMIN: Record<string, string> = {
   Students: "/admin/students",
   Compliance: "/admin/compliance",
   Platform: "/admin/platform",
-  "All screens": "/admin/all",
 };
 
 const APPLICANT: Record<string, string> = {
   Home: "/applicant",
   Application: "/applicant/application",
+  Status: "/applicant/f/ap-06-application-status",
+  Requirements: "/applicant/f/ap-03-requirements",
   Documents: "/applicant/documents",
+  Interview: "/applicant/f/ap-05-interview",
+  Offer: "/applicant/offers",
+  Contract: "/applicant/f/ap-08-contract",
+  Payment: "/applicant/f/ap-10-payment",
+  Leave: "/applicant/f/ap-09-loa",
+  Onboarding: "/applicant/f/ap-11-onboarding",
+  Timeline: "/applicant/timeline",
+  Assistant: "/applicant/f/ap-12-applicant-ai-drawer",
   Messages: "/applicant/messages",
   Notifications: "/applicant/notifications",
   Profile: "/applicant/application",
   Offers: "/applicant/offers",
   Search: "/applicant/search",
   Ask: "/applicant/ask",
-  "All screens": "/applicant/all",
 };
 
 const EMPLOYER: Record<string, string> = {
@@ -77,7 +83,6 @@ const EMPLOYER: Record<string, string> = {
   Messages: "/employer/profile",
   Search: "/employer/search",
   Ask: "/employer/ask",
-  "All screens": "/employer/all",
 };
 
 export const ROLE_NAV: Record<ShellRole, Record<string, string>> = {

@@ -519,10 +519,7 @@ export async function buildPortalView(user: SessionClaims, path: string): Promis
     // Still mark as API-composed from session/institution — not client fixtures.
   }
   base.sections = [{ title: `${title} records`, rows }];
-  base.actions = [
-    { label: "Home", href: role === "admin" ? "/admin" : `/${role}` },
-    { label: "All screens", href: `/${role}/all`, variant: "secondary" },
-  ];
+  base.actions = [{ label: "Home", href: role === "admin" ? "/admin" : `/${role}` }];
   if (path.startsWith("/m/")) {
     base.actions = [
       { label: "Mobile home", href: role === "instructor" ? "/m/instructor/home" : "/m/student" },

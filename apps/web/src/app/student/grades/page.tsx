@@ -3,18 +3,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { StudentGradesResponse } from "@myheritage/contracts";
-import {
-  AppShell,
-  Banner,
-  Breadcrumb,
-  Button,
-  EmptyState,
-  Panel,
-  RecordHeader,
-  StatusPill,
-} from "@myheritage/ui";
+import { Banner, Button, EmptyState, StatusPill } from "@myheritage/ui";
+import { StudentSisShell } from "@/components/StudentSisShell";
 import { ApiError, api, clearSession, loadSession, type Session } from "@/lib/api";
-import { resolveNav } from "@/lib/nav";
 
 type GradeViewState = "loading" | "ready" | "permission-denied" | "offline" | "archived" | "error";
 
@@ -95,6 +86,7 @@ export default function StudentGradesPage() {
         session.accessToken,
       );
       setMessage("Message sent to your instructor.");
+      router.push("/student/messages");
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Could not send message");
     } finally {
@@ -107,89 +99,65 @@ export default function StudentGradesPage() {
   const visibleCourses = data?.courses.filter((course) => course.items.length > 0) ?? [];
 
   return (
-    <AppShell
-      role="student"
+    <StudentSisShell
+      title="Grades"
+      subtitle="Published results only"
+      activeHref="/student/grades"
       userName={`${session.givenName} ${session.familyName}`}
-      active="Grades"
-      onNavigate={(item) => {
-        if (item === "Ask MyHeritage") {
-          router.push("/student/ask");
-          return;
-        }
-        const href = resolveNav("student", item);
-        if (href) router.push(href);
-      }}
     >
-      <Breadcrumb items={["Student", "Grades"]} />
-      <RecordHeader
-        title="Grades"
-        subtitle="Published results only · Fall 2026"
-        meta={
-          data ? (
-            <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.75rem" }}>
-              <StatusPill tone="success">GPA {data.cumulativeGpa.toFixed(2)}</StatusPill>
-              <StatusPill tone={data.standing === "alert" ? "danger" : "neutral"}>{data.standing}</StatusPill>
-              <Button
-                variant="secondary"
-                type="button"
-                onClick={() => {
-                  clearSession();
-                  router.push("/login");
-                }}
-              >
-                Sign out
-              </Button>
+      <div className="mh-student-stack">
+        {data ? (
+          <div className="mh-teacher-dash__kpis">
+            <div className="mh-teacher-dash__kpi">
+              <div className="mh-teacher-dash__kpi-label">GPA</div>
+              <div className="mh-teacher-dash__kpi-value">{data.cumulativeGpa.toFixed(2)}</div>
+              <div className="mh-teacher-dash__kpi-hint">Cumulative</div>
             </div>
-          ) : null
-        }
-      />
+            <div className="mh-teacher-dash__kpi">
+              <div className="mh-teacher-dash__kpi-label">Standing</div>
+              <div className="mh-teacher-dash__kpi-value">{data.standing}</div>
+              <div className="mh-teacher-dash__kpi-hint">Published record</div>
+            </div>
+          </div>
+        ) : null}
       {actionError ? <Banner tone="danger">{actionError}</Banner> : null}
       {message ? <Banner tone="success">{message}</Banner> : null}
       {viewState === "loading" ? (
-        <Panel>
+        <section className="mh-teacher-card">
           <EmptyState title="Loading grades" body="Checking for your latest published results." />
-        </Panel>
+        </section>
       ) : null}
       {viewState === "permission-denied" ? (
-        <Panel>
+        <section className="mh-teacher-card">
           <EmptyState title="Permission denied" body="This grade record is available only to the enrolled student." />
-        </Panel>
+        </section>
       ) : null}
       {viewState === "offline" ? (
-        <Panel>
+        <section className="mh-teacher-card">
           <EmptyState title="You're offline" body="Reconnect to load your published grades." />
           <Button type="button" onClick={() => void loadGrades(session)}>
             Try again
           </Button>
-        </Panel>
+        </section>
       ) : null}
       {viewState === "archived" ? (
-        <Panel>
+        <section className="mh-teacher-card">
           <EmptyState title="Grades archived" body="This grade record has been archived. Contact the registrar if you need access." />
-        </Panel>
+        </section>
       ) : null}
       {viewState === "error" ? (
-        <Panel>
+        <section className="mh-teacher-card">
           <EmptyState title="Grades unavailable" body={loadError ?? "The grade record could not be loaded."} />
           <Button type="button" onClick={() => void loadGrades(session)}>
             Try again
           </Button>
-        </Panel>
+        </section>
       ) : null}
       {viewState === "ready" && visibleCourses.length === 0 ? (
         <EmptyState title="No published grades" body="Draft grades are hidden until they are approved and published." />
       ) : null}
       {viewState === "ready" && visibleCourses.map((course) => (
-        <section
-          key={course.sectionId}
-          style={{
-            marginBottom: "1.5rem",
-            background: "var(--mh-surface)",
-            border: "1px solid var(--mh-border)",
-            borderRadius: "var(--mh-radius-lg)",
-            padding: "1rem 1.1rem",
-          }}
-        >
+        <section key={course.sectionId} className="mh-teacher-card">
           <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
             <div>
               <h2 style={{ margin: 0, fontSize: "var(--mh-h3)", fontFamily: "var(--mh-font-display)" }}>
@@ -238,6 +206,7 @@ export default function StudentGradesPage() {
           </table>
         </section>
       ))}
-    </AppShell>
+    </div>
+    </StudentSisShell>
   );
 }

@@ -49,7 +49,6 @@ export async function buildEmployerView(user: SessionClaims, path: string): Prom
     actions: [
       { label: "Ask Heritage", href: "/employer/ask", variant: "ai" },
       { label: "Search", href: "/employer/search", variant: "secondary" },
-      { label: "All screens", href: "/employer/all", variant: "secondary" },
     ],
     live: true,
   };
@@ -93,7 +92,6 @@ export async function buildEmployerView(user: SessionClaims, path: string): Prom
     base.actions = [
       { label: "Review hours", href: "/employer/hours" },
       { label: "Ask Heritage", href: "/employer/ask", variant: "ai" },
-      { label: "All screens", href: "/employer/all", variant: "secondary" },
     ];
     return base;
   }

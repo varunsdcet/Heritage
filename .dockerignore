@@ -10,8 +10,6 @@ coverage
 *.log
 *.tsbuildinfo
 .DS_Store
-.mcp.json
-**/mcp.json
 .vscode
 .idea
 .claude

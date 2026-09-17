@@ -88,6 +88,9 @@ if [[ -n "${SMOKE_TOKEN}" ]]; then
   if [[ -x deploy/smoke-admin-e2e.sh ]]; then
     API_URL=http://127.0.0.1:4000 WEB_URL=http://127.0.0.1:3000 ./deploy/smoke-admin-e2e.sh || echo "WARN: extended smoke failed"
   fi
+  if [[ -x deploy/smoke-advisor-e2e.sh ]]; then
+    API_URL=http://127.0.0.1:4000 WEB_URL=http://127.0.0.1:3000 ./deploy/smoke-advisor-e2e.sh || echo "WARN: advisor smoke failed"
+  fi
 else
   echo "WARN: could not login for SIS smoke (seed may be off)"
 fi

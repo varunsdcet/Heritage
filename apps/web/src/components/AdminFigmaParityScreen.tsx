@@ -131,9 +131,6 @@ export function AdminFigmaParityScreen({ path }: { path: string }) {
       </nav>
 
       <div style={{ position: "fixed", right: 20, bottom: 20, zIndex: 40, display: "flex", gap: 10 }}>
-        <Button type="button" variant="secondary" onClick={() => router.push("/admin/all")} style={{ boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}>
-          All admin screens
-        </Button>
         <Button type="button" onClick={() => setDrawerOpen((v) => !v)} style={{ boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}>
           {drawerOpen ? "Hide live data" : "Live data"}
         </Button>

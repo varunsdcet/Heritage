@@ -99,7 +99,6 @@ export async function buildApplicantView(user: SessionClaims, path: string): Pro
     actions: [
       { label: "Ask Heritage", href: "/applicant/ask", variant: "ai" },
       { label: "Search", href: "/applicant/search", variant: "secondary" },
-      { label: "All screens", href: "/applicant/all", variant: "secondary" },
     ],
     live: true,
   };
@@ -152,7 +151,6 @@ export async function buildApplicantView(user: SessionClaims, path: string): Pro
         : []),
       { label: "Continue application", href: "/applicant/application" },
       { label: "Ask Heritage", href: "/applicant/ask", variant: "ai" },
-      { label: "All screens", href: "/applicant/all", variant: "secondary" },
     ];
     return base;
   }
@@ -367,7 +365,6 @@ export async function buildApplicantView(user: SessionClaims, path: string): Pro
   base.actions = [
     { label: "Home", href: "/applicant" },
     { label: "Ask Heritage", href: "/applicant/ask", variant: "ai" },
-    { label: "All screens", href: "/applicant/all", variant: "secondary" },
   ];
   return base;
 }

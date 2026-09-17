@@ -55,4 +55,5 @@ export const EVENT_CATALOGUE = [
   "Student.preferencesUpdated",
   "Student.profileChangeRequested",
   "AiInteraction.created",
+  "DegreePlanScenario.created",
 ] as const;

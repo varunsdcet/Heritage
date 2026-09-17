@@ -20,17 +20,35 @@ export async function verifyPassword(password: string, hash: string) {
   return bcrypt.compare(password, hash);
 }
 
+/** Access-token lifetime kept long for campus retest / day-to-day portal use. */
+const SESSION_TTL = "30d";
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
 export async function signSession(claims: SessionClaims) {
   return new SignJWT(claims)
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime("8h")
+    .setExpirationTime(SESSION_TTL)
     .sign(secretKey());
 }
 
 export async function verifySession(token: string): Promise<SessionClaims> {
-  const { payload } = await jwtVerify(token, secretKey());
-  return SessionClaimsSchema.parse(payload);
+  try {
+    const { payload } = await jwtVerify(token, secretKey(), {
+      // Tolerate small host/container NTP skew without accepting truly expired sessions.
+      clockTolerance: "2m",
+    });
+    return SessionClaimsSchema.parse(payload);
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code === "ERR_JWT_EXPIRED" || /"exp" claim timestamp check failed/i.test(String(err))) {
+      throw Object.assign(new Error("Session expired. Please sign in again."), {
+        code: "UNAUTHORIZED",
+        status: 401,
+      });
+    }
+    throw err;
+  }
 }
 
 export function hasRole(roles: RoleName[], needed: RoleName | RoleName[]) {
@@ -81,7 +99,7 @@ export async function loginWithPassword(input: {
         ipAddress: input.ipAddress,
         userAgent: input.userAgent,
         geoLocation: "Surrey, BC",
-        expiresAt: new Date(Date.now() + 8 * 60 * 60 * 1000),
+        expiresAt: new Date(Date.now() + SESSION_TTL_MS),
       },
     });
     await writeAuditAndOutbox(tx, {

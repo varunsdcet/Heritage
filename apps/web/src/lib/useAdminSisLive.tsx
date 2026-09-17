@@ -104,6 +104,53 @@ function emptyForArchetype(archetype: SisScreenConfig["archetype"]): Partial<Sis
           tabs: ["Overview"],
         },
       };
+    case "case":
+      return {
+        caseDetail: {
+          type: "Case",
+          title: "Loading case…",
+          status: "…",
+          owner: "—",
+          body: "Loading live campus case record…",
+          outcome: "—",
+          tabs: ["Details", "Actions", "Notes", "Timeline"],
+        },
+      };
+    case "plan":
+      return { planTasks: [] };
+    case "appointments":
+      return {
+        appointments: {
+          slots: [],
+          student: "—",
+          advisor: "—",
+        },
+      };
+    case "lead360":
+      return {
+        lead360: {
+          name: "…",
+          meta: "Loading…",
+          score: "—",
+          steps: [],
+          tabs: ["Activity"],
+          fields: [],
+          timeline: [],
+        },
+      };
+    case "account":
+      return {
+        account: {
+          name: "…",
+          meta: "Loading…",
+          balance: "—",
+          dueNote: "—",
+          planTitle: "Payment plan",
+          planBody: "Loading live account…",
+          tabs: ["Ledger Summary"],
+          ledger: [],
+        },
+      };
     case "builder":
       return {
         builder: {
@@ -169,9 +216,21 @@ export function mergeSisLive(
     };
   }
   const merged: SisScreenConfig = { ...stripped };
+  const target = merged as unknown as Record<string, unknown>;
   for (const [key, value] of Object.entries(payload)) {
-    if (CHROME_KEYS.has(key) || value === undefined) continue;
-    (merged as unknown as Record<string, unknown>)[key] = value;
+    if (CHROME_KEYS.has(key) || value === undefined || value === null) continue;
+    const current = target[key];
+    if (
+      current &&
+      typeof current === "object" &&
+      !Array.isArray(current) &&
+      typeof value === "object" &&
+      !Array.isArray(value)
+    ) {
+      target[key] = { ...(current as Record<string, unknown>), ...(value as Record<string, unknown>) };
+    } else {
+      target[key] = value;
+    }
   }
   return merged;
 }

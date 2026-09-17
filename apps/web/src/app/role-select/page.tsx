@@ -12,7 +12,6 @@ const OPTIONS = [
   { role: "applicant", label: "Applicant", href: "/applicant", email: "nora.reyes@applicant.heritage.edu" },
   { role: "employer", label: "Employer", href: "/employer", email: "sam.okello@fraserhealth.partner" },
   { role: "mobile", label: "Mobile student", href: "/m/student", email: "marcus.vance@heritage.edu" },
-  { role: "shared", label: "All screens map", href: "/screens", email: "catalogue" },
   { role: "design", label: "Component library", href: "/design-system", email: "UI" },
   { role: "archive", label: "Archive & consolidate", href: "/archive", email: "Figma archive" },
 ] as const;

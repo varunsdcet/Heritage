@@ -23,14 +23,62 @@ const tx = vi.hoisted(() => ({
   eventOutbox: { create: vi.fn() },
 }));
 
+const progressFixture = vi.hoisted(() => ({
+  studentId: "10000000-0000-4000-8000-000000000001",
+  programCode: "CS-DIP",
+  programName: "Computer Science Diploma",
+  programVersionLabel: "2024.1",
+  remainingCredits: 12,
+  completedCredits: 15,
+  requiredCredits: 27,
+  remainingRequirements: [
+    {
+      id: "10000000-0000-4000-8000-000000000011",
+      code: "DATA401",
+      title: "Data Engineering",
+      credits: 3,
+      kind: "required" as const,
+      status: "blocked" as const,
+      satisfiedByCourseCode: null,
+      blockedByCourseCodes: ["STAT310"],
+    },
+  ],
+  satisfiedRequirements: [],
+  prerequisiteConflicts: [{ courseCode: "DATA401", missingPrerequisites: ["STAT310"] }],
+  prerequisiteGraph: [
+    { courseCode: "STAT310", requiresCourseCode: "MATH210" },
+    { courseCode: "DATA401", requiresCourseCode: "STAT310" },
+  ],
+  projectedCompletionTerm: "Summer 2027",
+  warnings: [],
+  suggestedOptions: ["Take STAT310 next available term (3 credits)."],
+  evidence: [
+    { id: "programVersion:pv-1", title: "CS Diploma · 2024.1", uri: "/student/degree" },
+    { id: "student:student-1", title: "Student S1001", uri: "/student/profile" },
+  ],
+  claims: [
+    {
+      kind: "fact" as const,
+      text: "15 of 27 required credits are satisfied from published/completed records.",
+      evidenceIds: ["programVersion:pv-1"],
+    },
+  ],
+}));
+
 const db = vi.hoisted(() => ({
   idempotencyKey: { findUnique: vi.fn() },
   aiInteraction: { count: vi.fn(), findMany: vi.fn() },
+  student: { findFirst: vi.fn() },
   $transaction: vi.fn(),
 }));
 
 const coachService = vi.hoisted(() => ({
   buildCoachFacts: vi.fn(),
+}));
+
+const progress = vi.hoisted(() => ({
+  computeDegreeProgress: vi.fn(),
+  impactIfDropCourse: vi.fn(),
 }));
 
 vi.mock("@myheritage/db", () => ({ prisma: db }));
@@ -44,6 +92,10 @@ vi.mock("./ai.service.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./ai.service.js")>();
   return { ...actual, buildCoachFacts: coachService.buildCoachFacts };
 });
+vi.mock("../academic/degree-progress.service.js", () => ({
+  computeDegreeProgress: progress.computeDegreeProgress,
+  impactIfDropCourse: progress.impactIfDropCourse,
+}));
 import { errorHandler } from "../../middleware/error-handler.js";
 import { aiRouter } from "./ai.router.js";
 
@@ -76,6 +128,17 @@ beforeEach(() => {
   db.idempotencyKey.findUnique.mockResolvedValue(null);
   db.aiInteraction.count.mockResolvedValue(0);
   db.aiInteraction.findMany.mockResolvedValue([]);
+  db.student.findFirst.mockResolvedValue({ id: "student-1", programVersionId: "pv-1" });
+  progress.computeDegreeProgress.mockResolvedValue(progressFixture);
+  progress.impactIfDropCourse.mockResolvedValue({
+    baseline: progressFixture,
+    projected: { ...progressFixture, remainingCredits: 15, projectedCompletionTerm: "Fall 2027" },
+    impactSummary: [
+      "Dropping MATH210 removes it from the active plan.",
+      "Downstream requirements that list MATH210 as a prerequisite: STAT310.",
+    ],
+    downstream: ["STAT310"],
+  });
   db.$transaction.mockImplementation(async (work: (client: typeof tx) => Promise<unknown>) => work(tx));
   coachService.buildCoachFacts.mockResolvedValue([
     {
@@ -124,6 +187,21 @@ describe("Campus Coach", () => {
     });
   });
 
+  it("accepts a short non-empty chat message", async () => {
+    const response = await fetch(`${apiBaseUrl}/ai/ask`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": "coach-request-short" },
+      body: JSON.stringify({ question: "hi", contextPath: "/student/ask" }),
+    });
+
+    expect(response.status).toBe(200);
+    const payload = CoachAnswer.parse(await response.json());
+    expect(payload.answer).toContain("Project 1");
+    expect(tx.aiInteraction.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ question: "hi", status: "completed" }),
+    });
+  });
+
   it("rejects credential secrets before context retrieval or persistence", async () => {
     const response = await fetch(`${apiBaseUrl}/ai/ask`, {
       method: "POST",
@@ -147,5 +225,52 @@ describe("Campus Coach", () => {
     expect(response.status).toBe(403);
     expect(coachService.buildCoachFacts).not.toHaveBeenCalled();
     expect(db.$transaction).not.toHaveBeenCalled();
+  });
+});
+
+describe("Student Advisor", () => {
+  it("routes degree questions through the progress engine", async () => {
+    const response = await fetch(`${apiBaseUrl}/ai/ask`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": "advisor-request-1" },
+      body: JSON.stringify({
+        question: "Can I graduate next summer?",
+        contextPath: "/student/ask",
+        capability: "student_advisor",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const payload = CoachAnswer.parse(await response.json());
+    expect(payload.capability).toBe("student_advisor");
+    expect(payload.analysis?.programCode).toBe("CS-DIP");
+    expect(payload.answer).toContain("Computer Science Diploma");
+    expect(payload.suggestedActions.some((a) => a.href === "/student/degree")).toBe(true);
+    expect(progress.computeDegreeProgress).toHaveBeenCalled();
+    expect(tx.aiInteraction.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ provider: "student_advisor_v1" }),
+    });
+  });
+
+  it("explains drop impact for what-if advisor questions", async () => {
+    const response = await fetch(`${apiBaseUrl}/ai/ask`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": "advisor-request-drop" },
+      body: JSON.stringify({
+        question: "What happens if I drop MATH210?",
+        contextPath: "/student/ask",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const payload = CoachAnswer.parse(await response.json());
+    expect(payload.capability).toBe("student_advisor");
+    expect(payload.answer).toContain("MATH210");
+    expect(payload.answer).toContain("STAT310");
+    expect(progress.impactIfDropCourse).toHaveBeenCalledWith({
+      institutionId: claims.institutionId,
+      studentId: "student-1",
+      courseCode: "MATH210",
+    });
   });
 });

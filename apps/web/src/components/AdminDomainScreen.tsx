@@ -151,7 +151,7 @@ export function AdminDomainScreen({ path, title, figmaId, archetype }: Props) {
                 <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Quick Actions</h2>
                 <AdminQuickAction label={`Open ${displayTitle} queue`} href={path} tone="brand" iconSrc="/brand/icons/file-text.svg" />
                 <AdminQuickAction label="Ask MyHeritage ops" href="/admin/ai" tone="ai" iconSrc="/brand/icons/sparkle.svg" />
-                <AdminQuickAction label="Browse all admin screens" href="/admin/all" tone="olive" iconSrc="/brand/icons/bar-chart.svg" />
+                <AdminQuickAction label="System operations" href="/admin/f/pl-06-operations" tone="olive" iconSrc="/brand/icons/bar-chart.svg" />
               </section>
               <section className="mh-admin-card" style={{ padding: 24 }}>
                 <h2 style={{ margin: "0 0 12px", fontSize: 16, fontWeight: 700 }}>Recent activity</h2>

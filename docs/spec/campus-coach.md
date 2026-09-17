@@ -82,7 +82,7 @@ When a question is outside the available context, the Coach states the limitatio
 
 ## Privacy and abuse controls
 
-- Question length is 3-2,000 characters.
+- Question length is 1-2,000 characters after trimming.
 - Maximum 20 successful interactions per account in a rolling minute.
 - Reject likely SIN, SSN, passport-number, password, access-token, or private-key content.
 - Do not write rejected prompt content to interaction, audit, or outbox storage.

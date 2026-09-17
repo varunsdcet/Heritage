@@ -2,6 +2,12 @@ id,title,actors,mode,writes,approval,shell,status
 SH-01,Sign in,all,WRITE,session,n/a,shared,in_progress
 SH-12,Approval inbox,admin|registrar,WRITE,approval_decision,n/a,admin,in_progress
 AI-13,Campus Coach,applicant|student|instructor|admin|employer|registrar,WRITE,ai_interaction,n/a,shared,implemented
+AI-14,Shared AI platform contracts,shared,READ,none,n/a,shared,implemented
+AI-05,Student Advisor,student,WRITE,ai_interaction,n/a,student,implemented
+AC-21,Program catalog,admin|registrar,WRITE,program|program_version,n/a,admin,implemented
+AC-22,Prerequisite graph,admin|registrar,WRITE,course_prerequisite,n/a,admin,implemented
+AC-23,Degree progress engine,student|admin|registrar,READ,none,n/a,student,implemented
+AI-07,What-if academic planner,student,WRITE,degree_plan_scenario,n/a,student,implemented
 ST-01,Student dashboard,student,READ,none,n/a,student,implemented
 ST-02,My courses,student,READ,none,n/a,student,implemented
 ST-03,Course detail,student,READ,none,n/a,student,implemented

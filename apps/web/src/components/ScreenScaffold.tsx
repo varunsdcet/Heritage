@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   AppShell,
   Banner,
@@ -282,9 +282,25 @@ export function ListPanel({
 const MOBILE_TABS = [
   { label: "Home", href: "/m/student" },
   { label: "Courses", href: "/m/student/courses" },
-  { label: "Schedule", href: "/m/student" },
+  { label: "Schedule", href: "/m/f/mb-04-student-schedule" },
   { label: "Grades", href: "/m/student/grades" },
   { label: "More", href: "/m/student/profile" },
+] as const;
+
+const INSTRUCTOR_MOBILE_TABS = [
+  { label: "Home", href: "/m/instructor/home" },
+  { label: "Attendance", href: "/m/instructor/attendance" },
+  { label: "Grades", href: "/m/instructor/grades" },
+] as const;
+
+const MOBILE_MORE_LINKS = [
+  { label: "Documents", href: "/m/student/documents" },
+  { label: "Fees", href: "/m/student/fees" },
+  { label: "Library", href: "/m/student/library" },
+  { label: "Profile", href: "/m/student/profile" },
+  { label: "Notifications", href: "/m/f/mb-09-notifications" },
+  { label: "To-do", href: "/m/f/mb-03-student-todo" },
+  { label: "Offline access", href: "/m/f/mb-10-offline-state" },
 ] as const;
 
 export function MobileChrome({
@@ -296,6 +312,17 @@ export function MobileChrome({
   title: string;
   active?: (typeof MOBILE_TABS)[number]["label"];
 }) {
+  const pathname = usePathname() || "";
+  const instructor = pathname.startsWith("/m/instructor");
+  const tabs = instructor ? INSTRUCTOR_MOBILE_TABS : MOBILE_TABS;
+  const activeLabel = instructor
+    ? pathname.includes("/attendance")
+      ? "Attendance"
+      : pathname.includes("/grades")
+        ? "Grades"
+        : "Home"
+    : active;
+
   return (
     <div
       style={{
@@ -343,6 +370,18 @@ export function MobileChrome({
         </span>
       </header>
       <div style={{ padding: "1.1rem", flex: 1 }}>{children}</div>
+      {!instructor && activeLabel === "More" ? (
+        <nav
+          aria-label="More student modules"
+          style={{ display: "flex", gap: 8, overflowX: "auto", padding: "10px 12px", borderTop: "1px solid var(--mh-border)" }}
+        >
+          {MOBILE_MORE_LINKS.map((item) => (
+            <a key={item.href} href={item.href} style={{ color: "var(--mh-brand)", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}>
+              {item.label}
+            </a>
+          ))}
+        </nav>
+      ) : null}
       <nav
         style={{
           display: "flex",
@@ -352,8 +391,8 @@ export function MobileChrome({
           padding: "8px 0 12px",
         }}
       >
-        {MOBILE_TABS.map((tab) => {
-          const isActive = tab.label === active;
+        {tabs.map((tab) => {
+          const isActive = tab.label === activeLabel;
           return (
             <a
               key={tab.label}

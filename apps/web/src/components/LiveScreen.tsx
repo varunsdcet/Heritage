@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "reac
 import { useRouter } from "next/navigation";
 import { Button, Metric, Panel } from "@myheritage/ui";
 import { ScreenScaffold, ListPanel, MobileChrome } from "@/components/ScreenScaffold";
+import { StudentSisShell } from "@/components/StudentSisShell";
 import { AdminFigmaParityScreen } from "@/components/AdminFigmaParityScreen";
 import { TeacherSisScreen } from "@/components/TeacherSisScreen";
 import { TEACHER_SCREENS } from "@/lib/teacherCatalog";
@@ -32,6 +33,27 @@ export type PortalView = {
   }>;
   actions: PortalAction[];
   live: true;
+};
+
+const STUDENT_ROUTE_META: Record<string, { title: string; subtitle: string }> = {
+  "/student/continue": { title: "Continue learning", subtitle: "Resume lectures, labs, and assigned course work." },
+  "/student/modules": { title: "Course modules", subtitle: "Learning content from your active courses." },
+  "/student/assessments": { title: "Assessments", subtitle: "Upcoming and published assessments for your courses." },
+  "/student/f/st-06-assessments": { title: "Assessments", subtitle: "Upcoming and published assessments for your courses." },
+  "/student/lectures": { title: "Lectures", subtitle: "Lecture schedule, recordings, and course materials." },
+  "/student/f/st-11-lecture-detail": { title: "Lecture detail", subtitle: "Lecture access, recording, and supporting materials." },
+  "/student/labs": { title: "Labs", subtitle: "Your scheduled labs, locations, and practical work." },
+  "/student/f/st-13-lab-detail": { title: "Lab detail", subtitle: "Lab schedule, location, safety notes, and practical work." },
+  "/student/attendance": { title: "Attendance", subtitle: "Attendance records for your enrolled courses." },
+  "/student/announcements": { title: "Announcements", subtitle: "Course and campus updates relevant to you." },
+  "/student/messages": { title: "Messages", subtitle: "Conversations with instructors and campus teams." },
+  "/student/library": { title: "Library", subtitle: "Loans, resources, and library services." },
+  "/student/f/st-16-services": { title: "Campus services", subtitle: "Student support, workshops, and service requests." },
+  "/student/f/st-17-practicum": { title: "Practicum", subtitle: "Placement, hours, agreements, and evaluations." },
+  "/student/f/st-19-credentials": { title: "Credentials", subtitle: "Official credentials and completion records." },
+  "/student/f/st-20-career": { title: "Career services", subtitle: "Career coaching, opportunities, and application support." },
+  "/student/holds": { title: "Holds", subtitle: "Registration and account holds affecting your studies." },
+  "/student/success": { title: "Student success", subtitle: "Academic support, coaching, and success planning." },
 };
 
 function mimeForFile(file: File) {
@@ -76,6 +98,9 @@ export function LiveScreen({
   if (!mobile && path.startsWith("/instructor") && TEACHER_SCREENS[path]) {
     return <TeacherSisScreen path={path} />;
   }
+  if (!mobile && path.startsWith("/student")) {
+    return <GenericLiveScreen path={path} chrome="student" />;
+  }
   return (
     <GenericLiveScreen path={path} mobile={mobile} mobileTitle={mobileTitle} mobileActive={mobileActive} />
   );
@@ -86,11 +111,13 @@ function GenericLiveScreen({
   mobile = false,
   mobileTitle = "Heritage",
   mobileActive = "Home",
+  chrome = "appshell",
 }: {
   path: string;
   mobile?: boolean;
   mobileTitle?: string;
   mobileActive?: "Home" | "Courses" | "Schedule" | "Grades" | "More";
+  chrome?: "appshell" | "student";
 }) {
   const router = useRouter();
   const [view, setView] = useState<PortalView | null>(null);
@@ -187,14 +214,32 @@ function GenericLiveScreen({
         </div>
       </div>
     );
-    return mobile ? <MobileChrome title={mobileTitle}>{body}</MobileChrome> : body;
+    if (mobile) return <MobileChrome title={mobileTitle}>{body}</MobileChrome>;
+    if (chrome === "student") {
+      return (
+        <StudentSisShell title="Student portal" activeHref={path}>
+          <div className="mh-teacher-card">{body}</div>
+        </StudentSisShell>
+      );
+    }
+    return body;
   }
 
   if (!view) {
     const loading = <p style={{ color: "var(--mh-text-muted)" }}>Loading live data…</p>;
-    return mobile ? <MobileChrome title={mobileTitle}>{loading}</MobileChrome> : loading;
+    if (mobile) return <MobileChrome title={mobileTitle}>{loading}</MobileChrome>;
+    if (chrome === "student") {
+      return (
+        <StudentSisShell title="Student portal" activeHref={path}>
+          <div className="mh-teacher-card">{loading}</div>
+        </StudentSisShell>
+      );
+    }
+    return loading;
   }
 
+  const studentMeta = chrome === "student" ? STUDENT_ROUTE_META[path] : undefined;
+  const visibleActions = view.actions;
   const content = (
     <>
       <input
@@ -211,9 +256,9 @@ function GenericLiveScreen({
         ))}
       </div>
 
-      {view.actions.length ? (
+      {visibleActions.length ? (
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
-          {view.actions.map((a) => (
+          {visibleActions.map((a) => (
             <Button
               key={(a.action ?? a.href ?? "") + a.label}
               type="button"
@@ -228,7 +273,10 @@ function GenericLiveScreen({
       ) : null}
 
       {view.sections.map((section) => (
-        <Panel key={section.title} title={section.title}>
+        <Panel
+          key={section.title}
+          title={studentMeta && /records$/i.test(section.title) ? `${studentMeta.title} overview` : section.title}
+        >
           {!section.rows.length ? (
             <p style={{ margin: 0, color: "var(--mh-text-muted)" }}>No records yet for your account.</p>
           ) : (
@@ -283,6 +331,18 @@ function GenericLiveScreen({
         <p style={{ margin: "0 0 16px", color: "var(--mh-text-muted)", fontSize: 13 }}>{view.subtitle}</p>
         {content}
       </MobileChrome>
+    );
+  }
+
+  if (chrome === "student") {
+    return (
+      <StudentSisShell
+        title={studentMeta?.title ?? view.title}
+        subtitle={studentMeta?.subtitle ?? view.subtitle}
+        activeHref={path}
+      >
+        <div className="mh-student-stack mh-student-live">{content}</div>
+      </StudentSisShell>
     );
   }
 

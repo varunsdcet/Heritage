@@ -1,17 +1,34 @@
 "use client";
 
-import { type FormEvent, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import type { CoachAnswer, CoachHistoryResponse } from "@myheritage/contracts";
-import { Banner, Button, Panel, StatusPill } from "@myheritage/ui";
+import {
+  Suspense,
+  type FormEvent,
+  type KeyboardEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import type {
+  CoachAnswer,
+  CoachHistoryResponse,
+  CoachSource,
+  CoachSuggestedAction,
+  DegreePlanAnalysis,
+} from "@myheritage/contracts";
+import { Banner, Button, LogoMark, StatusPill } from "@myheritage/ui";
 import { api, loadSession } from "@/lib/api";
 import type { ShellRole } from "@/lib/nav";
 import { ScreenScaffold } from "@/components/ScreenScaffold";
+import { StudentSisShell } from "@/components/StudentSisShell";
 
 const suggestions: Record<ShellRole, string[]> = {
   student: [
+    "Can I graduate next summer?",
+    "What courses do I still need?",
+    "What happens if I drop MATH 210?",
     "What should I focus on today?",
-    "What assignments and classes are coming up?",
     "Explain my published grades.",
   ],
   instructor: [
@@ -36,14 +53,47 @@ const suggestions: Record<ShellRole, string[]> = {
   ],
 };
 
-export function CampusCoach({ role, contextPath }: { role: ShellRole; contextPath: string }) {
+type ChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  createdAt?: string;
+  sources?: CoachSource[];
+  suggestedActions?: CoachSuggestedAction[];
+  analysis?: DegreePlanAnalysis;
+  capability?: CoachAnswer["capability"];
+};
+
+function messagesFromHistory(items: CoachHistoryResponse["items"]): ChatMessage[] {
+  return [...items].reverse().flatMap((item) => [
+    {
+      id: `${item.interactionId}-q`,
+      role: "user" as const,
+      text: item.question,
+      createdAt: item.createdAt,
+    },
+    {
+      id: item.interactionId,
+      role: "assistant" as const,
+      text: item.answer,
+      createdAt: item.createdAt,
+      sources: item.sources,
+      suggestedActions: item.suggestedActions,
+    },
+  ]);
+}
+
+function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: string }) {
   const router = useRouter();
-  const [question, setQuestion] = useState(suggestions[role][0] ?? "");
-  const [answer, setAnswer] = useState<CoachAnswer | null>(null);
-  const [history, setHistory] = useState<CoachHistoryResponse["items"]>([]);
+  const searchParams = useSearchParams();
+  const threadRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [draft, setDraft] = useState("");
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const bootstrappedQuery = useRef(false);
 
   useEffect(() => {
     const session = loadSession();
@@ -52,142 +102,265 @@ export function CampusCoach({ role, contextPath }: { role: ShellRole; contextPat
       return;
     }
     api<CoachHistoryResponse>("/ai/history", {}, session.accessToken)
-      .then((payload) => setHistory(payload.items))
-      .catch((reason) => setError(reason instanceof Error ? reason.message : "Unable to load Coach history"))
+      .then((payload) => setMessages(messagesFromHistory(payload.items)))
+      .catch((reason) => setError(reason instanceof Error ? reason.message : "Unable to load Ask Heritage history"))
       .finally(() => setHistoryLoading(false));
   }, []);
 
-  const latestSources = useMemo(() => answer?.sources ?? [], [answer]);
+  useEffect(() => {
+    if (historyLoading || bootstrappedQuery.current) return;
+    const q = searchParams.get("q")?.trim();
+    if (q) {
+      bootstrappedQuery.current = true;
+      void send(q);
+    }
+  }, [historyLoading, searchParams]);
 
-  async function submit(event: FormEvent) {
-    event.preventDefault();
+  useEffect(() => {
+    const node = threadRef.current;
+    if (!node) return;
+    node.scrollTop = node.scrollHeight;
+  }, [messages, loading, historyLoading]);
+
+  const canSend = useMemo(() => draft.trim().length > 0 && !loading, [draft, loading]);
+
+  function resizeDraft() {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }
+
+  async function send(question: string) {
     const session = loadSession();
-    if (!session || question.trim().length < 3) return;
-    setLoading(true);
+    if (!session) {
+      router.replace("/login");
+      return;
+    }
+    const trimmed = question.trim();
+    if (!trimmed || loading) return;
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      setError("You appear to be offline. Reconnect to ask Ask Heritage.");
+      return;
+    }
+
+    const pendingId = `local-${crypto.randomUUID()}`;
+    setDraft("");
+    if (inputRef.current) {
+      inputRef.current.style.height = "auto";
+    }
     setError(null);
+    setLoading(true);
+    setMessages((current) => [...current, { id: pendingId, role: "user", text: trimmed }]);
+
     try {
       const response = await api<CoachAnswer>(
         "/ai/ask",
         {
           method: "POST",
           headers: { "idempotency-key": crypto.randomUUID() },
-          body: JSON.stringify({ question: question.trim(), contextPath }),
+          body: JSON.stringify({ question: trimmed, contextPath }),
         },
         session.accessToken,
       );
-      setAnswer(response);
-      setHistory((current) => [{ ...response, question: question.trim() }, ...current].slice(0, 20));
+      setMessages((current) => [
+        ...current,
+        {
+          id: response.interactionId,
+          role: "assistant",
+          text: response.answer,
+          createdAt: response.createdAt,
+          sources: response.sources,
+          suggestedActions: response.suggestedActions,
+          analysis: response.analysis,
+          capability: response.capability,
+        },
+      ]);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Coach could not answer this question");
+      setError(reason instanceof Error ? reason.message : "Ask Heritage could not answer this question");
     } finally {
       setLoading(false);
+      inputRef.current?.focus();
     }
+  }
+
+  function onSubmit(event: FormEvent) {
+    event.preventDefault();
+    void send(draft);
+  }
+
+  function onDraftKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      void send(draft);
+    }
+  }
+
+  const empty = !historyLoading && messages.length === 0 && !loading;
+
+  const chat = (
+      <div className="mh-ask-chat-page">
+      <section className="mh-ask-chat" aria-label="Ask Heritage chatbot">
+        <header className="mh-ask-chat__head">
+          <LogoMark size={32} />
+          <div className="mh-ask-chat__head-copy">
+            <h1>Ask Heritage</h1>
+            <span>Grounded answers from your campus records</span>
+          </div>
+          <StatusPill tone="ai">Read-only</StatusPill>
+        </header>
+
+        <div ref={threadRef} className="mh-ask-chat__thread" role="log" aria-live="polite" aria-busy={loading || historyLoading}>
+          {historyLoading ? (
+            <p className="mh-ask-chat__status">Loading conversation…</p>
+          ) : null}
+
+          {empty ? (
+            <div className="mh-ask-chat__welcome">
+              <LogoMark size={44} />
+              <h2>Ask Heritage</h2>
+              <p>Ask about admissions, courses, grades, fees, practicum, and policies. Replies stay in this chat.</p>
+              <div className="mh-ask-chat__chips">
+                {suggestions[role].map((suggestion) => (
+                  <Button
+                    key={suggestion}
+                    type="button"
+                    variant="secondary"
+                    onClick={() => void send(suggestion)}
+                    style={{ padding: "0.45rem 0.75rem", fontSize: 13 }}
+                  >
+                    {suggestion}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {messages.map((message) => (
+            <article
+              key={message.id}
+              className={`mh-ask-chat__row is-${message.role}`}
+              aria-label={message.role === "user" ? "You" : "Ask Heritage"}
+            >
+              <div className="mh-ask-chat__bubble">
+                <div style={{ whiteSpace: "pre-wrap" }}>{message.text}</div>
+                {message.role === "assistant" && message.analysis ? (
+                  <div className="mh-ask-chat__meta">
+                    <strong className="mh-ask-chat__meta-label">Degree snapshot</strong>
+                    <p style={{ margin: "0.35rem 0 0", fontSize: 13, color: "var(--mh-text-muted)" }}>
+                      {message.analysis.programName} · {message.analysis.completedCredits}/
+                      {message.analysis.requiredCredits} credits · projected{" "}
+                      {message.analysis.projectedCompletionTerm ?? "not determined"}
+                    </p>
+                  </div>
+                ) : null}
+                {message.role === "assistant" && message.sources?.length ? (
+                  <div className="mh-ask-chat__meta">
+                    <strong className="mh-ask-chat__meta-label">Sources</strong>
+                    <div className="mh-ask-chat__chips">
+                      {message.sources.map((source) => (
+                        <Button
+                          key={source.id}
+                          type="button"
+                          variant="secondary"
+                          onClick={() => router.push(source.uri)}
+                          style={{ padding: "0.35rem 0.65rem", fontSize: 12 }}
+                        >
+                          {source.title}
+                        </Button>
+                      ))}
+                    </div>
+                    {message.suggestedActions?.length ? (
+                      <div className="mh-ask-chat__chips">
+                        {message.suggestedActions.map((action) => (
+                          <Button
+                            key={action.href + action.label}
+                            type="button"
+                            onClick={() => router.push(action.href)}
+                            style={{ padding: "0.4rem 0.75rem", fontSize: 13 }}
+                          >
+                            {action.label}
+                          </Button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            </article>
+          ))}
+
+          {loading ? (
+            <article className="mh-ask-chat__row is-assistant" aria-label="Ask Heritage is typing">
+              <div className="mh-ask-chat__bubble mh-ask-chat__typing">
+                <span className="mh-ask-chat__dot" />
+                <span className="mh-ask-chat__dot" />
+                <span className="mh-ask-chat__dot" />
+              </div>
+            </article>
+          ) : null}
+        </div>
+
+        <form className="mh-ask-chat__composer" onSubmit={onSubmit}>
+          {error ? <Banner tone="danger">{error}</Banner> : null}
+          <div className="mh-ask-chat__composer-row">
+            <label className="mh-ask-chat__composer-field">
+              <textarea
+                ref={inputRef}
+                value={draft}
+                onChange={(event) => {
+                  setDraft(event.target.value);
+                  resizeDraft();
+                }}
+                onKeyDown={onDraftKeyDown}
+                minLength={1}
+                maxLength={2000}
+                rows={1}
+                placeholder="Message Ask Heritage…"
+                aria-label="Message Ask Heritage"
+                disabled={loading}
+                className="mh-ask-chat__input"
+              />
+            </label>
+            <Button type="button" variant="ai" disabled={!canSend} onClick={() => void send(draft)}>
+              {loading ? "Sending…" : "Send"}
+            </Button>
+          </div>
+          <p className="mh-ask-chat__hint">
+            Enter to send, Shift+Enter for a new line. Ask Heritage answers questions but will not change a grade,
+            application, enrolment, payment, or placement.
+          </p>
+        </form>
+      </section>
+      </div>
+  );
+
+  if (role === "student") {
+    return (
+      <StudentSisShell title="Ask Heritage" subtitle="Grounded campus assistant" activeHref="/student/ask">
+        {chat}
+      </StudentSisShell>
+    );
   }
 
   return (
     <ScreenScaffold
       role={role}
       active="Ask MyHeritage"
-      title="Ask MyHeritage"
-      subtitle="Grounded Campus Coach - answers use only records available to your account"
-      breadcrumb={[role[0]!.toUpperCase() + role.slice(1), "Ask MyHeritage"]}
-      meta={<StatusPill tone="ai">Read-only Coach</StatusPill>}
+      title="Ask Heritage"
+      subtitle="Campus AI assistant. Answers use only records available to your account."
+      breadcrumb={[role[0]!.toUpperCase() + role.slice(1), "Ask Heritage"]}
+      hideChromeHeader
     >
-      {error ? <Banner tone="danger">{error}</Banner> : null}
-      <div className="mh-campus-coach-grid" style={{ display: "grid", gap: 18 }}>
-        <div style={{ display: "grid", gap: 18, alignContent: "start" }}>
-          <Panel title="Ask a campus question">
-            <form onSubmit={submit} style={{ display: "grid", gap: 12 }}>
-              <label style={{ display: "grid", gap: 6, fontWeight: 600 }}>
-                Your question
-                <textarea
-                  value={question}
-                  onChange={(event) => setQuestion(event.target.value)}
-                  minLength={3}
-                  maxLength={2000}
-                  rows={5}
-                  required
-                  placeholder="Ask about your current campus records..."
-                  style={{ width: "100%", resize: "vertical" }}
-                />
-              </label>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                {suggestions[role].map((suggestion) => (
-                  <Button key={suggestion} type="button" variant="secondary" onClick={() => setQuestion(suggestion)}>
-                    {suggestion}
-                  </Button>
-                ))}
-              </div>
-              <div>
-                <Button type="submit" variant="ai" disabled={loading || question.trim().length < 3}>
-                  {loading ? "Checking your campus records..." : "Ask Coach"}
-                </Button>
-              </div>
-            </form>
-          </Panel>
-
-          {answer ? (
-            <Panel title="Coach response">
-              <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.65 }}>{answer.answer}</div>
-              <div style={{ marginTop: 18 }}>
-                <strong>Sources</strong>
-                <ul style={{ marginBottom: 0, display: "grid", gap: 6 }}>
-                  {latestSources.map((source) => (
-                    <li key={source.id}>
-                      <button
-                        type="button"
-                        onClick={() => router.push(source.uri)}
-                        style={{
-                          border: 0,
-                          background: "transparent",
-                          color: "var(--mh-brand)",
-                          padding: 0,
-                          cursor: "pointer",
-                          display: "block",
-                          textAlign: "left",
-                          lineHeight: 1.4,
-                        }}
-                      >
-                        {source.title}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              {answer.suggestedActions.length ? (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 18 }}>
-                  {answer.suggestedActions.map((action) => (
-                    <Button key={action.href + action.label} type="button" onClick={() => router.push(action.href)}>
-                      {action.label}
-                    </Button>
-                  ))}
-                </div>
-              ) : null}
-            </Panel>
-          ) : (
-            <Banner>Coach answers are read-only in this phase. It will never change a grade, application, enrolment, payment, or placement.</Banner>
-          )}
-        </div>
-
-        <Panel title="Recent questions">
-          {historyLoading ? (
-            <p style={{ margin: 0, color: "var(--mh-text-muted)" }}>Loading history...</p>
-          ) : history.length === 0 ? (
-            <p style={{ margin: 0, color: "var(--mh-text-muted)" }}>Your Coach history will appear here.</p>
-          ) : (
-            <ol style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 14 }}>
-              {history.map((item) => (
-                <li key={item.interactionId} style={{ borderBottom: "1px solid var(--mh-border)", paddingBottom: 12 }}>
-                  <strong>{item.question}</strong>
-                  <div style={{ color: "var(--mh-text-muted)", fontSize: 13, marginTop: 5 }}>
-                    {item.sources.length} source{item.sources.length === 1 ? "" : "s"} - {new Date(item.createdAt).toLocaleString()}
-                  </div>
-                </li>
-              ))}
-            </ol>
-          )}
-        </Panel>
-      </div>
+      {chat}
     </ScreenScaffold>
+  );
+}
+
+export function CampusCoach(props: { role: ShellRole; contextPath: string }) {
+  return (
+    <Suspense fallback={<p style={{ padding: 24 }}>Loading Ask Heritage…</p>}>
+      <CampusCoachBody {...props} />
+    </Suspense>
   );
 }

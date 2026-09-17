@@ -155,7 +155,7 @@ function LoginForm() {
 
         <form onSubmit={onSubmit} noValidate style={{ width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 24 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <h1 style={{ margin: 0, fontSize: 32, fontWeight: 700, lineHeight: 1.2, color: "#1A1C19" }}>
+            <h1 style={{ margin: 0, fontFamily: "var(--mh-font-display)", fontSize: 34, fontWeight: 600, lineHeight: 1.15, letterSpacing: "-0.03em", color: "#1A1C19" }}>
               Sign in to MyHeritage
             </h1>
             <p style={{ margin: 0, color: "#5C5F5A", fontSize: 15, lineHeight: 1.4 }}>

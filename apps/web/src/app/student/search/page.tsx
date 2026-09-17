@@ -1,7 +1,12 @@
 "use client";
 
-import { GlobalSearchView } from "@/components/GlobalSearchView";
+import { Suspense } from "react";
+import { StudentSearchView } from "@/components/StudentFunctionalViews";
 
 export default function Page() {
-  return <GlobalSearchView role="student" />;
+  return (
+    <Suspense fallback={null}>
+      <StudentSearchView />
+    </Suspense>
+  );
 }

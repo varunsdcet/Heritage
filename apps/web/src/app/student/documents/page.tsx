@@ -1,7 +1,7 @@
 "use client";
 
-import { LiveScreen } from "@/components/LiveScreen";
+import { StudentDocumentsView } from "@/components/StudentFunctionalViews";
 
 export default function Page() {
-  return <LiveScreen path="/student/documents" />;
+  return <StudentDocumentsView />;
 }

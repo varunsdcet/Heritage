@@ -721,6 +721,61 @@ export async function composeFromDomain(user: SessionClaims, path: string): Prom
         badge: s.standing,
         badgeTone: rowTone(s.standing),
       })),
+      caseDetail: focus
+        ? {
+            type: "Case Type: Academic Intervention",
+            title: `Attendance / standing review: ${focus.name}`,
+            status: focus.standing === "good" ? "MONITORING" : "IN PROGRESS",
+            owner: "Campus Success",
+            body: `Case opened for ${focus.name} (${focus.studentNumber}) in ${focus.programName}. Current standing: ${focus.standing}. Review attendance, published grades, and outreach notes before closing.`,
+            outcome: "Resolved - Plan Implemented",
+            tabs: ["Details", "Actions", "Notes", "Timeline"],
+          }
+        : {
+            type: "Case",
+            title: "No active case",
+            status: "OPEN",
+            owner: "Campus Success",
+            body: "No at-risk student case is currently queued.",
+            outcome: "—",
+            tabs: ["Details", "Actions", "Notes", "Timeline"],
+          },
+      planTasks: [
+        {
+          task: "Confirm advisor outreach completed",
+          owner: focus?.name ?? "Student",
+          due: term,
+          shared: true,
+        },
+        {
+          task: "Review published grade signals",
+          owner: "Campus Success",
+          due: term,
+          shared: false,
+        },
+        {
+          task: "Schedule follow-up appointment",
+          owner: "Campus Success",
+          due: term,
+          shared: true,
+        },
+      ],
+      appointments: {
+        slots: [
+          {
+            time: "09:00 AM - 09:45 AM",
+            title: focus ? `Academic check-in · ${focus.name}` : "Open advising slot",
+            status: focus ? "Booked" : "Available",
+          },
+          {
+            time: "01:30 PM - 02:15 PM",
+            title: "Open Advising Slot",
+            status: "Available",
+          },
+        ],
+        student: focus?.name ?? "—",
+        advisor: "Campus Success",
+      },
     };
   }
 
@@ -1301,6 +1356,12 @@ export async function getSisScreen(user: SessionClaims, path: string) {
   const domain = await composeFromDomain(user, path);
   const mutations = await loadMutationOverlay(user.institutionId, path);
   const payload: SisLivePayload = { ...domain, ...mutations };
+  if (domain.caseDetail && typeof domain.caseDetail === "object") {
+    payload.caseDetail = {
+      ...(domain.caseDetail as Record<string, unknown>),
+      ...((mutations.caseDetail as Record<string, unknown> | undefined) ?? {}),
+    };
+  }
 
   const customPrograms = Array.isArray(mutations.customPrograms)
     ? (mutations.customPrograms as string[])

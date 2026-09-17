@@ -311,7 +311,7 @@ export function TeacherShell({
   const profileGroupActive = PROFILE_GROUP_HREFS.has(activeHref);
   const [profileOpen, setProfileOpen] = useState(profileGroupActive);
 
-  const groupOpen = profileOpen || profileGroupActive;
+  const groupOpen = profileOpen;
 
   const paletteSections = useMemo(() => {
     const q = searchQ.trim().toLowerCase();

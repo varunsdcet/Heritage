@@ -92,6 +92,13 @@ const ids = {
   hours2: "h0h0h0h0-h0h0-4h0h-8h0h-h0h0h0h0h002",
   eval1: "v0v0v0v0-v0v0-4v0v-8v0v-v0v0v0v0v001",
   agreement1: "g0g0g0g0-g0g0-4g0g-8g0g-g0g0g0g0g001",
+  programCs: "b1b1b1b1-b1b1-4b1b-8b1b-b1b1b1b1b101",
+  programVersionCs: "b2b2b2b2-b2b2-4b2b-8b2b-b2b2b2b2b201",
+  math210: "66666666-6666-4666-8666-666666666605",
+  stat310: "66666666-6666-4666-8666-666666666606",
+  data401: "66666666-6666-4666-8666-666666666607",
+  cs201: "66666666-6666-4666-8666-666666666608",
+  knowledgeDegree: "k0k0k0k0-k0k0-4k0k-8k0k-k0k0k0k0k001",
 };
 
 type PortalSeed = {
@@ -115,13 +122,23 @@ const PORTAL: PortalSeed[] = [
   { screenPath: "/student/library", role: "student", primaryText: "Library laptop loan", secondaryText: "Science Hall desk", metaText: "Available", href: "/student/library", sortOrder: 2 },
   { screenPath: "/student/advising", role: "student", primaryText: "Program check-in", secondaryText: "Advisor: Campus Success", metaText: "Booked", href: "/student/advising", sortOrder: 1 },
   { screenPath: "/student/holds", role: "student", primaryText: "No active holds", secondaryText: "Registration clear", metaText: "OK", href: "/student/holds", sortOrder: 1 },
+  { screenPath: "/student/f/st-16-services", role: "student", primaryText: "Academic advising", secondaryText: "Program planning and registration support", metaText: "Available", href: "/student/advising", sortOrder: 1 },
+  { screenPath: "/student/f/st-16-services", role: "student", primaryText: "Wellness and accessibility", secondaryText: "Confidential student support services", metaText: "Book", href: "/student/messages", sortOrder: 2 },
+  { screenPath: "/student/f/st-17-practicum", role: "student", primaryText: "Practicum readiness", secondaryText: "Requirements and placement documents", metaText: "In progress", href: "/student/documents", sortOrder: 1 },
+  { screenPath: "/student/f/st-19-credentials", role: "student", primaryText: "Computer Science diploma", secondaryText: "Credential progress follows your degree requirements", metaText: "In progress", href: "/student/degree", sortOrder: 1 },
+  { screenPath: "/student/f/st-19-credentials", role: "student", primaryText: "Unofficial transcript", secondaryText: "Current academic record", metaText: "Available", href: "/student/documents", sortOrder: 2 },
+  { screenPath: "/student/f/st-20-career", role: "student", primaryText: "Career coaching", secondaryText: "Resume, interview, and job-search support", metaText: "Book", href: "/student/messages", sortOrder: 1 },
+  { screenPath: "/student/f/st-20-career", role: "student", primaryText: "Work-integrated learning", secondaryText: "Explore practicum and placement opportunities", metaText: "Explore", href: "/student/f/st-17-practicum", sortOrder: 2 },
   { screenPath: "/student/attendance", role: "student", primaryText: "CS301 attendance", secondaryText: "Present 11 / 12", metaText: "94%", href: "/student/attendance", sortOrder: 1 },
   { screenPath: "/student/attendance", role: "student", primaryText: "ACC201 attendance", secondaryText: "Present 10 / 11", metaText: "91%", href: "/student/attendance", sortOrder: 2 },
   { screenPath: "/student/lectures", role: "student", primaryText: "CS301 Lecture 8", secondaryText: "Online · Recording ready", metaText: "Join", href: "/student/lectures", sortOrder: 1 },
-  { screenPath: "/student/labs", role: "student", primaryText: "Algorithms lab B", secondaryText: "Science Hall 110", metaText: "Thu 2pm", href: "/student/labs", sortOrder: 1 },
+  { screenPath: "/student/labs", role: "student", primaryText: "Algorithms lab B", secondaryText: "Science Hall 110", metaText: "Thu 2pm", href: "/student/f/st-13-lab-detail", sortOrder: 1 },
+  { screenPath: "/student/f/st-13-lab-detail", role: "student", primaryText: "Algorithms lab B", secondaryText: "Science Hall 110 · Thursday 2:00–4:00 PM", metaText: "Scheduled", href: "/student/labs", sortOrder: 1 },
+  { screenPath: "/student/f/st-13-lab-detail", role: "student", primaryText: "Lab safety acknowledgement", secondaryText: "Required before practical work", metaText: "Complete", href: "/student/documents", sortOrder: 2 },
   { screenPath: "/student/announcements", role: "student", primaryText: "Fall reading week", secondaryText: "No classes Oct 13–17", metaText: "Campus", href: "/student/announcements", sortOrder: 1 },
   { screenPath: "/student/ask", role: "student", primaryText: "Ask MyHeritage", secondaryText: "Grounded answers with citations", metaText: "AI", href: "/student/ask", sortOrder: 1 },
-  { screenPath: "/student/success", role: "student", primaryText: "Success plan", secondaryText: "Midterm coaching available", metaText: "Open", href: "/student/success", sortOrder: 1 },
+  { screenPath: "/student/success", role: "student", primaryText: "Success plan", secondaryText: "Midterm coaching available", metaText: "Open", href: "/student/advising", sortOrder: 1 },
+  { screenPath: "/student/success", role: "student", primaryText: "Study support", secondaryText: "Tutoring and learning strategy appointments", metaText: "Available", href: "/student/messages", sortOrder: 2 },
   { screenPath: "/student/*", role: "student", primaryText: "Campus services", secondaryText: "Live portal record", metaText: "Open", href: "/student", sortOrder: 1 },
 
   // Instructor
@@ -253,9 +270,15 @@ async function main() {
   await prisma.enrolment.deleteMany();
   await prisma.classSession.deleteMany().catch(() => undefined);
   await prisma.section.deleteMany();
+  await prisma.degreePlanScenario.deleteMany().catch(() => undefined);
+  await prisma.degreeRequirement.deleteMany().catch(() => undefined);
+  await prisma.coursePrerequisite.deleteMany().catch(() => undefined);
+  await prisma.knowledgeDocument.deleteMany().catch(() => undefined);
   await prisma.course.deleteMany();
   await prisma.term.deleteMany();
   await prisma.student.deleteMany();
+  await prisma.programVersion.deleteMany().catch(() => undefined);
+  await prisma.program.deleteMany().catch(() => undefined);
   await prisma.session.deleteMany();
   await prisma.account.deleteMany();
   await prisma.person.deleteMany();
@@ -358,7 +381,69 @@ async function main() {
       { id: ids.acc201, institutionId: INST, code: "ACC201", title: "Financial Accounting", credits: 3 },
       { id: ids.nurs400, institutionId: INST, code: "NURS400", title: "Clinical Practicum IV", credits: 4 },
       { id: ids.eng110, institutionId: INST, code: "ENG110", title: "Academic Writing", credits: 3 },
+      { id: ids.cs201, institutionId: INST, code: "CS201", title: "Data Structures", credits: 3 },
+      { id: ids.math210, institutionId: INST, code: "MATH210", title: "Discrete Mathematics", credits: 3 },
+      { id: ids.stat310, institutionId: INST, code: "STAT310", title: "Applied Statistics", credits: 3 },
+      { id: ids.data401, institutionId: INST, code: "DATA401", title: "Data Engineering", credits: 3 },
     ],
+  });
+
+  await prisma.program.create({
+    data: {
+      id: ids.programCs,
+      institutionId: INST,
+      code: "CS-DIP",
+      name: "Computer Science",
+      awardLevel: "diploma",
+    },
+  });
+  await prisma.programVersion.create({
+    data: {
+      id: ids.programVersionCs,
+      institutionId: INST,
+      programId: ids.programCs,
+      label: "2024.1",
+      effectiveOn: "2024-09-01",
+      totalCredits: 27,
+      status: "active",
+    },
+  });
+  await prisma.degreeRequirement.createMany({
+    data: [
+      { id: "c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c101", institutionId: INST, programVersionId: ids.programVersionCs, courseId: ids.cs201, courseCode: "CS201", title: "Data Structures", credits: 3, kind: "required", sortOrder: 1 },
+      { id: "c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c102", institutionId: INST, programVersionId: ids.programVersionCs, courseId: ids.cs301, courseCode: "CS301", title: "Algorithms", credits: 3, kind: "required", sortOrder: 2 },
+      { id: "c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c103", institutionId: INST, programVersionId: ids.programVersionCs, courseId: ids.eng110, courseCode: "ENG110", title: "Academic Writing", credits: 3, kind: "required", sortOrder: 3 },
+      { id: "c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c104", institutionId: INST, programVersionId: ids.programVersionCs, courseId: ids.math210, courseCode: "MATH210", title: "Discrete Mathematics", credits: 3, kind: "required", sortOrder: 4 },
+      { id: "c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c105", institutionId: INST, programVersionId: ids.programVersionCs, courseId: ids.stat310, courseCode: "STAT310", title: "Applied Statistics", credits: 3, kind: "required", sortOrder: 5 },
+      { id: "c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c106", institutionId: INST, programVersionId: ids.programVersionCs, courseId: ids.data401, courseCode: "DATA401", title: "Data Engineering", credits: 3, kind: "required", sortOrder: 6 },
+      { id: "c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c107", institutionId: INST, programVersionId: ids.programVersionCs, courseId: ids.acc201, courseCode: "ACC201", title: "Financial Accounting", credits: 3, kind: "elective", sortOrder: 7 },
+      { id: "c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c108", institutionId: INST, programVersionId: ids.programVersionCs, courseId: null, courseCode: "ELECTIVE", title: "Open elective", credits: 3, kind: "elective", sortOrder: 8 },
+      { id: "c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c109", institutionId: INST, programVersionId: ids.programVersionCs, courseId: null, courseCode: "CAPSTONE", title: "CS Capstone", credits: 3, kind: "capstone", sortOrder: 9 },
+    ],
+  });
+  await prisma.coursePrerequisite.createMany({
+    data: [
+      { id: "p1p1p1p1-p1p1-4p1p-8p1p-p1p1p1p1p101", institutionId: INST, courseId: ids.cs301, prerequisiteCourseId: ids.cs201 },
+      { id: "p1p1p1p1-p1p1-4p1p-8p1p-p1p1p1p1p102", institutionId: INST, courseId: ids.stat310, prerequisiteCourseId: ids.math210 },
+      { id: "p1p1p1p1-p1p1-4p1p-8p1p-p1p1p1p1p103", institutionId: INST, courseId: ids.data401, prerequisiteCourseId: ids.stat310 },
+    ],
+  });
+  await prisma.knowledgeDocument.create({
+    data: {
+      id: ids.knowledgeDegree,
+      institutionId: INST,
+      slug: "cs-diploma-requirements-2024",
+      title: "Computer Science Diploma Requirements 2024.1",
+      docType: "program_handbook",
+      body: "CS diploma requires 27 credits including MATH210 → STAT310 → DATA401 prerequisite chain.",
+      uri: "/student/degree",
+      versionLabel: "2024.1",
+      status: "published",
+    },
+  });
+  await prisma.student.updateMany({
+    where: { id: { in: [ids.marcusStudent, ids.danielStudent, ids.jordanStudent] }, institutionId: INST },
+    data: { programVersionId: ids.programVersionCs },
   });
 
   await prisma.section.createMany({
@@ -367,6 +452,8 @@ async function main() {
       { id: ids.sectionAcc, institutionId: INST, courseId: ids.acc201, termId: ids.term, code: "ACC201-01", instructorPersonId: ids.pendeltonPerson },
       { id: ids.sectionNurs, institutionId: INST, courseId: ids.nurs400, termId: ids.term, code: "NURS400-01", instructorPersonId: ids.pendeltonPerson },
       { id: ids.sectionEng, institutionId: INST, courseId: ids.eng110, termId: ids.term, code: "ENG110-01", instructorPersonId: ids.vancePerson },
+      { id: "77777777-7777-4777-8777-777777777705", institutionId: INST, courseId: ids.cs201, termId: ids.term, code: "CS201-01", instructorPersonId: ids.vancePerson },
+      { id: "77777777-7777-4777-8777-777777777706", institutionId: INST, courseId: ids.math210, termId: ids.term, code: "MATH210-01", instructorPersonId: ids.pendeltonPerson },
     ],
   });
 
@@ -374,6 +461,9 @@ async function main() {
     data: [
       { id: ids.enrolMarcusCs, institutionId: INST, sectionId: ids.sectionCs, studentId: ids.marcusStudent },
       { id: ids.enrolMarcusAcc, institutionId: INST, sectionId: ids.sectionAcc, studentId: ids.marcusStudent },
+      { id: "88888888-8888-4888-8888-888888888810", institutionId: INST, sectionId: "77777777-7777-4777-8777-777777777705", studentId: ids.marcusStudent, status: "completed" },
+      { id: "88888888-8888-4888-8888-888888888811", institutionId: INST, sectionId: ids.sectionEng, studentId: ids.marcusStudent, status: "completed" },
+      { id: "88888888-8888-4888-8888-888888888812", institutionId: INST, sectionId: "77777777-7777-4777-8777-777777777706", studentId: ids.marcusStudent },
       { id: ids.enrolPriya, institutionId: INST, sectionId: ids.sectionCs, studentId: ids.priyaStudent },
       { id: ids.enrolDaniel, institutionId: INST, sectionId: ids.sectionCs, studentId: ids.danielStudent },
       { id: ids.enrolMeiNurs, institutionId: INST, sectionId: ids.sectionNurs, studentId: ids.meiStudent },

@@ -31,9 +31,9 @@ export default function DesignSystemPage() {
       <div style={{ maxWidth: 1120, margin: "0 auto", padding: "1.5rem clamp(1rem,4vw,3rem) 3rem" }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "center", marginBottom: 12 }}>
           <BrandLockup />
-          <Link href="/screens">
+          <Link href="/role-select">
             <Button type="button" variant="secondary">
-              All screens map
+              Workspaces
             </Button>
           </Link>
         </div>

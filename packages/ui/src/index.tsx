@@ -221,7 +221,7 @@ export function Metric({ label, value, hint }: { label: string; value: string; h
       >
         {label}
       </div>
-      <div style={{ fontFamily: "var(--mh-font-display)", fontSize: 22, fontWeight: 700, marginTop: 4 }}>{value}</div>
+      <div style={{ fontFamily: "var(--mh-font-display)", fontSize: 24, fontWeight: 600, letterSpacing: "-0.03em", marginTop: 4 }}>{value}</div>
       {hint ? <div style={{ color: "var(--mh-text-muted)", fontSize: 13, marginTop: 4 }}>{hint}</div> : null}
     </div>
   );
@@ -321,10 +321,11 @@ export function RecordHeader({ title, subtitle, meta }: { title: string; subtitl
         style={{
           fontFamily: "var(--mh-font-display)",
           fontSize: "var(--mh-h1)",
-          lineHeight: 1.2,
+          lineHeight: 1.15,
+          letterSpacing: "-0.03em",
           margin: 0,
           color: "var(--mh-text)",
-          fontWeight: 700,
+          fontWeight: 600,
         }}
       >
         {title}
@@ -342,10 +343,25 @@ export function RecordHeader({ title, subtitle, meta }: { title: string; subtitl
 type Role = "applicant" | "student" | "instructor" | "admin" | "employer";
 
 const MENUS: Record<Role, string[]> = {
-  applicant: ["Home", "Application", "Documents", "Messages", "Offers", "All screens"],
+  applicant: [
+    "Home",
+    "Application",
+    "Status",
+    "Requirements",
+    "Documents",
+    "Interview",
+    "Offer",
+    "Contract",
+    "Payment",
+    "Leave",
+    "Onboarding",
+    "Timeline",
+    "Assistant",
+    "Messages",
+  ],
   student: ["Home", "Courses", "Schedule", "Grades", "Services", "Messages", "More"],
-  instructor: ["Home", "Sections", "Gradebook", "Attendance", "Messages", "All screens"],
-  admin: ["Overview", "Approvals Inbox", "Analytics", "Users", "Search", "Settings", "All screens"],
+  instructor: ["Home", "Sections", "Gradebook", "Attendance", "Messages"],
+  admin: ["Overview", "Approvals Inbox", "Analytics", "Users", "Search", "Settings"],
   employer: ["Home", "Placements", "Hours", "Evaluations", "Agreements", "Profile"],
 };
 

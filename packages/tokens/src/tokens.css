@@ -24,8 +24,8 @@
   --mh-radius-lg: 8px;
   --mh-radius-xl: 12px;
   --mh-radius-pill: 999px;
-  --mh-font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
-  --mh-font-display: "Inter", "Segoe UI", system-ui, sans-serif;
+  --mh-font-sans: var(--font-sans), "Plus Jakarta Sans", "Segoe UI", system-ui, sans-serif;
+  --mh-font-display: var(--font-display), "Source Serif 4", Georgia, "Times New Roman", serif;
   --mh-body: 16px;
   --mh-body-compact: 14px;
   --mh-h1: 28px;

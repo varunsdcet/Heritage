@@ -34,11 +34,27 @@ export class ApiError extends Error {
 const KEY = "mh.session";
 const ROLE_COOKIE = "mh_roles";
 
+/** Align role-cookie lifetime with JWT access token (30d). */
+const SESSION_MAX_AGE_SEC = 60 * 60 * 24 * 30;
+
 function writeRoleCookie(roles: string[]) {
   if (typeof document === "undefined") return;
   const value = encodeURIComponent(JSON.stringify(roles));
   const secure = typeof window !== "undefined" && window.location.protocol === "https:" ? "; Secure" : "";
-  document.cookie = `${ROLE_COOKIE}=${value}; Path=/; SameSite=Lax; Max-Age=${60 * 60 * 24 * 30}${secure}`;
+  document.cookie = `${ROLE_COOKIE}=${value}; Path=/; SameSite=Lax; Max-Age=${SESSION_MAX_AGE_SEC}${secure}`;
+}
+
+function tokenExpired(accessToken: string): boolean {
+  try {
+    const part = accessToken.split(".")[1];
+    if (!part) return true;
+    const padded = part.replace(/-/g, "+").replace(/_/g, "/") + "==".slice((part.length * 3) % 4);
+    const payload = JSON.parse(atob(padded)) as { exp?: number };
+    if (typeof payload.exp !== "number") return false;
+    return Date.now() >= payload.exp * 1000;
+  } catch {
+    return true;
+  }
 }
 
 function clearRoleCookie() {
@@ -57,9 +73,14 @@ export function loadSession(): Session | null {
   if (!raw) return null;
   try {
     const session = JSON.parse(raw) as Session;
+    if (!session.accessToken || tokenExpired(session.accessToken)) {
+      clearSession();
+      return null;
+    }
     writeRoleCookie(session.roles ?? []);
     return session;
   } catch {
+    clearSession();
     return null;
   }
 }
@@ -87,6 +108,13 @@ export async function api<T>(path: string, init: RequestInit = {}, token?: strin
         message = await res.text();
       } catch {
         /* ignore */
+      }
+    }
+    if (res.status === 401) {
+      clearSession();
+      if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
+        const next = encodeURIComponent(window.location.pathname + window.location.search);
+        window.location.replace(`/login?next=${next}`);
       }
     }
     throw new ApiError(message || `Request failed (${res.status})`, res.status, code);

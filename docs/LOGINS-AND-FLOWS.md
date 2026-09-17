@@ -17,7 +17,6 @@ Live campus OS map: every role, login, URL, and end-to-end flow.
 | Login | http://46.202.163.202:3000/login |
 | Forgot / Reset | http://46.202.163.202:3000/reset |
 | Role select | http://46.202.163.202:3000/role-select |
-| Screens map | http://46.202.163.202:3000/screens |
 
 ---
 
@@ -60,7 +59,6 @@ Forgot password: `/login` → forgot → mail → `/reset?token=…` → new pas
 ## 1) Admin — every tab / module
 
 **Home:** http://46.202.163.202:3000/admin  
-**All screens:** `/admin/all`
 
 | Module | URL | Flow |
 |--------|-----|------|
@@ -105,7 +103,7 @@ Forgot password: `/login` → forgot → mail → `/reset?token=…` → new pas
 | Studio | `/instructor/studio` | AI course studio |
 | Calendar / messages / notifications | `/instructor/calendar`, `/instructor/messages`, `/instructor/notifications` | Comm |
 | Profile / bio | `/instructor/profile`, `/instructor/f/t02-profile-biography` | Faculty profile |
-| Search / Ask / All | `/instructor/search`, `/instructor/ask`, `/instructor/all` | Find + AI |
+| Search / Ask | `/instructor/search`, `/instructor/ask` | Find + AI |
 
 **Depends on admin:** section + enrolments must exist first.
 
@@ -130,7 +128,7 @@ Forgot password: `/login` → forgot → mail → `/reset?token=…` → new pas
 | Lectures / labs / modules / assessments | `/student/lectures`, `/student/labs`, `/student/modules`, `/student/assessments` | Learning |
 | Announcements / messages / notifications | `/student/announcements`, `/student/messages`, `/student/notifications` | Comm |
 | Profile | `/student/profile` | Preferences / change requests |
-| Search / Ask / All | `/student/search`, `/student/ask`, `/student/all` | Find + AI |
+| Search / Ask | `/student/search`, `/student/ask` | Find + AI |
 
 **Depends on admin:** enrolments. **Depends on teacher:** attendance + grades publish.
 
@@ -150,7 +148,7 @@ Forgot password: `/login` → forgot → mail → `/reset?token=…` → new pas
 | Offers | `/applicant/offers` | Accept / decline offer |
 | Contract / LOA / payment / onboarding | `/applicant/f/ap-08…` → `ap-11` | Post-offer |
 | Timeline / messages | `/applicant/timeline`, `/applicant/messages` | History + admissions mail |
-| Ask / Search / All | `/applicant/ask`, `/applicant/search`, `/applicant/all` | AI + find |
+| Ask / Search | `/applicant/ask`, `/applicant/search` | AI + find |
 | AI drawer | `/applicant/f/ap-12-applicant-ai-drawer` | Same Ask Heritage |
 
 **Admin link:** `/admin/admissions` queue uses the same admissions domain.
@@ -170,7 +168,7 @@ Forgot password: `/login` → forgot → mail → `/reset?token=…` → new pas
 | Evaluations | `/employer/evaluations` | Submit clinical eval |
 | Agreements | `/employer/agreements` | MOU / affiliation |
 | Profile | `/employer/profile` | Org + contact |
-| Ask / Search / All | `/employer/ask`, `/employer/search`, `/employer/all` | AI + find |
+| Ask / Search | `/employer/ask`, `/employer/search` | AI + find |
 
 **Admin link:** `/admin/practicum` + `/admin/f/pr-02-employers-registry` + `/admin/f/pr-10-employer-portal`.
 
@@ -182,7 +180,6 @@ Forgot password: `/login` → forgot → mail → `/reset?token=…` → new pas
 |---------|---------|---------|-------|-----------|----------|
 | Campus Coach (Ask) | `/student/ask` | `/instructor/ask` | `/admin/ai/ask` | `/applicant/ask` | `/employer/ask` |
 | Search | `/student/search` | `/instructor/search` | `/admin/search` | `/applicant/search` | `/employer/search` |
-| All screens | `/student/all` | `/instructor/all` | `/admin/all` | `/applicant/all` | `/employer/all` |
 
 API: `POST /ai/ask` (Campus Coach, grounded + `Idempotency-Key`), `GET /ai/history`, `GET /search?q=`
 

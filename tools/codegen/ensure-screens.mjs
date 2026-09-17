@@ -31,6 +31,7 @@ for (let i = 0; i < paths.length; i++) {
   const path = paths[i];
   const title = titles[i] || path;
   const role = roles[i];
+  if (path === "/screens" || path.endsWith("/all")) continue;
   // skip dynamic demo aliases that map to [sectionId] - create concrete demo pages
   const filePath =
     path === "/"
@@ -40,61 +41,12 @@ for (let i = 0; i < paths.length; i++) {
   if (existsSync(filePath)) continue;
 
   // Special auth/public pages without scaffold auth
-  const noAuth = ["/login", "/mfa", "/reset", "/role-select", "/help", "/privacy", "/accessibility", "/offline", "/denied", "/verify", "/design-system", "/archive", "/screens", "/m/login"].includes(path);
+  const noAuth = ["/login", "/mfa", "/reset", "/role-select", "/help", "/privacy", "/accessibility", "/offline", "/denied", "/verify", "/design-system", "/archive", "/m/login"].includes(path);
 
   mkdirSync(dirname(filePath), { recursive: true });
 
   let content;
-  if (path.endsWith("/all") || path === "/screens") {
-    const group =
-      path === "/screens"
-        ? "ALL"
-        : path.includes("student")
-          ? "Student"
-          : path.includes("instructor")
-            ? "Teacher"
-            : "Admin";
-    content = `"use client";
-
-import Link from "next/link";
-import { Panel } from "@myheritage/ui";
-import { ScreenScaffold } from "@/components/ScreenScaffold";
-import { ALL_SCREENS } from "@/lib/screens";
-
-const items = ${group === "ALL" ? "ALL_SCREENS" : `ALL_SCREENS.filter((s) => s.group === "${group}")`};
-
-export default function Page() {
-  return (
-    <ScreenScaffold
-      role="${shellRole(role, path)}"
-      title="${title}"
-      subtitle="Every screen in this area — nothing missing"
-      breadcrumb={["${group === "ALL" ? "MyHeritage" : group}", "All screens"]}
-      active="Home"
-      requireAuth={${noAuth ? "false" : "true"}}
-    >
-      <div style={{ display: "grid", gap: "0.65rem" }}>
-        {items.map((s) => (
-          <Panel key={s.id}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
-              <div>
-                <strong>{s.title}</strong>
-                <div style={{ color: "var(--mh-text-muted)", fontSize: "var(--mh-body-compact)" }}>
-                  {s.id} · {s.path}
-                </div>
-              </div>
-              <Link href={s.path} style={{ color: "var(--mh-brand)", fontWeight: 600 }}>
-                Open →
-              </Link>
-            </div>
-          </Panel>
-        ))}
-      </div>
-    </ScreenScaffold>
-  );
-}
-`;
-  } else if (noAuth && path !== "/design-system" && path !== "/archive" && path !== "/verify") {
+  if (noAuth && path !== "/design-system" && path !== "/archive" && path !== "/verify") {
     content = `"use client";
 
 import Link from "next/link";
@@ -108,7 +60,7 @@ export default function Page() {
         <p style={{ color: "var(--mh-text-muted)" }}>MyHeritage shared screen · connected to server.</p>
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
           <Link href="/login"><Button type="button">Sign in</Button></Link>
-          <Link href="/screens"><Button type="button" variant="secondary">All screens</Button></Link>
+          <Link href="/role-select"><Button type="button" variant="secondary">Workspaces</Button></Link>
         </div>
       </Panel>
     </div>

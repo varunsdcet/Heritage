@@ -1,17 +1,24 @@
 import { randomUUID } from "node:crypto";
 import { Router } from "express";
-import { groundedCoachAnswer } from "@myheritage/ai";
+import {
+  advisorAnswerFromProgress,
+  extractDropCourseCode,
+  groundedCoachAnswer,
+  isAdvisorQuestion,
+} from "@myheritage/ai";
 import {
   AskCoachRequest,
   CoachAnswer,
   CoachHistoryResponse,
   type CoachSource,
   type CoachSuggestedAction,
+  type DegreePlanAnalysis,
 } from "@myheritage/contracts";
 import { prisma } from "@myheritage/db";
 import { writeAuditAndOutbox } from "@myheritage/events";
 import { requireAuth, type AuthedRequest } from "../../middleware/auth.js";
 import { buildCoachFacts, resolveCoachRole } from "./ai.service.js";
+import { computeDegreeProgress, impactIfDropCourse } from "../academic/degree-progress.service.js";
 
 export const aiRouter: Router = Router();
 
@@ -53,10 +60,12 @@ aiRouter.get("/history", async (req, res, next) => {
           interactionId: row.id,
           question: row.question,
           role: row.role,
-          tier: "read_only",
+          tier: row.tier === "draft" ? "draft" : "read_only",
+          capability: row.provider === "student_advisor_v1" ? "student_advisor" : "campus_coach",
           answer: row.answer,
           sources: parseStored<CoachSource[]>(row.sourcesJson, []),
           suggestedActions: parseStored<CoachSuggestedAction[]>(row.suggestedActionsJson, []),
+          claims: [],
           createdAt: row.createdAt.toISOString(),
         })),
       }),
@@ -65,6 +74,7 @@ aiRouter.get("/history", async (req, res, next) => {
     next(error);
   }
 });
+
 aiRouter.post("/ask", async (req, res, next) => {
   try {
     const user = (req as AuthedRequest).user;
@@ -114,17 +124,95 @@ aiRouter.post("/ask", async (req, res, next) => {
     }
 
     const role = resolveCoachRole(user, parsed.data.contextPath);
-    const facts = await buildCoachFacts(user, role);
-    const grounded = groundedCoachAnswer({ role, question: parsed.data.question, facts });
+    const wantsAdvisor =
+      role === "student" &&
+      (parsed.data.capability === "student_advisor" ||
+        parsed.data.capability === "degree_progress" ||
+        parsed.data.capability === "what_if_planner" ||
+        isAdvisorQuestion(parsed.data.question));
+
+    let grounded = groundedCoachAnswer({
+      role,
+      question: parsed.data.question,
+      facts: await buildCoachFacts(user, role),
+    });
+    let capability: "campus_coach" | "student_advisor" = "campus_coach";
+    let provider = "campus_grounding_v1";
+    let analysis: DegreePlanAnalysis | undefined;
+
+    if (wantsAdvisor) {
+      const student = await prisma.student.findFirst({
+        where: { institutionId: user.institutionId, personId: user.personId },
+      });
+      if (!student?.programVersionId) {
+        grounded = {
+          tier: "read_only",
+          text: "I cannot answer degree-planning questions yet because no program version is assigned to your student record. Open Advising to request a program assignment.",
+          sources: [
+            {
+              id: "portal:advising",
+              title: "Advising",
+              uri: "/student/advising",
+            },
+          ],
+          suggestedActions: [{ label: "Open advising", href: "/student/advising" }],
+          claims: [
+            {
+              kind: "uncertainty",
+              text: "Program version is missing on the student record.",
+              evidenceIds: [],
+            },
+          ],
+        };
+        capability = "student_advisor";
+        provider = "student_advisor_v1";
+      } else {
+        const dropCode = extractDropCourseCode(parsed.data.question);
+        if (dropCode) {
+          const impact = await impactIfDropCourse({
+            institutionId: user.institutionId,
+            studentId: student.id,
+            courseCode: dropCode,
+          });
+          analysis = impact.projected;
+          grounded = advisorAnswerFromProgress({
+            question: parsed.data.question,
+            progress: impact.projected,
+            impact: {
+              courseCode: dropCode,
+              impactSummary: impact.impactSummary,
+              downstream: impact.downstream,
+              projectedCompletionTerm: impact.projected.projectedCompletionTerm,
+              baselineCompletionTerm: impact.baseline.projectedCompletionTerm,
+            },
+          });
+        } else {
+          analysis = await computeDegreeProgress({
+            institutionId: user.institutionId,
+            studentId: student.id,
+          });
+          grounded = advisorAnswerFromProgress({
+            question: parsed.data.question,
+            progress: analysis,
+          });
+        }
+        capability = "student_advisor";
+        provider = "student_advisor_v1";
+      }
+    }
+
     const interactionId = randomUUID();
     const createdAt = new Date();
     const response = CoachAnswer.parse({
       interactionId,
       role,
-      tier: "read_only",
+      tier: grounded.tier === "draft" ? "draft" : "read_only",
+      capability,
       answer: grounded.text,
       sources: grounded.sources,
       suggestedActions: grounded.suggestedActions,
+      claims: grounded.claims ?? [],
+      analysis,
       createdAt: createdAt.toISOString(),
     });
 
@@ -150,8 +238,8 @@ aiRouter.post("/ask", async (req, res, next) => {
             answer: response.answer,
             sourcesJson: JSON.stringify(response.sources),
             suggestedActionsJson: JSON.stringify(response.suggestedActions),
-            tier: "read_only",
-            provider: "campus_grounding_v1",
+            tier: response.tier,
+            provider,
             status: "completed",
             createdAt,
           },
@@ -160,17 +248,18 @@ aiRouter.post("/ask", async (req, res, next) => {
           institutionId: user.institutionId,
           actorId: user.accountId,
           eventName: "AiInteraction.created",
-          purpose: "grounded_campus_assistance",
+          purpose: capability === "student_advisor" ? "grounded_degree_advice" : "grounded_campus_assistance",
           before: null,
           after: {
             interactionId,
             role,
-            tier: "read_only",
+            tier: response.tier,
+            capability,
             sourceIds: response.sources.map((source) => source.id),
           },
           source: "ai.ask",
           correlationId: (req as AuthedRequest).correlationId,
-          outboxPayload: { interactionId, role, tier: "read_only" },
+          outboxPayload: { interactionId, role, tier: response.tier, capability },
         });
         await tx.idempotencyKey.update({
           where: {

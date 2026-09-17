@@ -34,183 +34,6 @@ function badgeClass(tone?: SisBadgeTone) {
   return `mh-sis-badge mh-sis-badge--${tone || "active"}`;
 }
 
-const PLATFORM_NAV = [
-  { label: "Users & Roles", href: "/admin/f/pl-01-users-and-roles" },
-  { label: "Permission Matrix", href: "/admin/f/pl-02-permission-matrix" },
-  { label: "Security Policy", href: "/admin/f/pl-03-security-policy" },
-  { label: "Session & Login Audit", href: "/admin/f/pl-04-session-login-audit" },
-  { label: "Integrations", href: "/admin/f/pl-05-integrations" },
-  { label: "System Operations", href: "/admin/f/pl-06-operations" },
-  { label: "Institution Settings", href: "/admin/f/pl-07-institution-settings" },
-  { label: "Notification Templates", href: "/admin/f/pl-08-notification-templates" },
-];
-
-const LABS_NAV = [
-  { label: "Lab Dashboard", href: "/admin/f/lb-01-lab-dashboard" },
-  { label: "Rooms", href: "/admin/f/lb-02-lab-rooms" },
-  { label: "Equipment", href: "/admin/f/lb-03-lab-equipment-list" },
-  { label: "Inventory", href: "/admin/f/lb-05-inventory" },
-  { label: "Safety Rules", href: "/admin/f/lb-06-safety-rules" },
-  { label: "Eligibility", href: "/admin/f/lb-07-student-eligibility" },
-  { label: "Lab Session", href: "/admin/f/lb-08-lab-session" },
-  { label: "Notebook", href: "/admin/f/lb-09-lab-notebook" },
-  { label: "Incidents", href: "/admin/f/lb-10-incident" },
-  { label: "Virtual Labs", href: "/admin/f/lb-11-virtual-labs" },
-  { label: "Environments", href: "/admin/f/lb-12-computer-environments" },
-  { label: "Booking Calendar", href: "/admin/f/xx-1-lab-booking-calendar" },
-  { label: "Usage Analytics", href: "/admin/f/xx-2-lab-usage-analytics" },
-  { label: "Simulation Templates", href: "/admin/f/xx-3-simulation-templates" },
-  { label: "Lab Compliance", href: "/admin/f/xx-4-lab-compliance" },
-];
-
-const COMPLIANCE_NAV = [
-  { label: "Dashboard", href: "/admin/f/cp-01-compliance-dashboard" },
-  { label: "Completeness", href: "/admin/f/cp-02-record-completeness" },
-  { label: "Record Vault", href: "/admin/f/cp-03-record-vault" },
-  { label: "Retention", href: "/admin/f/cp-04-retention-policies" },
-  { label: "Legal Holds", href: "/admin/f/cp-05-legal-holds" },
-  { label: "Evidence Mapping", href: "/admin/f/cp-06-evidence-mapping" },
-  { label: "Accreditation", href: "/admin/f/cp-07-accreditation-assistant" },
-  { label: "Inspection Pack", href: "/admin/f/cp-08-inspection-pack" },
-  { label: "Disposal Review", href: "/admin/f/cp-09-disposal-review" },
-  { label: "Privacy Requests", href: "/admin/f/cp-10-privacy-requests" },
-  { label: "Disposal Queue", href: "/admin/f/xx-9-disposal-review-queue" },
-];
-
-const AI_NAV = [
-  { label: "AI Dashboard", href: "/admin/f/ai-01-ai-dashboard" },
-  { label: "Models", href: "/admin/f/ai-02-model-registry" },
-  { label: "Prompts", href: "/admin/f/ai-03-prompt-registry" },
-  { label: "Tools", href: "/admin/f/ai-04-tool-registry" },
-  { label: "Knowledge", href: "/admin/f/ai-05-knowledge-sources" },
-  { label: "Ingestion", href: "/admin/f/ai-06-ingestion-jobs" },
-  { label: "Retrieval", href: "/admin/f/ai-07-retrieval-inspector" },
-  { label: "Evaluation", href: "/admin/f/ai-08-evaluation-dashboard" },
-  { label: "Citations", href: "/admin/f/ai-09-citation-failures" },
-  { label: "Usage & Cost", href: "/admin/f/ai-10-usage-cost" },
-  { label: "AI Policy", href: "/admin/f/ai-11-ai-policy" },
-  { label: "Tool Audit", href: "/admin/f/ai-12-tool-call-audit" },
-];
-
-const ACADEMICS_NAV = [
-  { label: "Programs", href: "/admin/f/ac-03-programs" },
-  { label: "Academic Terms", href: "/admin/f/ac-01-academic-terms" },
-  { label: "Calendar", href: "/admin/f/ac-02-academic-calendar" },
-  { label: "Program Detail", href: "/admin/f/ac-04-program-detail" },
-  { label: "Change Requests", href: "/admin/f/ac-05-program-change-request" },
-  { label: "Course Catalogue", href: "/admin/f/ac-06-course-catalogue" },
-  { label: "Course Setup", href: "/admin/f/ac-07-course-setup" },
-  { label: "Categories", href: "/admin/f/ac-08-course-categories" },
-  { label: "Sections", href: "/admin/f/ac-09-sections" },
-  { label: "Master Scheduling", href: "/admin/f/ac-10-master-scheduling" },
-  { label: "Pending Schedules", href: "/admin/f/ac-11-pending-schedules" },
-  { label: "Grading Schemes", href: "/admin/f/ac-12-grading-schemes" },
-  { label: "Pending Grades", href: "/admin/f/ac-13-pending-grades" },
-  { label: "Faculty", href: "/admin/f/ac-14-faculty" },
-  { label: "Evaluations", href: "/admin/f/ac-15-course-evaluations" },
-  { label: "Resources", href: "/admin/f/ac-16-course-resources" },
-  { label: "Requirements", href: "/admin/f/ac-17-student-requirements" },
-  { label: "LOA Requests", href: "/admin/f/ac-18-loa-requests" },
-  { label: "Withdrawals", href: "/admin/f/ac-19-withdraw-requests" },
-  { label: "Create Student", href: "/admin/f/ac-20-create-student" },
-];
-
-const ADMISSIONS_NAV = [
-  { label: "Dashboard", href: "/admin/f/ad-01-admissions-dashboard" },
-  { label: "Application Queue", href: "/admin/f/ad-02-application-queue" },
-  { label: "Application Detail", href: "/admin/f/ad-03-application-detail" },
-  { label: "Requirement Review", href: "/admin/f/ad-04-requirement-review" },
-  { label: "Document Review", href: "/admin/f/ad-05-document-review" },
-  { label: "Interviews", href: "/admin/f/ad-06-interview-workspace" },
-  { label: "Decision", href: "/admin/f/ad-07-decision-workspace" },
-  { label: "Offer Builder", href: "/admin/f/ad-08-offer-builder" },
-  { label: "LOA Builder", href: "/admin/f/ad-09-loa-builder" },
-  { label: "Conversion", href: "/admin/f/ad-10-conversion" },
-  { label: "Intake Capacity", href: "/admin/f/ad-11-intake-capacity" },
-];
-
-const PRACTICUM_NAV = [
-  { label: "Dashboard", href: "/admin/f/pr-01-practicum-dashboard" },
-  { label: "Employers", href: "/admin/f/pr-02-employers-registry" },
-  { label: "Sites", href: "/admin/f/pr-03-sites" },
-  { label: "Opportunities", href: "/admin/f/pr-04-opportunities" },
-  { label: "Placements", href: "/admin/f/pr-05-placements-workspace" },
-  { label: "Agreements", href: "/admin/f/pr-06-agreements" },
-  { label: "Logs", href: "/admin/f/pr-07-logs" },
-  { label: "Evaluations", href: "/admin/f/pr-08-evaluations" },
-  { label: "Incidents", href: "/admin/f/pr-09-incidents" },
-  { label: "Employer Portal", href: "/admin/f/pr-10-employer-portal" },
-  { label: "Preceptors", href: "/admin/f/xx-5-preceptor-management" },
-  { label: "Competency", href: "/admin/f/xx-6-competency-tracking" },
-  { label: "Clinical Compliance", href: "/admin/f/xx-7-clinical-compliance" },
-  { label: "Practicum Reports", href: "/admin/f/xx-8-practicum-reports" },
-];
-
-const REGISTRAR_NAV = [
-  { label: "Dashboard", href: "/admin/f/rg-00-registrar-dashboard" },
-  { label: "Student 360", href: "/admin/f/rg-01-student-360" },
-  { label: "Academic History", href: "/admin/f/rg-02-academic-history" },
-  { label: "Status History", href: "/admin/f/rg-03-status-history" },
-  { label: "Transfer Credits", href: "/admin/f/rg-04-transfer-credits" },
-  { label: "Academic Standing", href: "/admin/f/rg-05-academic-standing" },
-  { label: "Completion Audit", href: "/admin/f/rg-06-completion-audit" },
-  { label: "Transcript", href: "/admin/f/rg-07-transcript" },
-  { label: "Corrections", href: "/admin/f/rg-08-registrar-correction" },
-  { label: "Official Export", href: "/admin/f/rg-09-official-export" },
-];
-
-const CRM_NAV = [
-  { label: "Dashboard", href: "/admin/f/crm-01-dashboard" },
-  { label: "Leads", href: "/admin/f/crm-02-leads" },
-  { label: "Lead 360", href: "/admin/f/crm-03-lead-360" },
-  { label: "Campaigns", href: "/admin/f/crm-04-campaigns" },
-  { label: "Campaign Detail", href: "/admin/f/crm-05-campaign-detail" },
-  { label: "Events", href: "/admin/f/crm-06-events" },
-  { label: "Counsellor Queue", href: "/admin/f/crm-07-counsellor-queue" },
-  { label: "Funnel Analytics", href: "/admin/f/crm-08-funnel-analytics" },
-];
-
-const FINANCE_NAV = [
-  { label: "Dashboard", href: "/admin/f/fn-01-finance-dashboard" },
-  { label: "Student Account", href: "/admin/f/fn-02-student-account" },
-  { label: "Charges", href: "/admin/f/fn-03-charges" },
-  { label: "Payments", href: "/admin/f/fn-04-payments" },
-  { label: "Reconciliation", href: "/admin/f/fn-05-reconciliation" },
-  { label: "Refund Queue", href: "/admin/f/fn-06-refund-queue" },
-  { label: "Holds", href: "/admin/f/fn-07-holds" },
-  { label: "Export", href: "/admin/f/fn-08-finance-export" },
-];
-
-const SUCCESS_NAV = [
-  { label: "Dashboard", href: "/admin/f/ss-01-success-dashboard" },
-  { label: "Alert Queue", href: "/admin/f/ss-02-alert-queue" },
-  { label: "Student 360", href: "/admin/f/ss-03-student-success-360" },
-  { label: "Case", href: "/admin/f/ss-04-case" },
-  { label: "Action Plan", href: "/admin/f/ss-05-action-plan" },
-  { label: "Appointments", href: "/admin/f/ss-06-appointments" },
-  { label: "Analytics", href: "/admin/f/ss-07-intervention-analytics" },
-];
-
-const WORKFLOW_NAV = [
-  { label: "Workflows", href: "/admin/f/wf-01-workflow-list" },
-  { label: "Designer", href: "/admin/f/wf-02-workflow-designer" },
-  { label: "Test Runner", href: "/admin/f/wf-03-workflow-test" },
-  { label: "Runs", href: "/admin/f/wf-04-workflow-runs" },
-];
-
-const FORMS_NAV = [
-  { label: "Form List", href: "/admin/f/fm-01-form-list" },
-  { label: "Designer", href: "/admin/f/fm-02-form-designer" },
-  { label: "Versions", href: "/admin/f/fm-03-form-version" },
-  { label: "Submissions", href: "/admin/f/fm-04-form-submissions" },
-];
-
-const RULES_NAV = [
-  { label: "Rule Sets", href: "/admin/f/rl-01-rule-sets" },
-  { label: "Designer", href: "/admin/f/rl-02-rule-designer" },
-  { label: "Simulator", href: "/admin/f/rl-03-rule-simulator" },
-];
-
 const ActionBtn = SisActionBtn;
 
 function SisLiveStatusBar() {
@@ -236,128 +59,6 @@ function SisLiveStatusBar() {
       {live.error ? <span style={{ color: "#b91c1c" }}>{live.error}</span> : null}
       {live.toast ? <span style={{ color: "#0f766e" }}>{live.toast}</span> : null}
     </div>
-  );
-}
-
-function PlatformSubnav({ activePath }: { activePath: string }) {
-  const router = useRouter();
-  return (
-    <aside className="mh-sis-platform-nav" aria-label="Platform Admin">
-      <div className="mh-sis-platform-nav__label">Platform Admin</div>
-      {PLATFORM_NAV.map((item) => (
-        <button
-          key={item.href}
-          type="button"
-          className={`mh-sis-platform-nav__item${activePath === item.href ? " is-active" : ""}`}
-          onClick={() => router.push(item.href)}
-        >
-          {item.label}
-        </button>
-      ))}
-    </aside>
-  );
-}
-
-function LabsSubnav({ activePath }: { activePath: string }) {
-  const router = useRouter();
-  return (
-    <aside className="mh-sis-platform-nav" aria-label="Labs">
-      <div className="mh-sis-platform-nav__label">Labs</div>
-      {LABS_NAV.map((item) => (
-        <button
-          key={item.href}
-          type="button"
-          className={`mh-sis-platform-nav__item${activePath === item.href ? " is-active" : ""}`}
-          onClick={() => router.push(item.href)}
-        >
-          {item.label}
-        </button>
-      ))}
-    </aside>
-  );
-}
-
-function ComplianceSubnav({ activePath }: { activePath: string }) {
-  const router = useRouter();
-  return (
-    <aside className="mh-sis-platform-nav" aria-label="Compliance">
-      <div className="mh-sis-platform-nav__label">Compliance</div>
-      {COMPLIANCE_NAV.map((item) => (
-        <button
-          key={item.href}
-          type="button"
-          className={`mh-sis-platform-nav__item${activePath === item.href ? " is-active" : ""}`}
-          onClick={() => router.push(item.href)}
-        >
-          {item.label}
-        </button>
-      ))}
-    </aside>
-  );
-}
-
-function AiHubSubnav({ activePath }: { activePath: string }) {
-  const router = useRouter();
-  return (
-    <aside className="mh-sis-platform-nav" aria-label="AI Hub">
-      <div className="mh-sis-platform-nav__label">AI Hub</div>
-      {AI_NAV.map((item) => (
-        <button
-          key={item.href}
-          type="button"
-          className={`mh-sis-platform-nav__item${activePath === item.href ? " is-active" : ""}`}
-          onClick={() => router.push(item.href)}
-        >
-          {item.label}
-        </button>
-      ))}
-    </aside>
-  );
-}
-
-function AcademicsSubnav({ activePath }: { activePath: string }) {
-  const router = useRouter();
-  return (
-    <aside className="mh-sis-platform-nav" aria-label="Academics">
-      <div className="mh-sis-platform-nav__label">Academics</div>
-      {ACADEMICS_NAV.map((item) => (
-        <button
-          key={item.href}
-          type="button"
-          className={`mh-sis-platform-nav__item${activePath === item.href ? " is-active" : ""}`}
-          onClick={() => router.push(item.href)}
-        >
-          {item.label}
-        </button>
-      ))}
-    </aside>
-  );
-}
-
-function ModuleSubnav({
-  label,
-  items,
-  activePath,
-}: {
-  label: string;
-  items: Array<{ label: string; href: string }>;
-  activePath: string;
-}) {
-  const router = useRouter();
-  return (
-    <aside className="mh-sis-platform-nav" aria-label={label}>
-      <div className="mh-sis-platform-nav__label">{label}</div>
-      {items.map((item) => (
-        <button
-          key={item.href}
-          type="button"
-          className={`mh-sis-platform-nav__item${activePath === item.href ? " is-active" : ""}`}
-          onClick={() => router.push(item.href)}
-        >
-          {item.label}
-        </button>
-      ))}
-    </aside>
   );
 }
 
@@ -597,8 +298,17 @@ function QueueView({ config }: { config: SisScreenConfig }) {
 }
 
 function DetailView({ config }: { config: SisScreenConfig }) {
-  const d = config.detail!;
-  const [tab, setTab] = useState(d.tabs[0] || "Summary");
+  const fallback: NonNullable<SisScreenConfig["detail"]> = {
+    name: config.title || "Record",
+    meta: config.subtitle || "",
+    steps: [],
+    tabs: ["Summary"],
+    fields: [],
+    checklist: [],
+  };
+  const d = { ...fallback, ...(config.detail ?? {}) };
+  const tabs = Array.isArray(d.tabs) && d.tabs.length ? d.tabs : ["Summary"];
+  const [tab, setTab] = useState(tabs[0] || "Summary");
   const secondaryLabels =
     config.secondaryActions || (config.secondaryAction ? [config.secondaryAction] : []);
 
@@ -639,7 +349,7 @@ function DetailView({ config }: { config: SisScreenConfig }) {
         </div>
 
         <div className="mh-sis-tabs">
-          {d.tabs.map((t) => (
+          {tabs.map((t) => (
             <button key={t} type="button" className={`mh-sis-tabs__item${tab === t ? " is-active" : ""}`} onClick={() => setTab(t)}>
               {t}
             </button>
@@ -1311,8 +1021,14 @@ function WizardView({ config }: { config: SisScreenConfig }) {
 }
 
 function Profile360View({ config }: { config: SisScreenConfig }) {
-  const p = config.profile360!;
-  const [tab, setTab] = useState(p.tabs[0] || "Overview");
+  const p = {
+    name: "Student",
+    meta: "",
+    tabs: ["Overview"],
+    ...(config.profile360 ?? {}),
+  };
+  const tabs = Array.isArray(p.tabs) && p.tabs.length ? p.tabs : ["Overview"];
+  const [tab, setTab] = useState(tabs[0] || "Overview");
   const courseLayout = Boolean(p.courses?.rows.length);
   return (
     <div className="mh-sis-dash mh-sis-dash--wide" data-figma-id={config.figmaId}>
@@ -1352,7 +1068,7 @@ function Profile360View({ config }: { config: SisScreenConfig }) {
         </div>
       ) : null}
       <div className="mh-sis-tabs">
-        {p.tabs.map((t) => (
+        {tabs.map((t) => (
           <button key={t} type="button" className={`mh-sis-tabs__item${tab === t ? " is-active" : ""}`} onClick={() => setTab(t)}>
             {t}
           </button>
@@ -1613,7 +1329,13 @@ function EmployerPortalView({ config }: { config: SisScreenConfig }) {
 }
 
 function SearchResultsView({ config }: { config: SisScreenConfig }) {
-  const s = config.searchResults!;
+  const fallback: NonNullable<SisScreenConfig["searchResults"]> = {
+    query: "",
+    resultCount: "0",
+    tabs: [],
+    results: [],
+  };
+  const s = { ...fallback, ...(config.searchResults ?? {}) };
   const router = useRouter();
   const [tab, setTab] = useState(s.tabs[0]?.label || "All");
   const results = s.results.filter((r) => {
@@ -1728,8 +1450,18 @@ function SearchResultsView({ config }: { config: SisScreenConfig }) {
 }
 
 function CaseView({ config }: { config: SisScreenConfig }) {
-  const c = config.caseDetail!;
-  const [tab, setTab] = useState(c.tabs[0] || "Details");
+  const c = {
+    type: "Case",
+    title: config.title || "Case",
+    status: "Open",
+    owner: "—",
+    body: "No live case detail is available yet.",
+    outcome: "—",
+    tabs: ["Details", "Actions", "Notes", "Timeline"],
+    ...(config.caseDetail ?? {}),
+  };
+  const tabs = Array.isArray(c.tabs) && c.tabs.length ? c.tabs : ["Details", "Actions", "Notes", "Timeline"];
+  const [tab, setTab] = useState(tabs[0] || "Details");
   return (
     <div className="mh-sis-dash mh-sis-dash--wide" data-figma-id={config.figmaId}>
       <section className="mh-sis-dash__card mh-sis-case-header">
@@ -1745,7 +1477,7 @@ function CaseView({ config }: { config: SisScreenConfig }) {
       <div className="mh-sis-detail-grid">
         <div className="mh-sis-stack">
           <div className="mh-sis-tabs">
-            {c.tabs.map((t) => (
+            {tabs.map((t) => (
               <button key={t} type="button" className={`mh-sis-tabs__item${tab === t ? " is-active" : ""}`} onClick={() => setTab(t)}>
                 {t}
               </button>
@@ -1913,8 +1645,18 @@ function AnalyticsView({ config }: { config: SisScreenConfig }) {
 }
 
 function Lead360View({ config }: { config: SisScreenConfig }) {
-  const l = config.lead360!;
-  const [tab, setTab] = useState(l.tabs[0] || "Activity");
+  const fallback: NonNullable<SisScreenConfig["lead360"]> = {
+    name: config.title || "Lead",
+    meta: config.subtitle || "",
+    score: "—",
+    steps: [],
+    tabs: ["Activity"],
+    fields: [],
+    timeline: [],
+  };
+  const l = { ...fallback, ...(config.lead360 ?? {}) };
+  const tabs = Array.isArray(l.tabs) && l.tabs.length ? l.tabs : ["Activity"];
+  const [tab, setTab] = useState(tabs[0] || "Activity");
   return (
     <div className="mh-sis-dash mh-sis-dash--wide" data-figma-id={config.figmaId}>
       <div className="mh-sis-dash__welcome">
@@ -1942,7 +1684,7 @@ function Lead360View({ config }: { config: SisScreenConfig }) {
         </div>
       </div>
       <div className="mh-sis-tabs">
-        {l.tabs.map((t) => (
+        {tabs.map((t) => (
           <button key={t} type="button" className={`mh-sis-tabs__item${tab === t ? " is-active" : ""}`} onClick={() => setTab(t)}>
             {t}
           </button>
@@ -2895,8 +2637,18 @@ function UsageCostView({ config }: { config: SisScreenConfig }) {
 }
 
 function AccountView({ config }: { config: SisScreenConfig }) {
-  const a = config.account!;
-  const [tab, setTab] = useState(a.tabs[0]);
+  const a = config.account ?? {
+    name: config.title || "Account",
+    meta: config.subtitle || "",
+    balance: "—",
+    dueNote: "—",
+    planTitle: "Payment plan",
+    planBody: "No live account detail yet.",
+    tabs: ["Ledger Summary"],
+    ledger: [],
+  };
+  const tabs = a.tabs?.length ? a.tabs : ["Ledger Summary"];
+  const [tab, setTab] = useState(tabs[0]);
   return (
     <div className="mh-sis-dash mh-sis-dash--wide" data-figma-id={config.figmaId}>
       <div className="mh-sis-dash__welcome">
@@ -2921,7 +2673,7 @@ function AccountView({ config }: { config: SisScreenConfig }) {
         </div>
       </section>
       <div className="mh-sis-tabs">
-        {a.tabs.map((t) => (
+        {tabs.map((t) => (
           <button key={t} type="button" className={`mh-sis-tabs__item${tab === t ? " is-active" : ""}`} onClick={() => setTab(t)}>
             {t}
           </button>
@@ -3491,57 +3243,9 @@ function AdminSisBody({ path, chrome }: { path: string; chrome: SisScreenConfig 
   }, []);
   const config = mergeSisLive(chrome, payload);
 
-  const showPlatformNav = Boolean(config.platformNav || path.startsWith("/admin/f/pl-"));
-  const showLabsNav =
-    Boolean(config.labsNav || path.startsWith("/admin/f/lb-") || /^\/admin\/f\/xx-[1-4]-/.test(path));
-  const showComplianceNav =
-    Boolean(config.complianceNav || path.startsWith("/admin/f/cp-") || path.startsWith("/admin/f/xx-9-"));
-  const showAiNav = Boolean(config.aiNav || path.startsWith("/admin/f/ai-"));
-  const showAcademicsNav = Boolean(config.academicsNav || path.startsWith("/admin/f/ac-"));
-  const showAdmissionsNav = path.startsWith("/admin/f/ad-");
-  const showPracticumNav =
-    path.startsWith("/admin/f/pr-") || /^\/admin\/f\/xx-[5-8]-/.test(path);
-  const showRegistrarNav = path.startsWith("/admin/f/rg-");
-  const showCrmNav = path.startsWith("/admin/f/crm-");
-  const showFinanceNav = path.startsWith("/admin/f/fn-");
-  const showSuccessNav = path.startsWith("/admin/f/ss-");
-  const showWorkflowNav = path.startsWith("/admin/f/wf-");
-  const showFormsNav = path.startsWith("/admin/f/fm-");
-  const showRulesNav = path.startsWith("/admin/f/rl-");
-  const showSideNav =
-    showPlatformNav ||
-    showLabsNav ||
-    showComplianceNav ||
-    showAiNav ||
-    showAcademicsNav ||
-    showAdmissionsNav ||
-    showPracticumNav ||
-    showRegistrarNav ||
-    showCrmNav ||
-    showFinanceNav ||
-    showSuccessNav ||
-    showWorkflowNav ||
-    showFormsNav ||
-    showRulesNav;
-
   return (
     <SisLiveProvider path={path} onPayload={onPayload}>
-      <div className={showSideNav ? "mh-sis-platform-layout" : undefined}>
-        {showPlatformNav ? <PlatformSubnav activePath={path} /> : null}
-        {showLabsNav ? <LabsSubnav activePath={path} /> : null}
-        {showComplianceNav ? <ComplianceSubnav activePath={path} /> : null}
-        {showAiNav ? <AiHubSubnav activePath={path} /> : null}
-        {showAcademicsNav ? <AcademicsSubnav activePath={path} /> : null}
-        {showAdmissionsNav ? <ModuleSubnav label="Admissions" items={ADMISSIONS_NAV} activePath={path} /> : null}
-        {showPracticumNav ? <ModuleSubnav label="Practicum" items={PRACTICUM_NAV} activePath={path} /> : null}
-        {showRegistrarNav ? <ModuleSubnav label="Registrar" items={REGISTRAR_NAV} activePath={path} /> : null}
-        {showCrmNav ? <ModuleSubnav label="CRM" items={CRM_NAV} activePath={path} /> : null}
-        {showFinanceNav ? <ModuleSubnav label="Finance" items={FINANCE_NAV} activePath={path} /> : null}
-        {showSuccessNav ? <ModuleSubnav label="Student Success" items={SUCCESS_NAV} activePath={path} /> : null}
-        {showWorkflowNav ? <ModuleSubnav label="Workflows" items={WORKFLOW_NAV} activePath={path} /> : null}
-        {showFormsNav ? <ModuleSubnav label="Forms" items={FORMS_NAV} activePath={path} /> : null}
-        {showRulesNav ? <ModuleSubnav label="Rules" items={RULES_NAV} activePath={path} /> : null}
-        <div className={showSideNav ? "mh-sis-platform-content" : undefined}>
+      <>
           <SisLiveStatusBar />
           {!payload ? (
             <div className="mh-sis-dash mh-sis-dash--wide" data-figma-id={chrome.figmaId}>
@@ -3611,8 +3315,7 @@ function AdminSisBody({ path, chrome }: { path: string; chrome: SisScreenConfig 
           {config.archetype === "aiDash" ? <AiDashView config={config} /> : null}
             </>
           )}
-        </div>
-      </div>
+      </>
     </SisLiveProvider>
   );
 }

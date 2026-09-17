@@ -20,8 +20,6 @@ packages/db/prisma/*.db-journal
 
 .vscode/
 .idea/
-.mcp.json
-**/mcp.json
 .claude/
 .codex/
 .github/copilot*

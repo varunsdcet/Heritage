@@ -95,22 +95,129 @@ model SecurityPolicy {
 }
 
 model Student {
-  id            String       @id @default(uuid())
-  institutionId String
-  personId      String
-  studentNumber String
-  programName   String
-  standing      String       @default("good")
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-  rowVersion    Int          @default(1)
-  person        Person       @relation(fields: [personId], references: [id])
-  enrolments    Enrolment[]
-  gradeItems    GradeItem[]
-  submissions   Submission[]
+  id               String            @id @default(uuid())
+  institutionId    String
+  personId         String
+  studentNumber    String
+  programName      String
+  programVersionId String?
+  standing         String            @default("good")
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  rowVersion       Int               @default(1)
+  person           Person            @relation(fields: [personId], references: [id])
+  programVersion   ProgramVersion?   @relation(fields: [programVersionId], references: [id])
+  enrolments       Enrolment[]
+  gradeItems       GradeItem[]
+  submissions      Submission[]
+  degreeScenarios  DegreePlanScenario[]
 
   @@unique([institutionId, studentNumber])
   @@index([institutionId])
+  @@index([programVersionId])
+}
+
+model Program {
+  id            String           @id @default(uuid())
+  institutionId String
+  code          String
+  name          String
+  awardLevel    String           @default("diploma")
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  rowVersion    Int              @default(1)
+  versions      ProgramVersion[]
+
+  @@unique([institutionId, code])
+  @@index([institutionId])
+}
+
+model ProgramVersion {
+  id            String              @id @default(uuid())
+  institutionId String
+  programId     String
+  label         String
+  effectiveOn   String
+  totalCredits  Float
+  status        String              @default("active")
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  rowVersion    Int                 @default(1)
+  program       Program             @relation(fields: [programId], references: [id])
+  requirements  DegreeRequirement[]
+  students      Student[]
+
+  @@unique([institutionId, programId, label])
+  @@index([institutionId])
+}
+
+model DegreeRequirement {
+  id               String         @id @default(uuid())
+  institutionId    String
+  programVersionId String
+  courseId         String?
+  courseCode       String
+  title            String
+  credits          Float
+  kind             String         @default("required")
+  sortOrder        Int            @default(0)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  rowVersion       Int            @default(1)
+  programVersion   ProgramVersion @relation(fields: [programVersionId], references: [id])
+  course           Course?        @relation(fields: [courseId], references: [id])
+
+  @@index([institutionId, programVersionId])
+  @@index([institutionId, courseCode])
+}
+
+model CoursePrerequisite {
+  id                 String   @id @default(uuid())
+  institutionId      String
+  courseId           String
+  prerequisiteCourseId String
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  rowVersion         Int      @default(1)
+  course             Course   @relation("CourseHasPrereqs", fields: [courseId], references: [id])
+  prerequisiteCourse Course   @relation("CourseIsPrereq", fields: [prerequisiteCourseId], references: [id])
+
+  @@unique([institutionId, courseId, prerequisiteCourseId])
+  @@index([institutionId])
+}
+
+model DegreePlanScenario {
+  id            String   @id @default(uuid())
+  institutionId String
+  studentId     String
+  label         String
+  assumptionsJson String
+  resultJson    String
+  status        String   @default("draft")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  rowVersion    Int      @default(1)
+  student       Student  @relation(fields: [studentId], references: [id])
+
+  @@index([institutionId, studentId, createdAt])
+}
+
+model KnowledgeDocument {
+  id            String   @id @default(uuid())
+  institutionId String
+  slug          String
+  title         String
+  docType       String
+  body          String
+  uri           String
+  versionLabel  String   @default("1")
+  status        String   @default("published")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  rowVersion    Int      @default(1)
+
+  @@unique([institutionId, slug])
+  @@index([institutionId, docType])
 }
 
 model Term {
@@ -130,15 +237,18 @@ model Term {
 }
 
 model Course {
-  id            String    @id @default(uuid())
+  id            String               @id @default(uuid())
   institutionId String
   code          String
   title         String
   credits       Float
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  rowVersion    Int       @default(1)
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  rowVersion    Int                  @default(1)
   sections      Section[]
+  requirements  DegreeRequirement[]
+  prereqFor     CoursePrerequisite[] @relation("CourseHasPrereqs")
+  isPrereqOf    CoursePrerequisite[] @relation("CourseIsPrereq")
 
   @@unique([institutionId, code])
   @@index([institutionId])

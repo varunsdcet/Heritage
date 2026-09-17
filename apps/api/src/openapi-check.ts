@@ -23,8 +23,11 @@ const runtimeRoutes = [
   "/student/assignments/{assignmentId}/files",
   "/student/submission-files/{fileId}",
   "/student/assignments/{assignmentId}/submit",
+  "/student/degree-progress",
+  "/student/degree-scenarios",
   "/search",
   "/ai/ask",
+  "/ai/history",
   "/auth/forgot-password",
   "/auth/reset-password",
 ];

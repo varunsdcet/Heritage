@@ -11,7 +11,7 @@ export default function Page() {
         <p style={{ color: "var(--mh-text-muted)" }}>MyHeritage shared screen · connected to server.</p>
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
           <Link href="/login"><Button type="button">Sign in</Button></Link>
-          <Link href="/screens"><Button type="button" variant="secondary">All screens</Button></Link>
+          <Link href="/role-select"><Button type="button" variant="secondary">Workspaces</Button></Link>
         </div>
       </Panel>
     </div>

@@ -92,6 +92,7 @@ describe("contracts", () => {
     const request = AskCoachRequest.parse({
       question: "What should I focus on today?",
       contextPath: "/student",
+      capability: "campus_coach",
     });
     expect(request.question).toContain("today");
     expect(() =>
@@ -99,6 +100,7 @@ describe("contracts", () => {
         interactionId: "00000000-0000-4000-8000-000000000010",
         role: "student",
         tier: "read_only",
+        capability: "campus_coach",
         answer: "Project 1 is your next assignment.",
         sources: [
           {
@@ -108,7 +110,33 @@ describe("contracts", () => {
           },
         ],
         suggestedActions: [{ label: "Open assignments", href: "/student/assignments" }],
+        claims: [],
         createdAt: "2026-09-15T20:00:00.000Z",
+      }),
+    ).not.toThrow();
+  });
+
+  it("parses degree plan analysis shape", async () => {
+    const { DegreePlanAnalysis, AiCapabilityId } = await import("./index.js");
+    expect(AiCapabilityId.parse("student_advisor")).toBe("student_advisor");
+    expect(() =>
+      DegreePlanAnalysis.parse({
+        studentId: "00000000-0000-4000-8000-000000000001",
+        programCode: "CS-DIP",
+        programName: "Computer Science",
+        programVersionLabel: "2024.1",
+        remainingCredits: 21,
+        completedCredits: 6,
+        requiredCredits: 27,
+        remainingRequirements: [],
+        satisfiedRequirements: [],
+        prerequisiteConflicts: [],
+        prerequisiteGraph: [],
+        projectedCompletionTerm: "Summer 2027",
+        warnings: [],
+        suggestedOptions: [],
+        evidence: [{ id: "programVersion:1", title: "CS", uri: "/student/degree" }],
+        claims: [],
       }),
     ).not.toThrow();
   });

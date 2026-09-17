@@ -1,15 +1,16 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 
+type NavChild = { label: string; href: string; match?: string[] };
 type NavItem = {
   label: string;
   href: string;
   icon: string;
   badge?: string;
-  children?: Array<{ label: string; href: string }>;
+  children?: NavChild[];
 };
 
 const NAV: NavItem[] = [
@@ -19,21 +20,125 @@ const NAV: NavItem[] = [
     href: "/instructor/f/t02-profile-biography",
     icon: "user",
     children: [
-      { label: "Manage My Profile", href: "/instructor/f/t02-profile-biography" },
+      { label: "Manage My Profile", href: "/instructor/f/t02-profile-biography", match: ["/instructor/profile"] },
+      { label: "Teaching Topics", href: "/instructor/f/t03-profile-topics" },
+      { label: "Availability", href: "/instructor/f/t04-profile-availability", match: ["/instructor/f/in-18-availability"] },
+      { label: "Compensation", href: "/instructor/f/t05-profile-compensation", match: ["/instructor/f/in-19-compensation"] },
+      { label: "Teaching Schedule", href: "/instructor/f/t06-profile-schedule" },
       { label: "Accomplishments", href: "/instructor/f/t34-accomplishments" },
       { label: "Security Settings", href: "/instructor/f/t35-security-settings" },
       { label: "Settings", href: "/instructor/f/t15-settings" },
+      { label: "Add Availability", href: "/instructor/f/t25-add-availability-modal" },
+      { label: "Password Reset", href: "/instructor/f/t29-password-reset-flow" },
+      { label: "MFA Challenge", href: "/instructor/f/t30-mfa-challenge" },
+      { label: "Profile Setup", href: "/instructor/f/t31-first-login-profile-completion" },
+      { label: "Help & Support", href: "/instructor/f/t33-help-support" },
     ],
   },
-  { label: "My Courses", href: "/instructor/sections", icon: "book" },
-  { label: "Workshops", href: "/instructor/f/t11-workshops", icon: "school" },
+  {
+    label: "My Courses",
+    href: "/instructor/sections",
+    icon: "book",
+    children: [
+      { label: "My courses", href: "/instructor/sections" },
+      { label: "Course detail", href: "/instructor/f/t08-my-courses-detail" },
+      { label: "Course workspace", href: "/instructor/f/in-03-course-detail" },
+      { label: "Modules", href: "/instructor/modules" },
+      { label: "Active courses", href: "/instructor/f/t56-active-courses" },
+      { label: "Sessions", href: "/instructor/f/t54-courses-sessions" },
+      { label: "Announcements", href: "/instructor/announcements", match: ["/instructor/f/t23-course-announcements"] },
+      { label: "Lectures", href: "/instructor/lectures", match: ["/instructor/f/in-08-lectures"] },
+      { label: "Lecture Review", href: "/instructor/f/in-09-lecture-review" },
+      { label: "Labs", href: "/instructor/labs", match: ["/instructor/f/in-10-lab-sessions"] },
+      { label: "Course history", href: "/instructor/f/t39-course-history" },
+      { label: "Textbooks", href: "/instructor/f/t57-course-textbooks" },
+      { label: "Repository", href: "/instructor/f/t37-course-repository" },
+      { label: "Resources", href: "/instructor/f/t60-course-resources-management" },
+      { label: "Resource Files", href: "/instructor/f/t32-resource-file-manager" },
+    ],
+  },
+  {
+    label: "Workshops",
+    href: "/instructor/f/t11-workshops",
+    icon: "school",
+    children: [
+      { label: "Workshops", href: "/instructor/f/t11-workshops", match: ["/instructor/f/in-20-workshops"] },
+      { label: "Workshop Detail", href: "/instructor/f/t24-workshop-detail" },
+      { label: "Enrollment", href: "/instructor/f/t40-workshop-enrollment-status" },
+      { label: "Attendance", href: "/instructor/f/t41-workshop-attendance" },
+      { label: "New enrollment", href: "/instructor/f/t42-new-workshop-enrollment" },
+    ],
+  },
   {
     label: "Students",
     href: "/instructor/f/t12-students-view",
     icon: "users",
+    children: [
+      { label: "Students", href: "/instructor/f/t12-students-view", match: ["/instructor/roster"] },
+      { label: "Roster", href: "/instructor/f/in-04-roster" },
+      { label: "Student detail", href: "/instructor/f/t22-student-detail-full-page", match: ["/instructor/f/in-11-student-detail"] },
+      { label: "Create Student", href: "/instructor/f/t43-create-student-profile" },
+      { label: "Academic alerts", href: "/instructor/f/t44-academic-alerts" },
+      { label: "Flags", href: "/instructor/f/t45-student-flags" },
+      { label: "Assessments", href: "/instructor/f/t46-student-assessments" },
+      { label: "Requirements", href: "/instructor/f/t47-student-requirements" },
+      { label: "Leave of absence", href: "/instructor/f/t48-leave-of-absence" },
+      { label: "Withdraw requests", href: "/instructor/f/t49-course-withdraw-requests" },
+      { label: "Status Filters", href: "/instructor/f/t63-students-by-status-filter" },
+    ],
   },
-  { label: "Gradebook", href: "/instructor/gradebook", icon: "briefcase" },
-  { label: "Course Management", href: "/instructor/f/t14-course-management", icon: "settings" },
+  {
+    label: "Gradebook",
+    href: "/instructor/gradebook",
+    icon: "briefcase",
+    children: [
+      { label: "Gradebook", href: "/instructor/gradebook", match: ["/instructor/f/in-07-gradebook"] },
+      { label: "Assessments", href: "/instructor/assessments", match: ["/instructor/f/t10-assessments-gradebook", "/instructor/f/in-06-assessment-manager"] },
+      { label: "Submissions", href: "/instructor/submissions" },
+      { label: "Create Assessment", href: "/instructor/f/t19-create-edit-assessment" },
+      { label: "Pending grades", href: "/instructor/f/t62-pending-grade-submissions" },
+      { label: "Grade correction", href: "/instructor/f/t20-grade-correction-workflow" },
+      { label: "Grading schemes", href: "/instructor/f/t61-grading-schemes" },
+      { label: "Attendance", href: "/instructor/attendance", match: ["/instructor/f/t21-attendance-correction-review"] },
+    ],
+  },
+  {
+    label: "Course Management",
+    href: "/instructor/f/t14-course-management",
+    icon: "settings",
+    children: [
+      { label: "Course management", href: "/instructor/f/t14-course-management" },
+      { label: "Program management", href: "/instructor/f/t13-program-management" },
+      { label: "Program Change Request", href: "/instructor/f/t27-program-change-request" },
+      { label: "Course Version Editor", href: "/instructor/f/t26-course-version-editor" },
+      { label: "Program Types", href: "/instructor/f/t50-program-types" },
+      { label: "Manage Terms", href: "/instructor/f/t51-manage-terms" },
+      { label: "Academic Calendars", href: "/instructor/f/t52-academic-calendars" },
+      { label: "Master Scheduling", href: "/instructor/f/t53-master-scheduling" },
+      { label: "Add Course", href: "/instructor/f/t55-add-course-form" },
+      { label: "Course Categories", href: "/instructor/f/t58-course-categories" },
+      { label: "Course Groups", href: "/instructor/f/t59-course-groups-types" },
+      { label: "Pending Schedules", href: "/instructor/f/t38-pending-course-schedules" },
+      { label: "Course studio", href: "/instructor/studio", match: ["/instructor/f/in-12-ai-course-studio"] },
+      { label: "Studio Generation", href: "/instructor/f/in-13-studio-generation" },
+      { label: "Outcomes", href: "/instructor/f/in-14-outcome-mapping" },
+      { label: "Question Generator", href: "/instructor/f/in-15-question-generator" },
+      { label: "Rubrics", href: "/instructor/f/in-16-rubric-generator" },
+      { label: "Approval", href: "/instructor/f/in-17-course-approval" },
+      { label: "Evaluations", href: "/instructor/f/t36-course-evaluations" },
+    ],
+  },
+  {
+    label: "Communication",
+    href: "/instructor/messages",
+    icon: "bell",
+    children: [
+      { label: "Messages", href: "/instructor/messages", match: ["/instructor/f/t16-teacher-messages-chat"] },
+      { label: "Notifications", href: "/instructor/notifications" },
+      { label: "Search", href: "/instructor/search" },
+      { label: "Ask MyHeritage", href: "/instructor/ask" },
+    ],
+  },
 ];
 
 const STUDIO_NAV = [
@@ -116,9 +221,20 @@ function NavIcon({ name, active }: { name: string; active?: boolean }) {
   }
 }
 
-function isActive(activeHref: string, href: string, children?: NavItem["children"]) {
-  if (activeHref === href) return true;
-  return Boolean(children?.some((c) => activeHref === c.href || activeHref.startsWith(c.href)));
+function pathMatches(pathname: string, href: string, extra: string[] = []) {
+  return [href, ...extra].some((target) => {
+    if (target === "/instructor") return pathname === "/instructor";
+    return pathname === target || pathname.startsWith(`${target}/`);
+  });
+}
+
+function childMatches(pathname: string, child: NavChild) {
+  return pathMatches(pathname, child.href, child.match);
+}
+
+function isActive(pathname: string, item: NavItem) {
+  if (item.children?.length) return item.children.some((child) => childMatches(pathname, child));
+  return pathMatches(pathname, item.href);
 }
 
 export function TeacherSisShell({
@@ -143,7 +259,9 @@ export function TeacherSisShell({
   studentCount?: number;
 }) {
   const router = useRouter();
-  const [profileOpen, setProfileOpen] = useState(true);
+  const pathname = usePathname() || "/instructor";
+  const current = pathname || activeHref;
+  const [openGroup, setOpenGroup] = useState<string | null>(null);
   const [searchQ, setSearchQ] = useState("");
 
   const navItems = useMemo(
@@ -166,6 +284,11 @@ export function TeacherSisShell({
         .join("") || "IN",
     [userName],
   );
+
+  useEffect(() => {
+    const match = NAV.find((item) => isActive(current, item) && item.children);
+    setOpenGroup(match?.href ?? null);
+  }, [current]);
 
   if (shell === "studio") {
     return (
@@ -231,18 +354,20 @@ export function TeacherSisShell({
 
           <nav className="mh-teacher__nav" aria-label="Teacher">
             {navItems.map((item) => {
-              const active = isActive(activeHref, item.href, item.children);
-              const expanded = Boolean(item.children) && (profileOpen || active);
+              const active = isActive(current, item);
+              const expanded = Boolean(item.children) && openGroup === item.href;
               return (
                 <div key={item.href} className={`mh-teacher__nav-group${active ? " is-active" : ""}`}>
                   <button
                     type="button"
                     className={`mh-teacher__nav-item${active ? " is-active" : ""}`}
+                    aria-expanded={item.children ? expanded : undefined}
                     onClick={() => {
                       if (item.children) {
-                        setProfileOpen((v) => !v);
+                        setOpenGroup((value) => (value === item.href ? null : item.href));
                         return;
                       }
+                      setOpenGroup(null);
                       router.push(item.href);
                     }}
                   >
@@ -251,7 +376,7 @@ export function TeacherSisShell({
                     </span>
                     <span className="mh-teacher__nav-text">{item.label}</span>
                     {item.badge ? <span className="mh-teacher__nav-badge">{item.badge}</span> : null}
-                    {item.children || item.label !== "Dashboard" ? (
+                    {item.children ? (
                       <img
                         src={`/brand/icons/chevron-${expanded ? "down" : "right"}.svg`}
                         alt=""
@@ -267,7 +392,7 @@ export function TeacherSisShell({
                         <button
                           key={child.href}
                           type="button"
-                          className={`mh-teacher__nav-subitem${activeHref === child.href ? " is-active" : ""}`}
+                          className={`mh-teacher__nav-subitem${childMatches(current, child) ? " is-active" : ""}`}
                           onClick={() => router.push(child.href)}
                         >
                           <span className="mh-teacher__nav-dot" />

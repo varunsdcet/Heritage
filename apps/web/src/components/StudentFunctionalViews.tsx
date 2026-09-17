@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Banner, Button, EmptyState, Panel, StatusPill } from "@myheritage/ui";
 import { ApiError, api, loadSession, type Session } from "@/lib/api";
-import { ScreenScaffold } from "@/components/ScreenScaffold";
+import { StudentFrame } from "@/components/StudentSisShell";
 
 type LoadState = "loading" | "ready" | "offline" | "forbidden" | "error";
 
@@ -75,12 +75,12 @@ function ResourceBoundary({
     error: ["Something went wrong", error ?? "The page could not be loaded."],
   }[state];
   return (
-    <Panel>
+    <div className="mh-teacher-card">
       <EmptyState title={copy[0]} body={copy[1]} />
       {state === "offline" || state === "error" ? (
         <Button type="button" onClick={onRetry}>Try again</Button>
       ) : null}
-    </Panel>
+    </div>
   );
 }
 
@@ -162,7 +162,7 @@ export function StudentCoursesView() {
   const resource = useStudentResource<{ courses: Course[] }>("/courses/me");
   const courses = resource.data?.courses ?? [];
   return (
-    <ScreenScaffold role="student" title="My courses" subtitle="Your active and completed enrolments" breadcrumb={["Student", "Courses"]} active="Courses">
+    <StudentFrame role="student" title="My courses" subtitle="Your active and completed enrolments" breadcrumb={["Student", "Courses"]} active="Courses">
       <ResourceBoundary state={resource.state} error={resource.error} onRetry={resource.refresh}>
         {courses.length === 0 ? <EmptyState title="No courses" body="Your assigned courses will appear here." /> : (
           <ul style={listStyle}>
@@ -183,7 +183,7 @@ export function StudentCoursesView() {
           </ul>
         )}
       </ResourceBoundary>
-    </ScreenScaffold>
+    </StudentFrame>
   );
 }
 
@@ -229,7 +229,7 @@ export function StudentCourseDetailView({ sectionId }: { sectionId: string }) {
   }
 
   return (
-    <ScreenScaffold role="student" title={course ? `${course.courseCode} · ${course.courseTitle}` : "Course detail"} subtitle={course ? `${course.sectionCode} · ${course.instructorName}` : "Enrolment-scoped course information"} breadcrumb={["Student", "Courses", course?.courseCode ?? "Detail"]} active="Courses">
+    <StudentFrame role="student" title={course ? `${course.courseCode} · ${course.courseTitle}` : "Course detail"} subtitle={course ? `${course.sectionCode} · ${course.instructorName}` : "Enrolment-scoped course information"} breadcrumb={["Student", "Courses", course?.courseCode ?? "Detail"]} active="Courses">
       <ResourceBoundary state={state} error={courses.error ?? assignments.error ?? calendar.error ?? content.error} onRetry={() => { courses.refresh(); assignments.refresh(); calendar.refresh(); content.refresh(); }}>
         {!course ? <EmptyState title="Course unavailable" body="This course is not part of your enrolment." /> : (
           <div style={{ display: "grid", gap: 18 }}>
@@ -307,7 +307,7 @@ export function StudentCourseDetailView({ sectionId }: { sectionId: string }) {
           </div>
         )}
       </ResourceBoundary>
-    </ScreenScaffold>
+    </StudentFrame>
   );
 }
 
@@ -317,14 +317,14 @@ export function StudentAssignmentsView() {
   const [query, setQuery] = useState("");
   const assignments = useMemo(() => (resource.data?.assignments ?? []).filter((assignment) => `${assignment.title} ${assignment.courseCode}`.toLowerCase().includes(query.toLowerCase())), [query, resource.data]);
   return (
-    <ScreenScaffold role="student" title="Assignments" subtitle="Upload and track work for your enrolled courses" breadcrumb={["Student", "Assignments"]} active="Courses">
+    <StudentFrame role="student" title="Assignments" subtitle="Upload and track work for your enrolled courses" breadcrumb={["Student", "Assignments"]} active="Courses">
       <ResourceBoundary state={resource.state} error={resource.error} onRetry={resource.refresh}>
         <label style={{ display: "grid", gap: 6, maxWidth: 420, marginBottom: 18 }}><span style={{ fontWeight: 600 }}>Search assignments</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Course or assignment" /></label>
         {assignments.length === 0 ? <EmptyState title="No matching assignments" body="Try another search or check back later." /> : (
           <ul style={listStyle}>{assignments.map((assignment) => <li key={assignment.id} style={rowStyle}><div><strong>{assignment.title}</strong><div style={{ color: "var(--mh-text-muted)" }}>{assignment.courseCode} · Due {formatDate(assignment.dueAt)}</div></div><div style={{ display: "flex", alignItems: "center", gap: 10 }}><StatusPill tone={assignment.state === "overdue" ? "danger" : assignment.state === "submitted" || assignment.state === "graded" ? "success" : "neutral"}>{assignment.state}</StatusPill><Button type="button" onClick={() => router.push(`/student/assignments/${assignment.id}`)}>Open</Button></div></li>)}</ul>
         )}
       </ResourceBoundary>
-    </ScreenScaffold>
+    </StudentFrame>
   );
 }
 
@@ -342,7 +342,15 @@ function toBase64(bytes: Uint8Array) {
   return btoa(binary);
 }
 
+function assignmentStatusTone(state: Assignment["state"]): "neutral" | "success" | "warning" | "danger" {
+  if (state === "overdue") return "danger";
+  if (state === "graded" || state === "submitted") return "success";
+  if (state === "due") return "warning";
+  return "neutral";
+}
+
 export function StudentAssignmentDetailView({ assignmentId }: { assignmentId: string }) {
+  const router = useRouter();
   const resource = useStudentResource<{ assignment: Assignment }>(`/student/assignments/${assignmentId}`);
   const assignment = resource.data?.assignment;
   const [busy, setBusy] = useState(false);
@@ -351,57 +359,263 @@ export function StudentAssignmentDetailView({ assignmentId }: { assignmentId: st
 
   async function upload(file: File | undefined) {
     if (!file || !resource.session) return;
-    setBusy(true); setNotice(null); setActionError(null);
+    setBusy(true);
+    setNotice(null);
+    setActionError(null);
     try {
       const mimeType = mimeForFile(file);
-      await api(`/student/assignments/${assignmentId}/files`, { method: "POST", body: JSON.stringify({ filename: file.name, mimeType, sizeBytes: file.size, contentBase64: toBase64(new Uint8Array(await file.arrayBuffer())) }) }, resource.session.accessToken);
+      await api(
+        `/student/assignments/${assignmentId}/files`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            filename: file.name,
+            mimeType,
+            sizeBytes: file.size,
+            contentBase64: toBase64(new Uint8Array(await file.arrayBuffer())),
+          }),
+        },
+        resource.session.accessToken,
+      );
       setNotice("File uploaded as a new version.");
       await resource.refresh();
-    } catch (caught) { setActionError(caught instanceof Error ? caught.message : "Upload failed"); } finally { setBusy(false); }
+    } catch (caught) {
+      setActionError(caught instanceof Error ? caught.message : "Upload failed");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function archive(fileId: string) {
     if (!resource.session) return;
-    setBusy(true); setNotice(null); setActionError(null);
+    setBusy(true);
+    setNotice(null);
+    setActionError(null);
     try {
       await api(`/student/submission-files/${fileId}`, { method: "DELETE" }, resource.session.accessToken);
       setNotice("File removed from the active submission. It remains recoverable for audit.");
       await resource.refresh();
-    } catch (caught) { setActionError(caught instanceof Error ? caught.message : "Could not remove file"); } finally { setBusy(false); }
+    } catch (caught) {
+      setActionError(caught instanceof Error ? caught.message : "Could not remove file");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function submit() {
     if (!resource.session) return;
-    setBusy(true); setNotice(null); setActionError(null);
+    setBusy(true);
+    setNotice(null);
+    setActionError(null);
     try {
       await api(`/student/assignments/${assignmentId}/submit`, { method: "POST", body: "{}" }, resource.session.accessToken);
       setNotice("Assignment submitted successfully.");
       await resource.refresh();
-    } catch (caught) { setActionError(caught instanceof Error ? caught.message : "Could not submit assignment"); } finally { setBusy(false); }
+    } catch (caught) {
+      setActionError(caught instanceof Error ? caught.message : "Could not submit assignment");
+    } finally {
+      setBusy(false);
+    }
   }
 
+  const files = assignment?.submission?.files ?? [];
+  const canUpload = assignment?.submission?.status !== "submitted" && assignment?.state !== "graded";
+  const canRemove = assignment?.submission?.status === "draft";
+  const submittedLocked = !canUpload;
+
   return (
-    <ScreenScaffold role="student" title={assignment?.title ?? "Assignment detail"} subtitle={assignment ? `${assignment.courseCode} · Due ${formatDate(assignment.dueAt)}` : "Submission workflow"} breadcrumb={["Student", "Assignments", assignment?.title ?? "Detail"]} active="Courses">
-      {actionError ? <Banner tone="danger">{actionError}</Banner> : null}{notice ? <Banner tone="success">{notice}</Banner> : null}
+    <StudentFrame
+      role="student"
+      title={assignment?.title ?? "Assignment detail"}
+      subtitle={assignment ? `${assignment.courseCode} · Due ${formatDate(assignment.dueAt)}` : "Submission workflow"}
+      breadcrumb={["Student", "Assignments", assignment?.title ?? "Detail"]}
+      activeHref="/student/assignments"
+    >
+      {actionError ? <Banner tone="danger">{actionError}</Banner> : null}
+      {notice ? <Banner tone="success">{notice}</Banner> : null}
       <ResourceBoundary state={resource.state} error={resource.error} onRetry={resource.refresh}>
-        {!assignment ? <EmptyState title="Assignment unavailable" body="This assignment is not part of your enrolment." /> : (
-          <div style={{ display: "grid", gap: 18 }}>
-            <Panel title="Assignment"><div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}><StatusPill tone="neutral">{assignment.state}</StatusPill><StatusPill tone="neutral">{assignment.maxScore} points</StatusPill><StatusPill tone="neutral">{assignment.weightPercent}% weight</StatusPill></div></Panel>
-            <Panel title="Your files">
-              {assignment.submission?.files.length ? <ul style={listStyle}>{assignment.submission.files.map((file) => <li key={file.id} style={rowStyle}><div><strong>{file.filename}</strong><div style={{ color: "var(--mh-text-muted)" }}>Version {file.version} · {(file.sizeBytes / 1024).toFixed(1)} KB</div></div>{assignment.submission?.status === "draft" ? <Button type="button" variant="secondary" disabled={busy} onClick={() => void archive(file.id)}>Delete</Button> : null}</li>)}</ul> : <EmptyState title="No files uploaded" body="Choose an accepted file up to 10 MiB." />}
-              {assignment.submission?.status !== "submitted" ? <div style={{ marginTop: 16, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}><label style={{ display: "inline-flex" }}><span className="sr-only">Choose submission file</span><input aria-label="Choose submission file" type="file" disabled={busy} accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,.zip" onChange={(event) => void upload(event.target.files?.[0])} /></label><Button type="button" disabled={busy || !assignment.submission?.files.length} onClick={() => void submit()}>{busy ? "Working…" : "Submit assignment"}</Button></div> : <Banner tone="success">Submitted {formatDate(assignment.submission.submittedAt)}</Banner>}
-            </Panel>
+        {!assignment ? (
+          <section className="mh-teacher-card">
+            <EmptyState title="Assignment unavailable" body="This assignment is not part of your enrolment." />
+            <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary" onClick={() => router.push("/student/assignments")}>
+              Back to assignments
+            </button>
+          </section>
+        ) : (
+          <div className="mh-student-assign">
+            <div className="mh-student-assign__toolbar">
+              <button type="button" className="mh-teacher-link" onClick={() => router.push("/student/assignments")}>
+                ← All assignments
+              </button>
+              <button
+                type="button"
+                className="mh-teacher-btn mh-teacher-btn--secondary"
+                onClick={() => router.push(`/student/courses/${assignment.sectionId}`)}
+              >
+                Open course
+              </button>
+            </div>
+
+            <div className="mh-teacher-dash__kpis">
+              <div className="mh-teacher-dash__kpi">
+                <div className="mh-teacher-dash__kpi-label">Status</div>
+                <div className="mh-teacher-dash__kpi-value" style={{ fontSize: 22, textTransform: "capitalize" }}>
+                  {assignment.state}
+                </div>
+                <div className="mh-teacher-dash__kpi-hint">{assignment.courseCode}</div>
+              </div>
+              <div className="mh-teacher-dash__kpi">
+                <div className="mh-teacher-dash__kpi-label">Points</div>
+                <div className="mh-teacher-dash__kpi-value">{assignment.maxScore}</div>
+                <div className="mh-teacher-dash__kpi-hint">Maximum score</div>
+              </div>
+              <div className="mh-teacher-dash__kpi">
+                <div className="mh-teacher-dash__kpi-label">Weight</div>
+                <div className="mh-teacher-dash__kpi-value">{assignment.weightPercent}%</div>
+                <div className="mh-teacher-dash__kpi-hint">Course grade</div>
+              </div>
+              <div className="mh-teacher-dash__kpi">
+                <div className="mh-teacher-dash__kpi-label">Due</div>
+                <div className="mh-teacher-dash__kpi-value" style={{ fontSize: 18 }}>
+                  {formatDate(assignment.dueAt)}
+                </div>
+                <div className="mh-teacher-dash__kpi-hint">{assignment.courseTitle}</div>
+              </div>
+            </div>
+
+            <div className="mh-teacher-detail__grid">
+              <section className="mh-teacher-card">
+                <div className="mh-teacher-card__head">
+                  <h2>Assignment</h2>
+                  <StatusPill tone={assignmentStatusTone(assignment.state)}>{assignment.state}</StatusPill>
+                </div>
+                <div className="mh-teacher-section">
+                  <div className="mh-teacher-section__label">OVERVIEW</div>
+                  <div className="mh-teacher-fields">
+                    <label>
+                      <span>Course</span>
+                      <div className="mh-teacher-field">
+                        {assignment.courseCode} · {assignment.courseTitle}
+                      </div>
+                    </label>
+                    <label>
+                      <span>Title</span>
+                      <div className="mh-teacher-field">{assignment.title}</div>
+                    </label>
+                    <label>
+                      <span>Due date</span>
+                      <div className="mh-teacher-field">{formatDate(assignment.dueAt)}</div>
+                    </label>
+                    <label>
+                      <span>Grading</span>
+                      <div className="mh-teacher-field">
+                        {assignment.maxScore} points · {assignment.weightPercent}% weight
+                      </div>
+                    </label>
+                  </div>
+                </div>
+                {submittedLocked && assignment.submission?.submittedAt ? (
+                  <div className="mh-teacher-banner" style={{ background: "#e8f5ee", borderColor: "rgba(1,127,63,0.22)", color: "#017f3f" }}>
+                    Submitted {formatDate(assignment.submission.submittedAt)}
+                    {assignment.state === "graded" ? " · Graded and published" : ""}
+                  </div>
+                ) : null}
+              </section>
+
+              <section className="mh-teacher-card mh-student-assign__submit">
+                <div className="mh-teacher-card__head">
+                  <h2>Your submission</h2>
+                  <StatusPill tone={files.length ? "success" : "neutral"}>
+                    {files.length ? `${files.length} file${files.length === 1 ? "" : "s"}` : "No files"}
+                  </StatusPill>
+                </div>
+
+                {files.length ? (
+                  <div className="mh-teacher-list">
+                    {files.map((file) => (
+                      <div key={file.id} className="mh-teacher-list__item">
+                        <div>
+                          <strong>{file.filename}</strong>
+                          <span>
+                            Version {file.version} · {(file.sizeBytes / 1024).toFixed(1)} KB · {formatDate(file.createdAt)}
+                          </span>
+                        </div>
+                        {canRemove ? (
+                          <button
+                            type="button"
+                            className="mh-teacher-btn mh-teacher-btn--secondary"
+                            disabled={busy}
+                            onClick={() => void archive(file.id)}
+                          >
+                            Remove
+                          </button>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mh-teacher-muted" style={{ margin: 0 }}>
+                    No files uploaded yet.
+                  </p>
+                )}
+
+                {canUpload ? (
+                  <>
+                    <label className="mh-teacher-dropzone mh-student-assign__drop">
+                      <input
+                        aria-label="Choose submission file"
+                        type="file"
+                        disabled={busy}
+                        accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,.zip"
+                        onChange={(event) => {
+                          void upload(event.target.files?.[0]);
+                          event.target.value = "";
+                        }}
+                      />
+                      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden>
+                        <path d="M12 16V8M12 8l-3 3M12 8l3 3" stroke="#017f3f" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                        <path
+                          d="M20 16.5a3.5 3.5 0 0 0-2.1-6.4A5.5 5.5 0 0 0 7.1 8.4 3.5 3.5 0 0 0 4 11.8"
+                          stroke="#017f3f"
+                          strokeWidth="1.6"
+                          strokeLinecap="round"
+                        />
+                        <path d="M8 19h8" stroke="#017f3f" strokeWidth="1.6" strokeLinecap="round" />
+                      </svg>
+                      <strong>{busy ? "Uploading…" : "Choose a file to upload"}</strong>
+                      <span>PDF, Office, images, or ZIP · up to 10 MiB</span>
+                    </label>
+                    <div className="mh-teacher-actions">
+                      <button
+                        type="button"
+                        className="mh-teacher-btn mh-teacher-btn--primary"
+                        disabled={busy || !files.length}
+                        onClick={() => void submit()}
+                      >
+                        {busy ? "Working…" : "Submit assignment"}
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <p className="mh-teacher-muted" style={{ margin: 0 }}>
+                    {assignment.state === "graded"
+                      ? "This assignment has been graded. Resubmission is closed."
+                      : "This submission is locked. Contact your instructor if you need a resubmission window."}
+                  </p>
+                )}
+              </section>
+            </div>
           </div>
         )}
       </ResourceBoundary>
-    </ScreenScaffold>
+    </StudentFrame>
   );
 }
 
 export function StudentCalendarView() {
   const resource = useStudentResource<{ events: CalendarEvent[] }>("/calendar/me");
   const events = resource.data?.events ?? [];
-  return <ScreenScaffold role="student" title="Schedule" subtitle="Classes and assignment deadlines" breadcrumb={["Student", "Schedule"]} active="Schedule"><ResourceBoundary state={resource.state} error={resource.error} onRetry={resource.refresh}>{events.length === 0 ? <EmptyState title="No scheduled items" body="Your enrolled class schedule will appear here." /> : <ul style={listStyle}>{events.map((event) => <li key={event.id} style={rowStyle}><div><strong>{event.title}</strong><div style={{ color: "var(--mh-text-muted)" }}>{formatDate(event.startsAt)} · {event.location ?? "Online"}</div></div><div style={{ display: "flex", gap: 10, alignItems: "center" }}><StatusPill tone="neutral">{event.kind.replace("_", " ")}</StatusPill>{event.joinUrl ? <Button type="button" onClick={() => window.open(event.joinUrl!, "_blank", "noopener,noreferrer")}>Join class</Button> : null}</div></li>)}</ul>}</ResourceBoundary></ScreenScaffold>;
+  return <StudentFrame role="student" title="Schedule" subtitle="Classes and assignment deadlines" breadcrumb={["Student", "Schedule"]} active="Schedule"><ResourceBoundary state={resource.state} error={resource.error} onRetry={resource.refresh}>{events.length === 0 ? <EmptyState title="No scheduled items" body="Your enrolled class schedule will appear here." /> : <ul style={listStyle}>{events.map((event) => <li key={event.id} style={rowStyle}><div><strong>{event.title}</strong><div style={{ color: "var(--mh-text-muted)" }}>{formatDate(event.startsAt)} · {event.location ?? "Online"}</div></div><div style={{ display: "flex", gap: 10, alignItems: "center" }}><StatusPill tone="neutral">{event.kind.replace("_", " ")}</StatusPill>{event.joinUrl ? <Button type="button" onClick={() => window.open(event.joinUrl!, "_blank", "noopener,noreferrer")}>Join class</Button> : null}</div></li>)}</ul>}</ResourceBoundary></StudentFrame>;
 }
 
 type NotificationItem = { id: string; channel: string; title: string; body: string; readAt: string | null; createdAt: string };
@@ -416,35 +630,474 @@ export function StudentNotificationsView() {
     catch (caught) { setActionError(caught instanceof Error ? caught.message : "Could not update notification"); }
   }
   const items = resource.data?.items ?? [];
-  return <ScreenScaffold role="student" title="Notifications" subtitle={`${resource.data?.unreadCount ?? 0} unread`} breadcrumb={["Student", "Notifications"]}>{actionError ? <Banner tone="danger">{actionError}</Banner> : null}<ResourceBoundary state={resource.state} error={resource.error} onRetry={resource.refresh}>{items.length === 0 ? <EmptyState title="You're all caught up" body="New campus notices will appear here." /> : <ul style={listStyle}>{items.map((item) => <li key={item.id} style={{ ...rowStyle, opacity: item.readAt ? 0.72 : 1 }}><div><strong>{item.title}</strong><div style={{ marginTop: 4 }}>{item.body}</div><div style={{ color: "var(--mh-text-muted)", marginTop: 4 }}>{formatDate(item.createdAt)}</div></div>{item.readAt ? <StatusPill tone="neutral">Read</StatusPill> : <Button type="button" onClick={() => void markRead(item.id)}>Mark read</Button>}</li>)}</ul>}</ResourceBoundary></ScreenScaffold>;
+  return <StudentFrame role="student" title="Notifications" subtitle={`${resource.data?.unreadCount ?? 0} unread`} breadcrumb={["Student", "Notifications"]}>{actionError ? <Banner tone="danger">{actionError}</Banner> : null}<ResourceBoundary state={resource.state} error={resource.error} onRetry={resource.refresh}>{items.length === 0 ? <EmptyState title="You're all caught up" body="New campus notices will appear here." /> : <ul style={listStyle}>{items.map((item) => <li key={item.id} style={{ ...rowStyle, opacity: item.readAt ? 0.72 : 1 }}><div><strong>{item.title}</strong><div style={{ marginTop: 4 }}>{item.body}</div><div style={{ color: "var(--mh-text-muted)", marginTop: 4 }}>{formatDate(item.createdAt)}</div></div>{item.readAt ? <StatusPill tone="neutral">Read</StatusPill> : <Button type="button" onClick={() => void markRead(item.id)}>Mark read</Button>}</li>)}</ul>}</ResourceBoundary></StudentFrame>;
 }
 
 type Profile = { studentId: string; studentNumber: string; givenName: string; familyName: string; primaryEmail: string; dateOfBirth: string | null; programName: string; standing: string; timezone: string };
 
 export function StudentProfileView() {
+  const router = useRouter();
   const resource = useStudentResource<Profile>("/me/profile");
   const [timezone, setTimezone] = useState("");
   const [familyName, setFamilyName] = useState("");
   const [reason, setReason] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  useEffect(() => { if (resource.data) { setTimezone(resource.data.timezone); setFamilyName(resource.data.familyName); } }, [resource.data]);
-  async function saveTimezone(event: FormEvent) { event.preventDefault(); if (!resource.session) return; setNotice(null); setActionError(null); try { await api("/me/preferences", { method: "PATCH", body: JSON.stringify({ timezone }) }, resource.session.accessToken); setNotice("Timezone updated."); await resource.refresh(); } catch (caught) { setActionError(caught instanceof Error ? caught.message : "Could not update timezone"); } }
-  async function requestChange(event: FormEvent) { event.preventDefault(); if (!resource.session) return; setNotice(null); setActionError(null); try { await api("/me/profile-change-requests", { method: "POST", body: JSON.stringify({ familyName, reason }) }, resource.session.accessToken); setNotice("Profile change sent to the registrar for approval."); setReason(""); } catch (caught) { setActionError(caught instanceof Error ? caught.message : "Could not request profile change"); } }
+  const [savingTz, setSavingTz] = useState(false);
+  const [sendingChange, setSendingChange] = useState(false);
+
+  useEffect(() => {
+    if (resource.data) {
+      setTimezone(resource.data.timezone);
+      setFamilyName(resource.data.familyName);
+    }
+  }, [resource.data]);
+
+  async function saveTimezone(event: FormEvent) {
+    event.preventDefault();
+    if (!resource.session) return;
+    setNotice(null);
+    setActionError(null);
+    setSavingTz(true);
+    try {
+      await api("/me/preferences", { method: "PATCH", body: JSON.stringify({ timezone }) }, resource.session.accessToken);
+      setNotice("Timezone updated.");
+      await resource.refresh();
+    } catch (caught) {
+      setActionError(caught instanceof Error ? caught.message : "Could not update timezone");
+    } finally {
+      setSavingTz(false);
+    }
+  }
+
+  async function requestChange(event: FormEvent) {
+    event.preventDefault();
+    if (!resource.session) return;
+    setNotice(null);
+    setActionError(null);
+    setSendingChange(true);
+    try {
+      await api(
+        "/me/profile-change-requests",
+        { method: "POST", body: JSON.stringify({ familyName, reason }) },
+        resource.session.accessToken,
+      );
+      setNotice("Profile change sent to the registrar for approval.");
+      setReason("");
+    } catch (caught) {
+      setActionError(caught instanceof Error ? caught.message : "Could not request profile change");
+    } finally {
+      setSendingChange(false);
+    }
+  }
+
   const profile = resource.data;
-  return <ScreenScaffold role="student" title="Profile" subtitle="Personal information and preferences" breadcrumb={["Student", "Profile"]}>{actionError ? <Banner tone="danger">{actionError}</Banner> : null}{notice ? <Banner tone="success">{notice}</Banner> : null}<ResourceBoundary state={resource.state} error={resource.error} onRetry={resource.refresh}>{profile ? <div style={{ display: "grid", gap: 18, gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))" }}><Panel title="Student record"><dl style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: 10, margin: 0 }}><dt>Student number</dt><dd>{profile.studentNumber}</dd><dt>Name</dt><dd>{profile.givenName} {profile.familyName}</dd><dt>Email</dt><dd>{profile.primaryEmail}</dd><dt>Program</dt><dd>{profile.programName}</dd><dt>Standing</dt><dd>{profile.standing}</dd></dl></Panel><Panel title="Timezone"><form onSubmit={saveTimezone} style={{ display: "grid", gap: 12 }}><label>Timezone<input value={timezone} onChange={(event) => setTimezone(event.target.value)} required /></label><Button type="submit">Save preference</Button></form></Panel><Panel title="Request an official correction"><form onSubmit={requestChange} style={{ display: "grid", gap: 12 }}><label>Family name<input value={familyName} onChange={(event) => setFamilyName(event.target.value)} required /></label><label>Reason<textarea value={reason} onChange={(event) => setReason(event.target.value)} minLength={10} required rows={4} /></label><Button type="submit">Send for approval</Button></form></Panel></div> : null}</ResourceBoundary></ScreenScaffold>;
+  const fullName = profile ? `${profile.givenName} ${profile.familyName}`.trim() : "Student";
+  const initials =
+    fullName
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join("") || "ST";
+  const dob = profile?.dateOfBirth
+    ? new Date(profile.dateOfBirth).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })
+    : "Not on file";
+
+  return (
+    <StudentFrame
+      role="student"
+      title="Profile"
+      subtitle="Your student record"
+      breadcrumb={["Student", "Profile"]}
+      activeHref="/student/profile"
+    >
+      {actionError ? <Banner tone="danger">{actionError}</Banner> : null}
+      {notice ? <Banner tone="success">{notice}</Banner> : null}
+      <ResourceBoundary state={resource.state} error={resource.error} onRetry={resource.refresh}>
+        {profile ? (
+          <div className="mh-teacher-profile">
+            <aside className="mh-teacher-profile__card">
+              <div className="mh-student-profile__avatar" aria-hidden>
+                {initials}
+              </div>
+              <h2>{fullName}</h2>
+              <p>
+                {profile.programName}
+                {profile.standing ? ` · ${profile.standing}` : ""}
+              </p>
+              <p className="mh-teacher-mono">ID {profile.studentNumber}</p>
+              <div className="mh-student-profile__chips">
+                <StatusPill tone={/good|excellent|satisfactory/i.test(profile.standing) ? "success" : "neutral"}>
+                  {profile.standing}
+                </StatusPill>
+                <span className="mh-teacher-tag">{profile.programName}</span>
+              </div>
+            </aside>
+
+            <section className="mh-teacher-card mh-teacher-profile__main">
+              <div className="mh-teacher-tabs">
+                <button type="button" className="mh-teacher-tabs__item is-active">
+                  My profile
+                </button>
+                <button
+                  type="button"
+                  className="mh-teacher-tabs__item"
+                  onClick={() => router.push("/student/notifications")}
+                >
+                  Notifications
+                </button>
+              </div>
+
+              <div className="mh-teacher-section">
+                <div className="mh-teacher-section__label">PERSONAL INFO</div>
+                <div className="mh-teacher-fields">
+                  <label>
+                    <span>Given name</span>
+                    <div className="mh-teacher-field">{profile.givenName}</div>
+                  </label>
+                  <label>
+                    <span>Family name</span>
+                    <div className="mh-teacher-field">{profile.familyName}</div>
+                  </label>
+                  <label>
+                    <span>Primary email</span>
+                    <div className="mh-teacher-field">{profile.primaryEmail}</div>
+                  </label>
+                  <label>
+                    <span>Date of birth</span>
+                    <div className="mh-teacher-field">{dob}</div>
+                  </label>
+                  <label>
+                    <span>Student number</span>
+                    <div className="mh-teacher-field">{profile.studentNumber}</div>
+                  </label>
+                  <label>
+                    <span>Academic standing</span>
+                    <div className="mh-teacher-field">{profile.standing}</div>
+                  </label>
+                </div>
+              </div>
+
+              <div className="mh-teacher-section">
+                <div className="mh-teacher-section__label">PREFERENCES</div>
+                <form className="mh-teacher-form" onSubmit={saveTimezone}>
+                  <label>
+                    <span>Timezone</span>
+                    <input
+                      className="mh-teacher-field"
+                      value={timezone}
+                      onChange={(event) => setTimezone(event.target.value)}
+                      placeholder="e.g. America/Toronto"
+                      required
+                    />
+                  </label>
+                  <div className="mh-teacher-actions">
+                    <button type="submit" className="mh-teacher-btn mh-teacher-btn--primary" disabled={savingTz}>
+                      {savingTz ? "Saving…" : "Save preference"}
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              <div className="mh-teacher-section">
+                <div className="mh-teacher-section__label">OFFICIAL CORRECTION</div>
+                <p className="mh-teacher-muted" style={{ margin: 0 }}>
+                  Name corrections go to the registrar for approval. Include a clear reason.
+                </p>
+                <form className="mh-teacher-form" onSubmit={requestChange}>
+                  <div className="mh-teacher-fields">
+                    <label>
+                      <span>Family name</span>
+                      <input
+                        className="mh-teacher-field"
+                        value={familyName}
+                        onChange={(event) => setFamilyName(event.target.value)}
+                        required
+                      />
+                    </label>
+                    <label style={{ gridColumn: "1 / -1" }}>
+                      <span>Reason</span>
+                      <textarea
+                        className="mh-teacher-field"
+                        value={reason}
+                        onChange={(event) => setReason(event.target.value)}
+                        minLength={10}
+                        required
+                        rows={4}
+                        placeholder="Describe the correction needed…"
+                      />
+                    </label>
+                  </div>
+                  <div className="mh-teacher-actions">
+                    <button type="submit" className="mh-teacher-btn mh-teacher-btn--primary" disabled={sendingChange}>
+                      {sendingChange ? "Sending…" : "Send for approval"}
+                    </button>
+                    <button
+                      type="button"
+                      className="mh-teacher-btn mh-teacher-btn--secondary"
+                      onClick={() => router.push("/student/messages")}
+                    >
+                      Message registrar
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </section>
+          </div>
+        ) : null}
+      </ResourceBoundary>
+    </StudentFrame>
+  );
 }
 
 type SearchGroup = { type: string; items: Array<{ id: string; label: string; sub?: string | null; href?: string | null }> };
 
 export function StudentSearchView() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [session, setSession] = useState<Session | null>(null);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(searchParams.get("q") ?? "");
   const [groups, setGroups] = useState<SearchGroup[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { const active = loadSession(); if (!active) router.replace("/login"); else setSession(active); }, [router]);
-  async function search(event: FormEvent) { event.preventDefault(); if (!session || !query.trim()) return; setBusy(true); setError(null); try { const result = await api<{ groups: SearchGroup[] }>(`/search?q=${encodeURIComponent(query.trim())}`, {}, session.accessToken); setGroups(result.groups); } catch (caught) { setError(caught instanceof Error ? caught.message : "Search failed"); } finally { setBusy(false); } }
-  return <ScreenScaffold role="student" title="Search" subtitle="Your courses, assignments, and approved resources" breadcrumb={["Student", "Search"]}><form onSubmit={search} style={{ display: "flex", gap: 10, marginBottom: 18, maxWidth: 680 }}><input aria-label="Search student portal" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search your portal" style={{ flex: 1 }} /><Button type="submit" disabled={busy || !query.trim()}>{busy ? "Searching…" : "Search"}</Button></form>{error ? <Banner tone="danger">{error}</Banner> : null}{groups.length === 0 ? <EmptyState title="Search your portal" body="People outside your enrolled courses are not included in student search." /> : groups.map((group) => <Panel key={group.type} title={group.type[0]?.toUpperCase() + group.type.slice(1)}><ul style={listStyle}>{group.items.map((item) => <li key={item.id} style={rowStyle}><div><strong>{item.label}</strong>{item.sub ? <div style={{ color: "var(--mh-text-muted)" }}>{item.sub}</div> : null}</div>{item.href ? <Button type="button" variant="secondary" onClick={() => router.push(item.href!)}>Open</Button> : null}</li>)}</ul></Panel>)}</ScreenScaffold>;
+  const activeQuery = (searchParams.get("q") ?? "").trim();
+  useEffect(() => {
+    const active = loadSession();
+    if (!active) router.replace("/login");
+    else setSession(active);
+  }, [router]);
+  useEffect(() => {
+    const q = searchParams.get("q") ?? "";
+    setQuery(q);
+    if (!q.trim() || !session) {
+      setGroups([]);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    api<{ groups: SearchGroup[] }>(`/search?q=${encodeURIComponent(q.trim())}`, {}, session.accessToken)
+      .then((result) => setGroups(result.groups))
+      .catch((caught) => setError(caught instanceof Error ? caught.message : "Search failed"))
+      .finally(() => setBusy(false));
+  }, [searchParams, session]);
+  async function search(event: FormEvent) {
+    event.preventDefault();
+    if (!query.trim()) return;
+    router.push(`/student/search?q=${encodeURIComponent(query.trim())}`);
+  }
+  return (
+    <StudentFrame
+      role="student"
+      title="Search"
+      subtitle="Search your courses, assignments, library, and student services."
+      breadcrumb={["Student", "Search"]}
+    >
+      <form onSubmit={search} style={{ display: "flex", gap: 10, marginBottom: 18, maxWidth: 680 }}>
+        <input
+          aria-label="Search student portal"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search your portal"
+          style={{ flex: 1 }}
+        />
+        <Button type="submit" disabled={busy || !query.trim()}>
+          {busy ? "Searching…" : "Search"}
+        </Button>
+      </form>
+      {error ? <Banner tone="danger">{error}</Banner> : null}
+      {!busy && groups.length === 0 ? (
+        <EmptyState
+          title={activeQuery ? `No results for “${activeQuery}”` : "Search your portal"}
+          body={
+            activeQuery
+              ? "Try a course code, assignment, lab, service, credential, or library keyword."
+              : "Results are limited to records and services available to your student account."
+          }
+        />
+      ) : (
+        groups.map((group) => (
+          <Panel key={group.type} title={group.type[0]?.toUpperCase() + group.type.slice(1)}>
+            <ul style={listStyle}>
+              {group.items.map((item) => (
+                <li key={item.id} style={rowStyle}>
+                  <div>
+                    <strong>{item.label}</strong>
+                    {item.sub ? <div style={{ color: "var(--mh-text-muted)" }}>{item.sub}</div> : null}
+                  </div>
+                  {item.href ? (
+                    <Button type="button" variant="secondary" onClick={() => router.push(item.href!)}>
+                      Open
+                    </Button>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </Panel>
+        ))
+      )}
+    </StudentFrame>
+  );
+}
+
+type PortalHubView = {
+  title: string;
+  subtitle: string;
+  metrics: Array<{ label: string; value: string; hint?: string }>;
+  sections: Array<{ title: string; rows: Array<{ primary: string; secondary?: string; meta?: string; href?: string }> }>;
+  actions: Array<{ label: string; href?: string; variant?: string }>;
+};
+
+const SERVICE_LINKS: Array<{ title: string; body: string; href: string }> = [
+  { title: "Active courses", body: "Open enrolled sections, lectures, and resources.", href: "/student/courses" },
+  { title: "Grades & final marks", body: "Published scores and letter grades.", href: "/student/grades" },
+  { title: "Assignments", body: "Due work, uploads, and submission status.", href: "/student/assignments" },
+  { title: "Calendar & Join Class", body: "Upcoming classes and meeting links.", href: "/student/calendar" },
+  { title: "Campus services", body: "Workshops, advising, and campus request forms.", href: "/student/f/st-16-services" },
+  { title: "Program plan", body: "Program standing and progress overview.", href: "/student/profile" },
+  { title: "My documents", body: "ID card and uploaded student documents.", href: "/student/documents" },
+  { title: "Fees & statements", body: "Balances, tuition, and financial records.", href: "/student/fees" },
+  { title: "Messages", body: "Inbox threads with instructors and campus.", href: "/student/messages" },
+  { title: "Leave of absence", body: "Start a request form for registrar review.", href: "/student/holds" },
+  { title: "Ask Heritage", body: "Grounded answers from your campus records.", href: "/student/ask" },
+  { title: "Profile & settings", body: "Timezone, security, and correction requests.", href: "/student/profile" },
+];
+
+export function StudentServicesView() {
+  const router = useRouter();
+  const resource = useStudentResource<PortalHubView>("/portal/view?path=%2Fstudent%2Fadvising");
+  const advisingRows = resource.data?.sections.flatMap((section) => section.rows) ?? [];
+
+  return (
+    <StudentFrame
+      role="student"
+      active="Services"
+      title="Student services"
+      subtitle="Advising, records, workshops, fees, and request forms for your student account."
+      breadcrumb={["Student", "Services"]}
+    >
+      <ResourceBoundary state={resource.state} error={resource.error} onRetry={resource.refresh}>
+        <div style={{ display: "grid", gap: 18 }}>
+          <Panel title="Advising appointments">
+            {advisingRows.length ? (
+              <ul style={listStyle}>
+                {advisingRows.map((row) => (
+                  <li key={`${row.primary}-${row.meta ?? ""}`} style={rowStyle}>
+                    <div>
+                      <strong>{row.primary}</strong>
+                      {row.secondary ? <div style={{ color: "var(--mh-text-muted)" }}>{row.secondary}</div> : null}
+                    </div>
+                    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                      {row.meta ? <StatusPill tone="warning">{row.meta}</StatusPill> : null}
+                      <Button type="button" variant="secondary" onClick={() => router.push("/student/messages")}>
+                        Message advisor
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <EmptyState title="No advising bookings yet" body="When an advisor books a check-in, it will appear here." />
+            )}
+          </Panel>
+
+          <Panel title="My campus hub">
+            <div
+              style={{
+                display: "grid",
+                gap: 12,
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              }}
+            >
+              {SERVICE_LINKS.map((link) => (
+                <button
+                  key={link.href + link.title}
+                  type="button"
+                  onClick={() => router.push(link.href)}
+                  style={{
+                    textAlign: "left",
+                    padding: 14,
+                    border: "1px solid var(--mh-border)",
+                    borderRadius: "var(--mh-radius-md)",
+                    background: "var(--mh-surface)",
+                    cursor: "pointer",
+                    display: "grid",
+                    gap: 6,
+                  }}
+                >
+                  <strong>{link.title}</strong>
+                  <span style={{ color: "var(--mh-text-muted)", fontSize: 13 }}>{link.body}</span>
+                </button>
+              ))}
+            </div>
+          </Panel>
+        </div>
+      </ResourceBoundary>
+    </StudentFrame>
+  );
+}
+
+export function StudentFeesView() {
+  const router = useRouter();
+  const resource = useStudentResource<PortalHubView>("/portal/view?path=%2Fstudent%2Ffees");
+  const rows = resource.data?.sections.flatMap((section) => section.rows) ?? [];
+  return (
+    <StudentFrame role="student" active="Fees" title="Fees & financial statements" subtitle="Tuition balances and financial records for your account." breadcrumb={["Student", "Fees"]}>
+      <ResourceBoundary state={resource.state} error={resource.error} onRetry={resource.refresh}>
+        <Panel title="Balances">
+          {rows.length ? (
+            <ul style={listStyle}>
+              {rows.map((row) => (
+                <li key={`${row.primary}-${row.meta ?? ""}`} style={rowStyle}>
+                  <div>
+                    <strong>{row.primary}</strong>
+                    {row.secondary ? <div style={{ color: "var(--mh-text-muted)" }}>{row.secondary}</div> : null}
+                  </div>
+                  {row.meta ? <StatusPill tone="warning">{row.meta}</StatusPill> : null}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <EmptyState title="No fee rows" body="Financial statements will appear when posted by finance." />
+          )}
+          <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <Button type="button" variant="secondary" onClick={() => router.push("/student/documents")}>Tax documents</Button>
+            <Button type="button" variant="secondary" onClick={() => router.push("/student/advising")}>Back to services</Button>
+          </div>
+        </Panel>
+      </ResourceBoundary>
+    </StudentFrame>
+  );
+}
+
+export function StudentDocumentsView() {
+  const router = useRouter();
+  const resource = useStudentResource<PortalHubView>("/portal/view?path=%2Fstudent%2Fdocuments");
+  const rows = resource.data?.sections.flatMap((section) => section.rows) ?? [];
+  return (
+    <StudentFrame role="student" title="My documents" subtitle="Student ID and campus document records." breadcrumb={["Student", "Documents"]}>
+      <ResourceBoundary state={resource.state} error={resource.error} onRetry={resource.refresh}>
+        <Panel title="Documents">
+          {rows.length ? (
+            <ul style={listStyle}>
+              {rows.map((row) => (
+                <li key={`${row.primary}-${row.meta ?? ""}`} style={rowStyle}>
+                  <div>
+                    <strong>{row.primary}</strong>
+                    {row.secondary ? <div style={{ color: "var(--mh-text-muted)" }}>{row.secondary}</div> : null}
+                  </div>
+                  {row.meta ? <StatusPill tone="success">{row.meta}</StatusPill> : null}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <EmptyState title="No documents yet" body="Uploaded and issued student documents will list here." />
+          )}
+          <div style={{ marginTop: 14 }}>
+            <Button type="button" variant="secondary" onClick={() => router.push("/student/advising")}>Student services</Button>
+          </div>
+        </Panel>
+      </ResourceBoundary>
+    </StudentFrame>
+  );
 }
