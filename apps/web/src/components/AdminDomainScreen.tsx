@@ -70,6 +70,14 @@ export function AdminDomainScreen({ path, title, figmaId, archetype }: Props) {
       router.replace("/login");
       return;
     }
+    if (!s.roles.includes("admin") && !s.roles.includes("registrar")) {
+      if (s.roles.includes("instructor")) router.replace("/instructor");
+      else if (s.roles.includes("student")) router.replace("/student");
+      else if (s.roles.includes("applicant")) router.replace("/applicant");
+      else if (s.roles.includes("employer")) router.replace("/employer");
+      else router.replace("/login");
+      return;
+    }
     api<PortalView>(`/portal/view?path=${encodeURIComponent(path)}`, {}, s.accessToken)
       .then(setView)
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load"));

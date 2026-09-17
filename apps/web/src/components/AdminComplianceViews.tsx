@@ -59,8 +59,21 @@ function KpiRow({ config }: { config: SisScreenConfig }) {
 
 export function ComplianceDashView({ config }: { config: SisScreenConfig }) {
   const router = useRouter();
-  const dash = config.complianceDash!;
-  const score = dash.scorePct;
+  const dash = config.complianceDash;
+  if (!dash) {
+    return (
+      <div className="mh-sis-dash mh-sis-dash--wide" data-figma-id={config.figmaId}>
+        <div className="mh-sis-dash__welcome">
+          <div className="mh-sis-dash__welcome-text">
+            <h1>{config.title}</h1>
+            <p>{config.subtitle}</p>
+          </div>
+        </div>
+        <p>No compliance score is available yet.</p>
+      </div>
+    );
+  }
+  const score = typeof dash.scorePct === "number" ? dash.scorePct : 0;
   const circumference = 2 * Math.PI * 54;
   const offset = circumference * (1 - score / 100);
 

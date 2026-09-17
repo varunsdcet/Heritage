@@ -1,29 +1,77 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import { api, saveSession, type Session } from "@/lib/api";
+import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { api, loadSession, saveSession, type Session } from "@/lib/api";
 
-export default function LoginPage() {
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function homeForRoles(roles: string[]) {
+  if (roles.includes("instructor")) return "/instructor";
+  if (roles.includes("admin") || roles.includes("registrar")) return "/admin";
+  if (roles.includes("applicant")) return "/applicant";
+  if (roles.includes("employer")) return "/employer";
+  if (roles.length > 1) return "/role-select";
+  return "/student";
+}
+
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("marcus.vance@heritage.edu");
   const [password, setPassword] = useState("Heritage!2026");
   const [showPassword, setShowPassword] = useState(false);
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [touchedEmail, setTouchedEmail] = useState(false);
   const [touchedPassword, setTouchedPassword] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+
+  useEffect(() => {
+    const existing = loadSession();
+    if (!existing) return;
+    const next = searchParams.get("next");
+    router.replace(next && next.startsWith("/") ? next : homeForRoles(existing.roles));
+  }, [router, searchParams]);
+
+  const emailTrimmed = email.trim();
+  const emailError = useMemo(() => {
+    if (!touchedEmail && !submitted) return null;
+    if (!emailTrimmed) return "Email is required.";
+    if (!isValidEmail(emailTrimmed)) return "Enter a valid email address.";
+    return null;
+  }, [emailTrimmed, touchedEmail, submitted]);
 
   const passwordError = useMemo(() => {
-    if (!touchedPassword && !error) return null;
-    if (password.length > 0 && password.length < 8) return "Password must be at least 8 characters long.";
+    if (!touchedPassword && !submitted) return null;
+    if (!password) return "Password is required.";
+    if (password.length < 8) return "Password must be at least 8 characters long.";
     return null;
-  }, [password, touchedPassword, error]);
+  }, [password, touchedPassword, submitted]);
+
+  const canSubmit = Boolean(emailTrimmed) && isValidEmail(emailTrimmed) && password.length >= 8 && !loading;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    setSubmitted(true);
+    setTouchedEmail(true);
     setTouchedPassword(true);
-    if (password.length > 0 && password.length < 8) {
+    if (!emailTrimmed) {
+      setError("Email is required.");
+      return;
+    }
+    if (!isValidEmail(emailTrimmed)) {
+      setError("Enter a valid email address.");
+      return;
+    }
+    if (!password) {
+      setError("Password is required.");
+      return;
+    }
+    if (password.length < 8) {
       setError("Password must be at least 8 characters long.");
       return;
     }
@@ -33,19 +81,15 @@ export default function LoginPage() {
       const session = await api<Session>("/auth/login", {
         method: "POST",
         body: JSON.stringify({
-          email: email.trim().toLowerCase(),
+          email: emailTrimmed.toLowerCase(),
           password,
           deviceFingerprint: `web-${typeof navigator !== "undefined" ? navigator.userAgent.slice(0, 48) : "device"}`,
           remember,
         }),
       });
       saveSession(session);
-      if (session.roles.includes("instructor")) router.push("/instructor");
-      else if (session.roles.includes("admin") || session.roles.includes("registrar")) router.push("/admin");
-      else if (session.roles.includes("applicant")) router.push("/applicant");
-      else if (session.roles.includes("employer")) router.push("/employer");
-      else if (session.roles.length > 1) router.push("/role-select");
-      else router.push("/student");
+      const next = searchParams.get("next");
+      router.push(next && next.startsWith("/") ? next : homeForRoles(session.roles));
     } catch (err) {
       const raw = err instanceof Error ? err.message : "Sign-in failed";
       const friendly =
@@ -62,7 +106,7 @@ export default function LoginPage() {
     }
   }
 
-  const fieldError = Boolean(passwordError) || Boolean(error && password.length < 8);
+  const fieldError = Boolean(passwordError);
 
   return (
     <div
@@ -109,7 +153,7 @@ export default function LoginPage() {
           style={{ display: "block", height: 56, width: "auto", maxWidth: 280, objectFit: "contain" }}
         />
 
-        <form onSubmit={onSubmit} style={{ width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 24 }}>
+        <form onSubmit={onSubmit} noValidate style={{ width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 24 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <h1 style={{ margin: 0, fontSize: 32, fontWeight: 700, lineHeight: 1.2, color: "#1A1C19" }}>
               Sign in to MyHeritage
@@ -119,7 +163,7 @@ export default function LoginPage() {
             </p>
           </div>
 
-          {error && !passwordError ? (
+          {error && !passwordError && !emailError ? (
             <div style={{ display: "flex", gap: 6, alignItems: "center", color: "#BA1A1A", fontSize: 13 }}>
               <img src="/brand/login/alert.svg" alt="" width={16} height={16} />
               <span>{error}</span>
@@ -131,9 +175,15 @@ export default function LoginPage() {
               <span style={{ fontSize: 14, fontWeight: 600, color: "#1A1C19" }}>Student Email</span>
               <input
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  setTouchedEmail(true);
+                  setError(null);
+                }}
+                onBlur={() => setTouchedEmail(true)}
                 autoComplete="username"
                 placeholder="name@heritage.edu"
+                aria-invalid={Boolean(emailError)}
                 style={{
                   width: "100%",
                   boxSizing: "border-box",
@@ -141,12 +191,18 @@ export default function LoginPage() {
                   fontSize: 15,
                   padding: "12px 14px",
                   borderRadius: 6,
-                  border: "1px solid #E1E3DC",
+                  border: `1px solid ${emailError ? "#BA1A1A" : "#E1E3DC"}`,
                   background: "#F9FAF6",
                   color: "#1A1C19",
                   outline: "none",
                 }}
               />
+              {emailError ? (
+                <span style={{ display: "flex", gap: 6, alignItems: "center", color: "#BA1A1A", fontSize: 13 }}>
+                  <img src="/brand/login/alert.svg" alt="" width={16} height={16} />
+                  {emailError}
+                </span>
+              ) : null}
             </label>
 
             <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -158,8 +214,11 @@ export default function LoginPage() {
                   onChange={(e) => {
                     setPassword(e.target.value);
                     setTouchedPassword(true);
+                    setError(null);
                   }}
+                  onBlur={() => setTouchedPassword(true)}
                   autoComplete="current-password"
+                  aria-invalid={Boolean(passwordError)}
                   style={{
                     width: "100%",
                     boxSizing: "border-box",
@@ -241,18 +300,18 @@ export default function LoginPage() {
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <button
               type="submit"
-              disabled={loading}
+              disabled={!canSubmit}
               style={{
                 width: "100%",
                 border: "none",
                 borderRadius: 6,
-                background: "#017F3F",
+                background: canSubmit ? "#017F3F" : "#C5C9C0",
                 color: "#FFFFFF",
                 fontSize: 15,
                 fontWeight: 600,
                 fontFamily: "inherit",
                 padding: "12px 16px",
-                cursor: loading ? "wait" : "pointer",
+                cursor: canSubmit ? "pointer" : "not-allowed",
                 opacity: loading ? 0.85 : 1,
               }}
             >
@@ -297,5 +356,13 @@ export default function LoginPage() {
         />
       </aside>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div style={{ padding: 24 }}>Loading…</div>}>
+      <LoginForm />
+    </Suspense>
   );
 }

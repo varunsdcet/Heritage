@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Metric, Panel } from "@myheritage/ui";
 import { ScreenScaffold, ListPanel, MobileChrome } from "@/components/ScreenScaffold";
@@ -33,6 +33,31 @@ export type PortalView = {
   actions: PortalAction[];
   live: true;
 };
+
+function mimeForFile(file: File) {
+  if (file.type) return file.type;
+  const extension = file.name.split(".").pop()?.toLowerCase();
+  return (
+    (
+      {
+        pdf: "application/pdf",
+        doc: "application/msword",
+        docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        png: "image/png",
+        jpg: "image/jpeg",
+        jpeg: "image/jpeg",
+      } as Record<string, string>
+    )[extension ?? ""] ?? ""
+  );
+}
+
+function toBase64(bytes: Uint8Array) {
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  }
+  return btoa(binary);
+}
 
 export function LiveScreen({
   path,
@@ -71,6 +96,8 @@ function GenericLiveScreen({
   const [view, setView] = useState<PortalView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const pendingUploadRef = useRef<PortalAction | null>(null);
 
   const load = useCallback(() => {
     const s = loadSession();
@@ -87,12 +114,7 @@ function GenericLiveScreen({
     load();
   }, [load]);
 
-  async function runAction(a: PortalAction) {
-    if (a.href && !a.action) {
-      router.push(a.href);
-      return;
-    }
-    if (!a.action) return;
+  async function postAction(a: PortalAction, payload?: Record<string, unknown>) {
     const s = loadSession();
     if (!s) {
       router.replace("/login");
@@ -110,7 +132,7 @@ function GenericLiveScreen({
         endpoint,
         {
           method: "POST",
-          body: JSON.stringify({ action: a.action, payload: a.payload, path }),
+          body: JSON.stringify({ action: a.action, payload: payload ?? a.payload, path }),
         },
         s.accessToken,
       );
@@ -121,6 +143,37 @@ function GenericLiveScreen({
     } finally {
       setBusyAction(null);
     }
+  }
+
+  async function runAction(a: PortalAction) {
+    if (a.href && !a.action) {
+      router.push(a.href);
+      return;
+    }
+    if (!a.action) return;
+    if (a.action === "upload_document") {
+      pendingUploadRef.current = a;
+      fileInputRef.current?.click();
+      return;
+    }
+    await postAction(a);
+  }
+
+  async function onUploadFileSelected(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    const pending = pendingUploadRef.current;
+    event.target.value = "";
+    pendingUploadRef.current = null;
+    if (!file || !pending?.action) return;
+    const mimeType = mimeForFile(file);
+    const contentBase64 = toBase64(new Uint8Array(await file.arrayBuffer()));
+    await postAction(pending, {
+      ...(pending.payload ?? {}),
+      filename: file.name,
+      mimeType,
+      sizeBytes: file.size,
+      contentBase64,
+    });
   }
 
   if (error && !view) {
@@ -144,6 +197,13 @@ function GenericLiveScreen({
 
   const content = (
     <>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+        style={{ display: "none" }}
+        onChange={(event) => void onUploadFileSelected(event)}
+      />
       {error ? <p style={{ color: "var(--mh-danger)", marginBottom: 12 }}>{error}</p> : null}
       <div style={{ display: "flex", gap: "0.65rem", flexWrap: "wrap", marginBottom: "0.85rem" }}>
         {view.metrics.map((m) => (

@@ -512,7 +512,7 @@ export function TeacherShell({
             <button
               type="button"
               className="mh-teacher__ask"
-              onClick={() => router.push("/instructor/f/in-12-ai-course-studio")}
+              onClick={() => router.push("/instructor/ask")}
             >
               <NavIcon name="sparkle" active />
               <span>Ask MyHeritage</span>

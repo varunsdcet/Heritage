@@ -1,11 +1,65 @@
+import { randomUUID } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
+import { writeAuditAndOutbox } from "@myheritage/events";
 import type { PortalRow, PortalView } from "../portal/portal.service.js";
 
 function requireApplicant(user: SessionClaims) {
   if (!user.roles.includes("applicant")) {
     throw Object.assign(new Error("Forbidden"), { code: "FORBIDDEN", status: 403 });
   }
+}
+
+function httpError(message: string, code: string, status: number) {
+  return Object.assign(new Error(message), { code, status });
+}
+
+const extensionByMime: Record<string, string[]> = {
+  "application/pdf": [".pdf"],
+  "application/msword": [".doc"],
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+  "image/png": [".png"],
+  "image/jpeg": [".jpg", ".jpeg"],
+};
+
+function decodeAndValidateApplicantFile(input: {
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  contentBase64: string;
+}) {
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(input.contentBase64) || input.contentBase64.length % 4 !== 0) {
+    throw httpError("File content is not valid base64", "VALIDATION_ERROR", 400);
+  }
+  if (path.basename(input.filename) !== input.filename || input.filename.includes("\0")) {
+    throw httpError("Filename must not contain a path", "VALIDATION_ERROR", 400);
+  }
+  const allowedExtensions = extensionByMime[input.mimeType] ?? [];
+  const extension = path.extname(input.filename).toLowerCase();
+  if (!allowedExtensions.includes(extension)) {
+    throw httpError("Filename extension does not match the file type", "VALIDATION_ERROR", 400);
+  }
+
+  const content = Buffer.from(input.contentBase64, "base64");
+  if (content.byteLength !== input.sizeBytes) {
+    throw httpError("Decoded file size does not match sizeBytes", "VALIDATION_ERROR", 400);
+  }
+
+  const startsWith = (...bytes: number[]) => bytes.every((byte, index) => content[index] === byte);
+  const isZip = startsWith(0x50, 0x4b, 0x03, 0x04) || startsWith(0x50, 0x4b, 0x05, 0x06);
+  const signatureValid =
+    (input.mimeType === "application/pdf" && content.subarray(0, 5).toString() === "%PDF-") ||
+    (input.mimeType === "image/png" && startsWith(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) ||
+    (input.mimeType === "image/jpeg" && startsWith(0xff, 0xd8, 0xff)) ||
+    (input.mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" && isZip) ||
+    (input.mimeType === "application/msword" && startsWith(0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1));
+
+  if (!signatureValid) {
+    throw httpError("File signature does not match the declared type", "VALIDATION_ERROR", 400);
+  }
+  return content;
 }
 
 async function applicationFor(user: SessionClaims) {
@@ -241,6 +295,34 @@ export async function buildApplicantView(user: SessionClaims, path: string): Pro
     return base;
   }
 
+  if (normalized.includes("/notifications")) {
+    base.title = "Notifications";
+    base.active = "Home";
+    base.breadcrumb = ["Applicant", "Notifications"];
+    const notes = await prisma.notification.findMany({
+      where: { institutionId: user.institutionId, recipientAccountId: user.accountId },
+      orderBy: { createdAt: "desc" },
+      take: 40,
+    });
+    base.sections = [
+      {
+        title: "Inbox",
+        rows: notes.length
+          ? notes.map((n) => ({
+              primary: n.title,
+              secondary: n.body,
+              meta: `${n.readAt ? "Read" : "Unread"} · ${n.createdAt.toLocaleString()}`,
+            }))
+          : [{ primary: "No notifications yet", secondary: "Status and offer alerts will appear here." }],
+      },
+    ];
+    base.actions = [
+      { label: "Application", href: "/applicant/application", variant: "secondary" },
+      { label: "Ask Heritage", href: "/applicant/ask", variant: "ai" },
+    ];
+    return base;
+  }
+
   if (normalized.includes("/interview") || normalized.includes("/ap-05")) {
     base.title = "Interview";
     base.active = "Application";
@@ -335,18 +417,59 @@ export async function runApplicantAction(
 
   if (action === "upload_document") {
     const documentId = String(payload?.documentId ?? "");
-    let doc = app.documents.find((d) => d.id === documentId) ?? app.documents.find((d) => d.status === "missing");
-    if (!doc) {
-      // Idempotent re-runs: mark oldest uploaded as re-uploaded confirmation
-      doc = app.documents[0];
-      if (!doc) throw Object.assign(new Error("No document to upload"), { status: 400, code: "BAD_REQUEST" });
-      return { ok: true, documentId: doc.id, status: doc.status, message: "All documents already uploaded" };
+    const filename = typeof payload?.filename === "string" ? payload.filename : "";
+    const mimeType = typeof payload?.mimeType === "string" ? payload.mimeType : "";
+    const sizeBytes = typeof payload?.sizeBytes === "number" ? payload.sizeBytes : Number(payload?.sizeBytes);
+    const contentBase64 = typeof payload?.contentBase64 === "string" ? payload.contentBase64 : "";
+    if (!documentId || !filename || !mimeType || !Number.isFinite(sizeBytes) || !contentBase64) {
+      throw httpError(
+        "Upload requires documentId, filename, mimeType, sizeBytes, and contentBase64",
+        "BAD_REQUEST",
+        400,
+      );
     }
+
+    const doc = app.documents.find((d) => d.id === documentId);
+    if (!doc) throw httpError("Document not found", "NOT_FOUND", 404);
+
+    const content = decodeAndValidateApplicantFile({
+      filename,
+      mimeType,
+      sizeBytes,
+      contentBase64,
+    });
+
+    const safeName = path.basename(filename);
+    const relativePath = path.join(
+      user.institutionId,
+      "applicant",
+      app.id,
+      `${doc.id}-${safeName}`,
+    );
+    const storageRoot = path.resolve(process.env.FILE_STORAGE_ROOT ?? path.join(process.cwd(), "var", "uploads"));
+    const storedPath = path.resolve(storageRoot, relativePath);
+    if (!storedPath.startsWith(`${storageRoot}${path.sep}`)) {
+      throw httpError("Invalid storage path", "VALIDATION_ERROR", 400);
+    }
+    await mkdir(path.dirname(storedPath), { recursive: true });
+    await writeFile(storedPath, content);
+
     await prisma.applicationDocument.update({
       where: { id: doc.id },
-      data: { status: "uploaded", fileName: `${doc.label.replace(/\s+/g, "_").toLowerCase()}.pdf` },
+      data: { status: "uploaded", fileName: safeName },
     });
     await addTimeline(app.id, user.institutionId, "Document uploaded", doc.label);
+    await writeAuditAndOutbox(prisma, {
+      institutionId: user.institutionId,
+      actorId: user.accountId,
+      eventName: "ApplicantDocument.uploaded",
+      purpose: "applicant_document",
+      before: { documentId: doc.id, status: doc.status, fileName: doc.fileName },
+      after: { documentId: doc.id, status: "uploaded", fileName: safeName, storedPath: relativePath },
+      source: "applicant.upload_document",
+      correlationId: randomUUID(),
+      outboxPayload: { applicationId: app.id, documentId: doc.id },
+    });
     const remaining = await prisma.applicationDocument.count({
       where: { applicationId: app.id, status: "missing" },
     });
@@ -356,7 +479,7 @@ export async function runApplicantAction(
         data: { progressPct: 70, status: app.status === "draft" ? "draft" : app.status },
       });
     }
-    return { ok: true, documentId: doc.id, status: "uploaded" };
+    return { ok: true, documentId: doc.id, status: "uploaded", fileName: safeName };
   }
 
   if (action === "ready_interview") {

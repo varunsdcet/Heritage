@@ -350,13 +350,17 @@ function buildCourseList(ctx: InstructorCtx): InstructorLivePayload {
     countLabel: `${ctx.sections.length} section(s)`,
     rows: tableRowsFromSections(ctx),
     courseList: {
-      term: ctx.term?.code ?? "—",
+      filters: ["All sections", ctx.term?.code ?? "Current term"],
       courses: ctx.sections.map((s) => ({
         code: s.courseCode,
         title: s.courseTitle,
-        section: s.code,
+        term: s.termCode || ctx.term?.code || "—",
+        schedule: s.code,
+        room: s.code,
         enrolled: String(s.enrolmentCount),
+        capacity: String(Math.max(s.enrolmentCount, 30)),
         status: "Active",
+        statusTone: "active",
         href: `/instructor/sections/${s.id}`,
       })),
     },
@@ -365,22 +369,46 @@ function buildCourseList(ctx: InstructorCtx): InstructorLivePayload {
 
 function buildStudents(ctx: InstructorCtx): InstructorLivePayload {
   const rows = rosterRows(ctx);
+  const students = rows.map((r) => {
+    const risk =
+      r.badgeTone === "danger" ? "High Risk" : r.badgeTone === "warning" ? "At Risk" : "Normal";
+    return {
+      id: r.secondary,
+      name: r.primary,
+      program: r.cells[2] ?? "",
+      attendance: "—",
+      gpa: "—",
+      missing: "0",
+      risk,
+      riskTone: r.badgeTone === "danger" ? ("danger" as const) : r.badgeTone === "warning" ? ("warning" as const) : ("active" as const),
+    };
+  });
+  const first = students[0];
   return {
     title: "Students",
     subtitle: `${ctx.studentCount} unique student(s) across your sections`,
     countLabel: `${rows.length} student(s)`,
     rows,
     studentsDirectory: {
-      total: ctx.studentCount,
-      filters: ["All", "Good standing", "Warning", "Probation"],
-      students: rows.map((r) => ({
-        name: r.primary,
-        id: r.secondary,
-        program: r.cells[2] ?? "",
-        course: r.cells[3] ?? "",
-        standing: r.badge,
-        href: r.href,
-      })),
+      rosterFilter: ctx.sections[0] ? `Roster: ${ctx.sections[0].courseCode} ${ctx.sections[0].code}` : "Roster: All sections",
+      riskFilter: "Risk Level: All",
+      note: "YOU ONLY VIEW ASSIGNED CLASS SECTIONS.",
+      students,
+      drawer: first
+        ? {
+            name: first.name,
+            meta: `${first.id} // ${first.program || "—"}`,
+            alert: first.riskTone === "danger" || first.riskTone === "warning" ? "URGENT VERIFICATION" : "STUDENT SUMMARY",
+            body: `${first.name} (${first.id}) — ${first.risk} in ${first.program || "program"}.`,
+            action: "Send Direct Notification",
+          }
+        : {
+            name: "—",
+            meta: "—",
+            alert: "—",
+            body: "No students assigned to your sections yet.",
+            action: "Send Direct Notification",
+          },
     },
   };
 }
@@ -597,18 +625,21 @@ function buildMessages(ctx: InstructorCtx): InstructorLivePayload {
 }
 
 function buildNotifications(ctx: InstructorCtx): InstructorLivePayload {
+  const unread = ctx.notifications.filter((n) => !n.readAt).length;
   return {
-    title: "Notification Center",
-    subtitle: `${ctx.notifications.filter((n) => !n.readAt).length} unread`,
+    title: "Notifications",
+    subtitle: `${unread} unread`,
     notifications: {
+      filters: [{ label: "All Alerts" }, { label: "Unread", count: unread }, { label: "System" }],
       items: ctx.notifications.map((n) => ({
-        id: n.id,
         title: n.title,
         body: n.body,
         when: n.createdAt.toLocaleString(),
-        read: Boolean(n.readAt),
+        category: "System",
+        unread: !n.readAt,
         tone: n.readAt ? ("muted" as const) : ("info" as const),
       })),
+      pagination: `Showing ${ctx.notifications.length} notification(s)`,
     },
   };
 }
@@ -633,31 +664,59 @@ function buildProfile(ctx: InstructorCtx): InstructorLivePayload {
 }
 
 function buildCalendar(ctx: InstructorCtx): InstructorLivePayload {
-  const events = ctx.sections.flatMap((s) =>
-    s.assignments
-      .filter((a) => a.dueAt)
-      .map((a) => ({
-        date: a.dueAt!.toISOString().slice(0, 10),
-        label: `${s.courseCode}: ${a.title}`,
-        tone: "info" as const,
-      })),
-  );
+  const dayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri"] as const;
+  const tones = ["blue", "green", "purple", "orange"] as const;
+  const byDay = new Map<number, Array<{ title: string; time: string; tone: (typeof tones)[number] }>>();
+  for (let i = 0; i < 5; i++) byDay.set(i, []);
+
+  ctx.sections.forEach((s, i) => {
+    const day = i % 5;
+    byDay.get(day)!.push({
+      title: s.courseTitle || s.courseCode,
+      time: "09:00–10:30",
+      tone: tones[i % tones.length]!,
+    });
+  });
+
+  for (const s of ctx.sections) {
+    for (const a of s.assignments.filter((x) => x.dueAt)) {
+      const day = a.dueAt!.getDay(); // 0 Sun … 6 Sat
+      const idx = day >= 1 && day <= 5 ? day - 1 : 0;
+      const hh = a.dueAt!.getHours().toString().padStart(2, "0");
+      const mm = a.dueAt!.getMinutes().toString().padStart(2, "0");
+      byDay.get(idx)!.push({
+        title: `${s.courseCode}: ${a.title}`,
+        time: `${hh}:${mm}`,
+        tone: "orange",
+      });
+    }
+  }
+
+  const now = new Date();
+  const monday = new Date(now);
+  const dow = now.getDay();
+  monday.setDate(now.getDate() - ((dow + 6) % 7));
+
+  const days = dayLabels.map((label, i) => {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    return {
+      label,
+      date: String(d.getDate()),
+      events: byDay.get(i) ?? [],
+    };
+  });
+
   return {
     title: "Calendar",
     subtitle: "Assignment deadlines from your sections",
-    calendarBoard: {
-      months: [...new Set(events.map((e) => e.date.slice(0, 7)))].slice(0, 3),
-      events,
-    },
     timetable: {
-      days: ["Mon", "Tue", "Wed", "Thu", "Fri"],
-      blocks: ctx.sections.map((s, i) => ({
-        day: i % 5,
-        start: "09:00",
-        end: "10:30",
-        label: s.courseCode,
-        room: s.code,
-      })),
+      rangeLabel: "This week",
+      termLabel: ctx.term?.name ?? "Term",
+      views: ["Week", "Day"],
+      activeView: "Week",
+      filters: ["Show All", "Classes"],
+      days,
     },
   };
 }
@@ -716,9 +775,15 @@ function buildEmptyDomain(title: string, subtitle: string): InstructorLivePayloa
     countLabel: "0 records",
     cards: [],
     form: { submitLabel: "Save", groups: [] },
-    workshops: { items: [] },
+    workshops: {
+      tabs: ["Available (0)"],
+      activeTab: "Available (0)",
+      credits: "0 CEUs",
+      cards: [],
+      registrations: [],
+    },
     helpSupport: { topics: [], tickets: [], references: [] },
-    fileManager: { folders: [], files: [] },
+    fileManager: { courseTitle: "Course files", breadcrumbs: ["Files"], tree: [], files: [] },
   };
 }
 
@@ -777,7 +842,8 @@ function routePayload(
     p.includes("t62") ||
     p.includes("in-06") ||
     p.includes("in-07") ||
-    p.includes("assessment")
+    p.includes("assessment") ||
+    p.includes("submission")
   ) {
     return buildGradebook(ctx);
   }
@@ -809,7 +875,13 @@ function routePayload(
     return {
       title: "Workshops",
       subtitle: "No workshop domain model yet — empty live list",
-      workshops: { items: [] },
+      workshops: {
+        tabs: ["Available (0)", "Registered (0)", "Completed (0)"],
+        activeTab: "Available (0)",
+        credits: "CREDITS COMPLETED: 0 CEUs",
+        cards: [],
+        registrations: [],
+      },
       rows: [],
       countLabel: "0 workshops",
     };
@@ -1039,6 +1111,23 @@ async function publishDraftGrades(ctx: InstructorCtx) {
 async function saveAttendanceSession(ctx: InstructorCtx, path: string, finalize: boolean) {
   const sec = primarySection(ctx);
   if (!sec) throw Object.assign(new Error("No teaching section for attendance"), { status: 400 });
+  const existing = await prisma.sisScreenState.findUnique({
+    where: { institutionId_path: { institutionId: ctx.user.institutionId, path } },
+  });
+  const prev = existing ? (JSON.parse(existing.payloadJson) as Record<string, unknown>) : {};
+  const existingAttendance = prev.attendance as
+    | {
+        sectionId: string;
+        sectionCode: string;
+        courseCode: string;
+        finalized?: boolean;
+        savedAt: string;
+        roster: Array<{ studentId: string; studentNumber: string; name: string; status: string }>;
+      }
+    | undefined;
+  if (existingAttendance?.finalized === true && finalize === true) {
+    return existingAttendance;
+  }
   const roster = sec.enrolments
     .filter((e) => e.status === "enrolled")
     .map((e) => ({
@@ -1055,10 +1144,6 @@ async function saveAttendanceSession(ctx: InstructorCtx, path: string, finalize:
     savedAt: new Date().toISOString(),
     roster,
   };
-  const existing = await prisma.sisScreenState.findUnique({
-    where: { institutionId_path: { institutionId: ctx.user.institutionId, path } },
-  });
-  const prev = existing ? (JSON.parse(existing.payloadJson) as Record<string, unknown>) : {};
   const next = { ...prev, attendance };
   await prisma.sisScreenState.upsert({
     where: { institutionId_path: { institutionId: ctx.user.institutionId, path } },

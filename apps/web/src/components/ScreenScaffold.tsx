@@ -29,6 +29,23 @@ type Props = {
   hideChromeHeader?: boolean;
 };
 
+const ROLE_MATCH: Record<ShellRole, string[]> = {
+  admin: ["admin", "registrar"],
+  instructor: ["instructor"],
+  student: ["student"],
+  applicant: ["applicant"],
+  employer: ["employer"],
+};
+
+function homeForRoles(roles: string[]): string {
+  if (roles.includes("instructor")) return "/instructor";
+  if (roles.includes("admin") || roles.includes("registrar")) return "/admin";
+  if (roles.includes("applicant")) return "/applicant";
+  if (roles.includes("employer")) return "/employer";
+  if (roles.includes("student")) return "/student";
+  return "/login";
+}
+
 export function ScreenScaffold({
   role,
   title,
@@ -44,6 +61,7 @@ export function ScreenScaffold({
   const router = useRouter();
   const [session, setSession] = useState<Session | null>(null);
   const [ready, setReady] = useState(!requireAuth);
+  const [forbidden, setForbidden] = useState(false);
 
   useEffect(() => {
     if (!requireAuth) {
@@ -55,11 +73,36 @@ export function ScreenScaffold({
       router.replace("/login");
       return;
     }
+    const allowed = ROLE_MATCH[role] ?? [role];
+    if (!s.roles.some((r) => allowed.includes(r))) {
+      setForbidden(true);
+      setSession(s);
+      setReady(true);
+      return;
+    }
+    setForbidden(false);
     setSession(s);
     setReady(true);
-  }, [requireAuth, router]);
+  }, [requireAuth, router, role]);
 
   if (!ready) return null;
+
+  if (forbidden && session) {
+    const home = homeForRoles(session.roles);
+    return (
+      <div style={{ minHeight: "40vh", display: "grid", placeItems: "center", padding: "2rem", textAlign: "center" }}>
+        <div>
+          <h1 style={{ margin: "0 0 0.5rem", fontSize: 22 }}>Access denied</h1>
+          <p style={{ margin: "0 0 1rem", color: "var(--mh-text-muted)" }}>
+            Your account does not have access to the {role} portal.
+          </p>
+          <Button type="button" onClick={() => router.replace(home)}>
+            Go to your portal
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   const userName = session ? `${session.givenName} ${session.familyName}` : guestName;
 
@@ -93,6 +136,38 @@ export function ScreenScaffold({
                     ? "/applicant/search"
                     : role === "employer"
                       ? "/employer/search"
+                      : `/${role}`,
+          );
+          return;
+        }
+        if (item === "Notifications") {
+          router.push(
+            role === "admin"
+              ? "/admin/notifications"
+              : role === "instructor"
+                ? "/instructor/notifications"
+                : role === "student"
+                  ? "/student/notifications"
+                  : role === "applicant"
+                    ? "/applicant/notifications"
+                    : role === "employer"
+                      ? "/employer/notifications"
+                      : `/${role}`,
+          );
+          return;
+        }
+        if (item === "Profile") {
+          router.push(
+            role === "admin"
+              ? "/admin/profile"
+              : role === "instructor"
+                ? "/instructor/profile"
+                : role === "student"
+                  ? "/student/profile"
+                  : role === "applicant"
+                    ? "/applicant/application"
+                    : role === "employer"
+                      ? "/employer/profile"
                       : `/${role}`,
           );
           return;

@@ -96,6 +96,14 @@ export default function StudentHomePage() {
       router.replace("/login");
       return;
     }
+    if (!s.roles.includes("student")) {
+      if (s.roles.includes("instructor")) router.replace("/instructor");
+      else if (s.roles.includes("admin") || s.roles.includes("registrar")) router.replace("/admin");
+      else if (s.roles.includes("applicant")) router.replace("/applicant");
+      else if (s.roles.includes("employer")) router.replace("/employer");
+      else router.replace("/login");
+      return;
+    }
     setName(s.givenName || "Student");
     Promise.all([
       api<HomePayload>("/me/home", {}, s.accessToken),

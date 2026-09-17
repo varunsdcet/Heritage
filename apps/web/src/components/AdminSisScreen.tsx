@@ -533,6 +533,12 @@ function QueueView({ config }: { config: SisScreenConfig }) {
                   className="mh-sis-btn-accept"
                 />
               </span>
+            ) : config.rowActions === "approval" ? (
+              <span className="mh-sis-refund-actions" onClick={(e) => e.stopPropagation()}>
+                <ActionBtn label="Approve" rowKey={row.primary || row.cells[0]} className="mh-sis-btn-accept" />
+                <ActionBtn label="Reject" tone="secondary" rowKey={row.primary || row.cells[0]} className="mh-sis-btn-return" />
+                <ActionBtn label="Apply" rowKey={row.primary || row.cells[0]} />
+              </span>
             ) : config.hideRowAction ? null : row.href ? (
               <span className="mh-sis-table__link">
                 {config.actionLabel || (config.path.includes("/ss-02") ? "Take Action" : "Review")}
@@ -549,7 +555,7 @@ function QueueView({ config }: { config: SisScreenConfig }) {
         ))}
       </div>
 
-      {!config.infoBanner && config.rowActions !== "refund" ? (
+      {!config.infoBanner && config.rowActions !== "refund" && config.rowActions !== "approval" ? (
         <div className="mh-sis-pager">
           <span>
             Show <strong>10</strong> per page ▾
@@ -2099,7 +2105,17 @@ function TasksView({ config }: { config: SisScreenConfig }) {
 }
 
 function MatrixView({ config }: { config: SisScreenConfig }) {
-  const m = config.matrix!;
+  const m = config.matrix;
+  if (!m) {
+    return (
+      <div className="mh-sis-dash mh-sis-dash--wide" data-figma-id={config.figmaId}>
+        <h1>{config.title}</h1>
+        <p>No permission matrix rows are available.</p>
+      </div>
+    );
+  }
+  const roles = m.roles ?? [];
+  const rows = m.rows ?? [];
   return (
     <div className="mh-sis-dash mh-sis-dash--wide" data-figma-id={config.figmaId}>
       <div className="mh-sis-dash__welcome">
@@ -2125,28 +2141,28 @@ function MatrixView({ config }: { config: SisScreenConfig }) {
       <div className="mh-sis-table mh-sis-table--card mh-sis-matrix">
         <div
           className="mh-sis-table__head"
-          style={{ gridTemplateColumns: `minmax(220px,1.6fr) repeat(${m.roles.length}, minmax(90px,1fr))` }}
+          style={{ gridTemplateColumns: `minmax(220px,1.6fr) repeat(${Math.max(roles.length, 1)}, minmax(90px,1fr))` }}
         >
           <span>Module & Target Capability</span>
-          {m.roles.map((r) => (
+          {roles.map((r) => (
             <span key={r} style={{ textAlign: "center" }}>
               {r}
             </span>
           ))}
         </div>
-        {m.rows.map((row) => (
+        {rows.map((row) => (
           <div
             key={row.capability}
             className="mh-sis-table__row mh-sis-grades__row mh-sis-matrix__row"
-            style={{ gridTemplateColumns: `minmax(220px,1.6fr) repeat(${m.roles.length}, minmax(90px,1fr))` }}
+            style={{ gridTemplateColumns: `minmax(220px,1.6fr) repeat(${Math.max(roles.length, 1)}, minmax(90px,1fr))` }}
           >
             <div className="mh-sis-matrix__cap">
               <span className="mh-sis-matrix__mod">{row.module}</span>
               <strong>{row.capability}</strong>
               <span>{row.detail}</span>
             </div>
-            {row.checks.map((on, i) => (
-              <span key={m.roles[i]} className="mh-sis-matrix__check" aria-label={`${m.roles[i]} ${on ? "allowed" : "denied"}`}>
+            {(row.checks ?? []).map((on, i) => (
+              <span key={roles[i] || i} className="mh-sis-matrix__check" aria-label={`${roles[i] || "role"} ${on ? "allowed" : "denied"}`}>
                 <span className={`mh-sis-matrix__box${on ? " is-on" : ""}`}>{on ? "✓" : ""}</span>
               </span>
             ))}
@@ -2341,7 +2357,15 @@ function OperationsView({ config }: { config: SisScreenConfig }) {
 }
 
 function SettingsView({ config }: { config: SisScreenConfig }) {
-  const s = config.settingsForm!;
+  const s = config.settingsForm;
+  if (!s) {
+    return (
+      <div className="mh-sis-dash mh-sis-dash--wide" data-figma-id={config.figmaId}>
+        <h1>{config.title}</h1>
+        <p>No settings fields are available.</p>
+      </div>
+    );
+  }
   return (
     <div className="mh-sis-dash mh-sis-dash--wide" data-figma-id={config.figmaId}>
       <div className="mh-sis-dash__welcome">
@@ -2358,7 +2382,7 @@ function SettingsView({ config }: { config: SisScreenConfig }) {
       </div>
       <section className="mh-sis-dash__card mh-sis-settings-card">
         <div className="mh-sis-fields">
-          {s.fields.map((f) => (
+          {(s.fields ?? []).map((f) => (
             <label key={f.label} className="mh-sis-field">
               <span>{f.label}</span>
               <div>{f.value}</div>
@@ -3559,6 +3583,7 @@ export function AdminSisScreen({ path }: { path: string }) {
   const router = useRouter();
   const chrome = ADMIN_SIS_SCREENS[path];
   const [userName, setUserName] = useState("Admin User");
+  const [allowed, setAllowed] = useState(false);
 
   useEffect(() => {
     const s = loadSession();
@@ -3566,12 +3591,22 @@ export function AdminSisScreen({ path }: { path: string }) {
       router.replace("/login");
       return;
     }
+    if (!s.roles.includes("admin") && !s.roles.includes("registrar")) {
+      if (s.roles.includes("instructor")) router.replace("/instructor");
+      else if (s.roles.includes("student")) router.replace("/student");
+      else if (s.roles.includes("applicant")) router.replace("/applicant");
+      else if (s.roles.includes("employer")) router.replace("/employer");
+      else router.replace("/login");
+      return;
+    }
     setUserName(`${s.givenName} ${s.familyName}`.trim() || "Admin User");
+    setAllowed(true);
   }, [router]);
 
   if (!chrome) {
     return <p style={{ padding: 32 }}>Unknown SIS screen: {path}</p>;
   }
+  if (!allowed) return null;
 
   return (
     <AdminSisShell

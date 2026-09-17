@@ -29,7 +29,20 @@ function BannerActions({ config }: { config: SisScreenConfig }) {
 
 export function AiDashView({ config }: { config: SisScreenConfig }) {
   const router = useRouter();
-  const dash = config.aiDash!;
+  const dash = config.aiDash;
+  if (!dash) {
+    return (
+      <div className="mh-sis-dash mh-sis-dash--wide" data-figma-id={config.figmaId}>
+        <div className="mh-sis-dash__welcome">
+          <div className="mh-sis-dash__welcome-text">
+            <h1>{config.title}</h1>
+            <p>{config.subtitle}</p>
+          </div>
+        </div>
+        <p className="mh-sis-muted">No AI dashboard metrics are available for this institution yet.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="mh-sis-dash mh-sis-dash--wide" data-figma-id={config.figmaId}>
@@ -42,7 +55,7 @@ export function AiDashView({ config }: { config: SisScreenConfig }) {
       </div>
 
       <div className="mh-sis-dash__kpis">
-        {dash.kpis.map((k) => (
+        {(dash.kpis ?? []).map((k) => (
           <button
             key={k.label}
             type="button"
@@ -60,7 +73,7 @@ export function AiDashView({ config }: { config: SisScreenConfig }) {
         <section className="mh-sis-dash__card">
           <h2>Usage Trend</h2>
           <div className="mh-sis-ai-bars">
-            {dash.usageTrend.map((bar) => (
+            {(dash.usageTrend ?? []).map((bar) => (
               <div key={bar.label} className="mh-sis-ai-bar">
                 <div className="mh-sis-ai-bar__col" style={{ height: bar.height }} />
                 <span>{bar.label}</span>
@@ -72,7 +85,7 @@ export function AiDashView({ config }: { config: SisScreenConfig }) {
         <section className="mh-sis-dash__card">
           <h2>Cost Breakdown</h2>
           <div className="mh-sis-ai-cost-list">
-            {dash.costBreakdown.map((item) => (
+            {(dash.costBreakdown ?? []).map((item) => (
               <button
                 key={item.label}
                 type="button"

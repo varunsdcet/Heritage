@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { applyApproval, decideApproval } from "@myheritage/auth";
 import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
 
@@ -266,7 +267,7 @@ function sectionRows(campus: Campus) {
       cells: [s.code, s.courseTitle, s.instructorName, `${s.enrolled}/${capacity}`],
       badge: open ? "Open" : "Full",
       badgeTone: open ? "active" : "review",
-      href: "/admin/f/ac-10-master-scheduling",
+      href: "/admin/sections/create",
     };
   });
 }
@@ -283,8 +284,8 @@ function courseRows(campus: Campus) {
 
 function approvalRows(campus: Campus) {
   return campus.approvals.map((a) => ({
-    primary: a.type,
-    secondary: a.subjectRef,
+    primary: a.id,
+    secondary: a.type,
     cells: [a.type, a.subjectRef, a.status, a.createdAt],
     badge: a.status === "pending" ? "Pending" : a.status,
     badgeTone: rowTone(a.status),
@@ -1268,21 +1269,60 @@ export async function runSisAction(
   if (
     (path.includes("approval") || path.includes("inbox") || path.includes("wf-")) &&
     input.rowKey &&
-    (lower.includes("approve") || lower.includes("reject") || lower.includes("deny"))
+    (lower.includes("approve") || lower.includes("reject") || lower.includes("deny") || lower.includes("apply"))
   ) {
-    const status = lower.includes("approve") ? "approved" : "rejected";
-    const hit = await prisma.approvalRequest.findFirst({
-      where: {
+    const approvalId = input.rowKey;
+    if (lower.includes("apply")) {
+      await applyApproval({
+        approvalId,
         institutionId: user.institutionId,
-        OR: [{ id: input.rowKey }, { subjectRef: input.rowKey }, { type: input.rowKey }],
-      },
-    });
-    if (hit) {
-      const decisions = JSON.parse(hit.decisionsJson || "[]") as unknown[];
-      decisions.push({ accountId: user.accountId, decision: status, at: new Date().toISOString() });
-      await prisma.approvalRequest.update({
-        where: { id: hit.id },
-        data: { status, decisionsJson: JSON.stringify(decisions) },
+        applyFn: async (diff, tx) => {
+          const d = diff as {
+            gradeItemIds?: string[];
+            givenName?: string;
+            familyName?: string;
+            primaryEmail?: string;
+            dateOfBirth?: string;
+          };
+          if (Array.isArray(d.gradeItemIds) && d.gradeItemIds.length > 0) {
+            await tx.gradeItem.updateMany({
+              where: { id: { in: d.gradeItemIds }, institutionId: user.institutionId },
+              data: { status: "published", publishedAt: new Date() },
+            });
+          }
+          const personData: {
+            givenName?: string;
+            familyName?: string;
+            email?: string;
+            dateOfBirth?: string;
+          } = {};
+          if (typeof d.givenName === "string") personData.givenName = d.givenName;
+          if (typeof d.familyName === "string") personData.familyName = d.familyName;
+          if (typeof d.primaryEmail === "string") personData.email = d.primaryEmail;
+          if (typeof d.dateOfBirth === "string") personData.dateOfBirth = d.dateOfBirth;
+          if (Object.keys(personData).length > 0) {
+            const approval = await tx.approvalRequest.findFirst({
+              where: { id: approvalId, institutionId: user.institutionId },
+            });
+            if (approval && /profile/i.test(approval.type)) {
+              const student = await tx.student.findFirst({
+                where: { id: approval.subjectRef, institutionId: user.institutionId },
+              });
+              if (student) {
+                await tx.person.update({ where: { id: student.personId }, data: personData });
+              }
+            }
+          }
+        },
+      });
+    } else {
+      await decideApproval({
+        approvalId,
+        institutionId: user.institutionId,
+        actorId: user.accountId,
+        actorRoles: user.roles,
+        decision: lower.includes("approve") ? "approve" : "reject",
+        comment: input.note,
       });
     }
   }

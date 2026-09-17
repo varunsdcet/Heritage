@@ -297,7 +297,7 @@ export type SisScreenConfig = {
   infoBanner?: { title: string; body: string; cta: string };
   actionLabel?: string;
   hideRowAction?: boolean;
-  rowActions?: "refund";
+  rowActions?: "refund" | "approval";
   account?: {
     name: string;
     meta: string;
@@ -1298,7 +1298,7 @@ export const ADMIN_SIS_SCREENS: Record<string, SisScreenConfig> = {
     activeHref: "/admin/f/ac-03-programs",
     academicsNav: true,
     primaryAction: "+ New Section",
-    primaryActionHref: "/admin/f/ac-10-master-scheduling",
+    primaryActionHref: "/admin/sections/create",
     secondaryAction: "Pending Approvals",
     secondaryActionHref: "/admin/f/ac-11-pending-schedules",
     searchPlaceholder: "Search sections…",
@@ -1313,21 +1313,21 @@ export const ADMIN_SIS_SCREENS: Record<string, SisScreenConfig> = {
         cells: ["CS 301-01", "Advanced Data Structures", "Prof. Eleanor Vance", "32/36"],
         badge: "Open",
         badgeTone: "active",
-        href: "/admin/f/ac-10-master-scheduling",
+        href: "/admin/sections/create",
       },
       {
         primary: "NURS 400-01",
         cells: ["NURS 400-01", "Clinical Practicum IV", "Dr. Sarah Jenkins", "18/18"],
         badge: "Full",
         badgeTone: "review",
-        href: "/admin/f/ac-11-pending-schedules",
+        href: "/admin/sections/create",
       },
       {
         primary: "ENG 101-04",
         cells: ["ENG 101-04", "Freshman Composition", "Dr. Jane Austin", "24/28"],
         badge: "Open",
         badgeTone: "active",
-        href: "/admin/f/ac-14-faculty",
+        href: "/admin/sections/create",
       },
     ],
   }),
@@ -6097,6 +6097,9 @@ export const ADMIN_SIS_SCREENS: Record<string, SisScreenConfig> = {
     activeHref: "/admin",
     searchPlaceholder: "Search approvals…",
     countLabel: "8 pending approvals",
+    columns: ["Request", "Subject", "Status", "Created", "Review Action"],
+    columnTemplate: "minmax(160px,1.2fr) minmax(140px,1fr) minmax(100px,0.7fr) minmax(120px,0.8fr) minmax(220px,1.2fr)",
+    rowActions: "approval",
   }),
 
   "/admin/calendar": makeDashboard({

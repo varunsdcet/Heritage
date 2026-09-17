@@ -444,7 +444,7 @@ async function main() {
         startsAt: new Date("2026-09-17T17:00:00.000Z"),
         endsAt: new Date("2026-09-17T18:20:00.000Z"),
         location: "Online",
-        joinUrl: "https://meet.example.edu/cs301-01",
+        joinUrl: "https://meet.jit.si/heritage-cs301-01",
         deliveryMode: "online",
       },
       {

@@ -647,14 +647,14 @@ function CourseListView({ config }: { config: TeacherScreenConfig }) {
     <div className="mh-teacher-stack" data-figma-id={config.figmaId}>
       <PageHead config={config} />
       <div className="mh-teacher-filters">
-        {cl.filters.map((f) => (
+        {cl.filters?.map((f) => (
           <span key={f} className="mh-teacher-chip">
             {f}
           </span>
         ))}
       </div>
       <div className="mh-teacher-card-grid">
-        {cl.courses.map((c) => (
+        {(cl.courses ?? []).map((c) => (
           <button
             key={c.code}
             type="button"
@@ -1701,21 +1701,22 @@ function MessagesView({ config }: { config: TeacherScreenConfig }) {
 
 function NotificationsView({ config }: { config: TeacherScreenConfig }) {
   const data = config.notifications;
-  const [filter, setFilter] = useState(data?.filters[0]?.label || "All Alerts");
+  const filters = data?.filters ?? [{ label: "All Alerts" }, { label: "Unread" }];
+  const [filter, setFilter] = useState(filters[0]?.label || "All Alerts");
   if (!data) return null;
 
   const items =
     filter === "All Alerts"
-      ? data.items
+      ? data.items ?? []
       : filter === "Unread"
-        ? data.items.filter((i) => i.unread)
-        : data.items.filter((i) => i.category === filter.replace(/s$/, "") || i.category === filter);
+        ? (data.items ?? []).filter((i) => i.unread)
+        : (data.items ?? []).filter((i) => i.category === filter.replace(/s$/, "") || i.category === filter);
 
   return (
     <div className="mh-teacher-notif" data-figma-id={config.figmaId}>
       <PageHead config={config} />
       <div className="mh-teacher-tabs">
-        {data.filters.map((f) => (
+        {filters.map((f) => (
           <button
             key={f.label}
             type="button"
@@ -1749,8 +1750,10 @@ function NotificationsView({ config }: { config: TeacherScreenConfig }) {
 
 function TimetableView({ config }: { config: TeacherScreenConfig }) {
   const data = config.timetable;
-  const [view, setView] = useState(data?.activeView || "Week");
-  const [filter, setFilter] = useState(data?.filters[0] || "Show All");
+  const views = data?.views ?? ["Week"];
+  const filters = data?.filters ?? ["Show All"];
+  const [view, setView] = useState(data?.activeView || views[0] || "Week");
+  const [filter, setFilter] = useState(filters[0] || "Show All");
   if (!data) return null;
 
   return (
@@ -1762,7 +1765,7 @@ function TimetableView({ config }: { config: TeacherScreenConfig }) {
           <p>{config.subtitle}</p>
         </div>
         <div className="mh-teacher-cal__views">
-          {data.views.map((v) => (
+          {views.map((v) => (
             <button
               key={v}
               type="button"
@@ -1775,7 +1778,7 @@ function TimetableView({ config }: { config: TeacherScreenConfig }) {
         </div>
       </div>
       <div className="mh-teacher-filters">
-        {data.filters.map((f) => (
+        {filters.map((f) => (
           <button
             key={f}
             type="button"
@@ -1787,7 +1790,7 @@ function TimetableView({ config }: { config: TeacherScreenConfig }) {
         ))}
       </div>
       <div className="mh-teacher-cal__grid">
-        {data.days.map((day) => (
+        {(data.days ?? []).map((day) => (
           <div key={day.label} className="mh-teacher-cal__day">
             <div className="mh-teacher-cal__day-head">
               <strong>{day.label}</strong>
@@ -1816,8 +1819,11 @@ function TimetableView({ config }: { config: TeacherScreenConfig }) {
 
 function FileManagerView({ config }: { config: TeacherScreenConfig }) {
   const data = config.fileManager;
+  const files = data?.files ?? [];
+  const tree = data?.tree ?? [];
+  const breadcrumbs = data?.breadcrumbs ?? ["Files"];
   const [selected, setSelected] = useState<string[]>(() =>
-    data?.files.filter((f) => f.selected).map((f) => f.name) || [],
+    files.filter((f) => f.selected).map((f) => f.name) || [],
   );
   if (!data) return null;
 
@@ -1830,7 +1836,7 @@ function FileManagerView({ config }: { config: TeacherScreenConfig }) {
       <div className="mh-teacher-page-head">
         <div>
           <nav className="mh-teacher-files__crumbs" aria-label="Breadcrumb">
-            {data.breadcrumbs.map((b, i) => (
+            {breadcrumbs.map((b, i) => (
               <span key={b}>
                 {i > 0 ? " › " : ""}
                 {b}
@@ -1846,7 +1852,7 @@ function FileManagerView({ config }: { config: TeacherScreenConfig }) {
       <div className="mh-teacher-split">
         <aside className="mh-teacher-card mh-teacher-files__tree">
           <h2>Course directory</h2>
-          {data.tree.map((node) => (
+          {tree.map((node) => (
             <div key={node.name} className={`mh-teacher-files__node${node.active ? " is-active" : ""}`}>
               <strong>{node.name}</strong>
               {(node.children || []).map((c) => (
@@ -1873,7 +1879,7 @@ function FileManagerView({ config }: { config: TeacherScreenConfig }) {
               <span>Updated</span>
               <span>Visibility</span>
             </div>
-            {data.files.map((f) => (
+            {files.map((f) => (
               <label key={f.name} className={`mh-teacher-files__row${selected.includes(f.name) ? " is-selected" : ""}`}>
                 <input
                   type="checkbox"
@@ -2045,11 +2051,14 @@ function WorkshopsView({ config }: { config: TeacherScreenConfig }) {
   const router = useRouter();
   const w = config.workshops;
   if (!w) return null;
+  const tabs = w.tabs ?? ["Available (0)"];
+  const cards = w.cards ?? [];
+  const registrations = w.registrations ?? [];
   return (
     <div className="mh-teacher-stack mh-teacher-workshops" data-figma-id={config.figmaId}>
       <div className="mh-teacher-workshops__top">
         <div className="mh-teacher-tabs">
-          {w.tabs.map((tab) => (
+          {tabs.map((tab) => (
             <button key={tab} type="button" className={`mh-teacher-tabs__item${tab === w.activeTab ? " is-active" : ""}`}>
               {tab}
             </button>
@@ -2060,7 +2069,8 @@ function WorkshopsView({ config }: { config: TeacherScreenConfig }) {
       <PageActions config={config} />
       <div className="mh-teacher-workshops__grid">
         <div className="mh-teacher-workshops__list">
-          {w.cards.map((card) => (
+          {cards.length === 0 ? <p className="mh-teacher-muted">No workshops available.</p> : null}
+          {cards.map((card) => (
             <article key={card.title} className="mh-teacher-workshop-card">
               <div className="mh-teacher-workshop-card__top">
                 <div className="mh-teacher-workshop-card__tags">
@@ -2099,7 +2109,7 @@ function WorkshopsView({ config }: { config: TeacherScreenConfig }) {
         <aside className="mh-teacher-card">
           <h2>My Registrations</h2>
           <div className="mh-teacher-list">
-            {w.registrations.map((r) => (
+            {registrations.map((r) => (
               <div key={r.title} className="mh-teacher-list__item">
                 <div>
                   <strong>{r.title}</strong>
@@ -2166,23 +2176,31 @@ function WorkshopDetailView({ config }: { config: TeacherScreenConfig }) {
 function StudentsDirectoryView({ config }: { config: TeacherScreenConfig }) {
   const router = useRouter();
   const d = config.studentsDirectory;
-  const [selected, setSelected] = useState(d?.students[0]?.id);
+  const students = d?.students ?? [];
+  const drawer = d?.drawer ?? {
+    name: "Select a student",
+    meta: "—",
+    alert: "No student selected",
+    body: "Choose a student from the roster to view details.",
+    action: "Open messages",
+  };
+  const [selected, setSelected] = useState(students[0]?.id);
   if (!d) return null;
   return (
     <div className="mh-teacher-stack mh-teacher-students" data-figma-id={config.figmaId}>
       <div className="mh-teacher-students__filters">
         <button type="button" className="mh-teacher-chip">
-          {d.rosterFilter} ▾
+          {d.rosterFilter ?? "All"} ▾
         </button>
         <button type="button" className="mh-teacher-chip">
-          {d.riskFilter} ▾
+          {d.riskFilter ?? "All risk"} ▾
         </button>
         <span className="mh-teacher-meta-note">{d.note}</span>
       </div>
       <div className="mh-teacher-students__grid">
         <section className="mh-teacher-card">
           <h2>Section Members</h2>
-          {d.students.map((s) => (
+          {students.map((s) => (
             <button
               key={s.id}
               type="button"
@@ -2191,7 +2209,7 @@ function StudentsDirectoryView({ config }: { config: TeacherScreenConfig }) {
               onDoubleClick={() => router.push("/instructor/f/t22-student-detail-full-page")}
             >
               <span className="mh-teacher__avatar mh-teacher__avatar--sm" aria-hidden>
-                {s.name
+                {(s.name ?? "?")
                   .split(" ")
                   .map((p) => p[0])
                   .join("")
@@ -2220,19 +2238,19 @@ function StudentsDirectoryView({ config }: { config: TeacherScreenConfig }) {
         <aside className="mh-teacher-card mh-teacher-students__drawer">
           <div className="mh-teacher-students__drawer-profile">
             <span className="mh-teacher__avatar" aria-hidden>
-              {d.drawer.name
+              {drawer.name
                 .split(" ")
                 .map((p) => p[0])
                 .join("")
                 .slice(0, 2)}
             </span>
-            <strong>{d.drawer.name}</strong>
-            <span className="mh-teacher-comment__role">{d.drawer.meta}</span>
+            <strong>{drawer.name}</strong>
+            <span className="mh-teacher-comment__role">{drawer.meta}</span>
           </div>
-          <div className="mh-teacher-students__alert">{d.drawer.alert}</div>
-          <p>{d.drawer.body}</p>
+          <div className="mh-teacher-students__alert">{drawer.alert}</div>
+          <p>{drawer.body}</p>
           <button type="button" className="mh-teacher-btn" style={{ width: "100%" }} onClick={() => router.push("/instructor/f/t16-teacher-messages-chat")}>
-            {d.drawer.action}
+            {drawer.action}
           </button>
         </aside>
       </div>
@@ -2797,7 +2815,13 @@ function AttendanceSessionView({ config }: { config: TeacherScreenConfig }) {
             </div>
           ))}
           <div className="mh-teacher-attendance__actions">
-            <ActionBtn label={config.primaryAction || "Submit & Finalize Session"} />
+            {String(data.draftStatus || "").includes("FINALIZED") ? (
+              <button type="button" className="mh-teacher-btn" disabled>
+                Session finalized
+              </button>
+            ) : (
+              <ActionBtn label={config.primaryAction || "Submit & Finalize Session"} />
+            )}
             <ActionBtn label={config.secondaryAction || "Save Draft State"} tone="secondary" />
           </div>
         </aside>
@@ -3203,6 +3227,7 @@ export function TeacherSisScreen({ path }: { path: string }) {
   const router = useRouter();
   const chrome = TEACHER_SCREENS[path];
   const [userName, setUserName] = useState("");
+  const [allowed, setAllowed] = useState(false);
 
   useEffect(() => {
     const s = loadSession();
@@ -3210,14 +3235,19 @@ export function TeacherSisScreen({ path }: { path: string }) {
       router.replace("/login");
       return;
     }
-    if (!s.roles.includes("instructor") && !s.roles.includes("admin")) {
-      router.replace("/login");
+    if (!s.roles.includes("instructor")) {
+      if (s.roles.includes("admin") || s.roles.includes("registrar")) router.replace("/admin");
+      else if (s.roles.includes("student")) router.replace("/student");
+      else if (s.roles.includes("applicant")) router.replace("/applicant");
+      else if (s.roles.includes("employer")) router.replace("/employer");
+      else router.replace("/login");
       return;
     }
     setUserName(`${s.givenName} ${s.familyName}`.trim());
+    setAllowed(true);
   }, [router]);
 
-  if (!chrome) return null;
+  if (!chrome || !allowed) return null;
 
   return (
     <TeacherLiveProvider path={path}>

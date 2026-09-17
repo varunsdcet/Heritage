@@ -79,8 +79,10 @@ echo "$ASKEM" | python3 -c 'import sys,json; d=json.load(sys.stdin); assert d.ge
 # Applicant / employer portals
 curl -fsS -H "authorization: Bearer $APPLICANT" "$API/applicant/bootstrap" >/tmp/ap-boot.json \
   && pass "applicant" "bootstrap" || fail "applicant" "bootstrap"
+# Minimal valid PDF (%PDF-1.4\n) — upload_document requires real file fields
+AP_PDF_B64="JVBERi0xLjQK"
 curl -fsS -X POST "$API/applicant/action" -H "authorization: Bearer $APPLICANT" -H "content-type: application/json" \
-  -d '{"action":"upload_document","path":"/applicant/documents"}' >/tmp/ap-up.json \
+  -d "{\"action\":\"upload_document\",\"path\":\"/applicant/documents\",\"payload\":{\"documentId\":\"d0d0d0d0-d0d0-4d0d-8d0d-d0d0d0d0d002\",\"filename\":\"transcript.pdf\",\"mimeType\":\"application/pdf\",\"sizeBytes\":9,\"contentBase64\":\"$AP_PDF_B64\"}}" >/tmp/ap-up.json \
   && pass "applicant" "upload_document" || fail "applicant" "upload_document"
 curl -fsS -H "authorization: Bearer $EMPLOYER" "$API/employer/bootstrap" >/tmp/em-boot.json \
   && pass "employer" "bootstrap" || fail "employer" "bootstrap"

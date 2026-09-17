@@ -32,9 +32,23 @@ export class ApiError extends Error {
 }
 
 const KEY = "mh.session";
+const ROLE_COOKIE = "mh_roles";
+
+function writeRoleCookie(roles: string[]) {
+  if (typeof document === "undefined") return;
+  const value = encodeURIComponent(JSON.stringify(roles));
+  const secure = typeof window !== "undefined" && window.location.protocol === "https:" ? "; Secure" : "";
+  document.cookie = `${ROLE_COOKIE}=${value}; Path=/; SameSite=Lax; Max-Age=${60 * 60 * 24 * 30}${secure}`;
+}
+
+function clearRoleCookie() {
+  if (typeof document === "undefined") return;
+  document.cookie = `${ROLE_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`;
+}
 
 export function saveSession(session: Session) {
   localStorage.setItem(KEY, JSON.stringify(session));
+  writeRoleCookie(session.roles ?? []);
 }
 
 export function loadSession(): Session | null {
@@ -42,7 +56,9 @@ export function loadSession(): Session | null {
   const raw = localStorage.getItem(KEY);
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as Session;
+    const session = JSON.parse(raw) as Session;
+    writeRoleCookie(session.roles ?? []);
+    return session;
   } catch {
     return null;
   }
@@ -50,6 +66,7 @@ export function loadSession(): Session | null {
 
 export function clearSession() {
   localStorage.removeItem(KEY);
+  clearRoleCookie();
 }
 
 export async function api<T>(path: string, init: RequestInit = {}, token?: string): Promise<T> {

@@ -2205,7 +2205,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
   "/instructor/notifications": {
     path: "/instructor/notifications",
     figmaId: "4:6347",
-    title: "Notifications Terminal",
+    title: "Notifications",
     subtitle: "Alerts across grading, attendance, and academic operations.",
     breadcrumbs: ["Home", "Notifications"],
     activeHref: "/instructor/notifications",
@@ -3685,6 +3685,7 @@ TEACHER_SCREENS["/instructor/f/in-07-gradebook"] = {
 const _t16 = TEACHER_SCREENS["/instructor/f/t16-teacher-messages-chat"];
 const _t02 = TEACHER_SCREENS["/instructor/f/t02-profile-biography"];
 const _t23 = TEACHER_SCREENS["/instructor/f/t23-course-announcements"];
+const _t62 = TEACHER_SCREENS["/instructor/f/t62-pending-grade-submissions"];
 
 if (_t16) {
   TEACHER_SCREENS["/instructor/messages"] = { ..._t16, path: "/instructor/messages", title: "Messages" };
@@ -3702,8 +3703,10 @@ if (_t10) {
     title: "Assessments",
     primaryActionHref: "/instructor/gradebook",
   };
+}
+if (_t62) {
   TEACHER_SCREENS["/instructor/submissions"] = {
-    ..._t10,
+    ..._t62,
     path: "/instructor/submissions",
     title: "Submissions",
     primaryActionHref: "/instructor/gradebook",

@@ -298,6 +298,63 @@ adminRouter.post("/sections", async (req, res, next) => {
   }
 });
 
+adminRouter.delete("/sections/:sectionId", async (req, res, next) => {
+  try {
+    const user = (req as unknown as AuthedRequest).user;
+    const sectionId = String(req.params.sectionId || "");
+    const section = await prisma.section.findFirst({
+      where: { id: sectionId, institutionId: user.institutionId },
+      include: { _count: { select: { enrolments: true } } },
+    });
+    if (!section) {
+      res.status(404).json({ error: { message: "Section not found" } });
+      return;
+    }
+    if (section._count.enrolments > 0) {
+      res.status(409).json({
+        error: { message: `Cannot delete section with ${section._count.enrolments} enrolment(s)` },
+      });
+      return;
+    }
+    await prisma.$transaction(async (tx) => {
+      const assignments = await tx.assignment.findMany({
+        where: { sectionId: section.id, institutionId: user.institutionId },
+        select: { id: true },
+      });
+      const assignmentIds = assignments.map((a) => a.id);
+      if (assignmentIds.length) {
+        const submissions = await tx.submission.findMany({
+          where: { assignmentId: { in: assignmentIds }, institutionId: user.institutionId },
+          select: { id: true },
+        });
+        const submissionIds = submissions.map((s) => s.id);
+        if (submissionIds.length) {
+          await tx.fileObject.deleteMany({ where: { submissionId: { in: submissionIds }, institutionId: user.institutionId } });
+          await tx.submission.deleteMany({ where: { id: { in: submissionIds } } });
+        }
+        await tx.gradeItem.deleteMany({ where: { assignmentId: { in: assignmentIds }, institutionId: user.institutionId } });
+        await tx.assignment.deleteMany({ where: { id: { in: assignmentIds } } });
+      }
+      await tx.classSession.deleteMany({ where: { sectionId: section.id, institutionId: user.institutionId } });
+      await tx.section.delete({ where: { id: section.id } });
+      await tx.auditEvent.create({
+        data: {
+          institutionId: user.institutionId,
+          actorId: user.accountId,
+          eventName: "Section.deleted",
+          purpose: "admin_mutation",
+          afterJson: JSON.stringify({ sectionId: section.id, code: section.code }),
+          source: "admin.sections",
+          correlationId: randomUUID(),
+        },
+      });
+    });
+    res.json({ ok: true, sectionId: section.id, code: section.code });
+  } catch (err) {
+    next(err);
+  }
+});
+
 adminRouter.post("/enrolments", async (req, res, next) => {
   try {
     const user = (req as AuthedRequest).user;

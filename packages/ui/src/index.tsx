@@ -375,24 +375,20 @@ export function AppShell({
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--mh-bg)", color: "var(--mh-text)" }}>
-      <header
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: "1.5rem",
-          height: 56,
-          padding: "0 clamp(1rem, 5vw, 80px)",
-          borderBottom: "1px solid var(--mh-border)",
-          background: "var(--mh-surface)",
-          position: "sticky",
-          top: 0,
-          zIndex: 20,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 40, minWidth: 0, height: "100%" }}>
+      <style>{`
+        .mh-appshell-header{display:flex;align-items:center;justify-content:space-between;gap:1rem;min-height:56px;padding:0 clamp(1rem,5vw,80px);border-bottom:1px solid var(--mh-border);background:var(--mh-surface);position:sticky;top:0;z-index:20;flex-wrap:wrap}
+        .mh-appshell-left{display:flex;align-items:center;gap:24px;min-width:0;flex:1 1 auto}
+        .mh-appshell-nav{display:flex;gap:16px;align-items:stretch;overflow-x:auto;max-width:100%;scrollbar-width:thin}
+        .mh-appshell-actions{display:flex;align-items:center;gap:10px;flex:0 1 auto;flex-wrap:wrap;justify-content:flex-end}
+        .mh-appshell-search{display:flex;align-items:center;gap:8px;width:min(240px,42vw);padding:8px 12px;border-radius:var(--mh-radius-md);border:1px solid var(--mh-border);background:var(--mh-surface-muted);color:var(--mh-text-subtle);font-family:var(--mh-font-sans);font-size:13;cursor:pointer;text-align:left}
+        @media (max-width:1100px){.mh-appshell-search{width:160px}.mh-appshell-search .mh-appshell-kbd{display:none}}
+        @media (max-width:900px){.mh-appshell-left{width:100%;justify-content:space-between}.mh-appshell-nav{display:none}.mh-appshell-actions{width:100%;justify-content:flex-start}.mh-appshell-search{flex:1 1 160px;width:auto}}
+        @media (max-width:520px){.mh-appshell-ask-label{display:none}.mh-appshell-search{flex:1 1 100%}}
+      `}</style>
+      <header className="mh-appshell-header">
+        <div className="mh-appshell-left">
           <BrandLockup compact />
-          <nav style={{ display: "flex", gap: 24, height: "100%", alignItems: "stretch", overflowX: "auto" }}>
+          <nav className="mh-appshell-nav" aria-label="Primary">
             {MENUS[role].map((item) => {
               const isActive = active === item || (item === "Overview" && active === "Home");
               const withChevron = DROPDOWN_ITEMS.has(item);
@@ -415,6 +411,7 @@ export function AppShell({
                     display: "inline-flex",
                     alignItems: "center",
                     gap: 4,
+                    height: 56,
                   }}
                 >
                   {item}
@@ -436,29 +433,14 @@ export function AppShell({
             })}
           </nav>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 16, flexShrink: 0 }}>
-          <button
-            type="button"
-            onClick={() => onNavigate?.("Search")}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              width: 240,
-              padding: "8px 12px",
-              borderRadius: "var(--mh-radius-md)",
-              border: "1px solid var(--mh-border)",
-              background: "var(--mh-surface-muted)",
-              color: "var(--mh-text-subtle)",
-              fontFamily: "var(--mh-font-sans)",
-              fontSize: 13,
-              cursor: "pointer",
-              textAlign: "left",
-            }}
-          >
+        <div className="mh-appshell-actions">
+          <button type="button" className="mh-appshell-search" onClick={() => onNavigate?.("Search")}>
             <img src="/brand/icons/search.svg" alt="" width={16} height={16} />
-            <span style={{ flex: 1 }}>{searchPlaceholder}</span>
+            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {searchPlaceholder}
+            </span>
             <span
+              className="mh-appshell-kbd"
               style={{
                 border: "1px solid var(--mh-border)",
                 borderRadius: 4,
@@ -485,13 +467,13 @@ export function AppShell({
           >
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               <img src="/brand/icons/sparkle.svg" alt="" width={16} height={16} />
-              Ask MyHeritage
+              <span className="mh-appshell-ask-label">Ask MyHeritage</span>
             </span>
           </Button>
           <button
             type="button"
             aria-label="Notifications"
-            onClick={() => onNavigate?.("Messages")}
+            onClick={() => onNavigate?.("Notifications")}
             style={{
               width: 36,
               height: 36,
@@ -501,14 +483,16 @@ export function AppShell({
               cursor: "pointer",
               display: "grid",
               placeItems: "center",
+              flexShrink: 0,
             }}
           >
             <img src="/brand/icons/bell.svg" alt="" width={36} height={36} />
           </button>
           <button
             type="button"
-            onClick={() => onNavigate?.("More")}
+            onClick={() => onNavigate?.("Profile")}
             title={userName}
+            aria-label="Profile"
             style={{
               display: "flex",
               alignItems: "center",
@@ -517,6 +501,7 @@ export function AppShell({
               background: "transparent",
               padding: 0,
               cursor: "pointer",
+              flexShrink: 0,
             }}
           >
             <span

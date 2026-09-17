@@ -5,6 +5,7 @@ dist
 .expo
 coverage
 *.log
+*.tsbuildinfo
 .env
 .env.local
 .env.production
@@ -19,3 +20,9 @@ packages/db/prisma/*.db-journal
 
 .vscode/
 .idea/
+.mcp.json
+**/mcp.json
+.claude/
+.codex/
+.github/copilot*
+AGENTS.local.md

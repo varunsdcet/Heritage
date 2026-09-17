@@ -186,6 +186,7 @@ export default function AdminHomePage() {
   const router = useRouter();
   const [userName, setUserName] = useState("Admin User");
   const [stats, setStats] = useState<HomeStats | null>(null);
+  const [allowed, setAllowed] = useState(false);
 
   useEffect(() => {
     const s = loadSession();
@@ -193,7 +194,16 @@ export default function AdminHomePage() {
       router.replace("/login");
       return;
     }
+    if (!s.roles.includes("admin") && !s.roles.includes("registrar")) {
+      if (s.roles.includes("instructor")) router.replace("/instructor");
+      else if (s.roles.includes("student")) router.replace("/student");
+      else if (s.roles.includes("applicant")) router.replace("/applicant");
+      else if (s.roles.includes("employer")) router.replace("/employer");
+      else router.replace("/login");
+      return;
+    }
     setUserName(`${s.givenName} ${s.familyName}`.trim() || "Admin User");
+    setAllowed(true);
 
     type OpsPayload = {
       operations?: { health?: Array<{ label: string; value: string }> };
@@ -262,6 +272,8 @@ export default function AdminHomePage() {
         });
       });
   }, [router]);
+
+  if (!allowed) return null;
 
   return (
     <AdminSisShell activeHref="/admin" userName={userName} userRole="Registrar's Office">

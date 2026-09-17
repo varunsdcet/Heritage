@@ -140,6 +140,34 @@ export async function buildEmployerView(user: SessionClaims, path: string): Prom
     return base;
   }
 
+  if (normalized.includes("/notifications")) {
+    base.title = "Notifications";
+    base.active = "Home";
+    base.breadcrumb = ["Employer", "Notifications"];
+    const notes = await prisma.notification.findMany({
+      where: { institutionId: user.institutionId, recipientAccountId: user.accountId },
+      orderBy: { createdAt: "desc" },
+      take: 40,
+    });
+    base.sections = [
+      {
+        title: "Inbox",
+        rows: notes.length
+          ? notes.map((n) => ({
+              primary: n.title,
+              secondary: n.body,
+              meta: `${n.readAt ? "Read" : "Unread"} · ${n.createdAt.toLocaleString()}`,
+            }))
+          : [{ primary: "No notifications yet", secondary: "Hours and evaluation alerts will appear here." }],
+      },
+    ];
+    base.actions = [
+      { label: "Hours", href: "/employer/hours", variant: "secondary" },
+      { label: "Ask Heritage", href: "/employer/ask", variant: "ai" },
+    ];
+    return base;
+  }
+
   if (normalized.includes("/evaluations")) {
     base.title = "Evaluations";
     base.active = "Evaluations";
