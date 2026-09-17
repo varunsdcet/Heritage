@@ -283,6 +283,15 @@ async function main() {
   await prisma.degreePlanScenario.deleteMany().catch(() => undefined);
   await prisma.degreeRequirement.deleteMany().catch(() => undefined);
   await prisma.coursePrerequisite.deleteMany().catch(() => undefined);
+  await prisma.courseCorequisite.deleteMany().catch(() => undefined);
+  await prisma.courseOffering.deleteMany().catch(() => undefined);
+  await prisma.transferCredit.deleteMany().catch(() => undefined);
+  await prisma.careerOpportunity.deleteMany().catch(() => undefined);
+  await prisma.interventionTask.deleteMany().catch(() => undefined);
+  await prisma.successCase.deleteMany().catch(() => undefined);
+  await prisma.advisingAppointment.deleteMany().catch(() => undefined);
+  await prisma.rubricCriterion.deleteMany().catch(() => undefined);
+  await prisma.rubric.deleteMany().catch(() => undefined);
   await prisma.knowledgeDocument.deleteMany().catch(() => undefined);
   await prisma.course.deleteMany();
   await prisma.term.deleteMany();
