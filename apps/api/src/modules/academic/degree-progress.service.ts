@@ -70,6 +70,17 @@ export async function computeDegreeProgress(input: ProgressOptions): Promise<Deg
       status: enrolment.status === "completed" || hasPublished ? "satisfied" : "in_progress",
     });
   }
+  const transfers = await prisma.transferCredit.findMany({
+    where: { institutionId: input.institutionId, studentId: student.id, status: "accepted" },
+    include: { course: true },
+  });
+  for (const transfer of transfers) {
+    const code = (transfer.course?.code ?? transfer.externalCode).toUpperCase();
+    if (drop.has(code) || fail.has(code)) continue;
+    if (!completedByCourse.has(code)) {
+      completedByCourse.set(code, { credits: transfer.credits, status: "satisfied" });
+    }
+  }
   for (const code of add) {
     if (drop.has(code) || fail.has(code)) continue;
     if (!completedByCourse.has(code)) {

@@ -140,4 +140,12 @@ describe("contracts", () => {
       }),
     ).not.toThrow();
   });
+
+  it("freezes the AI tool registry", async () => {
+    const { AI_TOOL_REGISTRY, AiToolDefinition } = await import("./index.js");
+    expect(AI_TOOL_REGISTRY.length).toBeGreaterThanOrEqual(14);
+    for (const tool of AI_TOOL_REGISTRY) {
+      expect(() => AiToolDefinition.parse(tool)).not.toThrow();
+    }
+  });
 });

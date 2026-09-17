@@ -125,6 +125,10 @@ importers:
         version: 3.2.7(@types/node@22.20.2)(jiti@2.7.0)(tsx@4.23.13)
 
   packages/ai:
+    dependencies:
+      '@myheritage/contracts':
+        specifier: workspace:*
+        version: link:../contracts
     devDependencies:
       typescript:
         specifier: ^5.8.2

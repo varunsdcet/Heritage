@@ -62,6 +62,8 @@ const NAV: NavItem[] = [
     icon: "school",
     children: [
       { label: "Degree progress", href: "/student/degree" },
+      { label: "Study with AI", href: "/student/study" },
+      { label: "Career", href: "/student/career" },
       { label: "Advising", href: "/student/advising" },
       { label: "Campus services", href: "/student/f/st-16-services" },
       { label: "Practicum", href: "/student/f/st-17-practicum" },

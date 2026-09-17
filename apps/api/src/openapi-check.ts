@@ -28,6 +28,10 @@ const runtimeRoutes = [
   "/search",
   "/ai/ask",
   "/ai/history",
+  "/ai/tools",
+  "/ai/governance",
+  "/ai/eval",
+  "/student/advising/appointments",
   "/auth/forgot-password",
   "/auth/reset-password",
 ];

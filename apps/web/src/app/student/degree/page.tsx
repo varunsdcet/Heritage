@@ -185,13 +185,25 @@ function StudentDegreeBody() {
 
             <section className="mh-sis-dash__card" style={{ marginTop: 20 }}>
               <h2>Prerequisite chain</h2>
-              <ul>
-                {view.prerequisiteGraph.map((edge) => (
-                  <li key={`${edge.requiresCourseCode}-${edge.courseCode}`}>
-                    {edge.requiresCourseCode} → {edge.courseCode}
-                  </li>
-                ))}
-              </ul>
+              <pre
+                aria-label="Prerequisite dependency graph"
+                style={{
+                  margin: 0,
+                  padding: 16,
+                  overflowX: "auto",
+                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                  fontSize: 13,
+                  lineHeight: 1.5,
+                  background: "var(--mh-surface-muted, #f6f5f8)",
+                  borderRadius: 8,
+                }}
+              >
+                {view.prerequisiteGraph.length
+                  ? view.prerequisiteGraph
+                      .map((edge) => `${edge.requiresCourseCode}\n  └─▶ ${edge.courseCode}`)
+                      .join("\n\n")
+                  : "No prerequisite edges published for this program catalog."}
+              </pre>
             </section>
 
             <section className="mh-sis-dash__card" style={{ marginTop: 20 }}>

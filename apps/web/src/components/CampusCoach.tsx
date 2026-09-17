@@ -26,25 +26,25 @@ import { StudentSisShell } from "@/components/StudentSisShell";
 const suggestions: Record<ShellRole, string[]> = {
   student: [
     "Can I graduate next summer?",
-    "What courses do I still need?",
     "What happens if I drop MATH 210?",
-    "What should I focus on today?",
-    "Explain my published grades.",
+    "I don't understand normalization — explain it.",
+    "Am I at risk academically?",
+    "How do I request a transcript?",
   ],
   instructor: [
+    "Which students have not submitted Assignment work?",
+    "Which students may need help?",
     "Summarize my teaching load.",
-    "What gradebook work needs attention?",
-    "Which sections should I review today?",
   ],
   admin: [
-    "What campus operations need attention?",
-    "How many approvals are pending?",
-    "Summarize current academic operations.",
+    "How many students are currently enrolled?",
+    "Show enrollment by program.",
+    "Which courses have less than 40% seat utilization?",
   ],
   applicant: [
-    "What are my next application steps?",
-    "What application records are available to me?",
-    "Where should I go next?",
+    "What documents are missing?",
+    "What is my application status?",
+    "What do I need to apply?",
   ],
   employer: [
     "What placement work needs attention?",
@@ -52,6 +52,17 @@ const suggestions: Record<ShellRole, string[]> = {
     "What employer records are available to me?",
   ],
 };
+
+function capabilityForPath(role: ShellRole, contextPath: string): string | undefined {
+  if (contextPath.startsWith("/student/study")) return "study_coach";
+  if (contextPath.startsWith("/student/degree")) return "student_advisor";
+  if (contextPath.startsWith("/student/success")) return "student_success";
+  if (contextPath.startsWith("/student/career")) return "career_assistant";
+  if (contextPath.startsWith("/admin/ai")) return "admin_ask_data";
+  if (contextPath.startsWith("/instructor/ask") && role === "instructor") return "faculty_assistant";
+  if (contextPath.startsWith("/applicant")) return "admissions_assistant";
+  return undefined;
+}
 
 type ChatMessage = {
   id: string;
@@ -159,7 +170,11 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
         {
           method: "POST",
           headers: { "idempotency-key": crypto.randomUUID() },
-          body: JSON.stringify({ question: trimmed, contextPath }),
+          body: JSON.stringify({
+            question: trimmed,
+            contextPath,
+            capability: capabilityForPath(role, contextPath),
+          }),
         },
         session.accessToken,
       );
@@ -204,8 +219,12 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
         <header className="mh-ask-chat__head">
           <LogoMark size={32} />
           <div className="mh-ask-chat__head-copy">
-            <h1>Ask Heritage</h1>
-            <span>Grounded answers from your campus records</span>
+            <h1>{contextPath.includes("/study") ? "Study with AI" : "Ask Heritage"}</h1>
+            <span>
+              {contextPath.includes("/study")
+                ? "Course-grounded tutoring with academic-integrity gates"
+                : "Grounded answers from your campus records"}
+            </span>
           </div>
           <StatusPill tone="ai">Read-only</StatusPill>
         </header>

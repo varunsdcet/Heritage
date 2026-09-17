@@ -127,3 +127,43 @@ academicRouter.post("/degree-scenarios", async (req, res, next) => {
     next(error);
   }
 });
+
+academicRouter.get("/advising/appointments", async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    const student = await ownStudent(user);
+    const { listAdvisorAppointments } = await import("../ai/domain-actions.service.js");
+    res.json({ items: await listAdvisorAppointments({ institutionId: user.institutionId, studentId: student.id }) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+academicRouter.post("/advising/appointments", async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    const student = await ownStudent(user);
+    const { AdvisingAppointmentRequest } = await import("@myheritage/contracts");
+    const parsed = AdvisingAppointmentRequest.safeParse(req.body);
+    if (!parsed.success) {
+      throw Object.assign(new Error("Invalid advising appointment"), {
+        code: "VALIDATION_ERROR",
+        status: 400,
+        issues: parsed.error.issues,
+      });
+    }
+    const { createAdvisorAppointment } = await import("../ai/domain-actions.service.js");
+    const created = await createAdvisorAppointment({
+      institutionId: user.institutionId,
+      studentId: student.id,
+      topic: parsed.data.topic,
+      startsAt: parsed.data.startsAt,
+      notes: parsed.data.notes,
+      actorAccountId: user.accountId,
+      correlationId: (req as AuthedRequest).correlationId,
+    });
+    res.status(201).json(created);
+  } catch (error) {
+    next(error);
+  }
+});

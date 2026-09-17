@@ -55,6 +55,19 @@ export const openApiDocument = {
     "/ai/history": {
       get: { summary: "Current account Coach history", security: [{ bearer: [] }] },
     },
+    "/ai/tools": {
+      get: { summary: "List allowlisted AI tools", security: [{ bearer: [] }] },
+    },
+    "/ai/governance": {
+      get: { summary: "AI governance snapshot for admin/registrar", security: [{ bearer: [] }] },
+    },
+    "/ai/eval": {
+      get: { summary: "Run deterministic AI eval suite", security: [{ bearer: [] }] },
+    },
+    "/student/advising/appointments": {
+      get: { summary: "List student advising appointments", security: [{ bearer: [] }] },
+      post: { summary: "Request advising appointment", security: [{ bearer: [] }] },
+    },
   },
   components: {
     securitySchemes: { bearer: { type: "http", scheme: "bearer" } },

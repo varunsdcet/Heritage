@@ -128,7 +128,10 @@ beforeEach(() => {
   db.idempotencyKey.findUnique.mockResolvedValue(null);
   db.aiInteraction.count.mockResolvedValue(0);
   db.aiInteraction.findMany.mockResolvedValue([]);
-  db.student.findFirst.mockResolvedValue({ id: "student-1", programVersionId: "pv-1" });
+  db.student.findFirst.mockResolvedValue({
+    id: "10000000-0000-4000-8000-000000000001",
+    programVersionId: "pv-1",
+  });
   progress.computeDegreeProgress.mockResolvedValue(progressFixture);
   progress.impactIfDropCourse.mockResolvedValue({
     baseline: progressFixture,
@@ -269,7 +272,7 @@ describe("Student Advisor", () => {
     expect(payload.answer).toContain("STAT310");
     expect(progress.impactIfDropCourse).toHaveBeenCalledWith({
       institutionId: claims.institutionId,
-      studentId: "student-1",
+      studentId: "10000000-0000-4000-8000-000000000001",
       courseCode: "MATH210",
     });
   });

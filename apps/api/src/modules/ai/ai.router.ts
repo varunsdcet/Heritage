@@ -1,24 +1,47 @@
 import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import {
+  adminAskDataAnswer,
   advisorAnswerFromProgress,
+  assertToolAllowed,
+  buildAiRequestContext,
+  careerAssistantAnswer,
   extractDropCourseCode,
+  facultyAssistantAnswer,
   groundedCoachAnswer,
+  isAdminAskDataQuestion,
   isAdvisorQuestion,
+  isCareerAssistantQuestion,
+  isFacultyAssistantQuestion,
+  isStudentSuccessQuestion,
+  isStudyCoachQuestion,
+  listAiTools,
+  resolveStudyCoachPolicy,
+  runAiEvalSuite,
+  studentSuccessAnswer,
+  studyCoachAnswer,
 } from "@myheritage/ai";
 import {
+  AiGovernanceSnapshot,
   AskCoachRequest,
   CoachAnswer,
   CoachHistoryResponse,
+  type AiCapabilityId,
   type CoachSource,
   type CoachSuggestedAction,
   type DegreePlanAnalysis,
+  type EnrollmentMetricsSnapshot,
+  type ExecutiveMetricsSnapshot,
+  type GradingSuggestion,
+  type StudentRiskAnalysis,
 } from "@myheritage/contracts";
 import { prisma } from "@myheritage/db";
 import { writeAuditAndOutbox } from "@myheritage/events";
 import { requireAuth, type AuthedRequest } from "../../middleware/auth.js";
 import { buildCoachFacts, resolveCoachRole } from "./ai.service.js";
-import { computeDegreeProgress, impactIfDropCourse } from "../academic/degree-progress.service.js";
+import { executeAiTool } from "./tool-executor.js";
+import { listKnowledgeDocuments } from "./knowledge.service.js";
+import { getExecutiveMetrics } from "./metrics.service.js";
 
 export const aiRouter: Router = Router();
 
@@ -44,7 +67,126 @@ function parseStored<T>(value: string, fallback: T): T {
   }
 }
 
+function capabilityFromProvider(provider: string): AiCapabilityId {
+  if (provider.startsWith("student_advisor")) return "student_advisor";
+  if (provider.startsWith("study_coach")) return "study_coach";
+  if (provider.startsWith("faculty_assistant")) return "faculty_assistant";
+  if (provider.startsWith("grading_assistant")) return "grading_assistant";
+  if (provider.startsWith("student_success")) return "student_success";
+  if (provider.startsWith("intervention")) return "intervention_assistant";
+  if (provider.startsWith("admin_ask")) return "admin_ask_data";
+  if (provider.startsWith("admissions")) return "admissions_assistant";
+  if (provider.startsWith("student_services")) return "student_services";
+  if (provider.startsWith("career")) return "career_assistant";
+  return "campus_coach";
+}
+
 aiRouter.use(requireAuth);
+
+aiRouter.get("/tools", async (_req, res) => {
+  res.json({ tools: listAiTools() });
+});
+
+aiRouter.get("/eval", async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    if (!user.roles.includes("admin") && !user.roles.includes("registrar")) {
+      throw Object.assign(new Error("AI eval is limited to admin and registrar roles"), {
+        code: "FORBIDDEN",
+        status: 403,
+      });
+    }
+    const results = runAiEvalSuite();
+    res.json({
+      passed: results.every((row) => row.passed),
+      results,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+aiRouter.get("/governance", async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    if (!user.roles.includes("admin") && !user.roles.includes("registrar")) {
+      throw Object.assign(new Error("AI governance is limited to admin and registrar roles"), {
+        code: "FORBIDDEN",
+        status: 403,
+      });
+    }
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const [knowledgeCount, recent] = await Promise.all([
+      prisma.knowledgeDocument.count({
+        where: { institutionId: user.institutionId, status: "published" },
+      }),
+      prisma.aiInteraction.findMany({
+        where: { institutionId: user.institutionId, createdAt: { gte: since } },
+        select: { latencyMs: true, estimatedTokens: true, resultStatus: true },
+      }),
+    ]);
+    const studyPolicy = resolveStudyCoachPolicy({});
+    const requestsLast24h = recent.length;
+    const estimatedTokensLast24h = recent.reduce((sum, row) => sum + (row.estimatedTokens ?? 0), 0);
+    const avgLatencyMsLast24h =
+      requestsLast24h === 0
+        ? 0
+        : Math.round(recent.reduce((sum, row) => sum + (row.latencyMs ?? 0), 0) / requestsLast24h);
+    const failureCountLast24h = recent.filter((row) => row.resultStatus === "failed").length;
+    res.json(
+      AiGovernanceSnapshot.parse({
+        models: [
+          {
+            id: "campus_grounding_v1",
+            purpose: "Grounded campus coach",
+            enabled: true,
+            provider: "packages/ai",
+          },
+          {
+            id: "student_advisor_v1",
+            purpose: "Degree advisor",
+            enabled: true,
+            provider: "packages/ai",
+          },
+          {
+            id: "study_coach_v1",
+            purpose: "Study coach with integrity gates",
+            enabled: true,
+            provider: "packages/ai",
+          },
+          {
+            id: "grading_assistant_v1",
+            purpose: "Rubric draft feedback (never auto-publishes)",
+            enabled: true,
+            provider: "packages/ai",
+          },
+        ],
+        tools: listAiTools(),
+        policies: {
+          ...studyPolicy,
+          studentAiAllowed: true,
+          instructorAiAllowed: true,
+          gradingAssistanceAllowed: true,
+        },
+        knowledgeSources: [
+          {
+            docType: "program_handbook",
+            status: "published",
+            note: `${knowledgeCount} published document(s) indexed for keyword retrieve`,
+          },
+        ],
+        usage: {
+          requestsLast24h,
+          estimatedTokensLast24h,
+          avgLatencyMsLast24h,
+          failureCountLast24h,
+        },
+      }),
+    );
+  } catch (error) {
+    next(error);
+  }
+});
 
 aiRouter.get("/history", async (req, res, next) => {
   try {
@@ -61,7 +203,9 @@ aiRouter.get("/history", async (req, res, next) => {
           question: row.question,
           role: row.role,
           tier: row.tier === "draft" ? "draft" : "read_only",
-          capability: row.provider === "student_advisor_v1" ? "student_advisor" : "campus_coach",
+          capability: row.capability
+            ? capabilityFromProvider(row.capability)
+            : capabilityFromProvider(row.provider),
           answer: row.answer,
           sources: parseStored<CoachSource[]>(row.sourcesJson, []),
           suggestedActions: parseStored<CoachSuggestedAction[]>(row.suggestedActionsJson, []),
@@ -124,37 +268,73 @@ aiRouter.post("/ask", async (req, res, next) => {
     }
 
     const role = resolveCoachRole(user, parsed.data.contextPath);
-    const wantsAdvisor =
+    const question = parsed.data.question;
+    const requested = parsed.data.capability;
+
+    let capability: AiCapabilityId = "campus_coach";
+    if (requested) capability = requested;
+    else if (role === "student" && isAdvisorQuestion(question)) capability = "student_advisor";
+    else if (role === "student" && isCareerAssistantQuestion(question)) capability = "career_assistant";
+    else if (role === "student" && isStudyCoachQuestion(question)) capability = "study_coach";
+    else if (role === "student" && isStudentSuccessQuestion(question)) capability = "student_success";
+    else if ((role === "admin" || role === "registrar") && /executive|retention|graduation|draft grade|success case/.test(question.toLowerCase()))
+      capability = "admin_ask_data";
+    else if ((role === "admin" || role === "registrar") && isAdminAskDataQuestion(question)) capability = "admin_ask_data";
+    else if (role === "instructor" && /rubric|grade suggestion|draft feedback|suggest.*score/.test(question.toLowerCase()))
+      capability = "grading_assistant";
+    else if (role === "instructor" && isFacultyAssistantQuestion(question)) capability = "faculty_assistant";
+    else if (role === "applicant") capability = requested ?? "admissions_assistant";
+    else if (
       role === "student" &&
-      (parsed.data.capability === "student_advisor" ||
-        parsed.data.capability === "degree_progress" ||
-        parsed.data.capability === "what_if_planner" ||
-        isAdvisorQuestion(parsed.data.question));
+      /transcript|withdraw|reading week|accommodation|tuition receipt|change my address|book.*advisor|student services/.test(
+        question.toLowerCase(),
+      )
+    ) {
+      capability = /book.*advisor/.test(question.toLowerCase()) ? "student_advisor" : "student_services";
+    }
+
+    const startedAt = Date.now();
+
+    const student =
+      role === "student"
+        ? await prisma.student.findFirst({
+            where: { institutionId: user.institutionId, personId: user.personId },
+          })
+        : null;
+
+    const ctx = buildAiRequestContext({
+      user,
+      capability,
+      contextPath: parsed.data.contextPath,
+      activeStudentId: student?.id,
+      activeCourseId: parsed.data.activeCourseId,
+      activeSectionId: parsed.data.activeSectionId,
+      assessmentAttemptOpen: parsed.data.assessmentAttemptOpen,
+    });
 
     let grounded = groundedCoachAnswer({
       role,
-      question: parsed.data.question,
+      question,
       facts: await buildCoachFacts(user, role),
     });
-    let capability: "campus_coach" | "student_advisor" = "campus_coach";
     let provider = "campus_grounding_v1";
     let analysis: DegreePlanAnalysis | undefined;
+    let riskAnalysis: StudentRiskAnalysis | undefined;
+    let metrics: EnrollmentMetricsSnapshot | undefined;
+    let executiveMetrics: ExecutiveMetricsSnapshot | undefined;
+    let gradingSuggestion: GradingSuggestion | undefined;
+    let studyPolicy = capability === "study_coach" ? resolveStudyCoachPolicy({
+      assessmentAttemptOpen: parsed.data.assessmentAttemptOpen,
+      contextPath: parsed.data.contextPath,
+    }) : undefined;
 
-    if (wantsAdvisor) {
-      const student = await prisma.student.findFirst({
-        where: { institutionId: user.institutionId, personId: user.personId },
-      });
+    if (capability === "student_advisor" || capability === "degree_progress" || capability === "what_if_planner") {
+      assertToolAllowed("get_degree_progress", user.roles);
       if (!student?.programVersionId) {
         grounded = {
           tier: "read_only",
           text: "I cannot answer degree-planning questions yet because no program version is assigned to your student record. Open Advising to request a program assignment.",
-          sources: [
-            {
-              id: "portal:advising",
-              title: "Advising",
-              uri: "/student/advising",
-            },
-          ],
+          sources: [{ id: "portal:advising", title: "Advising", uri: "/student/advising" }],
           suggestedActions: [{ label: "Open advising", href: "/student/advising" }],
           claims: [
             {
@@ -164,19 +344,39 @@ aiRouter.post("/ask", async (req, res, next) => {
             },
           ],
         };
-        capability = "student_advisor";
-        provider = "student_advisor_v1";
       } else {
-        const dropCode = extractDropCourseCode(parsed.data.question);
-        if (dropCode) {
-          const impact = await impactIfDropCourse({
-            institutionId: user.institutionId,
+        const dropCode = extractDropCourseCode(question);
+        if (/book (my )?advisor|schedule (an )?advisor|advisor (meeting|appointment)/i.test(question)) {
+          const appointment = (await executeAiTool("create_advisor_appointment", ctx, {
+            studentId: student.id,
+            topic: "Degree plan review",
+            startsAt: new Date(Date.now() + 3 * 86_400_000).toISOString(),
+            notes: "Requested via Ask Heritage",
+          })) as { id: string; topic: string; startsAt: string; status: string };
+          grounded = {
+            tier: "draft",
+            text: `FACT: Advising appointment requested (${appointment.status}).\nTopic: ${appointment.topic}\nStarts: ${appointment.startsAt}\nACTION: Appointment id ${appointment.id} is saved for advisor confirmation.`,
+            sources: [{ id: `advising:${appointment.id}`, title: "Advising appointment", uri: "/student/advising" }],
+            suggestedActions: [
+              { label: "Open advising", href: "/student/advising" },
+              { label: "View degree plan", href: "/student/degree" },
+            ],
+            claims: [
+              {
+                kind: "action",
+                text: "Advisor appointment request created (Level 3).",
+                evidenceIds: [`advising:${appointment.id}`],
+              },
+            ],
+          };
+        } else if (dropCode) {
+          const impact = (await executeAiTool("create_degree_plan_scenario", ctx, {
             studentId: student.id,
             courseCode: dropCode,
-          });
+          })) as Awaited<ReturnType<typeof import("../academic/degree-progress.service.js").impactIfDropCourse>>;
           analysis = impact.projected;
           grounded = advisorAnswerFromProgress({
-            question: parsed.data.question,
+            question,
             progress: impact.projected,
             impact: {
               courseCode: dropCode,
@@ -187,20 +387,256 @@ aiRouter.post("/ask", async (req, res, next) => {
             },
           });
         } else {
-          analysis = await computeDegreeProgress({
-            institutionId: user.institutionId,
+          analysis = (await executeAiTool("get_degree_progress", ctx, {
             studentId: student.id,
-          });
-          grounded = advisorAnswerFromProgress({
-            question: parsed.data.question,
-            progress: analysis,
-          });
+          })) as DegreePlanAnalysis;
+          grounded = advisorAnswerFromProgress({ question, progress: analysis });
         }
-        capability = "student_advisor";
-        provider = "student_advisor_v1";
+      }
+      provider = "student_advisor_v1";
+      capability = "student_advisor";
+    } else if (capability === "study_coach") {
+      const content = (await executeAiTool("get_course_content", ctx, {})) as Array<{
+        id: string;
+        title: string;
+        uri: string;
+        text: string;
+      }>;
+      const knowledge = await listKnowledgeDocuments({
+        institutionId: user.institutionId,
+        question,
+      });
+      const merged = [
+        ...content,
+        ...knowledge.map((hit) => ({
+          id: `knowledge:${hit.id}`,
+          title: hit.title,
+          uri: hit.uri,
+          text: hit.excerpt,
+        })),
+      ];
+      const studyResult = studyCoachAnswer({
+        question,
+        content: merged,
+        contextPath: parsed.data.contextPath,
+        assessmentAttemptOpen: parsed.data.assessmentAttemptOpen,
+      });
+      grounded = studyResult;
+      studyPolicy = studyResult.studyPolicy;
+      provider = "study_coach_v1";
+    } else if (capability === "admin_ask_data") {
+      metrics = (await executeAiTool("get_enrollment_metrics", ctx, {})) as EnrollmentMetricsSnapshot;
+      executiveMetrics = await getExecutiveMetrics(user.institutionId);
+      const facts = [
+        {
+          id: "metrics:students",
+          title: "Students",
+          uri: "/admin/students",
+          text: `${metrics.studentCount} student records; ${metrics.enrolmentCount} active enrolments.`,
+        },
+        {
+          id: "metrics:sections",
+          title: "Sections",
+          uri: "/admin/sections",
+          text: `${metrics.sectionCount} sections; ${metrics.lowUtilizationSections.length} below 40% seat utilization (capacity assumption ${metrics.lowUtilizationSections[0]?.capacityAssumption ?? 30}).`,
+        },
+        {
+          id: "metrics:approvals",
+          title: "Approvals",
+          uri: "/admin/approvals",
+          text: `${metrics.pendingApprovals} approval requests pending human review.`,
+        },
+        {
+          id: "metrics:executive",
+          title: "Executive academic",
+          uri: "/admin/ai/executive",
+          text: `${executiveMetrics.academic.publishedGradeCount} published grades; ${executiveMetrics.academic.draftGradeCount} drafts; ${executiveMetrics.academic.openSuccessCases} open success cases; ${executiveMetrics.academic.advisingRequested} advising requests.`,
+        },
+        ...metrics.byProgram.slice(0, 5).map((row) => ({
+          id: `metrics:program:${row.programCode}`,
+          title: row.programName,
+          uri: "/admin/students",
+          text: `${row.programName} (${row.programCode}): ${row.studentCount} students.`,
+        })),
+      ];
+      grounded = adminAskDataAnswer({ question, facts });
+      provider = "admin_ask_data_v1";
+    } else if (capability === "faculty_assistant") {
+      const rows = (await executeAiTool("get_section_missing_submissions", ctx, {})) as Array<{
+        studentId: string;
+        studentNumber: string;
+        displayName: string;
+        assignmentId: string;
+        assignmentTitle: string;
+        sectionCode: string;
+        courseCode: string;
+        dueAt: string | null;
+      }>;
+      grounded = facultyAssistantAnswer({
+        question,
+        rows: rows.map((row) => ({
+          id: `missing:${row.assignmentId}:${row.studentId}`,
+          title: `${row.courseCode} · ${row.assignmentTitle}`,
+          uri: "/instructor/gradebook",
+          text: `${row.displayName} (${row.studentNumber}) has not submitted “${row.assignmentTitle}” for ${row.courseCode} ${row.sectionCode}${row.dueAt ? ` (due ${row.dueAt})` : ""}.`,
+        })),
+      });
+      provider = "faculty_assistant_v1";
+    } else if (capability === "student_success") {
+      if (!student) {
+        throw Object.assign(new Error("Student record not found"), { code: "NOT_FOUND", status: 404 });
+      }
+      riskAnalysis = (await executeAiTool("get_student_success_signals", ctx, {
+        studentId: student.id,
+      })) as StudentRiskAnalysis;
+      grounded = studentSuccessAnswer({
+        level: riskAnalysis.level,
+        signals: riskAnalysis.signals,
+        explanation: riskAnalysis.explanation,
+      });
+      provider = "student_success_v1";
+    } else if (capability === "career_assistant") {
+      const opportunities = (await executeAiTool("get_career_opportunities", ctx, {})) as Array<{
+        id: string;
+        title: string;
+        employerName: string;
+        href: string;
+        skillsJson: string;
+      }>;
+      grounded = careerAssistantAnswer({ opportunities });
+      provider = "career_assistant_v1";
+    } else if (capability === "grading_assistant") {
+      const assignment = await prisma.assignment.findFirst({
+        where: {
+          institutionId: user.institutionId,
+          section: { institutionId: user.institutionId, instructorPersonId: user.personId },
+          rubricId: { not: null },
+        },
+        include: {
+          section: {
+            include: {
+              enrolments: {
+                where: { institutionId: user.institutionId, status: { in: ["enrolled", "completed"] } },
+                take: 1,
+              },
+            },
+          },
+        },
+      });
+      if (!assignment?.rubricId || !assignment.section.enrolments[0]) {
+        grounded = {
+          tier: "read_only",
+          text: "No rubric-linked assignment with enrolled students was found in your sections. Link a rubric before requesting draft feedback.",
+          sources: [{ id: "faculty:rubric", title: "Gradebook", uri: "/instructor/gradebook" }],
+          suggestedActions: [{ label: "Open gradebook", href: "/instructor/gradebook" }],
+          claims: [
+            {
+              kind: "uncertainty",
+              text: "Rubric-linked assignment required for grading assistant.",
+              evidenceIds: [],
+            },
+          ],
+        };
+      } else {
+        gradingSuggestion = (await executeAiTool("draft_grading_suggestion", ctx, {
+          assignmentId: assignment.id,
+          studentId: assignment.section.enrolments[0].studentId,
+        })) as GradingSuggestion;
+        grounded = {
+          tier: "draft",
+          text: [
+            "Draft grading suggestion (not published):",
+            gradingSuggestion.feedback,
+            `Suggested total: ${gradingSuggestion.suggestedTotal}`,
+            gradingSuggestion.confidenceNote,
+            ...gradingSuggestion.flags.map((flag) => `Flag: ${flag}`),
+          ].join("\n"),
+          sources: [{ id: `rubric:${gradingSuggestion.rubricId}`, title: "Rubric", uri: "/instructor/gradebook" }],
+          suggestedActions: [{ label: "Open gradebook", href: "/instructor/gradebook" }],
+          claims: gradingSuggestion.claims,
+        };
+      }
+      provider = "grading_assistant_v1";
+    } else if (capability === "intervention_assistant") {
+      const signalStudentId =
+        typeof (req.body as { studentId?: string }).studentId === "string"
+          ? (req.body as { studentId: string }).studentId
+          : student?.id;
+      if (!signalStudentId) {
+        throw Object.assign(new Error("studentId required to open an intervention case"), {
+          code: "VALIDATION_ERROR",
+          status: 400,
+        });
+      }
+      riskAnalysis = (await executeAiTool(
+        "get_student_success_signals",
+        { ...ctx, activeStudentId: signalStudentId },
+        { studentId: signalStudentId },
+      )) as StudentRiskAnalysis;
+      const opened = (await executeAiTool("create_student_success_case", ctx, {
+        studentId: signalStudentId,
+        level: riskAnalysis.level === "none" ? "watch" : riskAnalysis.level,
+        summary: riskAnalysis.explanation,
+        signals: riskAnalysis.signals,
+      })) as { id: string; taskTitles: string[] };
+      grounded = {
+        tier: "draft",
+        text: [
+          `Intervention case opened (${opened.id}).`,
+          riskAnalysis.explanation,
+          "Tasks:",
+          ...opened.taskTitles.map((title) => `• ${title}`),
+          "AI recommended these actions; humans complete outreach.",
+        ].join("\n"),
+        sources:
+          riskAnalysis.signals.length > 0
+            ? riskAnalysis.signals.map((s) => ({ id: s.id, title: s.label, uri: s.evidenceUri }))
+            : [{ id: `case:${opened.id}`, title: "Success case", uri: "/student/success" }],
+        suggestedActions: riskAnalysis.recommendedActions,
+        claims: riskAnalysis.claims,
+      };
+      provider = "intervention_assistant_v1";
+    } else if (capability === "student_services" || capability === "admissions_assistant") {
+      const knowledge = await listKnowledgeDocuments({
+        institutionId: user.institutionId,
+        question,
+      });
+      if (knowledge.length) {
+        grounded = {
+          tier: "read_only",
+          text: [
+            capability === "admissions_assistant"
+              ? "Admissions guidance from published institutional documents:"
+              : "Student services guidance from published institutional documents:",
+            "",
+            ...knowledge.map((hit, index) => `${index + 1}. ${hit.title} (${hit.versionLabel}): ${hit.excerpt}`),
+            "",
+            "Confirm deadlines on the cited source before acting.",
+          ].join("\n"),
+          sources: knowledge.map((hit) => ({ id: hit.id, title: hit.title, uri: hit.uri })),
+          suggestedActions:
+            capability === "admissions_assistant"
+              ? [
+                  { label: "Open application", href: "/applicant/application" },
+                  { label: "Documents", href: "/applicant/documents" },
+                ]
+              : [
+                  { label: "Advising", href: "/student/advising" },
+                  { label: "Fees", href: "/student/fees" },
+                  { label: "Documents", href: "/student/documents" },
+                ],
+          claims: knowledge.map((hit) => ({
+            kind: "fact" as const,
+            text: hit.title,
+            evidenceIds: [hit.id],
+          })),
+        };
+        provider = capability === "admissions_assistant" ? "admissions_assistant_v1" : "student_services_v1";
       }
     }
 
+    const latencyMs = Date.now() - startedAt;
+    const estimatedTokens = Math.ceil((question.length + grounded.text.length) / 4);
     const interactionId = randomUUID();
     const createdAt = new Date();
     const response = CoachAnswer.parse({
@@ -213,6 +649,11 @@ aiRouter.post("/ask", async (req, res, next) => {
       suggestedActions: grounded.suggestedActions,
       claims: grounded.claims ?? [],
       analysis,
+      riskAnalysis,
+      metrics,
+      executiveMetrics,
+      gradingSuggestion,
+      studyPolicy,
       createdAt: createdAt.toISOString(),
     });
 
@@ -234,12 +675,16 @@ aiRouter.post("/ask", async (req, res, next) => {
             institutionId: user.institutionId,
             accountId: user.accountId,
             role,
-            question: parsed.data.question,
+            question,
             answer: response.answer,
             sourcesJson: JSON.stringify(response.sources),
             suggestedActionsJson: JSON.stringify(response.suggestedActions),
             tier: response.tier,
             provider,
+            capability,
+            latencyMs,
+            estimatedTokens,
+            resultStatus: "completed",
             status: "completed",
             createdAt,
           },
@@ -248,18 +693,21 @@ aiRouter.post("/ask", async (req, res, next) => {
           institutionId: user.institutionId,
           actorId: user.accountId,
           eventName: "AiInteraction.created",
-          purpose: capability === "student_advisor" ? "grounded_degree_advice" : "grounded_campus_assistance",
+          purpose: `grounded_${capability}`,
           before: null,
           after: {
             interactionId,
             role,
             tier: response.tier,
             capability,
+            latencyMs,
+            estimatedTokens,
             sourceIds: response.sources.map((source) => source.id),
+            toolsHint: capability,
           },
           source: "ai.ask",
           correlationId: (req as AuthedRequest).correlationId,
-          outboxPayload: { interactionId, role, tier: response.tier, capability },
+          outboxPayload: { interactionId, role, tier: response.tier, capability, latencyMs },
         });
         await tx.idempotencyKey.update({
           where: {

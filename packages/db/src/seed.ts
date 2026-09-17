@@ -99,6 +99,16 @@ const ids = {
   data401: "66666666-6666-4666-8666-666666666607",
   cs201: "66666666-6666-4666-8666-666666666608",
   knowledgeDegree: "k0k0k0k0-k0k0-4k0k-8k0k-k0k0k0k0k001",
+  knowledgeCalendar: "k0k0k0k0-k0k0-4k0k-8k0k-k0k0k0k0k002",
+  knowledgeServices: "k0k0k0k0-k0k0-4k0k-8k0k-k0k0k0k0k003",
+  knowledgeAdmissions: "k0k0k0k0-k0k0-4k0k-8k0k-k0k0k0k0k004",
+  knowledgeNormalization: "k0k0k0k0-k0k0-4k0k-8k0k-k0k0k0k0k005",
+  rubricCs: "r0r0r0r0-r0r0-4r0r-8r0r-r0r0r0r0r001",
+  rubricCrit1: "r0r0r0r0-r0r0-4r0r-8r0r-r0r0r0r0r002",
+  rubricCrit2: "r0r0r0r0-r0r0-4r0r-8r0r-r0r0r0r0r003",
+  career1: "c0c0c0c0-c0c0-4c0c-8c0c-c0c0c0c0c001",
+  offeringMath: "o1o1o1o1-o1o1-4o1o-8o1o-o1o1o1o1o101",
+  transferMarcus: "t0t0t0t0-t0t0-4t0t-8t0t-t0t0t0t0t001",
 };
 
 type PortalSeed = {
@@ -441,6 +451,108 @@ async function main() {
       status: "published",
     },
   });
+  await prisma.knowledgeDocument.createMany({
+    data: [
+      {
+        id: ids.knowledgeCalendar,
+        institutionId: INST,
+        slug: "academic-calendar-2026",
+        title: "Academic Calendar 2026–2027",
+        docType: "academic_calendar",
+        body: "Fall 2026 classes begin September 8. Reading week is November 10–14. Withdrawal deadline without academic penalty is October 31. Winter term starts January 12 2027.",
+        uri: "/student/calendar",
+        versionLabel: "2026.1",
+        status: "published",
+      },
+      {
+        id: ids.knowledgeServices,
+        institutionId: INST,
+        slug: "student-services-handbook",
+        title: "Student Services Handbook",
+        docType: "student_handbook",
+        body: "Request an official transcript from Documents. Book an academic advisor under Advising. Tuition receipts appear under Fees. Accommodation requests are filed through Campus services. Address changes require a profile change request.",
+        uri: "/student/advising",
+        versionLabel: "2026.1",
+        status: "published",
+      },
+      {
+        id: ids.knowledgeAdmissions,
+        institutionId: INST,
+        slug: "admissions-requirements",
+        title: "Admissions Requirements Overview",
+        docType: "admissions_policy",
+        body: "Applicants must submit transcript, identification, and program application. Offers are issued by Admissions staff. AI does not make final admissions decisions. Missing documents are listed on the applicant Documents screen.",
+        uri: "/applicant/application",
+        versionLabel: "2026.1",
+        status: "published",
+      },
+      {
+        id: ids.knowledgeNormalization,
+        institutionId: INST,
+        slug: "cs301-normalization-brief",
+        title: "CS301 Database Normalization Brief",
+        docType: "course_material",
+        body: "Normalization organizes relations to reduce redundancy. First normal form requires atomic values. Second normal form removes partial dependency on a composite key. Third normal form removes transitive dependencies. Practice by decomposing an unnormalized enrolment table into Student, Course, and Enrolment relations.",
+        uri: "/student/courses",
+        versionLabel: "2026.1",
+        status: "published",
+      },
+    ],
+  });
+  await prisma.rubric.create({
+    data: {
+      id: ids.rubricCs,
+      institutionId: INST,
+      title: "CS301 Project Rubric",
+      description: "Rubric for Project 1 deliverables",
+      maxScore: 100,
+      status: "published",
+      criteria: {
+        create: [
+          {
+            id: ids.rubricCrit1,
+            institutionId: INST,
+            label: "Correctness",
+            description: "Solution meets functional requirements",
+            maxPoints: 60,
+            sortOrder: 1,
+          },
+          {
+            id: ids.rubricCrit2,
+            institutionId: INST,
+            label: "Clarity",
+            description: "Explanation and structure are clear",
+            maxPoints: 40,
+            sortOrder: 2,
+          },
+        ],
+      },
+    },
+  });
+  await prisma.courseOffering.create({
+    data: {
+      id: ids.offeringMath,
+      institutionId: INST,
+      courseId: ids.math210,
+      termCode: "2027W",
+      termName: "Winter 2027",
+      seatsOpen: 18,
+      seatsTotal: 30,
+      status: "published",
+    },
+  });
+  await prisma.careerOpportunity.create({
+    data: {
+      id: ids.career1,
+      institutionId: INST,
+      title: "Junior Data Analyst (co-op)",
+      employerName: "Surrey Civic Analytics",
+      skillsJson: JSON.stringify(["SQL", "normalization", "reporting"]),
+      programCodesJson: JSON.stringify(["CS-DIP"]),
+      status: "open",
+      href: "/student/f/st-20-career",
+    },
+  });
   await prisma.student.updateMany({
     where: { id: { in: [ids.marcusStudent, ids.danielStudent, ids.jordanStudent] }, institutionId: INST },
     data: { programVersionId: ids.programVersionCs },
@@ -522,6 +634,22 @@ async function main() {
         dueAt: new Date("2026-10-28T23:59:00.000Z"),
       },
     ],
+  });
+  await prisma.assignment.update({
+    where: { id: ids.asgProject },
+    data: { rubricId: ids.rubricCs },
+  });
+  await prisma.transferCredit.create({
+    data: {
+      id: ids.transferMarcus,
+      institutionId: INST,
+      studentId: ids.marcusStudent,
+      courseId: ids.eng110,
+      externalCode: "ENGL101",
+      externalTitle: "College Writing Transfer",
+      credits: 3,
+      status: "accepted",
+    },
   });
 
   await prisma.classSession.createMany({
