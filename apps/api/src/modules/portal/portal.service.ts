@@ -1,5 +1,15 @@
 import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
+import {
+  toPortalRowsFromAssessments,
+  toPortalRowsFromAttendance,
+  toPortalRowsFromCredentials,
+  toPortalRowsFromFinance,
+  toPortalRowsFromLectures,
+  toPortalRowsFromPracticum,
+  toPortalRowsFromResources,
+  toPortalRowsFromServices,
+} from "../student/surfaces.service.js";
 
 export type PortalRow = {
   primary: string;
@@ -382,7 +392,7 @@ export async function buildPortalView(user: SessionClaims, path: string): Promis
     return base;
   }
 
-  if (normalized.endsWith("/grades") || normalized.endsWith("/assessments") || normalized.endsWith("/submissions")) {
+  if (normalized.endsWith("/grades") || normalized.endsWith("/submissions")) {
     if (role === "student" || path.startsWith("/m/student")) {
       const g = await gradesFor(user);
       base.metrics = g.metrics.length ? g.metrics : base.metrics;
@@ -393,7 +403,7 @@ export async function buildPortalView(user: SessionClaims, path: string): Promis
       ];
       return base;
     }
-    if (role === "instructor") {
+    if (role === "instructor" || path.startsWith("/m/instructor")) {
       const sections = await coursesFor(user);
       base.sections = [{ title: "Sections ready for grading", rows: sections }];
       base.actions = [
@@ -402,6 +412,80 @@ export async function buildPortalView(user: SessionClaims, path: string): Promis
       ];
       return base;
     }
+  }
+
+  if (role === "student" && (normalized.endsWith("/assessments") || normalized.includes("st-06-assessments"))) {
+    const rows = await toPortalRowsFromAssessments(user);
+    base.metrics = [
+      { label: "Assessments", value: String(rows.length) },
+      { label: "Term", value: meta.termCode },
+      { label: "Campus", value: meta.campus },
+    ];
+    base.sections = [{ title: "Assigned assessments", rows }];
+    base.actions = [{ label: "Open assessments", href: "/student/assessments" }];
+    return base;
+  }
+
+  if (role === "student" && normalized.endsWith("/attendance")) {
+    const rows = await toPortalRowsFromAttendance(user);
+    const present = rows.filter((r) => (r.secondary ?? "").includes("present")).length;
+    base.metrics = [
+      { label: "Records", value: String(rows.length) },
+      { label: "Present", value: String(present) },
+      { label: "Term", value: meta.termCode },
+    ];
+    base.sections = [{ title: "Your attendance", rows }];
+    base.actions = [{ label: "Courses", href: "/student/courses", variant: "secondary" }];
+    return base;
+  }
+
+  if (role === "student" && (normalized.endsWith("/lectures") || normalized.includes("st-11-lecture"))) {
+    const rows = await toPortalRowsFromLectures(user, "lecture");
+    base.sections = [{ title: "Lectures", rows }];
+    base.actions = [{ label: "Schedule", href: "/student/calendar", variant: "secondary" }];
+    return base;
+  }
+
+  if (role === "student" && (normalized.endsWith("/labs") || normalized.includes("st-13-lab"))) {
+    const rows = await toPortalRowsFromLectures(user, "lab");
+    base.sections = [{ title: "Labs", rows }];
+    base.actions = [{ label: "Open labs", href: "/student/labs" }];
+    return base;
+  }
+
+  if (role === "student" && (normalized.endsWith("/fees") || normalized.includes("finance"))) {
+    const rows = await toPortalRowsFromFinance(user);
+    base.sections = [{ title: "Ledger", rows }];
+    base.actions = [{ label: "Fees", href: "/student/fees" }];
+    return base;
+  }
+
+  if (role === "student" && (normalized.includes("st-19-credentials") || normalized.endsWith("/credentials"))) {
+    const rows = await toPortalRowsFromCredentials(user);
+    base.sections = [{ title: "Credentials", rows }];
+    base.actions = [{ label: "Degree progress", href: "/student/degree", variant: "secondary" }];
+    return base;
+  }
+
+  if (role === "student" && (normalized.endsWith("/library") || normalized.includes("resources"))) {
+    const rows = await toPortalRowsFromResources(user);
+    base.sections = [{ title: "Resources", rows }];
+    base.actions = [{ label: "Library", href: "/student/library" }];
+    return base;
+  }
+
+  if (role === "student" && normalized.includes("st-16-services")) {
+    const rows = await toPortalRowsFromServices(user);
+    base.sections = [{ title: "Service requests", rows }];
+    base.actions = [{ label: "Services", href: "/student/f/st-16-services" }];
+    return base;
+  }
+
+  if (role === "student" && normalized.includes("st-17-practicum")) {
+    const rows = await toPortalRowsFromPracticum(user);
+    base.sections = [{ title: "Practicum", rows }];
+    base.actions = [{ label: "Practicum", href: "/student/f/st-17-practicum" }];
+    return base;
   }
 
   if (normalized.endsWith("/calendar") || normalized.endsWith("/schedule")) {
@@ -485,7 +569,7 @@ export async function buildPortalView(user: SessionClaims, path: string): Promis
     return base;
   }
 
-  if (normalized.endsWith("/roster") || normalized.endsWith("/attendance")) {
+  if (normalized.endsWith("/roster") || (role === "instructor" && normalized.endsWith("/attendance"))) {
     const rows = await rosterFor(user);
     base.metrics = [
       { label: "Roster size", value: String(rows.length) },

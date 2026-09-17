@@ -78,7 +78,7 @@ function LoginForm() {
     setLoading(true);
     setError(null);
     try {
-      const session = await api<Session>("/auth/login", {
+      const session = await api<Session & { requiresMfa?: boolean }>("/auth/login", {
         method: "POST",
         body: JSON.stringify({
           email: emailTrimmed.toLowerCase(),
@@ -87,6 +87,10 @@ function LoginForm() {
           remember,
         }),
       });
+      if (session.requiresMfa) {
+        setError("Multi-factor authentication is required for this account. Complete MFA with your institution before continuing.");
+        return;
+      }
       saveSession(session);
       const next = searchParams.get("next");
       router.push(next && next.startsWith("/") ? next : homeForRoles(session.roles));

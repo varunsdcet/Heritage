@@ -74,10 +74,19 @@ approvalsRouter.post(
         approvalId: id,
         institutionId: user.institutionId,
         applyFn: async (diff, tx) => {
-          const { gradeItemIds } = diff as { gradeItemIds: string[] };
-          await tx.gradeItem.updateMany({
-            where: { id: { in: gradeItemIds }, institutionId: user.institutionId },
-            data: { status: "published", publishedAt: new Date() },
+          const payload = diff as {
+            gradeItemIds?: string[];
+            type?: string;
+          };
+          if (Array.isArray(payload.gradeItemIds) && payload.gradeItemIds.length) {
+            await tx.gradeItem.updateMany({
+              where: { id: { in: payload.gradeItemIds }, institutionId: user.institutionId },
+              data: { status: "published", publishedAt: new Date() },
+            });
+          }
+          await tx.serviceRequest.updateMany({
+            where: { institutionId: user.institutionId, approvalRequestId: id },
+            data: { status: "resolved" },
           });
         },
       });

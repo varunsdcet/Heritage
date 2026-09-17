@@ -13,6 +13,8 @@ import {
 import { api, clearSession, loadSession, type Session } from "@/lib/api";
 import { resolveNav } from "@/lib/nav";
 
+const NIL = "00000000-0000-4000-8000-000000000000";
+
 export default function InstructorGradebookPage() {
   const router = useRouter();
   const [session, setSession] = useState<Session | null>(null);
@@ -21,10 +23,20 @@ export default function InstructorGradebookPage() {
   const [book, setBook] = useState<GradebookResponse | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState<string | null>(null);
 
   async function refresh(s: Session, sid: string) {
     const data = await api<GradebookResponse>(`/gradebooks/${sid}`, {}, s.accessToken);
     setBook(data);
+    const next: Record<string, string> = {};
+    for (const row of data.rows) {
+      for (const cell of row.cells) {
+        const key = `${row.studentId}:${cell.assignmentId}`;
+        next[key] = cell.score != null ? String(cell.score) : "";
+      }
+    }
+    setDrafts(next);
   }
 
   useEffect(() => {
@@ -48,11 +60,49 @@ export default function InstructorGradebookPage() {
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load gradebook"));
   }, [router]);
 
+  async function saveCell(studentId: string, assignmentId: string, gradeItemId: string, rowVersion: number, maxScore: number) {
+    if (!session || !sectionId) return;
+    const key = `${studentId}:${assignmentId}`;
+    const raw = drafts[key]?.trim() ?? "";
+    if (raw === "") {
+      setError("Enter a score before saving.");
+      return;
+    }
+    const score = Number(raw);
+    if (!Number.isFinite(score) || score < 0 || score > maxScore) {
+      setError(`Score must be between 0 and ${maxScore}.`);
+      return;
+    }
+    setSaving(key);
+    setError(null);
+    try {
+      if (!gradeItemId || gradeItemId === NIL) {
+        await api(
+          "/grade-items",
+          { method: "POST", body: JSON.stringify({ assignmentId, studentId, score }) },
+          session.accessToken,
+        );
+      } else {
+        await api(
+          `/grade-items/${gradeItemId}`,
+          { method: "PATCH", body: JSON.stringify({ score, rowVersion }) },
+          session.accessToken,
+        );
+      }
+      setStatus(`Saved score ${score} for assignment.`);
+      await refresh(session, sectionId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setSaving(null);
+    }
+  }
+
   async function publishDrafts() {
     if (!session || !book || !sectionId) return;
     const ids = book.rows
       .flatMap((r) => r.cells)
-      .filter((c) => c.status === "draft" && c.score != null)
+      .filter((c) => c.status === "draft" && c.score != null && c.gradeItemId !== NIL)
       .map((c) => c.gradeItemId);
     if (!ids.length) {
       setStatus("No draft grades to publish.");
@@ -149,14 +199,57 @@ export default function InstructorGradebookPage() {
                 {book.rows.map((row) => (
                   <tr key={row.studentId}>
                     <td>{row.name}</td>
-                    {row.cells.map((cell) => (
-                      <td key={cell.gradeItemId}>
-                        {cell.score != null ? `${cell.score}/${cell.maxScore}` : "—"}{" "}
-                        <StatusPill tone={cell.status === "published" ? "success" : cell.status === "draft" ? "warning" : "neutral"}>
-                          {cell.status}
-                        </StatusPill>
-                      </td>
-                    ))}
+                    {row.cells.map((cell) => {
+                      const key = `${row.studentId}:${cell.assignmentId}`;
+                      const editable = cell.status === "draft" || cell.status === "pending_publish" || cell.gradeItemId === NIL;
+                      return (
+                        <td key={`${row.studentId}-${cell.assignmentId}`}>
+                          {editable && cell.status !== "published" ? (
+                            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                              <input
+                                type="number"
+                                min={0}
+                                max={cell.maxScore}
+                                step="0.5"
+                                value={drafts[key] ?? ""}
+                                disabled={cell.status === "pending_publish"}
+                                onChange={(e) => setDrafts((prev) => ({ ...prev, [key]: e.target.value }))}
+                                style={{ width: 72, padding: "4px 6px" }}
+                                aria-label={`Score for ${row.name}`}
+                              />
+                              <span style={{ color: "var(--mh-text-muted)", fontSize: 12 }}>/ {cell.maxScore}</span>
+                              {cell.status !== "pending_publish" ? (
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  style={{ padding: "4px 8px", fontSize: 12 }}
+                                  disabled={saving === key}
+                                  onClick={() =>
+                                    void saveCell(
+                                      row.studentId,
+                                      cell.assignmentId,
+                                      cell.gradeItemId,
+                                      cell.rowVersion,
+                                      cell.maxScore,
+                                    )
+                                  }
+                                >
+                                  {saving === key ? "…" : "Save"}
+                                </Button>
+                              ) : null}
+                              <StatusPill tone={cell.status === "pending_publish" ? "ai" : "warning"}>
+                                {cell.status === "pending_publish" ? "pending_publish" : "draft"}
+                              </StatusPill>
+                            </div>
+                          ) : (
+                            <>
+                              {cell.score != null ? `${cell.score}/${cell.maxScore}` : "—"}{" "}
+                              <StatusPill tone="success">{cell.status}</StatusPill>
+                            </>
+                          )}
+                        </td>
+                      );
+                    })}
                   </tr>
                 ))}
               </tbody>

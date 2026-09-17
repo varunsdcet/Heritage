@@ -84,31 +84,42 @@ const ids = {
   appDocPassport: "d0d0d0d0-d0d0-4d0d-8d0d-d0d0d0d0d001",
   appDocTranscript: "d0d0d0d0-d0d0-4d0d-8d0d-d0d0d0d0d002",
   appDocResume: "d0d0d0d0-d0d0-4d0d-8d0d-d0d0d0d0d003",
-  appOffer1: "o0o0o0o0-o0o0-4o0o-8o0o-o0o0o0o0o001",
+  appOffer1: "a55a55a5-a55a-4a55-8a55-a55a55a55a01",
   employerOrg1: "e0e0e0e0-e0e0-4e0e-8e0e-e0e0e0e0e001",
-  placement1: "p0p0p0p0-p0p0-4p0p-8p0p-p0p0p0p0p001",
-  placement2: "p0p0p0p0-p0p0-4p0p-8p0p-p0p0p0p0p002",
-  hours1: "h0h0h0h0-h0h0-4h0h-8h0h-h0h0h0h0h001",
-  hours2: "h0h0h0h0-h0h0-4h0h-8h0h-h0h0h0h0h002",
-  eval1: "v0v0v0v0-v0v0-4v0v-8v0v-v0v0v0v0v001",
-  agreement1: "g0g0g0g0-g0g0-4g0g-8g0g-g0g0g0g0g001",
+  placement1: "a0a0a0a0-a0a0-4a0a-8a0a-a0a0a0a0a001",
+  placement2: "a0a0a0a0-a0a0-4a0a-8a0a-a0a0a0a0a002",
+  hours1: "b0b0b0b0-b0b0-4b0b-8b0b-b0b0b0b0b001",
+  hours2: "b0b0b0b0-b0b0-4b0b-8b0b-b0b0b0b0b002",
+  eval1: "c0c0c0c0-c0c0-4c0c-8c0c-c0c0c0c0c0e1",
+  agreement1: "d0d0d0d0-d0d0-4d0d-8d0d-d0d0d0d0d0e1",
   programCs: "b1b1b1b1-b1b1-4b1b-8b1b-b1b1b1b1b101",
   programVersionCs: "b2b2b2b2-b2b2-4b2b-8b2b-b2b2b2b2b201",
   math210: "66666666-6666-4666-8666-666666666605",
   stat310: "66666666-6666-4666-8666-666666666606",
   data401: "66666666-6666-4666-8666-666666666607",
   cs201: "66666666-6666-4666-8666-666666666608",
-  knowledgeDegree: "k0k0k0k0-k0k0-4k0k-8k0k-k0k0k0k0k001",
-  knowledgeCalendar: "k0k0k0k0-k0k0-4k0k-8k0k-k0k0k0k0k002",
-  knowledgeServices: "k0k0k0k0-k0k0-4k0k-8k0k-k0k0k0k0k003",
-  knowledgeAdmissions: "k0k0k0k0-k0k0-4k0k-8k0k-k0k0k0k0k004",
-  knowledgeNormalization: "k0k0k0k0-k0k0-4k0k-8k0k-k0k0k0k0k005",
-  rubricCs: "r0r0r0r0-r0r0-4r0r-8r0r-r0r0r0r0r001",
-  rubricCrit1: "r0r0r0r0-r0r0-4r0r-8r0r-r0r0r0r0r002",
-  rubricCrit2: "r0r0r0r0-r0r0-4r0r-8r0r-r0r0r0r0r003",
+  knowledgeDegree: "a11a11a1-a11a-4a11-8a11-a11a11a11a01",
+  knowledgeCalendar: "a11a11a1-a11a-4a11-8a11-a11a11a11a02",
+  knowledgeServices: "a11a11a1-a11a-4a11-8a11-a11a11a11a03",
+  knowledgeAdmissions: "a11a11a1-a11a-4a11-8a11-a11a11a11a04",
+  knowledgeNormalization: "a11a11a1-a11a-4a11-8a11-a11a11a11a05",
+  rubricCs: "a22a22a2-a22a-4a22-8a22-a22a22a22a01",
+  rubricCrit1: "a22a22a2-a22a-4a22-8a22-a22a22a22a02",
+  rubricCrit2: "a22a22a2-a22a-4a22-8a22-a22a22a22a03",
   career1: "c0c0c0c0-c0c0-4c0c-8c0c-c0c0c0c0c001",
-  offeringMath: "o1o1o1o1-o1o1-4o1o-8o1o-o1o1o1o1o101",
-  transferMarcus: "t0t0t0t0-t0t0-4t0t-8t0t-t0t0t0t0t001",
+  offeringMath: "a33a33a3-a33a-4a33-8a33-a33a33a33a01",
+  transferMarcus: "a44a44a4-a44a-4a44-8a44-a44a44a44a01",
+  sessionCsLab: "ffffffff-ffff-4fff-8fff-fffffffff003",
+  assessmentCsQuiz: "a5a5a5a5-a5a5-4a5a-8a5a-a5a5a5a5a501",
+  attendance1: "a7a7a7a7-a7a7-4a7a-8a7a-a7a7a7a7a701",
+  attendance2: "a7a7a7a7-a7a7-4a7a-8a7a-a7a7a7a7a702",
+  financeTuition: "f1f1f1f1-f1f1-4f1f-8f1f-f1f1f1f1f101",
+  financeLab: "f1f1f1f1-f1f1-4f1f-8f1f-f1f1f1f1f102",
+  financePayment: "f1f1f1f1-f1f1-4f1f-8f1f-f1f1f1f1f103",
+  credentialPending: "c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c101",
+  credentialEarned: "c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c102",
+  serviceReq1: "b3b3b3b3-b3b3-4b3b-8b3b-b3b3b3b3b301",
+  placementMarcus: "a0a0a0a0-a0a0-4a0a-8a0a-a0a0a0a0a003",
 };
 
 type PortalSeed = {
@@ -253,6 +264,13 @@ const PORTAL: PortalSeed[] = [
 ];
 
 async function main() {
+  await prisma.assessmentAttempt.deleteMany().catch(() => undefined);
+  await prisma.assessment.deleteMany().catch(() => undefined);
+  await prisma.attendanceRecord.deleteMany().catch(() => undefined);
+  await prisma.labNotebookEntry.deleteMany().catch(() => undefined);
+  await prisma.serviceRequest.deleteMany().catch(() => undefined);
+  await prisma.financeLedgerEntry.deleteMany().catch(() => undefined);
+  await prisma.credentialRecord.deleteMany().catch(() => undefined);
   await prisma.sisScreenState.deleteMany().catch(() => undefined);
   await prisma.portalRecord.deleteMany().catch(() => undefined);
   await prisma.aiInteraction.deleteMany().catch(() => undefined);
@@ -442,9 +460,9 @@ async function main() {
   });
   await prisma.coursePrerequisite.createMany({
     data: [
-      { id: "p1p1p1p1-p1p1-4p1p-8p1p-p1p1p1p1p101", institutionId: INST, courseId: ids.cs301, prerequisiteCourseId: ids.cs201 },
-      { id: "p1p1p1p1-p1p1-4p1p-8p1p-p1p1p1p1p102", institutionId: INST, courseId: ids.stat310, prerequisiteCourseId: ids.math210 },
-      { id: "p1p1p1p1-p1p1-4p1p-8p1p-p1p1p1p1p103", institutionId: INST, courseId: ids.data401, prerequisiteCourseId: ids.stat310 },
+      { id: "a66a66a6-a66a-4a66-8a66-a66a66a66a01", institutionId: INST, courseId: ids.cs301, prerequisiteCourseId: ids.cs201 },
+      { id: "a66a66a6-a66a-4a66-8a66-a66a66a66a02", institutionId: INST, courseId: ids.stat310, prerequisiteCourseId: ids.math210 },
+      { id: "a66a66a6-a66a-4a66-8a66-a66a66a66a03", institutionId: INST, courseId: ids.data401, prerequisiteCourseId: ids.stat310 },
     ],
   });
   await prisma.knowledgeDocument.create({
@@ -673,6 +691,7 @@ async function main() {
         location: "Online",
         joinUrl: "https://meet.jit.si/heritage-cs301-01",
         deliveryMode: "online",
+        sessionKind: "lecture",
       },
       {
         id: ids.sessionAccRoom,
@@ -683,8 +702,126 @@ async function main() {
         endsAt: new Date("2026-09-18T20:20:00.000Z"),
         location: "Business Centre 204",
         deliveryMode: "in_person",
+        sessionKind: "lecture",
+      },
+      {
+        id: ids.sessionCsLab,
+        institutionId: INST,
+        sectionId: ids.sectionCs,
+        title: "Algorithms Lab · Graph Coding",
+        startsAt: new Date("2026-09-19T17:00:00.000Z"),
+        endsAt: new Date("2026-09-19T18:50:00.000Z"),
+        location: "Lab 3B",
+        deliveryMode: "in_person",
+        sessionKind: "lab",
       },
     ],
+  });
+
+  await prisma.assessment.create({
+    data: {
+      id: ids.assessmentCsQuiz,
+      institutionId: INST,
+      sectionId: ids.sectionCs,
+      title: "CS301 Quiz 2 · Graphs",
+      opensAt: new Date("2026-09-16T00:00:00.000Z"),
+      closesAt: new Date("2026-09-30T23:59:00.000Z"),
+      durationMinutes: 45,
+      maxAttempts: 1,
+      status: "published",
+    },
+  });
+
+  await prisma.attendanceRecord.createMany({
+    data: [
+      {
+        id: ids.attendance1,
+        institutionId: INST,
+        studentId: ids.marcusStudent,
+        sectionId: ids.sectionCs,
+        classSessionId: ids.sessionCsOnline,
+        meetingLabel: "CS301 · Graph Traversal",
+        status: "present",
+        recordedAt: new Date("2026-09-17T18:25:00.000Z"),
+      },
+      {
+        id: ids.attendance2,
+        institutionId: INST,
+        studentId: ids.marcusStudent,
+        sectionId: ids.sectionAcc,
+        classSessionId: ids.sessionAccRoom,
+        meetingLabel: "ACC201 · Ledgers",
+        status: "late",
+        recordedAt: new Date("2026-09-18T19:10:00.000Z"),
+      },
+    ],
+  });
+
+  await prisma.financeLedgerEntry.createMany({
+    data: [
+      {
+        id: ids.financeTuition,
+        institutionId: INST,
+        studentId: ids.marcusStudent,
+        label: "Tuition Fall 2026",
+        amountCad: 2450,
+        kind: "charge",
+        status: "open",
+        dueAt: new Date("2026-10-01T00:00:00.000Z"),
+      },
+      {
+        id: ids.financeLab,
+        institutionId: INST,
+        studentId: ids.marcusStudent,
+        label: "Lab fee CS301",
+        amountCad: 85,
+        kind: "charge",
+        status: "paid",
+      },
+      {
+        id: ids.financePayment,
+        institutionId: INST,
+        studentId: ids.marcusStudent,
+        label: "Payment · Lab fee",
+        amountCad: 85,
+        kind: "payment",
+        status: "paid",
+      },
+    ],
+  });
+
+  await prisma.credentialRecord.createMany({
+    data: [
+      {
+        id: ids.credentialPending,
+        institutionId: INST,
+        studentId: ids.marcusStudent,
+        title: "Computer Science Diploma",
+        status: "pending",
+        detail: "In progress — tracked against degree requirements",
+      },
+      {
+        id: ids.credentialEarned,
+        institutionId: INST,
+        studentId: ids.marcusStudent,
+        title: "Workplace Safety Orientation",
+        status: "earned",
+        detail: "Completed campus safety module",
+        earnedAt: new Date("2026-08-20T12:00:00.000Z"),
+      },
+    ],
+  });
+
+  await prisma.serviceRequest.create({
+    data: {
+      id: ids.serviceReq1,
+      institutionId: INST,
+      studentId: ids.marcusStudent,
+      type: "general_inquiry",
+      subject: "Ask about workshop schedule",
+      details: "Looking for upcoming academic skills workshops this term.",
+      status: "open",
+    },
   });
 
   await prisma.submission.create({
@@ -938,6 +1075,7 @@ async function main() {
             id: ids.placement1,
             institutionId: INST,
             studentName: "Mei Chen",
+            studentId: ids.meiStudent,
             programName: "Nursing · NURS400",
             status: "active",
             startsOn: "2026-09-08",
@@ -975,10 +1113,21 @@ async function main() {
             id: ids.placement2,
             institutionId: INST,
             studentName: "Fatima Hassan",
+            studentId: ids.fatimaStudent,
             programName: "Nursing · NURS400",
             status: "active",
             startsOn: "2026-09-08",
             endsOn: "2026-12-12",
+          },
+          {
+            id: ids.placementMarcus,
+            institutionId: INST,
+            studentName: "Marcus Vance",
+            studentId: ids.marcusStudent,
+            programName: "Computer Science · Industry project",
+            status: "active",
+            startsOn: "2026-09-01",
+            endsOn: "2026-12-15",
           },
         ],
       },

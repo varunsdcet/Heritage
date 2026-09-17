@@ -1,7 +1,93 @@
 "use client";
 
-import { LiveScreen } from "@/components/LiveScreen";
+import { FormEvent, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import type { StudentServiceRequestsResponse } from "@myheritage/contracts";
+import { Button, Panel, StatusPill } from "@myheritage/ui";
+import { StudentSisShell } from "@/components/StudentSisShell";
+import { api, loadSession, type Session } from "@/lib/api";
 
-export default function Page() {
-  return <LiveScreen path="/student/f/st-16-services" />;
+export default function StudentServicesPage() {
+  const router = useRouter();
+  const [session, setSession] = useState<Session | null>(null);
+  const [data, setData] = useState<StudentServiceRequestsResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [subject, setSubject] = useState("");
+  const [details, setDetails] = useState("");
+  const [type, setType] = useState<"general_inquiry" | "official_transcript" | "enrollment_verification" | "advising_referral">("general_inquiry");
+
+  async function refresh(s: Session) {
+    setData(await api<StudentServiceRequestsResponse>("/student/services", {}, s.accessToken));
+  }
+
+  useEffect(() => {
+    const s = loadSession();
+    if (!s) {
+      router.replace("/login");
+      return;
+    }
+    setSession(s);
+    refresh(s).catch((err) => setError(err instanceof Error ? err.message : "Failed to load"));
+  }, [router]);
+
+  async function onCreate(e: FormEvent) {
+    e.preventDefault();
+    if (!session) return;
+    try {
+      await api(
+        "/student/services",
+        { method: "POST", body: JSON.stringify({ type, subject, details }) },
+        session.accessToken,
+      );
+      setSubject("");
+      setDetails("");
+      await refresh(session);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Create failed");
+    }
+  }
+
+  if (!session) return null;
+
+  return (
+    <StudentSisShell title="Student services" activeHref="/student/f/st-16-services">
+      <div style={{ padding: 24, maxWidth: 960 }}>
+        <h1 style={{ marginTop: 0 }}>Student services</h1>
+        <p style={{ color: "var(--mh-text-muted)" }}>
+          Create and track service requests. Official record changes require approval.
+        </p>
+        {error ? <p style={{ color: "var(--mh-danger)" }}>{error}</p> : null}
+        <Panel title="New request">
+          <form onSubmit={onCreate} style={{ display: "grid", gap: 10 }}>
+            <select value={type} onChange={(e) => setType(e.target.value as typeof type)}>
+              <option value="general_inquiry">General inquiry</option>
+              <option value="advising_referral">Advising referral</option>
+              <option value="official_transcript">Official transcript (approval)</option>
+              <option value="enrollment_verification">Enrollment verification (approval)</option>
+            </select>
+            <input placeholder="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} required minLength={3} />
+            <textarea placeholder="Details" value={details} onChange={(e) => setDetails(e.target.value)} required minLength={10} rows={4} />
+            <Button type="submit">Submit request</Button>
+          </form>
+        </Panel>
+        <Panel title="Your requests">
+          {(data?.requests.length ?? 0) === 0 ? (
+            <p style={{ color: "var(--mh-text-muted)" }}>No requests yet.</p>
+          ) : (
+            <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 10 }}>
+              {data!.requests.map((r) => (
+                <li key={r.id} style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                  <div>
+                    <strong>{r.subject}</strong>
+                    <div style={{ color: "var(--mh-text-muted)", fontSize: 13 }}>{r.type} · {r.createdAt.slice(0, 10)}</div>
+                  </div>
+                  <StatusPill tone={r.status === "resolved" ? "success" : "warning"}>{r.status}</StatusPill>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Panel>
+      </div>
+    </StudentSisShell>
+  );
 }

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import {
+  CreateGradeItemRequest,
   GradebookResponse,
   PublishGradesRequest,
   StudentGradesResponse,
@@ -174,6 +175,94 @@ gradesRouter.get(
     }
   },
 );
+
+gradesRouter.post("/", requireAuth, requireRoles("instructor", "admin"), async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    const body = CreateGradeItemRequest.parse(req.body);
+    const assignment = await prisma.assignment.findFirst({
+      where: {
+        id: body.assignmentId,
+        institutionId: user.institutionId,
+        ...(user.roles.includes("admin")
+          ? {}
+          : { section: { instructorPersonId: user.personId, institutionId: user.institutionId } }),
+      },
+    });
+    if (!assignment) throw Object.assign(new Error("Assignment not found"), { code: "NOT_FOUND", status: 404 });
+    const enrolment = await prisma.enrolment.findFirst({
+      where: {
+        institutionId: user.institutionId,
+        sectionId: assignment.sectionId,
+        studentId: body.studentId,
+        status: "enrolled",
+      },
+    });
+    if (!enrolment) throw Object.assign(new Error("Enrolment not found"), { code: "NOT_FOUND", status: 404 });
+    if (body.score > assignment.maxScore) {
+      throw Object.assign(new Error("Score cannot exceed the maximum score"), {
+        code: "VALIDATION_ERROR",
+        status: 400,
+      });
+    }
+    const letter = letterFor(body.score, assignment.maxScore);
+    const existing = await prisma.gradeItem.findFirst({
+      where: { assignmentId: assignment.id, studentId: body.studentId, institutionId: user.institutionId },
+    });
+    if (existing) {
+      if (existing.status === "published") {
+        throw Object.assign(new Error("Published grades are read-only"), { code: "CONFLICT", status: 409 });
+      }
+      const updated = await prisma.$transaction(async (tx) => {
+        const row = await tx.gradeItem.update({
+          where: { id: existing.id },
+          data: { score: body.score, letter, status: "draft", rowVersion: { increment: 1 } },
+        });
+        await writeAuditAndOutbox(tx, {
+          institutionId: user.institutionId,
+          actorId: user.accountId,
+          eventName: "GradeItem.updated",
+          purpose: "gradebook_edit",
+          before: existing,
+          after: row,
+          source: "grade-items.post",
+          correlationId: (req as AuthedRequest).correlationId,
+        });
+        return row;
+      });
+      res.json(updated);
+      return;
+    }
+    const created = await prisma.$transaction(async (tx) => {
+      const row = await tx.gradeItem.create({
+        data: {
+          institutionId: user.institutionId,
+          assignmentId: assignment.id,
+          studentId: body.studentId,
+          enrolmentId: enrolment.id,
+          score: body.score,
+          maxScore: assignment.maxScore,
+          letter,
+          status: "draft",
+        },
+      });
+      await writeAuditAndOutbox(tx, {
+        institutionId: user.institutionId,
+        actorId: user.accountId,
+        eventName: "GradeItem.created",
+        purpose: "gradebook_edit",
+        before: null,
+        after: row,
+        source: "grade-items.post",
+        correlationId: (req as AuthedRequest).correlationId,
+      });
+      return row;
+    });
+    res.status(201).json(created);
+  } catch (err) {
+    next(err);
+  }
+});
 
 gradesRouter.patch("/:id", requireAuth, requireRoles("instructor", "admin"), async (req, res, next) => {
   try {

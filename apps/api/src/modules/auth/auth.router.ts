@@ -5,6 +5,7 @@ import { prisma } from "@myheritage/db";
 import { hashPassword, loginWithPassword } from "@myheritage/auth";
 import { LoginRequest, LoginResponse } from "@myheritage/contracts";
 import { sendMailViaHumanitix, mailConfigured } from "../../lib/mailer.js";
+import { requireAuth, type AuthedRequest } from "../../middleware/auth.js";
 
 export const authRouter: Router = Router();
 
@@ -122,6 +123,31 @@ authRouter.post("/reset-password", async (req, res, next) => {
       }),
       prisma.session.deleteMany({ where: { accountId: row.accountId } }),
     ]);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+authRouter.post("/logout", requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    await prisma.session.deleteMany({
+      where: { id: user.sessionId, accountId: user.accountId, institutionId: user.institutionId },
+    });
+    await prisma.auditEvent.create({
+      data: {
+        institutionId: user.institutionId,
+        actorId: user.accountId,
+        eventName: "Account.logout",
+        purpose: "authentication",
+        beforeJson: JSON.stringify({ sessionId: user.sessionId }),
+        afterJson: null,
+        source: "auth.logout",
+        correlationId: randomUUID(),
+        version: 1,
+      },
+    });
     res.json({ ok: true });
   } catch (err) {
     next(err);

@@ -114,6 +114,13 @@ model Student {
   advisingAppointments AdvisingAppointment[]
   successCases     SuccessCase[]
   transferCredits  TransferCredit[]
+  assessmentAttempts AssessmentAttempt[]
+  attendanceRecords  AttendanceRecord[]
+  labNotebookEntries LabNotebookEntry[]
+  serviceRequests    ServiceRequest[]
+  financeLedgerEntries FinanceLedgerEntry[]
+  credentialRecords  CredentialRecord[]
+  placements         Placement[]
 
   @@unique([institutionId, studentNumber])
   @@index([institutionId])
@@ -276,6 +283,8 @@ model Section {
   enrolments         Enrolment[]
   assignments        Assignment[]
   classSessions      ClassSession[]
+  assessments        Assessment[]
+  attendanceRecords  AttendanceRecord[]
 
   @@index([institutionId])
 }
@@ -368,13 +377,17 @@ model ClassSession {
   location      String?
   joinUrl       String?
   deliveryMode  String    @default("in_person")
+  sessionKind   String    @default("lecture")
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   rowVersion    Int       @default(1)
   section       Section   @relation(fields: [sectionId], references: [id])
+  attendanceRecords AttendanceRecord[]
+  labNotebookEntries LabNotebookEntry[]
 
   @@index([institutionId, startsAt])
   @@index([sectionId, startsAt])
+  @@index([institutionId, sessionKind])
 }
 
 model GradeItem {
@@ -675,6 +688,7 @@ model Placement {
   id            String   @id @default(uuid())
   institutionId String
   employerOrgId String
+  studentId     String?
   studentName   String
   programName   String
   status        String   @default("active")
@@ -684,10 +698,12 @@ model Placement {
   updatedAt     DateTime @updatedAt
   rowVersion    Int      @default(1)
   employerOrg   EmployerOrg @relation(fields: [employerOrgId], references: [id], onDelete: Cascade)
+  student       Student? @relation(fields: [studentId], references: [id])
   hours         HoursEntry[]
   evaluations   PlacementEvaluation[]
 
   @@index([institutionId, employerOrgId])
+  @@index([institutionId, studentId])
 }
 
 model HoursEntry {
@@ -886,4 +902,133 @@ model CareerOpportunity {
   rowVersion    Int      @default(1)
 
   @@index([institutionId, status])
+}
+
+model Assessment {
+  id              String              @id @default(uuid())
+  institutionId   String
+  sectionId       String
+  title           String
+  opensAt         DateTime
+  closesAt        DateTime
+  durationMinutes Int                 @default(60)
+  maxAttempts     Int                 @default(1)
+  status          String              @default("published")
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  rowVersion      Int                 @default(1)
+  section         Section             @relation(fields: [sectionId], references: [id])
+  attempts        AssessmentAttempt[]
+
+  @@index([institutionId, sectionId])
+  @@index([institutionId, status, opensAt])
+}
+
+model AssessmentAttempt {
+  id            String     @id @default(uuid())
+  institutionId String
+  assessmentId  String
+  studentId     String
+  status        String     @default("open")
+  startedAt     DateTime   @default(now())
+  submittedAt   DateTime?
+  expiresAt     DateTime
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  rowVersion    Int        @default(1)
+  assessment    Assessment @relation(fields: [assessmentId], references: [id])
+  student       Student    @relation(fields: [studentId], references: [id])
+
+  @@index([institutionId, studentId, status])
+  @@index([assessmentId, studentId])
+}
+
+model AttendanceRecord {
+  id             String        @id @default(uuid())
+  institutionId  String
+  studentId      String
+  sectionId      String
+  classSessionId String?
+  meetingLabel   String
+  status         String        @default("present")
+  recordedAt     DateTime      @default(now())
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  rowVersion     Int           @default(1)
+  student        Student       @relation(fields: [studentId], references: [id])
+  section        Section       @relation(fields: [sectionId], references: [id])
+  classSession   ClassSession? @relation(fields: [classSessionId], references: [id])
+
+  @@index([institutionId, studentId])
+  @@index([sectionId, recordedAt])
+}
+
+model LabNotebookEntry {
+  id             String       @id @default(uuid())
+  institutionId  String
+  studentId      String
+  classSessionId String
+  title          String
+  body           String       @default("")
+  version        Int          @default(1)
+  lockedAt       DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  rowVersion     Int          @default(1)
+  student        Student      @relation(fields: [studentId], references: [id])
+  classSession   ClassSession @relation(fields: [classSessionId], references: [id])
+
+  @@unique([studentId, classSessionId])
+  @@index([institutionId, studentId])
+}
+
+model ServiceRequest {
+  id                String   @id @default(uuid())
+  institutionId     String
+  studentId         String
+  type              String
+  subject           String
+  details           String
+  status            String   @default("open")
+  approvalRequestId String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  rowVersion        Int      @default(1)
+  student           Student  @relation(fields: [studentId], references: [id])
+
+  @@index([institutionId, studentId, status])
+}
+
+model FinanceLedgerEntry {
+  id            String    @id @default(uuid())
+  institutionId String
+  studentId     String
+  label         String
+  amountCad     Float
+  kind          String
+  status        String    @default("open")
+  dueAt         DateTime?
+  postedAt      DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  rowVersion    Int       @default(1)
+  student       Student   @relation(fields: [studentId], references: [id])
+
+  @@index([institutionId, studentId, postedAt])
+}
+
+model CredentialRecord {
+  id            String    @id @default(uuid())
+  institutionId String
+  studentId     String
+  title         String
+  status        String    @default("pending")
+  detail        String?
+  earnedAt      DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  rowVersion    Int       @default(1)
+  student       Student   @relation(fields: [studentId], references: [id])
+
+  @@index([institutionId, studentId, status])
 }

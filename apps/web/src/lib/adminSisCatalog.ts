@@ -6096,7 +6096,7 @@ export const ADMIN_SIS_SCREENS: Record<string, SisScreenConfig> = {
     breadcrumbs: ["Home", "Approvals"],
     activeHref: "/admin",
     searchPlaceholder: "Search approvals…",
-    countLabel: "8 pending approvals",
+    countLabel: "Live approval queue",
     columns: ["Request", "Subject", "Status", "Created", "Review Action"],
     columnTemplate: "minmax(160px,1.2fr) minmax(140px,1fr) minmax(100px,0.7fr) minmax(120px,0.8fr) minmax(220px,1.2fr)",
     rowActions: "approval",

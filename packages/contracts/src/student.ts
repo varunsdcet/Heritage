@@ -180,6 +180,21 @@ export const StudentFinanceSummary = z.object({
   paymentExecutionEnabled: z.literal(false),
 });
 
+export const StudentFinanceLedgerEntry = z.object({
+  id: Uuid,
+  label: z.string().min(1),
+  amountCad: z.number(),
+  kind: z.enum(["charge", "credit", "payment"]),
+  status: z.enum(["open", "paid", "waived"]),
+  dueAt: IsoDateTime.nullable(),
+  postedAt: IsoDateTime,
+});
+
+export const StudentFinanceResponse = z.object({
+  summary: StudentFinanceSummary,
+  entries: z.array(StudentFinanceLedgerEntry),
+});
+
 export const StudentPortalViewResponse = z.object({
   moduleId: StudentModuleId,
   title: z.string().min(1),
@@ -204,6 +219,172 @@ export const StudentPortalViewResponse = z.object({
   ),
 });
 
+export const StudentAssessmentSummary = z.object({
+  id: Uuid,
+  sectionId: Uuid,
+  courseCode: z.string().min(1),
+  title: z.string().min(1),
+  opensAt: IsoDateTime,
+  closesAt: IsoDateTime,
+  durationMinutes: z.number().int().positive(),
+  maxAttempts: z.number().int().positive(),
+  attemptCount: z.number().int().nonnegative(),
+  openAttemptId: Uuid.nullable(),
+  state: z.enum(["upcoming", "open", "in_progress", "submitted", "closed"]),
+});
+
+export const StudentAssessmentsResponse = z.object({
+  assessments: z.array(StudentAssessmentSummary),
+  assessmentAttemptOpen: z.boolean(),
+});
+
+export const StartAssessmentAttemptResponse = z.object({
+  attemptId: Uuid,
+  expiresAt: IsoDateTime,
+  assessmentAttemptOpen: z.literal(true),
+});
+
+export const SubmitAssessmentAttemptResponse = z.object({
+  attemptId: Uuid,
+  status: z.literal("submitted"),
+  submittedAt: IsoDateTime,
+});
+
+export const StudentAttendanceRecord = z.object({
+  id: Uuid,
+  sectionId: Uuid,
+  courseCode: z.string().min(1),
+  meetingLabel: z.string().min(1),
+  status: z.enum(["present", "absent", "late", "excused"]),
+  recordedAt: IsoDateTime,
+});
+
+export const StudentAttendanceResponse = z.object({
+  presentCount: z.number().int().nonnegative(),
+  absentCount: z.number().int().nonnegative(),
+  lateCount: z.number().int().nonnegative(),
+  records: z.array(StudentAttendanceRecord),
+});
+
+export const StudentLectureSummary = z.object({
+  id: Uuid,
+  sectionId: Uuid,
+  courseCode: z.string().min(1),
+  title: z.string().min(1),
+  startsAt: IsoDateTime,
+  endsAt: IsoDateTime.nullable(),
+  location: z.string().nullable(),
+  joinUrl: z.string().url().refine((value) => value.startsWith("https://")).nullable(),
+  sessionKind: z.enum(["lecture", "lab"]),
+  deliveryMode: z.string().min(1),
+});
+
+export const StudentLecturesResponse = z.object({
+  lectures: z.array(StudentLectureSummary),
+});
+
+export const StudentLabNotebook = z.object({
+  id: Uuid,
+  classSessionId: Uuid,
+  title: z.string().min(1),
+  body: z.string(),
+  version: z.number().int().positive(),
+  rowVersion: z.number().int().positive(),
+  lockedAt: IsoDateTime.nullable(),
+  updatedAt: IsoDateTime,
+});
+
+export const UpsertLabNotebookRequest = z.object({
+  title: z.string().trim().min(1).max(200),
+  body: z.string().max(50_000),
+  rowVersion: z.number().int().positive().optional(),
+});
+
+export const StudentServiceRequestType = z.enum([
+  "official_transcript",
+  "enrollment_verification",
+  "advising_referral",
+  "general_inquiry",
+]);
+
+export const StudentServiceRequest = z.object({
+  id: Uuid,
+  type: StudentServiceRequestType,
+  subject: z.string().min(1),
+  details: z.string().min(1),
+  status: z.enum(["open", "pending_approval", "resolved", "rejected"]),
+  approvalRequestId: Uuid.nullable(),
+  createdAt: IsoDateTime,
+});
+
+export const CreateStudentServiceRequest = z.object({
+  type: StudentServiceRequestType,
+  subject: z.string().trim().min(3).max(200),
+  details: z.string().trim().min(10).max(4000),
+});
+
+export const StudentServiceRequestsResponse = z.object({
+  requests: z.array(StudentServiceRequest),
+});
+
+export const StudentPracticumHours = z.object({
+  id: Uuid,
+  weekLabel: z.string().min(1),
+  hours: z.number().nonnegative(),
+  status: z.enum(["pending", "approved", "rejected"]),
+});
+
+export const StudentPracticumPlacement = z.object({
+  id: Uuid,
+  programName: z.string().min(1),
+  siteName: z.string().min(1),
+  status: z.string().min(1),
+  startsOn: z.string().nullable(),
+  endsOn: z.string().nullable(),
+  hours: z.array(StudentPracticumHours),
+});
+
+export const StudentPracticumResponse = z.object({
+  placements: z.array(StudentPracticumPlacement),
+});
+
+export const LogPracticumHoursRequest = z.object({
+  placementId: Uuid,
+  weekLabel: z.string().trim().min(1).max(80),
+  hours: z.number().positive().max(80),
+});
+
+export const StudentCredentialRecord = z.object({
+  id: Uuid,
+  title: z.string().min(1),
+  status: z.enum(["earned", "pending", "revoked"]),
+  detail: z.string().nullable(),
+  earnedAt: IsoDateTime.nullable(),
+});
+
+export const StudentCredentialsResponse = z.object({
+  credentials: z.array(StudentCredentialRecord),
+  issuanceEnabled: z.literal(false),
+});
+
+export const StudentResourceItem = z.object({
+  id: Uuid,
+  title: z.string().min(1),
+  snippet: z.string(),
+  sourceKind: z.string().min(1),
+  href: z.string().nullable(),
+});
+
+export const StudentResourcesResponse = z.object({
+  resources: z.array(StudentResourceItem),
+});
+
+export const CreateGradeItemRequest = z.object({
+  assignmentId: Uuid,
+  studentId: Uuid,
+  score: z.number().min(0),
+});
+
 export type StudentModuleId = z.infer<typeof StudentModuleId>;
 export type StudentCourseSummary = z.infer<typeof StudentCourseSummary>;
 export type StudentCoursesResponse = z.infer<typeof StudentCoursesResponse>;
@@ -216,3 +397,14 @@ export type UploadStudentSubmissionFileRequest = z.infer<
 export type StudentCalendarResponse = z.infer<typeof StudentCalendarResponse>;
 export type StudentNotificationsResponse = z.infer<typeof StudentNotificationsResponse>;
 export type StudentProfileResponse = z.infer<typeof StudentProfileResponse>;
+export type StudentFinanceResponse = z.infer<typeof StudentFinanceResponse>;
+export type StudentAssessmentsResponse = z.infer<typeof StudentAssessmentsResponse>;
+export type StudentAttendanceResponse = z.infer<typeof StudentAttendanceResponse>;
+export type StudentLecturesResponse = z.infer<typeof StudentLecturesResponse>;
+export type StudentLectureSummary = z.infer<typeof StudentLectureSummary>;
+export type StudentLabNotebook = z.infer<typeof StudentLabNotebook>;
+export type StudentCredentialsResponse = z.infer<typeof StudentCredentialsResponse>;
+export type StudentResourcesResponse = z.infer<typeof StudentResourcesResponse>;
+export type StudentPracticumResponse = z.infer<typeof StudentPracticumResponse>;
+export type StudentServiceRequestsResponse = z.infer<typeof StudentServiceRequestsResponse>;
+export type CreateGradeItemRequest = z.infer<typeof CreateGradeItemRequest>;

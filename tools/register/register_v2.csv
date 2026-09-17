@@ -1,6 +1,6 @@
 id,title,actors,mode,writes,approval,shell,status
-SH-01,Sign in,all,WRITE,session,n/a,shared,in_progress
-SH-12,Approval inbox,admin|registrar,WRITE,approval_decision,n/a,admin,in_progress
+SH-01,Sign in,all,WRITE,session,n/a,shared,implemented
+SH-12,Approval inbox,admin|registrar,WRITE,approval_decision,n/a,admin,implemented
 AI-13,Campus Coach,applicant|student|instructor|admin|employer|registrar,WRITE,ai_interaction,n/a,shared,implemented
 AI-14,Shared AI platform contracts,shared,READ,none,n/a,shared,implemented
 AI-01,AI tool registry and executor,shared,READ,none,n/a,shared,implemented
@@ -34,22 +34,22 @@ ST-02,My courses,student,READ,none,n/a,student,implemented
 ST-03,Course detail,student,READ,none,n/a,student,implemented
 ST-04,Assignments,student,READ,none,n/a,student,implemented
 ST-05,Assignment detail and submission,student,WRITE,submission|file_object,n/a,student,implemented
-ST-06,Assessments,student,WRITE,assessment_attempt,n/a,student,scaffolded
+ST-06,Assessments,student,WRITE,assessment_attempt,n/a,student,implemented
 ST-07,Student grades,student,READ,none,n/a,student,implemented
-ST-08,Attendance,student,READ,none,n/a,student,scaffolded
+ST-08,Attendance,student,READ,none,n/a,student,implemented
 ST-09,Schedule,student,READ,none,n/a,student,implemented
-ST-10,Lectures,student,READ,none,n/a,student,scaffolded
-ST-11,Lecture detail,student,READ,none,n/a,student,scaffolded
-ST-12,Labs,student,READ,none,n/a,student,scaffolded
-ST-13,Lab notebook,student,WRITE,lab_notebook,n/a,student,scaffolded
+ST-10,Lectures,student,READ,none,n/a,student,implemented
+ST-11,Lecture detail,student,READ,none,n/a,student,implemented
+ST-12,Labs,student,READ,none,n/a,student,implemented
+ST-13,Lab notebook,student,WRITE,lab_notebook,n/a,student,implemented
 ST-14,AI tutor / Study Coach,student,WRITE,ai_interaction,n/a,student,implemented
 ST-15,Advising,student,WRITE,advising_appointment,n/a,student,implemented
-ST-16,Student services,student,WRITE,service_request,approval,student,scaffolded
-ST-17,Practicum,student,WRITE,practicum_log,approval,student,scaffolded
-ST-18,Finance,student,READ,none,n/a,student,scaffolded
-ST-19,Credentials,student,READ,none,n/a,student,scaffolded
+ST-16,Student services,student,WRITE,service_request,approval,student,implemented
+ST-17,Practicum,student,WRITE,practicum_log,approval,student,implemented
+ST-18,Finance,student,READ,none,n/a,student,implemented
+ST-19,Credentials,student,READ,none,n/a,student,implemented
 ST-20,Career,student,WRITE,saved_opportunity,n/a,student,implemented
 ST-21,Ask about grade,student,WRITE,message,n/a,student,implemented
-ST-22,Resources,student,READ,none,n/a,student,scaffolded
-IN-07,Gradebook,instructor,WRITE,grade_draft|publish_request,approval,instructor,in_progress
-MB-08,Mobile grades read-only,instructor,READ,none,n/a,mobile,scaffolded
+ST-22,Resources,student,READ,none,n/a,student,implemented
+IN-07,Gradebook,instructor,WRITE,grade_draft|publish_request,approval,instructor,implemented
+MB-08,Mobile grades read-only,instructor,READ,none,n/a,mobile,implemented

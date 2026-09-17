@@ -1039,21 +1039,34 @@ export function StudentServicesView() {
 
 export function StudentFeesView() {
   const router = useRouter();
-  const resource = useStudentResource<PortalHubView>("/portal/view?path=%2Fstudent%2Ffees");
-  const rows = resource.data?.sections.flatMap((section) => section.rows) ?? [];
+  const resource = useStudentResource<{
+    summary: { balance: { amountCents: number }; pastDue: { amountCents: number }; nextDueAt: string | null; paymentExecutionEnabled: false };
+    entries: Array<{ id: string; label: string; amountCad: number; kind: string; status: string; dueAt: string | null }>;
+  }>("/student/finance");
+  const entries = resource.data?.entries ?? [];
+  const summary = resource.data?.summary;
   return (
-    <StudentFrame role="student" active="Fees" title="Fees & financial statements" subtitle="Tuition balances and financial records for your account." breadcrumb={["Student", "Fees"]}>
+    <StudentFrame role="student" active="Fees" title="Fees & financial statements" subtitle="Tuition balances and financial records for your account. Online payment is not enabled." breadcrumb={["Student", "Fees"]}>
       <ResourceBoundary state={resource.state} error={resource.error} onRetry={resource.refresh}>
         <Panel title="Balances">
-          {rows.length ? (
+          {summary ? (
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
+              <StatusPill tone="warning">Balance CAD {(summary.balance.amountCents / 100).toFixed(2)}</StatusPill>
+              <StatusPill tone={summary.pastDue.amountCents > 0 ? "danger" : "success"}>
+                Past due CAD {(summary.pastDue.amountCents / 100).toFixed(2)}
+              </StatusPill>
+              <StatusPill tone="neutral">Payment execution off</StatusPill>
+            </div>
+          ) : null}
+          {entries.length ? (
             <ul style={listStyle}>
-              {rows.map((row) => (
-                <li key={`${row.primary}-${row.meta ?? ""}`} style={rowStyle}>
+              {entries.map((row) => (
+                <li key={row.id} style={rowStyle}>
                   <div>
-                    <strong>{row.primary}</strong>
-                    {row.secondary ? <div style={{ color: "var(--mh-text-muted)" }}>{row.secondary}</div> : null}
+                    <strong>{row.label}</strong>
+                    <div style={{ color: "var(--mh-text-muted)" }}>{row.kind} · {row.status}{row.dueAt ? ` · due ${row.dueAt.slice(0, 10)}` : ""}</div>
                   </div>
-                  {row.meta ? <StatusPill tone="warning">{row.meta}</StatusPill> : null}
+                  <StatusPill tone="warning">CAD {row.amountCad.toFixed(2)}</StatusPill>
                 </li>
               ))}
             </ul>
