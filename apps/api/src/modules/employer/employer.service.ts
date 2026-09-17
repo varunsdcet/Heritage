@@ -1,5 +1,7 @@
 import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
+import { writeAuditAndOutbox } from "@myheritage/events";
+import { randomUUID } from "node:crypto";
 import type { PortalView } from "../portal/portal.service.js";
 
 function requireEmployer(user: SessionClaims) {
@@ -305,6 +307,17 @@ export async function runEmployerAction(
         templateKey: "practicum.hours.approved",
       },
     });
+    await writeAuditAndOutbox(prisma, {
+      institutionId: user.institutionId,
+      actorId: user.accountId,
+      eventName: "EmployerHours.approved",
+      purpose: "employer_mutation",
+      before: { hoursId: entry.id, status: entry.status },
+      after: { hoursId: entry.id, status: "approved", weekLabel: entry.weekLabel, hours: entry.hours },
+      source: "employer.approve_hours",
+      correlationId: randomUUID(),
+      outboxPayload: { hoursId: entry.id, status: "approved" },
+    });
     return { ok: true, hoursId: entry.id, status: "approved" };
   }
 
@@ -332,6 +345,17 @@ export async function runEmployerAction(
     await prisma.placementEvaluation.update({
       where: { id: evaluation.id },
       data: { status: "submitted", score: 4, notes: "Meets clinical expectations" },
+    });
+    await writeAuditAndOutbox(prisma, {
+      institutionId: user.institutionId,
+      actorId: user.accountId,
+      eventName: "EmployerEvaluation.submitted",
+      purpose: "employer_mutation",
+      before: { evaluationId: evaluation.id, status: evaluation.status },
+      after: { evaluationId: evaluation.id, status: "submitted", score: 4 },
+      source: "employer.submit_evaluation",
+      correlationId: randomUUID(),
+      outboxPayload: { evaluationId: evaluation.id, status: "submitted", score: 4 },
     });
     return { ok: true, evaluationId: evaluation.id, status: "submitted", score: 4 };
   }

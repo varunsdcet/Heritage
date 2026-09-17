@@ -8,7 +8,14 @@ dist
 **/.env
 coverage
 *.log
+*.tsbuildinfo
 .DS_Store
+.mcp.json
+**/mcp.json
+.vscode
+.idea
+.claude
+.codex
 packages/db/prisma/*.db
 packages/db/prisma/*.db-journal
 deploy/.env.production.example

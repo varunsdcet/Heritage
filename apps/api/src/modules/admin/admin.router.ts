@@ -12,7 +12,7 @@ const CreateUser = z.object({
   email: z.string().email(),
   givenName: z.string().min(1),
   familyName: z.string().min(1),
-  role: z.enum(["student", "instructor", "admin", "registrar"]),
+  role: z.enum(["student", "instructor", "admin", "registrar", "applicant", "employer"]),
   password: z.string().min(8).default("Heritage!2026"),
   studentNumber: z.string().optional(),
   programName: z.string().optional(),
@@ -119,6 +119,47 @@ adminRouter.post("/users", async (req, res, next) => {
           studentNumber,
           programName: body.programName?.trim() || "General Studies",
           standing: "good",
+        },
+      });
+    }
+
+    if (body.role === "applicant") {
+      await prisma.admissionsApplication.create({
+        data: {
+          institutionId: user.institutionId,
+          accountId,
+          personId,
+          programName: body.programName?.trim() || "General Studies",
+          intakeTerm: "Fall 2026",
+          status: "draft",
+          progressPct: 10,
+          documents: {
+            create: [
+              { institutionId: user.institutionId, label: "Official transcript", status: "missing" },
+              { institutionId: user.institutionId, label: "Government ID", status: "missing" },
+            ],
+          },
+          timeline: {
+            create: [
+              {
+                institutionId: user.institutionId,
+                title: "Application started",
+                detail: "Account provisioned by campus admin",
+              },
+            ],
+          },
+        },
+      });
+    }
+
+    if (body.role === "employer") {
+      await prisma.employerOrg.create({
+        data: {
+          institutionId: user.institutionId,
+          accountId,
+          name: body.programName?.trim() || `${body.givenName} ${body.familyName} Org`,
+          siteName: "Primary practicum site",
+          contactEmail: email,
         },
       });
     }

@@ -376,14 +376,15 @@ export function AppShell({
   return (
     <div style={{ minHeight: "100vh", background: "var(--mh-bg)", color: "var(--mh-text)" }}>
       <style>{`
-        .mh-appshell-header{display:flex;align-items:center;justify-content:space-between;gap:1rem;min-height:56px;padding:0 clamp(1rem,5vw,80px);border-bottom:1px solid var(--mh-border);background:var(--mh-surface);position:sticky;top:0;z-index:20;flex-wrap:wrap}
-        .mh-appshell-left{display:flex;align-items:center;gap:24px;min-width:0;flex:1 1 auto}
+        .mh-appshell-header{display:flex;align-items:center;justify-content:space-between;gap:1rem;min-height:56px;padding:0 clamp(1rem,5vw,80px);border-bottom:1px solid var(--mh-border);background:var(--mh-surface);position:sticky;top:0;z-index:20;flex-wrap:wrap;max-width:100vw;box-sizing:border-box}
+        .mh-appshell-left{display:flex;align-items:center;gap:24px;min-width:0;flex:1 1 auto;max-width:100%}
         .mh-appshell-nav{display:flex;gap:16px;align-items:stretch;overflow-x:auto;max-width:100%;scrollbar-width:thin}
-        .mh-appshell-actions{display:flex;align-items:center;gap:10px;flex:0 1 auto;flex-wrap:wrap;justify-content:flex-end}
-        .mh-appshell-search{display:flex;align-items:center;gap:8px;width:min(240px,42vw);padding:8px 12px;border-radius:var(--mh-radius-md);border:1px solid var(--mh-border);background:var(--mh-surface-muted);color:var(--mh-text-subtle);font-family:var(--mh-font-sans);font-size:13;cursor:pointer;text-align:left}
+        .mh-appshell-actions{display:flex;align-items:center;gap:10px;flex:0 1 auto;flex-wrap:wrap;justify-content:flex-end;max-width:100%}
+        .mh-appshell-search{display:flex;align-items:center;gap:8px;width:min(240px,42vw);max-width:100%;padding:8px 12px;border-radius:var(--mh-radius-md);border:1px solid var(--mh-border);background:var(--mh-surface-muted);color:var(--mh-text-subtle);font-family:var(--mh-font-sans);font-size:13;cursor:pointer;text-align:left;box-sizing:border-box}
         @media (max-width:1100px){.mh-appshell-search{width:160px}.mh-appshell-search .mh-appshell-kbd{display:none}}
         @media (max-width:900px){.mh-appshell-left{width:100%;justify-content:space-between}.mh-appshell-nav{display:none}.mh-appshell-actions{width:100%;justify-content:flex-start}.mh-appshell-search{flex:1 1 160px;width:auto}}
         @media (max-width:520px){.mh-appshell-ask-label{display:none}.mh-appshell-search{flex:1 1 100%}}
+        .mh-appshell-main{max-width:100vw;overflow-x:hidden;box-sizing:border-box}
       `}</style>
       <header className="mh-appshell-header">
         <div className="mh-appshell-left">
@@ -524,7 +525,7 @@ export function AppShell({
           </button>
         </div>
       </header>
-      <main style={{ padding: "32px clamp(1rem, 5vw, 80px) 48px" }}>{children}</main>
+      <main className="mh-appshell-main" style={{ padding: "32px clamp(1rem, 5vw, 80px) 48px" }}>{children}</main>
     </div>
   );
 }

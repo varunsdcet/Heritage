@@ -482,19 +482,30 @@ function QueueView({ config }: { config: SisScreenConfig }) {
             <span key={c}>{c}</span>
           ))}
         </div>
-        {rows.map((row, idx) => (
-          <button
-            key={(row.primary || row.cells[0]) + idx}
-            type="button"
+        {rows.map((row, idx) => {
+          const rowKey =
+            (row as { id?: string }).id ||
+            `${row.primary || row.cells[0] || "row"}-${row.secondary || ""}-${idx}`;
+          const RowTag = config.rowActions === "refund" ? "div" : "button";
+          return (
+          <RowTag
+            key={rowKey}
+            {...(RowTag === "button"
+              ? {
+                  type: "button" as const,
+                  onClick: () => {
+                    if (row.href) {
+                      router.push(row.href);
+                      return;
+                    }
+                    void live.runAction("Open", row.primary || row.cells[0]);
+                  },
+                }
+              : {
+                  role: "row" as const,
+                })}
             className="mh-sis-table__row"
             style={{ gridTemplateColumns: config.columnTemplate }}
-            onClick={() => {
-              if (row.href) {
-                router.push(row.href);
-                return;
-              }
-              void live.runAction("Open", row.primary || row.cells[0]);
-            }}
           >
             <span className="mh-sis-table__stack">
               {config.rowActions === "refund" ? <span className="mh-sis-plan-task__check" /> : null}
@@ -551,8 +562,9 @@ function QueueView({ config }: { config: SisScreenConfig }) {
                 tone="secondary"
               />
             )}
-          </button>
-        ))}
+          </RowTag>
+          );
+        })}
       </div>
 
       {!config.infoBanner && config.rowActions !== "refund" && config.rowActions !== "approval" ? (
@@ -783,8 +795,8 @@ function DashboardView({ config }: { config: SisScreenConfig }) {
           <section className="mh-sis-dash__card">
             <h2>{registrarDash.auditsTitle}</h2>
             <div className="mh-sis-rg-activity">
-              {registrarDash.audits.map((row) => (
-                <div key={row.text} className="mh-sis-rg-activity__row">
+              {registrarDash.audits.map((row, i) => (
+                <div key={`${row.text}-${row.when}-${i}`} className="mh-sis-rg-activity__row">
                   <p>{row.text}</p>
                   <span>{row.when}</span>
                 </div>
@@ -915,8 +927,8 @@ function DashboardView({ config }: { config: SisScreenConfig }) {
             <section className="mh-sis-dash__card">
               <h2>Recent Transactions</h2>
               <div className="mh-sis-risk">
-                {config.financeDash.transactions.map((t) => (
-                  <div key={t.name + t.amount} className="mh-sis-risk__row">
+                {config.financeDash.transactions.map((t, i) => (
+                  <div key={(t as { id?: string }).id || `${t.name}-${t.detail}-${t.amount}-${i}`} className="mh-sis-risk__row">
                     <div>
                       <strong>{t.name}</strong>
                       <span className="mh-sis-table__secondary">{t.detail}</span>
@@ -1192,7 +1204,20 @@ function GradesView({ config }: { config: SisScreenConfig }) {
 
 function WizardView({ config }: { config: SisScreenConfig }) {
   const router = useRouter();
-  const w = config.wizard!;
+  const w = config.wizard;
+  if (!w) {
+    return (
+      <div className="mh-sis-dash mh-sis-dash--wide" data-figma-id={config.figmaId}>
+        <div className="mh-sis-dash__welcome">
+          <div className="mh-sis-dash__welcome-text">
+            <h1>{config.title}</h1>
+            <p>{config.subtitle}</p>
+          </div>
+        </div>
+        <p className="mh-sis-muted">Create-student wizard data is loading or unavailable for this institution.</p>
+      </div>
+    );
+  }
   return (
     <div className="mh-sis-dash mh-sis-dash--wide" data-figma-id={config.figmaId}>
       <div className="mh-sis-dash__welcome">
@@ -2790,7 +2815,20 @@ function CitationView({ config }: { config: SisScreenConfig }) {
 }
 
 function UsageCostView({ config }: { config: SisScreenConfig }) {
-  const u = config.usageCost!;
+  const u = config.usageCost;
+  if (!u) {
+    return (
+      <div className="mh-sis-dash mh-sis-dash--wide" data-figma-id={config.figmaId}>
+        <div className="mh-sis-dash__welcome">
+          <div className="mh-sis-dash__welcome-text">
+            <h1>{config.title}</h1>
+            <p>{config.subtitle}</p>
+          </div>
+        </div>
+        <p className="mh-sis-muted">Usage and cost analytics are not available yet for this campus.</p>
+      </div>
+    );
+  }
   return (
     <div className="mh-sis-dash mh-sis-dash--wide" data-figma-id={config.figmaId}>
       <div className="mh-sis-dash__welcome">
@@ -2799,7 +2837,7 @@ function UsageCostView({ config }: { config: SisScreenConfig }) {
           <p>{config.subtitle}</p>
         </div>
         <div className="mh-sis-dash__banner-actions">
-          <ActionBtn label={(u.cycle) || "Action"} tone="secondary" />
+          <ActionBtn label={u.cycle || "Billing cycle"} tone="secondary" />
         </div>
       </div>
       <div className="mh-sis-dash__kpis">
@@ -2825,7 +2863,7 @@ function UsageCostView({ config }: { config: SisScreenConfig }) {
               <span>Tokens Out</span>
               <span>Cost</span>
             </div>
-            {u.models.map((m) => (
+            {(u.models ?? []).map((m) => (
               <div
                 key={m.model}
                 className="mh-sis-table__row mh-sis-grades__row"
@@ -2843,7 +2881,7 @@ function UsageCostView({ config }: { config: SisScreenConfig }) {
         <section className="mh-sis-dash__card">
           <h2>Cost Trend (Past 10 Days)</h2>
           <div className="mh-sis-chart mh-sis-chart--finance">
-            {u.trend.map((t) => (
+            {(u.trend ?? []).map((t) => (
               <div key={t.label} className="mh-sis-chart__col">
                 <div className="mh-sis-chart__bar" style={{ height: t.height }} />
                 <span>{t.label}</span>

@@ -772,27 +772,89 @@ function CourseMgmtView({ config }: { config: TeacherScreenConfig }) {
 
 function AnnouncementsView({ config }: { config: TeacherScreenConfig }) {
   const a = config.announcements;
-  if (!a) return null;
+  const live = useOptionalTeacherLive();
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  if (!a) {
+    return (
+      <div className="mh-teacher-stack" data-figma-id={config.figmaId}>
+        <PageHead config={config} />
+        <p className="mh-teacher-muted">No announcement workspace available yet.</p>
+      </div>
+    );
+  }
   return (
     <div className="mh-teacher-stack" data-figma-id={config.figmaId}>
       <PageHead config={config} />
       <p className="mh-teacher-muted">{a.course}</p>
       <section className="mh-teacher-card">
-        <div className="mh-teacher-announcements">
-          {a.posts.map((p) => (
-            <div key={p.title} className="mh-teacher-announcements__item">
-              <div className="mh-teacher-announcements__top">
-                <strong>
-                  {p.pinned ? "📌 " : ""}
-                  {p.title}
-                </strong>
-                <span>{p.when}</span>
-              </div>
-              <p>{p.body}</p>
-              <span className="mh-teacher-muted">{p.audience}</span>
-            </div>
-          ))}
+        <h2>Compose announcement</h2>
+        <div className="mh-teacher-fields">
+          <label>
+            <span>Title</span>
+            <input
+              className="mh-teacher-field"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Announcement title"
+            />
+          </label>
+          <label>
+            <span>Body</span>
+            <textarea
+              className="mh-teacher-field mh-teacher-field--tall"
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              placeholder="Message for enrolled students"
+              rows={4}
+            />
+          </label>
+          <label>
+            <span>Audience</span>
+            <div className="mh-teacher-field">All enrolled students</div>
+          </label>
         </div>
+        <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            className="mh-teacher-btn mh-teacher-btn--primary"
+            disabled={live?.busy || !title.trim() || !body.trim()}
+            onClick={() => {
+              void (async () => {
+                await live?.runAction?.(
+                  "Publish announcement",
+                  JSON.stringify({ title: title.trim(), body: body.trim() }),
+                );
+                setTitle("");
+                setBody("");
+              })();
+            }}
+          >
+            Publish announcement
+          </button>
+        </div>
+      </section>
+      <section className="mh-teacher-card">
+        <h2>Published posts</h2>
+        {(a.posts ?? []).length === 0 ? (
+          <p className="mh-teacher-muted">No announcements published yet.</p>
+        ) : (
+          <div className="mh-teacher-announcements">
+            {a.posts.map((p, i) => (
+              <div key={`${p.title}-${p.when}-${i}`} className="mh-teacher-announcements__item">
+                <div className="mh-teacher-announcements__top">
+                  <strong>
+                    {p.pinned ? "📌 " : ""}
+                    {p.title}
+                  </strong>
+                  <span>{p.when}</span>
+                </div>
+                <p>{p.body}</p>
+                <span className="mh-teacher-muted">{p.audience}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
     </div>
   );
@@ -1014,7 +1076,30 @@ function TableBlock({ config }: { config: TeacherScreenConfig }) {
 
 function FormView({ config }: { config: TeacherScreenConfig }) {
   const f = config.form;
-  if (!f) return null;
+  const live = useOptionalTeacherLive();
+  const [values, setValues] = useState<Record<string, string>>(() => {
+    const init: Record<string, string> = {};
+    for (const g of f?.groups ?? []) {
+      for (const field of g.fields) init[field.label] = field.value;
+    }
+    return init;
+  });
+  useEffect(() => {
+    const init: Record<string, string> = {};
+    for (const g of f?.groups ?? []) {
+      for (const field of g.fields) init[field.label] = field.value;
+    }
+    setValues(init);
+  }, [f]);
+  if (!f) {
+    return (
+      <div className="mh-teacher-stack" data-figma-id={config.figmaId}>
+        <PageHead config={config} />
+        <p className="mh-teacher-muted">No form fields available for this screen.</p>
+      </div>
+    );
+  }
+  const courseName = values["Course Name"] || values["Course Number"] || "";
   return (
     <div className="mh-teacher-stack" data-figma-id={config.figmaId}>
       <PageHead config={config} />
@@ -1025,14 +1110,39 @@ function FormView({ config }: { config: TeacherScreenConfig }) {
             {g.fields.map((field) => (
               <label key={field.label}>
                 <span>{field.label}</span>
-                <div className={`mh-teacher-field${field.type === "textarea" ? " mh-teacher-field--tall" : ""}`}>
-                  {field.value}
-                </div>
+                {field.type === "textarea" ? (
+                  <textarea
+                    className="mh-teacher-field mh-teacher-field--tall"
+                    value={values[field.label] ?? ""}
+                    onChange={(e) => setValues((prev) => ({ ...prev, [field.label]: e.target.value }))}
+                    rows={4}
+                  />
+                ) : (
+                  <input
+                    className="mh-teacher-field"
+                    type={field.type === "number" ? "text" : "text"}
+                    value={values[field.label] ?? ""}
+                    onChange={(e) => setValues((prev) => ({ ...prev, [field.label]: e.target.value }))}
+                  />
+                )}
               </label>
             ))}
           </div>
         </section>
       ))}
+      <div style={{ display: "flex", gap: 8 }}>
+        {config.secondaryAction ? (
+          <ActionBtn label={config.secondaryAction} tone="secondary" href={config.secondaryActionHref} />
+        ) : null}
+        <button
+          type="button"
+          className="mh-teacher-btn mh-teacher-btn--primary"
+          disabled={live?.busy || !courseName.trim()}
+          onClick={() => void live?.runAction?.(f.submitLabel || config.primaryAction || "Save Course", courseName.trim())}
+        >
+          {f.submitLabel || config.primaryAction || "Save Course"}
+        </button>
+      </div>
     </div>
   );
 }

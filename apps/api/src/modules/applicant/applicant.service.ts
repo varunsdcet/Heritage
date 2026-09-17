@@ -393,6 +393,17 @@ export async function runApplicantAction(
       data: { progressPct: next },
     });
     await addTimeline(app.id, user.institutionId, "Progress saved", `Application now ${next}% complete`);
+    await writeAuditAndOutbox(prisma, {
+      institutionId: user.institutionId,
+      actorId: user.accountId,
+      eventName: "ApplicantApplication.progressSaved",
+      purpose: "applicant_mutation",
+      before: { applicationId: app.id, progressPct: app.progressPct },
+      after: { applicationId: app.id, progressPct: next },
+      source: "applicant.save_progress",
+      correlationId: randomUUID(),
+      outboxPayload: { applicationId: app.id, progressPct: next },
+    });
     return { ok: true, progressPct: next };
   }
 
@@ -411,6 +422,17 @@ export async function runApplicantAction(
         body: `Your ${app.programName} application is under review.`,
         templateKey: "admissions.submitted",
       },
+    });
+    await writeAuditAndOutbox(prisma, {
+      institutionId: user.institutionId,
+      actorId: user.accountId,
+      eventName: "ApplicantApplication.submitted",
+      purpose: "applicant_mutation",
+      before: { applicationId: app.id, status: app.status },
+      after: { applicationId: app.id, status: "submitted", progressPct: Math.max(app.progressPct, 80) },
+      source: "applicant.submit_application",
+      correlationId: randomUUID(),
+      outboxPayload: { applicationId: app.id, status: "submitted" },
     });
     return { ok: true, status: "submitted" };
   }
@@ -488,6 +510,17 @@ export async function runApplicantAction(
       data: { status: "interview", progressPct: Math.max(app.progressPct, 85) },
     });
     await addTimeline(app.id, user.institutionId, "Interview readiness confirmed", "Applicant marked ready for interview");
+    await writeAuditAndOutbox(prisma, {
+      institutionId: user.institutionId,
+      actorId: user.accountId,
+      eventName: "ApplicantApplication.interviewReady",
+      purpose: "applicant_mutation",
+      before: { applicationId: app.id, status: app.status },
+      after: { applicationId: app.id, status: "interview" },
+      source: "applicant.ready_interview",
+      correlationId: randomUUID(),
+      outboxPayload: { applicationId: app.id, status: "interview" },
+    });
     return { ok: true, status: "interview" };
   }
 
@@ -507,6 +540,17 @@ export async function runApplicantAction(
       status === "accepted" ? "Offer accepted" : "Offer declined",
       offer.title,
     );
+    await writeAuditAndOutbox(prisma, {
+      institutionId: user.institutionId,
+      actorId: user.accountId,
+      eventName: status === "accepted" ? "ApplicantOffer.accepted" : "ApplicantOffer.declined",
+      purpose: "applicant_mutation",
+      before: { applicationId: app.id, offerId: offer.id, status: offer.status },
+      after: { applicationId: app.id, offerId: offer.id, status },
+      source: `applicant.${action}`,
+      correlationId: randomUUID(),
+      outboxPayload: { applicationId: app.id, offerId: offer.id, status },
+    });
     return { ok: true, offerId: offer.id, status };
   }
 

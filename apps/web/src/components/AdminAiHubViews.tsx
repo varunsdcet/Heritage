@@ -121,7 +121,7 @@ export function AiDashView({ config }: { config: SisScreenConfig }) {
           </button>
         </div>
         <div className="mh-sis-ai-activity">
-          {dash.activity.map((row) => (
+          {(dash.activity ?? []).map((row) => (
             <button
               key={row.id}
               type="button"

@@ -312,10 +312,12 @@ function gradeRows(campus: Campus) {
 function auditRows(campus: Campus) {
   return campus.audits.map((a) => ({
     primary: a.eventName,
-    secondary: a.actorId.slice(0, 8),
-    cells: [a.eventName, a.actorId.slice(0, 8), a.createdAt],
+    secondary: `${a.actorId.slice(0, 8)} · ${a.id.slice(0, 8)}`,
+    cells: [a.eventName, a.actorId.slice(0, 8), a.createdAt, a.id],
     badge: "Logged",
     badgeTone: "active",
+    href: undefined as string | undefined,
+    id: a.id,
   }));
 }
 
@@ -601,7 +603,8 @@ export async function composeFromDomain(user: SessionClaims, path: string): Prom
       financeDash: {
         months: [{ label: term, height: "70%", active: true }],
         methods: [{ label: "Tuition (credits)", value: `CAD ${k.tuition.toLocaleString()}`, color: "#3d6b4f" }],
-        transactions: tuition.slice(0, 6).map((t) => ({
+        transactions: tuition.slice(0, 6).map((t, i) => ({
+          id: `txn-${i}-${String(t.secondary)}`,
           name: String(t.primary),
           detail: String(t.secondary),
           amount: `CAD ${t.amount}`,
@@ -884,7 +887,52 @@ export async function composeFromDomain(user: SessionClaims, path: string): Prom
     };
   }
 
+  if (path.includes("ai-10") || path.includes("usage-cost") || path.includes("usage_cost")) {
+    const auditCount = campus.audits.length;
+    const notifCount = campus.notifications.length;
+    return {
+      rows: auditRows(campus),
+      countLabel: `${auditCount} audit events`,
+      kpis: [
+        { label: "Today's Cost", value: "$0.00", hint: `${auditCount} live audit events` },
+        { label: "Month-to-Date Cost", value: "$0.00", hint: "No billing integration yet" },
+        { label: "Gateway Events", value: String(auditCount), hint: "Audit trail volume" },
+      ],
+      usageCost: {
+        cycle: `Live cycle · ${campus.institutionName}`,
+        models: [
+          {
+            model: "Campus Coach",
+            calls: String(Math.max(auditCount, 1)),
+            tokensIn: "—",
+            tokensOut: "—",
+            cost: "$0.00",
+          },
+          {
+            model: "Notifications",
+            calls: String(notifCount),
+            tokensIn: "—",
+            tokensOut: "—",
+            cost: "$0.00",
+          },
+        ],
+        trend: Array.from({ length: 10 }, (_, i) => ({
+          label: String(i + 1),
+          height: `${Math.min(100, 20 + ((auditCount + i) % 8) * 10)}%`,
+        })),
+      },
+    };
+  }
+
   if (path.includes("/admin/f/ai-") || path.includes("/admin/ai") || path.includes("retrieval") || path.includes("citation") || path.includes("eval")) {
+    const activity = campus.audits.slice(0, 8).map((a) => ({
+      id: a.id.slice(0, 8),
+      title: a.eventName,
+      when: a.createdAt,
+      status: "LOGGED",
+      tone: "active" as const,
+      href: "/admin/f/ai-12-tool-call-audit",
+    }));
     return {
       rows: auditRows(campus),
       countLabel: `${campus.audits.length} audit events`,
@@ -896,9 +944,21 @@ export async function composeFromDomain(user: SessionClaims, path: string): Prom
       ],
       aiDash: {
         kpis: [
-          { label: "Audits", value: String(campus.audits.length) },
-          { label: "Notifications", value: String(campus.notifications.length) },
+          { label: "Audits", value: String(campus.audits.length), hint: "Live trail", href: "/admin/f/ai-12-tool-call-audit" },
+          { label: "Notifications", value: String(campus.notifications.length), hint: "Sent", href: "/admin/f/fm-01-notification-center" },
+          { label: "Pending approvals", value: String(k.pending), hint: "Human review", href: "/admin/f/wf-01-approval-inbox" },
+          { label: "Published grades", value: String(k.publishedGrades), hint: "Signals" },
         ],
+        usageTrend: Array.from({ length: 7 }, (_, i) => ({
+          label: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][i]!,
+          height: `${Math.min(100, 30 + ((campus.audits.length + i) % 7) * 10)}%`,
+        })),
+        costBreakdown: [
+          { label: "Audit gateway", amount: "$0", pct: 60, color: "#017f3f", href: "/admin/f/ai-10-usage-cost" },
+          { label: "Notifications", amount: "$0", pct: 25, color: "#849f38", href: "/admin/f/ai-10-usage-cost" },
+          { label: "Other", amount: "$0", pct: 15, color: "#1d4ed8", href: "/admin/f/ai-10-usage-cost" },
+        ],
+        activity,
       },
     };
   }
@@ -1086,7 +1146,39 @@ export async function composeFromDomain(user: SessionClaims, path: string): Prom
     };
   }
 
-  if (path.includes("grade") || path.includes("ac-12") || path.includes("ac-13") || path.includes("ac-14") || path.includes("ac-15") || path.includes("ac-16") || path.includes("ac-17") || path.includes("ac-18") || path.includes("ac-19") || path.includes("ac-20")) {
+  if (path.includes("ac-20") || path.includes("create-student")) {
+    const matches = campus.students.slice(0, 2).map((s) => ({
+      name: s.name,
+      reason: `Matches: student number ${s.studentNumber}, program ${s.programName}`,
+    }));
+    const focus = campus.students[0];
+    return {
+      rows: studentRows(campus),
+      countLabel: `${campus.students.length} students`,
+      kpis: baseKpis,
+      wizard: {
+        steps: [
+          { label: "Personal Info", state: "done" as const },
+          { label: "Program Selection", state: "done" as const },
+          { label: "Identity Match Check", state: "current" as const },
+          { label: "Enrollment Details", state: "todo" as const },
+          { label: "Review and Create", state: "todo" as const },
+        ],
+        matches:
+          matches.length > 0
+            ? matches
+            : [{ name: "No matches", reason: "No overlapping identity signals in this institution yet." }],
+        summary: [
+          { label: "Campus", value: campus.institutionName },
+          { label: "Students on file", value: String(campus.students.length) },
+          { label: "Suggested program", value: focus?.programName ?? "—" },
+          { label: "Catalog year", value: k.term },
+        ],
+      },
+    };
+  }
+
+  if (path.includes("grade") || path.includes("ac-12") || path.includes("ac-13") || path.includes("ac-14") || path.includes("ac-15") || path.includes("ac-16") || path.includes("ac-17") || path.includes("ac-18") || path.includes("ac-19")) {
     return {
       rows: gradeRows(campus),
       countLabel: `${campus.grades.length} grade items`,

@@ -115,6 +115,8 @@ export default function CreateUserPage() {
             >
               <option value="instructor">Teacher / Instructor</option>
               <option value="student">Student</option>
+              <option value="applicant">Applicant</option>
+              <option value="employer">Employer</option>
               <option value="admin">Admin</option>
               <option value="registrar">Registrar</option>
             </select>
@@ -152,6 +154,22 @@ export default function CreateUserPage() {
                 <Input value={form.programName} onChange={(e) => setForm({ ...form, programName: e.target.value })} />
               </label>
             </>
+          ) : null}
+          {form.role === "applicant" ? (
+            <label style={{ display: "grid", gap: 6 }}>
+              <span style={{ fontWeight: 600, fontSize: 14 }}>Program interest</span>
+              <Input value={form.programName} onChange={(e) => setForm({ ...form, programName: e.target.value })} />
+            </label>
+          ) : null}
+          {form.role === "employer" ? (
+            <label style={{ display: "grid", gap: 6 }}>
+              <span style={{ fontWeight: 600, fontSize: 14 }}>Organization name</span>
+              <Input
+                value={form.programName}
+                onChange={(e) => setForm({ ...form, programName: e.target.value })}
+                placeholder="Partner organization"
+              />
+            </label>
           ) : null}
           <Button type="submit">Create account</Button>
         </form>

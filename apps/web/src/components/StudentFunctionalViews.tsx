@@ -218,9 +218,41 @@ export function StudentCourseDetailView({ sectionId }: { sectionId: string }) {
                 <ul style={listStyle}>{sessions.map((event) => <li key={event.id} style={rowStyle}><div><strong>{event.title}</strong><div style={{ color: "var(--mh-text-muted)" }}>{formatDate(event.startsAt)} · {event.location ?? "Location TBA"}</div></div>{event.joinUrl ? <Button type="button" onClick={() => window.open(event.joinUrl!, "_blank", "noopener,noreferrer")}>Join class</Button> : <StatusPill tone="neutral">In person</StatusPill>}</li>)}</ul>
               )}
             </Panel>
-            <Panel title="Assignments">
-              {courseAssignments.length === 0 ? <EmptyState title="No assignments" body="There is no assigned work for this course yet." /> : (
-                <ul style={listStyle}>{courseAssignments.map((assignment) => <li key={assignment.id} style={rowStyle}><div><strong>{assignment.title}</strong><div style={{ color: "var(--mh-text-muted)" }}>Due {formatDate(assignment.dueAt)}</div></div><Button type="button" variant="secondary" onClick={() => router.push(`/student/assignments/${assignment.id}`)}>View</Button></li>)}</ul>
+            <Panel title="Course materials">
+              {sessions.length === 0 && courseAssignments.length === 0 ? (
+                <EmptyState title="No materials yet" body="Lectures, resources, and assigned work will appear here when published." />
+              ) : (
+                <ul style={listStyle}>
+                  {sessions.map((event) => (
+                    <li key={`mat-${event.id}`} style={rowStyle}>
+                      <div>
+                        <strong>{event.title}</strong>
+                        <div style={{ color: "var(--mh-text-muted)" }}>
+                          Class session · {formatDate(event.startsAt)}
+                          {event.location ? ` · ${event.location}` : ""}
+                        </div>
+                      </div>
+                      {event.joinUrl ? (
+                        <Button type="button" variant="secondary" onClick={() => window.open(event.joinUrl!, "_blank", "noopener,noreferrer")}>
+                          Open session
+                        </Button>
+                      ) : (
+                        <StatusPill tone="neutral">In person</StatusPill>
+                      )}
+                    </li>
+                  ))}
+                  {courseAssignments.map((assignment) => (
+                    <li key={`asg-${assignment.id}`} style={rowStyle}>
+                      <div>
+                        <strong>{assignment.title}</strong>
+                        <div style={{ color: "var(--mh-text-muted)" }}>Assignment · Due {formatDate(assignment.dueAt)}</div>
+                      </div>
+                      <Button type="button" variant="secondary" onClick={() => router.push(`/student/assignments/${assignment.id}`)}>
+                        Open
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
               )}
             </Panel>
           </div>

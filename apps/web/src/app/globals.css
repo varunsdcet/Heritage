@@ -15,6 +15,8 @@ body {
   color: var(--mh-text);
   font-family: var(--mh-font-sans);
   font-size: var(--mh-body);
+  overflow-x: hidden;
+  max-width: 100vw;
 }
 
 a {
@@ -466,7 +468,16 @@ button.mh-admin-kpi {
 
 .mh-admin-table__grid {
   --mh-admin-cols: repeat(4, minmax(0, 1fr));
-  min-width: 640px;
+  min-width: 0;
+  width: max-content;
+  max-width: none;
+}
+
+@media (max-width: 640px) {
+  .mh-admin-table__grid {
+    min-width: 100%;
+    width: 100%;
+  }
 }
 
 .mh-admin-table__head,
@@ -1083,10 +1094,11 @@ button.mh-admin-table__row {
 }
 
 .mh-sis-table--card {
+  overflow-x: auto;
+  max-width: 100%;
   background: #ffffff;
   border: 1px solid #e1e3dc;
   border-radius: 8px;
-  overflow: hidden;
 }
 
 .mh-sis-table__head {
@@ -8077,6 +8089,22 @@ a.mh-sis-tabs__item {
   padding: 10px;
   color: #1a1c19;
   font-size: 13px;
+  border: 1px solid transparent;
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+}
+
+input.mh-teacher-field,
+textarea.mh-teacher-field {
+  border-color: #d7dbd2;
+  outline: none;
+}
+
+input.mh-teacher-field:focus,
+textarea.mh-teacher-field:focus {
+  border-color: #3d6b4f;
+  background: #fff;
 }
 
 .mh-teacher-field--block {

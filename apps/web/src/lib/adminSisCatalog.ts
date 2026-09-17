@@ -291,7 +291,7 @@ export type SisScreenConfig = {
   financeDash?: {
     months: Array<{ label: string; height: string; active?: boolean }>;
     methods: Array<{ label: string; value: string; color: string }>;
-    transactions: Array<{ name: string; detail: string; amount: string }>;
+    transactions: Array<{ id?: string; name: string; detail: string; amount: string }>;
     overdue: Array<{ name: string; detail: string }>;
   };
   infoBanner?: { title: string; body: string; cta: string };

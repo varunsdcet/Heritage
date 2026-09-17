@@ -59,6 +59,7 @@ type InstructorCtx = {
     courseCode: string;
     weightPercent: number;
   }>;
+  announcementPosts: Array<{ id: string; title: string; body: string; when: string }>;
 };
 
 function pct(score: number | null, max: number) {
@@ -206,6 +207,27 @@ async function loadCtx(user: SessionClaims): Promise<InstructorCtx> {
     take: 200,
   });
 
+  const announcementRecords = await prisma.portalRecord.findMany({
+    where: {
+      institutionId: user.institutionId,
+      role: "instructor",
+      OR: [
+        { screenPath: { contains: "announcement" } },
+        { audienceAccountId: user.accountId, primaryText: { not: "" } },
+      ],
+    },
+    orderBy: { createdAt: "desc" },
+    take: 30,
+  });
+  const announcementPosts = announcementRecords
+    .filter((r) => r.screenPath.includes("announcement"))
+    .map((r) => ({
+      id: r.id,
+      title: r.primaryText,
+      body: r.secondaryText ?? "",
+      when: r.createdAt.toLocaleString(),
+    }));
+
   return {
     user,
     person: { givenName: person.givenName, familyName: person.familyName, email: person.email },
@@ -230,6 +252,7 @@ async function loadCtx(user: SessionClaims): Promise<InstructorCtx> {
       courseCode: g.assignment.section.course.code,
       weightPercent: g.assignment.weightPercent,
     })),
+    announcementPosts,
   };
 }
 
@@ -363,6 +386,155 @@ function buildCourseList(ctx: InstructorCtx): InstructorLivePayload {
         statusTone: "active",
         href: `/instructor/sections/${s.id}`,
       })),
+    },
+  };
+}
+
+function buildCourseDetail(ctx: InstructorCtx, path: string): InstructorLivePayload {
+  const sectionId = path.split("/").pop();
+  const sec =
+    ctx.sections.find((s) => s.id === sectionId) ||
+    (sectionId === "demo" ? ctx.sections[0] : undefined) ||
+    ctx.sections[0];
+  if (!sec) {
+    return {
+      title: "Section detail",
+      subtitle: "No teaching section assigned",
+      courseDetail: {
+        code: "—",
+        title: "No section",
+        meta: "Assign a section to this instructor to open the workspace.",
+        status: "Empty",
+        tabs: ["Overview", "Modules", "Roster", "Assessments"],
+        activeTab: "Overview",
+        overview: [{ label: "Status", value: "No section" }],
+        modules: [],
+        team: [
+          {
+            name: ctx.displayName,
+            role: "Lead Instructor",
+            initials: `${ctx.person.givenName[0] ?? ""}${ctx.person.familyName[0] ?? ""}`.toUpperCase(),
+          },
+        ],
+      },
+    };
+  }
+  return {
+    title: `${sec.courseCode} · ${sec.courseTitle}`,
+    subtitle: `${sec.code} · ${sec.enrolmentCount} enrolled`,
+    primaryAction: "Open Gradebook",
+    primaryActionHref: "/instructor/gradebook",
+    secondaryAction: "Announcements",
+    secondaryActionHref: "/instructor/announcements",
+    courseDetail: {
+      code: sec.courseCode,
+      title: sec.courseTitle,
+      meta: `${sec.termCode || ctx.term?.code || "Term"} · ${sec.code} · ${sec.enrolmentCount} enrolled · ${sec.credits} credits`,
+      status: "Active",
+      tabs: ["Overview", "Modules", "Roster", "Assessments", "Lectures", "Labs", "Resources"],
+      activeTab: "Overview",
+      overview: [
+        { label: "Credits", value: String(sec.credits) },
+        { label: "Section", value: sec.code },
+        { label: "Term", value: sec.termCode || ctx.term?.name || "—" },
+        { label: "Enrolled", value: String(sec.enrolmentCount) },
+        { label: "Assignments", value: String(sec.assignments.length) },
+        { label: "Instructor", value: ctx.displayName },
+      ],
+      modules: sec.assignments.length
+        ? sec.assignments.map((a) => ({
+            title: a.title,
+            items: 1,
+            status: a.dueAt && a.dueAt < new Date() ? "Complete" : "In Progress",
+          }))
+        : [{ title: "Course outline", items: 0, status: "Draft" }],
+      team: [
+        {
+          name: ctx.displayName,
+          role: "Lead Instructor",
+          initials: `${ctx.person.givenName[0] ?? ""}${ctx.person.familyName[0] ?? ""}`.toUpperCase(),
+        },
+      ],
+    },
+  };
+}
+
+function buildAnnouncements(ctx: InstructorCtx): InstructorLivePayload {
+  const sec = primarySection(ctx);
+  const posts =
+    ctx.announcementPosts.length > 0
+      ? ctx.announcementPosts.map((p) => ({
+          title: p.title,
+          body: p.body,
+          when: p.when,
+          audience: "All enrolled",
+          pinned: false,
+        }))
+      : [];
+  return {
+    title: "Course Announcements",
+    subtitle: sec
+      ? `Publish updates to enrolled students in ${sec.courseCode}.`
+      : "Publish class updates to enrolled students",
+    primaryAction: "New Announcement",
+    announcements: {
+      course: sec ? `${sec.courseCode} · ${sec.courseTitle}` : "All sections",
+      posts,
+      compose: {
+        titleLabel: "Announcement title",
+        bodyLabel: "Message body",
+        audienceLabel: "Audience",
+        audienceValue: "All enrolled students",
+        publishLabel: "Publish announcement",
+      },
+    },
+  };
+}
+
+function buildAddCourseForm(ctx: InstructorCtx): InstructorLivePayload {
+  const n = ctx.sections.length + 1;
+  return {
+    title: "Add New Course Instance",
+    subtitle: "Create a live course and section for your teaching load",
+    primaryAction: "Save Course",
+    secondaryAction: "Cancel",
+    secondaryActionHref: "/instructor/f/t14-course-management",
+    form: {
+      submitLabel: "Save Course",
+      groups: [
+        {
+          title: "Course Details",
+          fields: [
+            { label: "Course Category", value: "General", type: "select" },
+            { label: "Course Group", value: "Core", type: "select" },
+            { label: "Course Name", value: `Instructor Course ${n}`, type: "text" },
+            { label: "Course Number", value: `INS${String(n).padStart(3, "0")}`, type: "text" },
+            { label: "Course Credit Value", value: "3.0", type: "number" },
+            { label: "Intake Type", value: "Standard Intake", type: "select" },
+          ],
+        },
+        {
+          title: "Course Outline & Syllabus",
+          fields: [
+            {
+              label: "Course Description",
+              value: "Describe the course content, requirements and objectives here...",
+              type: "textarea",
+            },
+            { label: "Total Course Hours", value: "120 Hours", type: "text" },
+            { label: "Hours Per Day", value: "3 Hours", type: "text" },
+          ],
+        },
+        {
+          title: "Course Tuition & Finances",
+          fields: [
+            { label: "Domestic Tuition Cost ($)", value: "1,200.00", type: "number" },
+            { label: "International Tuition Cost ($)", value: "3,400.00", type: "number" },
+            { label: "Grading Scheme", value: "Standard GPA Ladder", type: "select" },
+            { label: "Registration Limit", value: "Max 45 Students", type: "text" },
+          ],
+        },
+      ],
     },
   };
 }
@@ -795,12 +967,17 @@ function routePayload(
   const p = path.replace(/\/+$/, "") || "/instructor";
 
   if (p === "/instructor") return buildDashboard(ctx);
+  if (/\/sections\/[^/]+$/.test(p) || p.includes("t08-my-courses-detail") || p.includes("course-detail")) {
+    return buildCourseDetail(ctx, p);
+  }
+  if (p.includes("t55") || p.includes("add-course-form") || p.includes("add-course")) {
+    return buildAddCourseForm(ctx);
+  }
   if (
     p.includes("t07") ||
-    p.includes("sections") ||
+    p.endsWith("/sections") ||
     p.includes("t08") ||
     p.includes("in-03") ||
-    p.includes("course-detail") ||
     p.includes("t14-course") ||
     p.includes("t54") ||
     p.includes("t56") ||
@@ -848,9 +1025,8 @@ function routePayload(
     return buildGradebook(ctx);
   }
   if (p.includes("message") || p.includes("t16")) return buildMessages(ctx);
-  if (p.includes("notification") || p.includes("t17") || p.includes("announcement") || p.includes("t23")) {
-    return buildNotifications(ctx);
-  }
+  if (p.includes("announcement") || p.includes("t23")) return buildAnnouncements(ctx);
+  if (p.includes("notification") || p.includes("t17")) return buildNotifications(ctx);
   if (
     p.includes("profile") ||
     p.includes("t02") ||
@@ -1218,12 +1394,21 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
       const created = await createAssignmentForInstructor(ctx, title);
       message = `Scheduled “${created.assignment.title}” on ${created.section.code}`;
       result = { assignmentId: created.assignment.id, sectionId: created.section.id };
-    } else if (lower.includes("announcement") || lower.includes("share with class")) {
-      const title = input.rowKey || `Class update · ${new Date().toLocaleDateString()}`;
-      const body = `${ctx.displayName} posted: ${title}`;
+    } else if (lower.includes("announcement") || lower.includes("share with class") || lower.includes("publish announcement")) {
+      let title = input.rowKey || `Class update · ${new Date().toLocaleDateString()}`;
+      let body = `${ctx.displayName} posted: ${title}`;
+      if (input.rowKey?.startsWith("{")) {
+        try {
+          const parsed = JSON.parse(input.rowKey) as { title?: string; body?: string };
+          if (parsed.title) title = parsed.title;
+          if (parsed.body) body = parsed.body;
+        } catch {
+          /* keep defaults */
+        }
+      }
       const n = await postAnnouncement(ctx, title, body);
       message = `Announcement sent to ${n} student account(s)`;
-      result = { recipients: n };
+      result = { recipients: n, title };
     } else if (
       lower.includes("publish final") ||
       lower.includes("publish marks") ||

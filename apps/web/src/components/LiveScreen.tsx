@@ -233,9 +233,9 @@ function GenericLiveScreen({
             <p style={{ margin: 0, color: "var(--mh-text-muted)" }}>No records yet for your account.</p>
           ) : (
             <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "0.65rem" }}>
-              {section.rows.map((row) => (
+              {section.rows.map((row, i) => (
                 <li
-                  key={row.primary + (row.secondary ?? "") + (row.meta ?? "")}
+                  key={`${section.title}-${row.primary}-${row.secondary ?? ""}-${row.meta ?? ""}-${i}`}
                   style={{
                     display: "flex",
                     justifyContent: "space-between",
