@@ -641,6 +641,16 @@ export type TeacherScreenConfig = {
       notes: string;
       rejectPlaceholder: string;
     };
+    fileQueue?: Array<{
+      id: string;
+      student: string;
+      studentNumber: string;
+      assignment: string;
+      course: string;
+      status: string;
+      submittedAt: string;
+      files: Array<{ id: string; name: string; version: string; size: string; mimeType: string }>;
+    }>;
   };
 };
 

@@ -192,63 +192,112 @@ export function StudentCourseDetailView({ sectionId }: { sectionId: string }) {
   const courses = useStudentResource<{ courses: Course[] }>("/courses/me");
   const assignments = useStudentResource<{ assignments: Assignment[] }>("/student/assignments");
   const calendar = useStudentResource<{ events: CalendarEvent[] }>("/calendar/me");
+  const content = useStudentResource<{
+    progressPct: number;
+    completedCount: number;
+    totalCount: number;
+    items: Array<{ id: string; kind: string; title: string; detail: string; href?: string | null; completed: boolean }>;
+  }>(`/student/courses/${sectionId}/content`);
+  const [busyId, setBusyId] = useState<string | null>(null);
   const course = courses.data?.courses.find((item) => item.sectionId === sectionId);
   const courseAssignments = assignments.data?.assignments.filter((item) => item.sectionId === sectionId) ?? [];
   const sessions = calendar.data?.events.filter((item) => item.sectionId === sectionId && item.kind === "class") ?? [];
-  const state = [courses.state, assignments.state, calendar.state].includes("forbidden")
+  const state = [courses.state, assignments.state, calendar.state, content.state].includes("forbidden")
     ? "forbidden"
-    : [courses.state, assignments.state, calendar.state].includes("error")
+    : [courses.state, assignments.state, calendar.state, content.state].includes("error")
       ? "error"
-      : [courses.state, assignments.state, calendar.state].includes("offline")
+      : [courses.state, assignments.state, calendar.state, content.state].includes("offline")
         ? "offline"
-        : [courses.state, assignments.state, calendar.state].every((value) => value === "ready")
+        : [courses.state, assignments.state, calendar.state, content.state].every((value) => value === "ready")
           ? "ready"
           : "loading";
+
+  async function markComplete(itemId: string) {
+    const session = loadSession();
+    if (!session) return;
+    setBusyId(itemId);
+    try {
+      await api(
+        `/student/courses/${sectionId}/content/${encodeURIComponent(itemId)}/complete`,
+        { method: "POST", body: "{}" },
+        session.accessToken,
+      );
+      await content.refresh();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   return (
     <ScreenScaffold role="student" title={course ? `${course.courseCode} · ${course.courseTitle}` : "Course detail"} subtitle={course ? `${course.sectionCode} · ${course.instructorName}` : "Enrolment-scoped course information"} breadcrumb={["Student", "Courses", course?.courseCode ?? "Detail"]} active="Courses">
-      <ResourceBoundary state={state} error={courses.error ?? assignments.error ?? calendar.error} onRetry={() => { courses.refresh(); assignments.refresh(); calendar.refresh(); }}>
+      <ResourceBoundary state={state} error={courses.error ?? assignments.error ?? calendar.error ?? content.error} onRetry={() => { courses.refresh(); assignments.refresh(); calendar.refresh(); content.refresh(); }}>
         {!course ? <EmptyState title="Course unavailable" body="This course is not part of your enrolment." /> : (
           <div style={{ display: "grid", gap: 18 }}>
             <Panel title="Course overview">
               <p style={{ marginTop: 0 }}>{course.credits} credits · {course.termName}</p>
-              <StatusPill tone="success">{course.enrolmentStatus}</StatusPill>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <StatusPill tone="success">{course.enrolmentStatus}</StatusPill>
+                <StatusPill tone="neutral">
+                  Content {content.data?.completedCount ?? 0}/{content.data?.totalCount ?? 0} · {content.data?.progressPct ?? 0}%
+                </StatusPill>
+              </div>
             </Panel>
             <Panel title="Upcoming classes">
               {sessions.length === 0 ? <EmptyState title="No scheduled classes" body="New sessions will appear when they are scheduled." /> : (
                 <ul style={listStyle}>{sessions.map((event) => <li key={event.id} style={rowStyle}><div><strong>{event.title}</strong><div style={{ color: "var(--mh-text-muted)" }}>{formatDate(event.startsAt)} · {event.location ?? "Location TBA"}</div></div>{event.joinUrl ? <Button type="button" onClick={() => window.open(event.joinUrl!, "_blank", "noopener,noreferrer")}>Join class</Button> : <StatusPill tone="neutral">In person</StatusPill>}</li>)}</ul>
               )}
             </Panel>
-            <Panel title="Course materials">
-              {sessions.length === 0 && courseAssignments.length === 0 ? (
+            <Panel title="Course materials & consumption">
+              {(content.data?.items?.length ?? 0) === 0 && sessions.length === 0 && courseAssignments.length === 0 ? (
                 <EmptyState title="No materials yet" body="Lectures, resources, and assigned work will appear here when published." />
               ) : (
                 <ul style={listStyle}>
-                  {sessions.map((event) => (
-                    <li key={`mat-${event.id}`} style={rowStyle}>
+                  {(content.data?.items ?? []).map((item) => (
+                    <li key={item.id} style={rowStyle}>
                       <div>
-                        <strong>{event.title}</strong>
+                        <strong>{item.title}</strong>
                         <div style={{ color: "var(--mh-text-muted)" }}>
-                          Class session · {formatDate(event.startsAt)}
-                          {event.location ? ` · ${event.location}` : ""}
+                          {item.kind === "lecture" ? "Lecture / class" : "Resource / assignment"} · {item.detail}
                         </div>
                       </div>
-                      {event.joinUrl ? (
-                        <Button type="button" variant="secondary" onClick={() => window.open(event.joinUrl!, "_blank", "noopener,noreferrer")}>
-                          Open session
-                        </Button>
-                      ) : (
-                        <StatusPill tone="neutral">In person</StatusPill>
-                      )}
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                        {item.completed ? <StatusPill tone="success">Completed</StatusPill> : null}
+                        {item.href ? (
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            onClick={() => {
+                              if (item.href!.startsWith("http")) window.open(item.href!, "_blank", "noopener,noreferrer");
+                              else router.push(item.href!);
+                            }}
+                          >
+                            {item.kind === "lecture" ? "Open session" : "Open"}
+                          </Button>
+                        ) : null}
+                        {!item.completed ? (
+                          <Button type="button" disabled={busyId === item.id} onClick={() => void markComplete(item.id)}>
+                            {busyId === item.id ? "Saving…" : "Mark complete"}
+                          </Button>
+                        ) : null}
+                      </div>
                     </li>
                   ))}
+                </ul>
+              )}
+            </Panel>
+            <Panel title="Assignments">
+              {courseAssignments.length === 0 ? (
+                <EmptyState title="No assignments" body="There is no assigned work for this course yet." />
+              ) : (
+                <ul style={listStyle}>
                   {courseAssignments.map((assignment) => (
-                    <li key={`asg-${assignment.id}`} style={rowStyle}>
+                    <li key={assignment.id} style={rowStyle}>
                       <div>
                         <strong>{assignment.title}</strong>
-                        <div style={{ color: "var(--mh-text-muted)" }}>Assignment · Due {formatDate(assignment.dueAt)}</div>
+                        <div style={{ color: "var(--mh-text-muted)" }}>Due {formatDate(assignment.dueAt)}</div>
                       </div>
                       <Button type="button" variant="secondary" onClick={() => router.push(`/student/assignments/${assignment.id}`)}>
-                        Open
+                        View
                       </Button>
                     </li>
                   ))}

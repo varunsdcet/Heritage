@@ -2774,6 +2774,36 @@ function PendingGradesView({ config }: { config: TeacherScreenConfig }) {
           </div>
         </aside>
       </div>
+
+      <section className="mh-teacher-card" style={{ marginTop: 16 }}>
+        <h2>Student file submissions</h2>
+        {(data.fileQueue ?? []).length === 0 ? (
+          <p className="mh-teacher-muted">No student files uploaded for your sections yet.</p>
+        ) : (
+          <div className="mh-teacher-list">
+            {(data.fileQueue ?? []).map((packet) => (
+              <div key={packet.id} className="mh-teacher-list__item" style={{ alignItems: "flex-start" }}>
+                <div style={{ flex: 1 }}>
+                  <strong>
+                    {packet.student} · {packet.assignment}
+                  </strong>
+                  <span>
+                    {packet.course} · {packet.studentNumber} · {packet.status} · {packet.submittedAt}
+                  </span>
+                  <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+                    {packet.files.map((f) => (
+                      <li key={f.id}>
+                        {f.name} ({f.version}, {f.size}, {f.mimeType})
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <span className={badgeClass(packet.status === "submitted" ? "active" : "muted")}>{packet.status}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

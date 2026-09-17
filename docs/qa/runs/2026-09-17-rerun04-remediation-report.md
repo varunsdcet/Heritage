@@ -37,9 +37,9 @@ This report does **not** claim the full 8,490-case manual catalogue is executed.
 | Item | Status |
 |---|---|
 | Cross-role shell (admin → `/student/*`) | **FIXED** — `mh_roles` cookie + middleware redirect before paint; client gates remain |
-| Course consumption controls (PARTIAL) | **IMPROVED** — course detail now has **Course materials** panel (sessions + assignments with open actions). Full LMS lecture/video progress is still future scope |
+| Course consumption controls (PARTIAL) | **FIXED** — course detail lists lectures/resources with Open + Mark complete, progress %, audit `StudentContent.completed` |
 | Admin cannot create Applicant/Employer roles | **FIXED** — `/admin/users/create` + `POST /admin/users` accept `applicant` / `employer` and provision application / employer org |
-| Instructor submissions/studio scaffold depth | **PARTIAL** — gradebook/submissions live; full studio authoring remains facade for some catalogue screens (outside confirmed blocker table) |
+| Instructor submissions/studio scaffold depth | **FIXED** — submissions queue shows real student file packets; lectures/resources/version editor/create-student/workshop forms now live domain payloads |
 
 ## What already PASSED in Rerun 04 (unchanged / preserved)
 

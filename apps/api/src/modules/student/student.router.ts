@@ -384,3 +384,123 @@ studentRouter.post("/assignments/:assignmentId/submit", async (req, res, next) =
     next(error);
   }
 });
+
+studentRouter.get("/courses/:sectionId/content", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    const sectionId = String(req.params.sectionId);
+    const student = await prisma.student.findFirst({
+      where: { institutionId: user.institutionId, personId: user.personId },
+    });
+    if (!student) {
+      res.status(404).json({ error: { message: "Student record not found" } });
+      return;
+    }
+    const enrolment = await prisma.enrolment.findFirst({
+      where: { institutionId: user.institutionId, studentId: student.id, sectionId, status: "enrolled" },
+      include: {
+        section: {
+          include: {
+            course: true,
+            assignments: { orderBy: { dueAt: "asc" } },
+            classSessions: { orderBy: { startsAt: "asc" } },
+          },
+        },
+      },
+    });
+    if (!enrolment) {
+      res.status(404).json({ error: { message: "Section not in your enrolment" } });
+      return;
+    }
+    const progressPath = `/student/content-progress/${user.accountId}/${sectionId}`;
+    const state = await prisma.sisScreenState.findUnique({
+      where: { institutionId_path: { institutionId: user.institutionId, path: progressPath } },
+    });
+    const completed = new Set<string>(
+      state ? ((JSON.parse(state.payloadJson) as { completed?: string[] }).completed ?? []) : [],
+    );
+    const items = [
+      ...enrolment.section.classSessions.map((session) => ({
+        id: `session:${session.id}`,
+        kind: "lecture" as const,
+        title: session.title,
+        detail: `${session.startsAt.toISOString()}${session.location ? ` · ${session.location}` : ""}`,
+        href: session.joinUrl,
+        completed: completed.has(`session:${session.id}`),
+      })),
+      ...enrolment.section.assignments.map((assignment) => ({
+        id: `assignment:${assignment.id}`,
+        kind: "resource" as const,
+        title: assignment.title,
+        detail: assignment.dueAt ? `Due ${assignment.dueAt.toISOString()}` : "Assignment resource",
+        href: `/student/assignments/${assignment.id}`,
+        completed: completed.has(`assignment:${assignment.id}`),
+      })),
+    ];
+    const done = items.filter((i) => i.completed).length;
+    res.json({
+      sectionId,
+      courseCode: enrolment.section.course.code,
+      courseTitle: enrolment.section.course.title,
+      progressPct: items.length ? Math.round((done / items.length) * 100) : 0,
+      completedCount: done,
+      totalCount: items.length,
+      items,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+studentRouter.post("/courses/:sectionId/content/:itemId/complete", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    const sectionId = String(req.params.sectionId);
+    const itemId = decodeURIComponent(String(req.params.itemId));
+    const student = await prisma.student.findFirst({
+      where: { institutionId: user.institutionId, personId: user.personId },
+    });
+    if (!student) {
+      res.status(404).json({ error: { message: "Student record not found" } });
+      return;
+    }
+    const enrolment = await prisma.enrolment.findFirst({
+      where: { institutionId: user.institutionId, studentId: student.id, sectionId, status: "enrolled" },
+    });
+    if (!enrolment) {
+      res.status(404).json({ error: { message: "Section not in your enrolment" } });
+      return;
+    }
+    const progressPath = `/student/content-progress/${user.accountId}/${sectionId}`;
+    const existing = await prisma.sisScreenState.findUnique({
+      where: { institutionId_path: { institutionId: user.institutionId, path: progressPath } },
+    });
+    const prev = existing ? (JSON.parse(existing.payloadJson) as { completed?: string[] }) : { completed: [] };
+    const completed = new Set(prev.completed ?? []);
+    completed.add(itemId);
+    const payload = { completed: [...completed], updatedAt: new Date().toISOString() };
+    await prisma.sisScreenState.upsert({
+      where: { institutionId_path: { institutionId: user.institutionId, path: progressPath } },
+      create: {
+        institutionId: user.institutionId,
+        path: progressPath,
+        payloadJson: JSON.stringify(payload),
+      },
+      update: { payloadJson: JSON.stringify(payload) },
+    });
+    await writeAuditAndOutbox(prisma, {
+      institutionId: user.institutionId,
+      actorId: user.accountId,
+      eventName: "StudentContent.completed",
+      purpose: "course_consumption",
+      before: { sectionId, completed: prev.completed ?? [] },
+      after: { sectionId, itemId, completed: [...completed] },
+      source: "student.content",
+      correlationId: randomUUID(),
+      outboxPayload: { sectionId, itemId },
+    });
+    res.json({ ok: true, sectionId, itemId, completed: [...completed] });
+  } catch (error) {
+    next(error);
+  }
+});

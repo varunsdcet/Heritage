@@ -60,6 +60,27 @@ type InstructorCtx = {
     weightPercent: number;
   }>;
   announcementPosts: Array<{ id: string; title: string; body: string; when: string }>;
+  submissions: Array<{
+    id: string;
+    status: string;
+    submittedAt: Date | null;
+    studentName: string;
+    studentNumber: string;
+    assignmentTitle: string;
+    courseCode: string;
+    sectionCode: string;
+    files: Array<{ id: string; filename: string; mimeType: string; sizeBytes: number; version: number }>;
+  }>;
+  classSessions: Array<{
+    id: string;
+    title: string;
+    startsAt: Date;
+    endsAt: Date | null;
+    location: string | null;
+    sectionCode: string;
+    courseCode: string;
+    joinUrl: string | null;
+  }>;
 };
 
 function pct(score: number | null, max: number) {
@@ -228,6 +249,34 @@ async function loadCtx(user: SessionClaims): Promise<InstructorCtx> {
       when: r.createdAt.toLocaleString(),
     }));
 
+  const sectionIds = sections.map((s) => s.id);
+  const assignmentIds = sections.flatMap((s) => s.assignments.map((a) => a.id));
+
+  const submissionRows = assignmentIds.length
+    ? await prisma.submission.findMany({
+        where: {
+          institutionId: user.institutionId,
+          assignmentId: { in: assignmentIds },
+        },
+        include: {
+          student: { include: { person: true } },
+          assignment: { include: { section: { include: { course: true } } } },
+          files: { where: { archivedAt: null }, orderBy: { version: "desc" } },
+        },
+        orderBy: { updatedAt: "desc" },
+        take: 100,
+      })
+    : [];
+
+  const classSessions = sectionIds.length
+    ? await prisma.classSession.findMany({
+        where: { institutionId: user.institutionId, sectionId: { in: sectionIds } },
+        include: { section: { include: { course: true } } },
+        orderBy: { startsAt: "asc" },
+        take: 40,
+      })
+    : [];
+
   return {
     user,
     person: { givenName: person.givenName, familyName: person.familyName, email: person.email },
@@ -253,6 +302,33 @@ async function loadCtx(user: SessionClaims): Promise<InstructorCtx> {
       weightPercent: g.assignment.weightPercent,
     })),
     announcementPosts,
+    submissions: submissionRows.map((s) => ({
+      id: s.id,
+      status: s.status,
+      submittedAt: s.submittedAt,
+      studentName: `${s.student.person.givenName} ${s.student.person.familyName}`.trim(),
+      studentNumber: s.student.studentNumber,
+      assignmentTitle: s.assignment.title,
+      courseCode: s.assignment.section.course.code,
+      sectionCode: s.assignment.section.code,
+      files: s.files.map((f) => ({
+        id: f.id,
+        filename: f.filename,
+        mimeType: f.mimeType,
+        sizeBytes: f.sizeBytes,
+        version: f.version,
+      })),
+    })),
+    classSessions: classSessions.map((c) => ({
+      id: c.id,
+      title: c.title,
+      startsAt: c.startsAt,
+      endsAt: c.endsAt,
+      location: c.location,
+      sectionCode: c.section.code,
+      courseCode: c.section.course.code,
+      joinUrl: c.joinUrl,
+    })),
   };
 }
 
@@ -605,6 +681,7 @@ function buildGradebook(ctx: InstructorCtx): InstructorLivePayload {
           notes: "",
           rejectPlaceholder: "Specify reasons here...",
         },
+        fileQueue: [],
       },
     };
   }
@@ -673,7 +750,9 @@ function buildGradebook(ctx: InstructorCtx): InstructorLivePayload {
       alert:
         ctx.draftGradeCount > 0
           ? `${ctx.draftGradeCount} DRAFT GRADE ITEM(S) REQUIRE INSTRUCTOR ACTION.`
-          : "NO PENDING GRADE AUDITS FOR YOUR SECTIONS.",
+          : ctx.submissions.filter((s) => s.status === "submitted" && s.files.length).length
+            ? `${ctx.submissions.filter((s) => s.status === "submitted" && s.files.length).length} STUDENT FILE SUBMISSION(S) READY FOR REVIEW.`
+            : "NO PENDING GRADE AUDITS FOR YOUR SECTIONS.",
       queueTitle: "Auditable Submissions Queue",
       actionBadge: `${ctx.sections.length} SECTION(S)`,
       rows: ctx.sections.map((s, i) => {
@@ -693,9 +772,28 @@ function buildGradebook(ctx: InstructorCtx): InstructorLivePayload {
         title: `Gradebook Audit: ${sec.courseCode} ${sec.code}`,
         locked: ctx.draftGradeCount ? "Unlocked" : "Locked",
         average: "—",
-        notes: `${sec.enrolmentCount} enrolments · ${sec.assignments.length} assessments · ${ctx.draftGradeCount} drafts`,
+        notes: `${sec.enrolmentCount} enrolments · ${sec.assignments.length} assessments · ${ctx.draftGradeCount} drafts · ${ctx.submissions.filter((s) => s.files.length).length} file packet(s)`,
         rejectPlaceholder: "Specify reasons here...",
       },
+      fileQueue: ctx.submissions
+        .filter((s) => s.files.length > 0)
+        .slice(0, 40)
+        .map((s) => ({
+          id: s.id,
+          student: s.studentName,
+          studentNumber: s.studentNumber,
+          assignment: s.assignmentTitle,
+          course: `${s.courseCode} · ${s.sectionCode}`,
+          status: s.status,
+          submittedAt: s.submittedAt ? s.submittedAt.toLocaleString() : "Draft upload",
+          files: s.files.map((f) => ({
+            id: f.id,
+            name: f.filename,
+            version: `v${f.version}`,
+            size: `${Math.max(1, Math.round(f.sizeBytes / 1024))} KB`,
+            mimeType: f.mimeType,
+          })),
+        })),
     },
   };
 }
@@ -959,6 +1057,134 @@ function buildEmptyDomain(title: string, subtitle: string): InstructorLivePayloa
   };
 }
 
+function buildLectures(ctx: InstructorCtx): InstructorLivePayload {
+  const sec = primarySection(ctx);
+  const sessions =
+    ctx.classSessions.length > 0
+      ? ctx.classSessions.map((c) => ({
+          title: c.title,
+          when: c.startsAt.toLocaleString(),
+          duration: c.endsAt
+            ? `${Math.max(15, Math.round((c.endsAt.getTime() - c.startsAt.getTime()) / 60000))} min`
+            : "50 min",
+          status: c.startsAt < new Date() ? "Completed" : "Scheduled",
+          tone: (c.startsAt < new Date() ? "muted" : "active") as "muted" | "active",
+          href: c.joinUrl || undefined,
+        }))
+      : (sec?.assignments ?? []).map((a) => ({
+          title: `Lecture · ${a.title}`,
+          when: a.dueAt ? a.dueAt.toLocaleString() : "TBA",
+          duration: "50 min",
+          status: "Draft",
+          tone: "info" as const,
+          href: undefined,
+        }));
+  return {
+    title: "Lectures",
+    subtitle: sec ? `${sec.courseCode} · ${sec.code}` : "Teaching sessions",
+    lectures: {
+      course: sec ? `${sec.courseCode} · ${sec.courseTitle}` : "All sections",
+      sessions,
+    },
+  };
+}
+
+function buildResources(ctx: InstructorCtx): InstructorLivePayload {
+  const sec = primarySection(ctx);
+  const files = [
+    ...ctx.submissions.flatMap((s) =>
+      s.files.map((f) => ({
+        name: f.filename,
+        type: f.mimeType,
+        size: `${Math.max(1, Math.round(f.sizeBytes / 1024))} KB`,
+        updated: s.submittedAt ? s.submittedAt.toLocaleDateString() : "Draft",
+        visibility: "Published" as const,
+      })),
+    ),
+    ...(sec?.assignments ?? []).map((a) => ({
+      name: `${a.title} · brief.pdf`,
+      type: "application/pdf",
+      size: "—",
+      updated: a.dueAt ? a.dueAt.toLocaleDateString() : "—",
+      visibility: "Published" as const,
+    })),
+  ];
+  return {
+    title: "Course Resources",
+    subtitle: sec ? `${sec.courseCode} file workspace` : "Section resources",
+    splitPane: {
+      leftTitle: "Folders",
+      leftItems: [
+        { label: "Assignments", meta: `${sec?.assignments.length ?? 0} items`, active: true },
+        { label: "Student uploads", meta: `${ctx.submissions.filter((s) => s.files.length).length} packets` },
+        { label: "Lectures", meta: `${ctx.classSessions.length} sessions` },
+      ],
+      rightTitle: "Files",
+      rightFields: [
+        { label: "Section", value: sec ? `${sec.courseCode} · ${sec.code}` : "—" },
+        { label: "Instructor", value: ctx.displayName },
+        { label: "Term", value: ctx.term?.name ?? "—" },
+      ],
+      resources: files.slice(0, 30).map((f) => ({ name: f.name, type: f.type, size: f.size })),
+    },
+    fileManager: {
+      courseTitle: sec ? `${sec.courseCode} · ${sec.courseTitle}` : "Course files",
+      breadcrumbs: ["Files", sec?.courseCode ?? "Section"],
+      tree: [
+        { name: "Assignments", active: true },
+        { name: "Uploads" },
+        { name: "Lectures" },
+      ],
+      files: files.slice(0, 30),
+    },
+  };
+}
+
+function buildVersionEditor(ctx: InstructorCtx): InstructorLivePayload {
+  const sec = primarySection(ctx);
+  const modules = (sec?.assignments ?? []).map((a, i) => ({
+    id: a.id,
+    label: `Module ${i + 1} — ${a.title}`,
+    children: [`Weight ${a.weightPercent}%`, a.dueAt ? `Due ${a.dueAt.toLocaleDateString()}` : "No due date"],
+  }));
+  return {
+    title: "Course Version Editor",
+    subtitle: sec ? `Edit ${sec.courseCode} outline` : "Outline editor",
+    primaryAction: "Submit for Approval",
+    versionEditor: {
+      course: sec ? `${sec.courseCode} · ${sec.courseTitle}` : "Untitled course",
+      version: "v1.0-live",
+      notice: "Live outline generated from assigned assessments. Submit changes for registrar approval.",
+      outline: modules.length
+        ? modules
+        : [{ id: "outline-1", label: "Module 1 — Getting started", children: ["Add assessments to build outline"] }],
+      editor: {
+        title: sec?.courseTitle ?? "Course outline",
+        body: `Instructor ${ctx.displayName} · ${sec?.enrolmentCount ?? 0} enrolled · ${sec?.assignments.length ?? 0} assessments`,
+        wordCount: `${Math.max(40, (sec?.assignments.length ?? 0) * 120)} words`,
+      },
+      versions: [
+        { label: "v1.0-live", when: new Date().toLocaleDateString(), author: ctx.displayName, current: true },
+      ],
+    },
+  };
+}
+
+function buildGenericLiveForm(
+  ctx: InstructorCtx,
+  title: string,
+  subtitle: string,
+  submitLabel: string,
+  groups: Array<{ title: string; fields: Array<{ label: string; value: string; type?: "text" | "select" | "textarea" | "number" }> }>,
+): InstructorLivePayload {
+  return {
+    title,
+    subtitle,
+    primaryAction: submitLabel,
+    form: { submitLabel, groups },
+  };
+}
+
 function routePayload(
   path: string,
   ctx: InstructorCtx,
@@ -973,6 +1199,60 @@ function routePayload(
   if (p.includes("t55") || p.includes("add-course-form") || p.includes("add-course")) {
     return buildAddCourseForm(ctx);
   }
+  if (p.includes("t26") || p.includes("version-editor")) {
+    return buildVersionEditor(ctx);
+  }
+  if (p.includes("t60") || p.includes("resources") || p.includes("file-manager") || p.includes("repository")) {
+    return buildResources(ctx);
+  }
+  if (p.includes("in-08") || (p.includes("lecture") && !p.includes("schedule"))) {
+    return buildLectures(ctx);
+  }
+  if (p.includes("t43") || p.includes("create-student-profile")) {
+    return buildGenericLiveForm(ctx, "Create Student Profile", "Registrar-assisted student intake from instructor roster context", "Save Student Profile", [
+      {
+        title: "Identity",
+        fields: [
+          { label: "Given Name", value: "", type: "text" },
+          { label: "Family Name", value: "", type: "text" },
+          { label: "Email", value: "", type: "text" },
+          { label: "Program", value: ctx.sections[0]?.enrolments[0]?.programName || "General Studies", type: "text" },
+        ],
+      },
+      {
+        title: "Section placement",
+        fields: [
+          { label: "Course Name", value: ctx.sections[0] ? `${ctx.sections[0].courseCode} · ${ctx.sections[0].courseTitle}` : "", type: "text" },
+          { label: "Section", value: ctx.sections[0]?.code ?? "", type: "text" },
+        ],
+      },
+    ]);
+  }
+  if (p.includes("t27") || p.includes("program-change")) {
+    return buildGenericLiveForm(ctx, "Program Change Request", "Submit a program change for registrar review", "Submit Request", [
+      {
+        title: "Request",
+        fields: [
+          { label: "Course Name", value: "Program Change", type: "text" },
+          { label: "Current Program", value: ctx.sections[0]?.enrolments[0]?.programName || "—", type: "text" },
+          { label: "Requested Program", value: "", type: "text" },
+          { label: "Course Description", value: "Reason for change…", type: "textarea" },
+        ],
+      },
+    ]);
+  }
+  if (p.includes("t42") || p.includes("workshop-enrollment")) {
+    return buildGenericLiveForm(ctx, "Workshop Enrollment", "Register learners into a workshop offering", "Save Enrollment", [
+      {
+        title: "Workshop",
+        fields: [
+          { label: "Course Name", value: "Workplace Skills Workshop", type: "text" },
+          { label: "Course Number", value: "WS-101", type: "text" },
+          { label: "Course Description", value: "Orientation workshop for practicum readiness", type: "textarea" },
+        ],
+      },
+    ]);
+  }
   if (
     p.includes("t07") ||
     p.endsWith("/sections") ||
@@ -985,7 +1265,6 @@ function routePayload(
     p.includes("active-courses") ||
     p.includes("course-repository") ||
     p.includes("courses-sessions") ||
-    p.includes("lectures") ||
     p.includes("labs") ||
     p.includes("modules") ||
     p.includes("studio")
