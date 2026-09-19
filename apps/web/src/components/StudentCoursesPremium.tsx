@@ -1,0 +1,982 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { EmptyState } from "@myheritage/ui";
+import { ApiError, api, loadSession, type Session } from "@/lib/api";
+import { StudentFrame } from "@/components/StudentSisShell";
+import { formatHccDateRange, statusLabel, statusTone } from "@/lib/hccCourseFormat";
+
+type LoadState = "loading" | "ready" | "offline" | "forbidden" | "error";
+
+type Course = {
+  sectionId: string;
+  courseCode: string;
+  courseTitle: string;
+  sectionCode: string;
+  termName: string;
+  instructorName: string;
+  credits: number;
+  enrolmentStatus: "enrolled" | "completed";
+  progressPercent: number | null;
+  deliveryMethod?: string | null;
+  location?: string | null;
+  scheduleText?: string | null;
+  startsOn?: string | null;
+  endsOn?: string | null;
+};
+
+type CalendarEvent = {
+  id: string;
+  kind: string;
+  sectionId: string | null;
+  title: string;
+  startsAt: string;
+  endsAt: string | null;
+  location: string | null;
+};
+
+type LmsActivity = {
+  id: string;
+  type: string;
+  name: string;
+  body?: string;
+  fileName?: string;
+  modified?: string;
+  note?: string;
+  joinUrl?: string | null;
+  gradingMethod?: string;
+  questions?: Array<{ id: string; text: string; answers: string[]; mark?: string }>;
+};
+
+type CourseLms = {
+  academicBlock: { code: string; name: string; startsOn: string; endsOn: string } | null;
+  dayBlocks: Array<{
+    id: string;
+    label: string;
+    title: string;
+    lessons: Array<{
+      id: string;
+      title: string;
+      body: string;
+      resourceHref: string | null;
+      completed: boolean;
+    }>;
+  }>;
+  folders: Array<{
+    id: string;
+    name: string;
+    items: Array<{ id: string; title: string; kind: string; href: string | null }>;
+  }>;
+  syllabus: Array<{ id: string; title: string; level: number }>;
+  topics?: Array<{ id: string; title: string; summary?: string; activities: LmsActivity[] }>;
+  evaluationRows?: Array<{ component: string; weight: string }>;
+  gradeScheme?: Array<{ title: string; weightPercent: number }>;
+  sessionLabel?: string;
+  location?: string;
+  instructorName?: string;
+  joinUrl?: string | null;
+};
+
+type GradeRow = {
+  id: string;
+  title: string;
+  weightPercent: number;
+  score: number | null;
+  maxScore: number;
+  letter: string | null;
+};
+
+const EVAL_COLORS = ["#2f9e44", "#1971c2", "#e8590c", "#9c36b5", "#868e96"];
+
+const DEFAULT_EVAL_ROWS = [
+  { component: "Class Participation", weight: "20%" },
+  { component: "Quizzes", weight: "20%" },
+  { component: "Mid-term Exam", weight: "30%" },
+  { component: "Final Exam", weight: "30%" },
+];
+
+function EvaluationCriteriaCard({
+  courseCode,
+  courseTitle,
+  rows,
+  modified,
+  compact = false,
+}: {
+  courseCode: string;
+  courseTitle: string;
+  rows: Array<{ component: string; weight: string }>;
+  modified?: string;
+  compact?: boolean;
+}) {
+  const list = (rows.filter((r) => r.component !== "Total").length ? rows.filter((r) => r.component !== "Total") : DEFAULT_EVAL_ROWS);
+  return (
+    <div className={`mh-student-eval-card${compact ? " is-compact" : ""}`} data-screen="evaluation">
+      <header>
+        <div className="mh-student-eval-card__cap" aria-hidden>
+          ▨
+        </div>
+        <div>
+          <strong>EVALUATION CRITERIA</strong>
+          <span>Course Grade Distribution — Out of 100%</span>
+        </div>
+        <em className="mh-student-eval-card__pill">
+          {courseCode.replace(/\s+/g, "")} {courseTitle}
+        </em>
+      </header>
+      <p className="mh-student-eval-card__section">COURSE EVALUATION</p>
+      <ul>
+        {list.map((row, i) => {
+          const pct = Number.parseFloat(row.weight) || 0;
+          return (
+            <li key={row.component}>
+              <span className="mh-student-eval-card__dot" style={{ background: EVAL_COLORS[i % EVAL_COLORS.length] }} />
+              <div>
+                <strong>{row.component}</strong>
+                <div className="mh-student-eval-card__bar">
+                  <i style={{ width: `${pct}%`, background: EVAL_COLORS[i % EVAL_COLORS.length] }} />
+                </div>
+              </div>
+              <em>{row.weight}</em>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="mh-student-eval-card__note">
+        Students must achieve a cumulative passing grade according to course requirements.
+      </p>
+      <footer>
+        <span>TOTAL</span>
+        <span>100%</span>
+      </footer>
+      {modified ? <p className="mh-teacher-muted mh-student-eval-card__mod">Last modified: {modified}</p> : null}
+    </div>
+  );
+}
+
+function SyllabusDocumentCard({
+  fileName,
+  courseCode,
+  courseTitle,
+  modified,
+}: {
+  fileName?: string;
+  courseCode: string;
+  courseTitle: string;
+  modified?: string;
+}) {
+  return (
+    <div className="mh-student-syllabus" data-screen="syllabus">
+      <div className="mh-student-syllabus__hero">
+        <span className="mh-student-syllabus__badge">PDF</span>
+        <div>
+          <p className="mh-student-activity-type">FILE</p>
+          <h2>Course Syllabus</h2>
+          <p>
+            {courseCode}: {courseTitle}
+          </p>
+        </div>
+      </div>
+      <div className="mh-student-syllabus__body">
+        <h3>What&apos;s inside</h3>
+        <ul>
+          <li>Course description, learning outcomes, and weekly schedule</li>
+          <li>Required readings, lab expectations, and assessment weights</li>
+          <li>Academic integrity, attendance, and support resources</li>
+        </ul>
+        <dl>
+          <div>
+            <dt>Document</dt>
+            <dd>{fileName || "ACSW500-Family-Studies-Syllabus.pdf"}</dd>
+          </div>
+          <div>
+            <dt>Format</dt>
+            <dd>PDF · Downloadable</dd>
+          </div>
+          {modified ? (
+            <div>
+              <dt>Updated</dt>
+              <dd>{modified}</dd>
+            </div>
+          ) : null}
+        </dl>
+        <button type="button" className="mh-hcc-btn">
+          Download syllabus
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function activityIcon(type: string) {
+  const t = type.toUpperCase();
+  if (t === "QUIZ") return "Q";
+  if (t === "BIGBLUEBUTTON") return "▶";
+  if (t === "PAGE") return "P";
+  if (t === "FOLDER") return "F";
+  if (t === "FILE") return "PDF";
+  return "•";
+}
+
+function useStudentResource<T>(path: string) {
+  const router = useRouter();
+  const [session, setSession] = useState<Session | null>(null);
+  const [data, setData] = useState<T | null>(null);
+  const [state, setState] = useState<LoadState>("loading");
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(
+    async (activeSession: Session) => {
+      setState("loading");
+      setError(null);
+      try {
+        setData(await api<T>(path, {}, activeSession.accessToken));
+        setState("ready");
+      } catch (caught) {
+        if (caught instanceof ApiError && caught.status === 401) {
+          router.replace("/login");
+          return;
+        }
+        if (caught instanceof ApiError && caught.status === 403) {
+          setState("forbidden");
+          return;
+        }
+        if ((typeof navigator !== "undefined" && !navigator.onLine) || caught instanceof TypeError) {
+          setState("offline");
+          return;
+        }
+        setError(caught instanceof Error ? caught.message : "The page could not be loaded.");
+        setState("error");
+      }
+    },
+    [path, router],
+  );
+
+  useEffect(() => {
+    const activeSession = loadSession();
+    if (!activeSession) {
+      router.replace("/login");
+      return;
+    }
+    setSession(activeSession);
+    if (!activeSession.roles.includes("student")) {
+      setState("forbidden");
+      return;
+    }
+    void load(activeSession);
+  }, [load, router]);
+
+  return { data, state, error, refresh: () => session && void load(session) };
+}
+
+function formatDate(value: string | null | undefined) {
+  if (!value) return "—";
+  return new Date(value).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+}
+
+function formatTime(value: string) {
+  return new Date(value).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+function Boundary({
+  state,
+  error,
+  onRetry,
+  children,
+}: {
+  state: LoadState;
+  error: string | null;
+  onRetry: () => void;
+  children: ReactNode;
+}) {
+  if (state === "ready") return <>{children}</>;
+  const copy = {
+    loading: ["Loading", "Fetching your courses…"],
+    offline: ["You're offline", "Reconnect and try again."],
+    forbidden: ["Permission denied", "This page is available only to the signed-in student."],
+    error: ["Something went wrong", error ?? "The page could not be loaded."],
+  }[state];
+  return (
+    <div className="mh-hcc-panel">
+      <EmptyState title={copy[0]} body={copy[1]} />
+      {state === "offline" || state === "error" ? (
+        <button type="button" className="mh-hcc-btn" onClick={onRetry}>
+          Try again
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+export function StudentCoursesPremiumView() {
+  const router = useRouter();
+  const search = useSearchParams();
+  const resource = useStudentResource<{ courses: Course[] }>("/courses/me");
+  const courses = resource.data?.courses ?? [];
+  const term = search.get("term") || "All Terms";
+  const status = search.get("status") || "Active & Upcoming Courses";
+
+  const termOptions = useMemo(() => {
+    const set = new Set(courses.map((c) => c.termName).filter(Boolean));
+    return ["All Terms", ...[...set].sort()];
+  }, [courses]);
+
+  const statusOptions = ["Active & Upcoming Courses", "All Courses", "Completed Courses"];
+
+  const filtered = useMemo(() => {
+    const rows = courses.filter((c) => {
+      if (term !== "All Terms" && c.termName !== term) return false;
+      if (status === "Completed Courses") return c.enrolmentStatus === "completed";
+      if (status === "Active & Upcoming Courses") return c.enrolmentStatus === "enrolled";
+      return true;
+    });
+    return [...rows].sort((a, b) => {
+      const rank = (code: string) => (/^ACSW\s*500$/i.test(code) ? 0 : 1);
+      const diff = rank(a.courseCode) - rank(b.courseCode);
+      if (diff !== 0) return diff;
+      return a.courseCode.localeCompare(b.courseCode);
+    });
+  }, [courses, term, status]);
+
+  function applyFilter(next: { term?: string; status?: string }) {
+    const params = new URLSearchParams();
+    const nextTerm = next.term ?? term;
+    const nextStatus = next.status ?? status;
+    if (nextTerm !== "All Terms") params.set("term", nextTerm);
+    if (nextStatus !== "Active & Upcoming Courses") params.set("status", nextStatus);
+    const qs = params.toString();
+    router.push(qs ? `/student/courses?${qs}` : "/student/courses");
+  }
+
+  return (
+    <StudentFrame role="student" title="" activeHref="/student/courses">
+      <div className="mh-hcc-page mh-hcc-page--campus" data-stu="STU-11">
+        <p className="mh-hcc-profile__crumb">
+          Home <span>›</span> My Courses
+        </p>
+        <h1>MY COURSES</h1>
+        <div className="mh-hcc-filters mh-hcc-filters--campus">
+          <label>
+            <span>FILTER TERM:</span>
+            <select value={term} onChange={(e) => applyFilter({ term: e.target.value })}>
+              {termOptions.map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>FILTER STATUS:</span>
+            <select value={status} onChange={(e) => applyFilter({ status: e.target.value })}>
+              {statusOptions.map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <Boundary state={resource.state} error={resource.error} onRetry={resource.refresh}>
+          <table className="mh-hcc-table mh-hcc-table--campus">
+            <thead>
+              <tr>
+                <th>COURSE</th>
+                <th>DELIVERY METHOD</th>
+                <th>INSTRUCTOR(S)</th>
+                <th>STATUS</th>
+                <th>LOCATION</th>
+                <th>SCHEDULE</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={6}>No courses found.</td>
+                </tr>
+              ) : (
+                filtered.map((c) => {
+                  const dateRange = formatHccDateRange(c.startsOn, c.endsOn);
+                  return (
+                    <tr
+                      key={c.sectionId}
+                      className="is-click"
+                      onClick={() => router.push(`/student/courses/${c.sectionId}`)}
+                    >
+                      <td>
+                        <strong className="mh-hcc-course-link">
+                          {c.courseCode} ({c.sectionCode})
+                        </strong>
+                        <div className="mh-hcc-course-title">{c.courseTitle}</div>
+                      </td>
+                      <td>{c.deliveryMethod || ""}</td>
+                      <td>{c.instructorName}</td>
+                      <td>
+                        <span className={`mh-hcc-status mh-hcc-status--${statusTone(c.enrolmentStatus)}`}>
+                          {statusLabel(c.enrolmentStatus)}
+                        </span>
+                      </td>
+                      <td>{c.location || "TBD"}</td>
+                      <td className="mh-hcc-schedule">
+                        {dateRange ? (
+                          <div className="mh-hcc-schedule__dates">Dates: {dateRange}</div>
+                        ) : null}
+                        {c.scheduleText ? <div className="mh-hcc-pre">{c.scheduleText}</div> : null}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </Boundary>
+      </div>
+    </StudentFrame>
+  );
+}
+
+export function StudentCourseDetailPremiumView({ sectionId }: { sectionId: string }) {
+  const router = useRouter();
+  const search = useSearchParams();
+  const tab = (search.get("tab") || "Course").toLowerCase() === "grades" ? "Grades" : "Course";
+  const activityId = search.get("aid");
+  const quizMode = search.get("quiz") === "attempt";
+  const courses = useStudentResource<{ courses: Course[] }>("/courses/me");
+  const calendar = useStudentResource<{ events: CalendarEvent[] }>("/calendar/me");
+  const lms = useStudentResource<CourseLms>(`/student/courses/${sectionId}/lms`);
+  const grades = useStudentResource<{
+    courses: Array<{ sectionId: string; code: string; items: GradeRow[] }>;
+  }>("/grades/me");
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [answers, setAnswers] = useState<Record<string, number>>({});
+
+  const course = courses.data?.courses.find((item) => item.sectionId === sectionId);
+  const sessions = (calendar.data?.events ?? []).filter((e) => e.sectionId === sectionId && e.kind === "class");
+  const gradeItems =
+    grades.data?.courses.find((c) => c.sectionId === sectionId || c.code === course?.courseCode)?.items ?? [];
+  const topics = lms.data?.topics ?? [];
+  const evaluationRows = lms.data?.evaluationRows ?? [];
+  const gradeScheme = lms.data?.gradeScheme ?? [];
+  const block = lms.data?.academicBlock;
+  const location = lms.data?.location || sessions.find((s) => s.location)?.location || course?.location || "TBA";
+  const instructorName = lms.data?.instructorName || course?.instructorName || "TBA";
+  const sessionLabel =
+    lms.data?.sessionLabel ||
+    `${course?.sectionCode || ""}${
+      formatHccDateRange(block?.startsOn || course?.startsOn, block?.endsOn || course?.endsOn)
+        ? `: ${formatHccDateRange(block?.startsOn || course?.startsOn, block?.endsOn || course?.endsOn)}`
+        : ""
+    }`;
+  const startDate = block?.startsOn || course?.startsOn || sessions[0]?.startsAt || null;
+  const endDate = block?.endsOn || course?.endsOn || sessions[sessions.length - 1]?.endsAt || null;
+  const joinUrl = lms.data?.joinUrl || null;
+
+  const allActivities = useMemo(() => topics.flatMap((t) => t.activities), [topics]);
+  const viewed = allActivities.find((a) => a.id === activityId) || null;
+
+  const gradesTable =
+    gradeItems.length > 0
+      ? gradeItems
+      : gradeScheme.map((g, i) => ({
+          id: `scheme-${i}`,
+          title: g.title,
+          weightPercent: g.weightPercent,
+          score: null as number | null,
+          maxScore: 100,
+          letter: null as string | null,
+        }));
+
+  const weekDays = useMemo(() => {
+    const labels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const buckets: Record<string, string[]> = Object.fromEntries(labels.map((d) => [d, []]));
+    for (const s of sessions) {
+      const d = new Date(s.startsAt);
+      const key = labels[d.getDay()]!;
+      const end = s.endsAt ? ` - ${formatTime(s.endsAt)}` : "";
+      buckets[key]!.push(`${formatTime(s.startsAt)}${end}`);
+    }
+    return labels.map((label) => ({ label, entries: buckets[label] || [] }));
+  }, [sessions]);
+
+  const states = [courses.state, calendar.state, lms.state, grades.state];
+  const combinedState: LoadState = states.includes("forbidden")
+    ? "forbidden"
+    : states.includes("error")
+      ? "error"
+      : states.includes("offline")
+        ? "offline"
+        : states.every((s) => s === "ready")
+          ? "ready"
+          : "loading";
+
+  function setTab(next: "Course" | "Grades") {
+    const params = new URLSearchParams(search.toString());
+    params.delete("aid");
+    params.delete("quiz");
+    if (next === "Course") params.delete("tab");
+    else params.set("tab", "Grades");
+    const qs = params.toString();
+    router.push(qs ? `/student/courses/${sectionId}?${qs}` : `/student/courses/${sectionId}`);
+  }
+
+  function openActivity(aid: string, quizAttempt = false) {
+    const params = new URLSearchParams(search.toString());
+    params.delete("tab");
+    params.set("aid", aid);
+    if (quizAttempt) params.set("quiz", "attempt");
+    else params.delete("quiz");
+    router.push(`/student/courses/${sectionId}?${params.toString()}`);
+  }
+
+  function clearActivity() {
+    const params = new URLSearchParams(search.toString());
+    params.delete("aid");
+    params.delete("quiz");
+    const qs = params.toString();
+    router.push(qs ? `/student/courses/${sectionId}?${qs}` : `/student/courses/${sectionId}`);
+  }
+
+  const scheduleColors: Record<string, string> = {
+    Mon: "#dbeafe",
+    Tue: "#e9d5ff",
+    Wed: "#fce7f3",
+    Thu: "#fef08a",
+  };
+
+  /** ACSW 500 / Family Studies: Mon–Thu 5:00pm–10:00pm when calendar is empty. */
+  const scheduleDays = useMemo(() => {
+    if (weekDays.some((d) => d.entries.length > 0)) return weekDays;
+    const isFamily = /ACSW\s*500/i.test(course?.courseCode || "") || /family\s*studies/i.test(course?.courseTitle || "");
+    if (!isFamily) return weekDays;
+    return weekDays.map((d) =>
+      ["Mon", "Tue", "Wed", "Thu"].includes(d.label)
+        ? { ...d, entries: ["5:00pm - 10:00pm"] }
+        : d,
+    );
+  }, [weekDays, course?.courseCode, course?.courseTitle]);
+
+  const showingActivity = Boolean(viewed);
+  const showingGrades = tab === "Grades" && !showingActivity;
+
+  function joinSession(url: string | null | undefined) {
+    if (url?.startsWith("http")) {
+      window.open(url, "_blank", "noopener,noreferrer");
+      return;
+    }
+    window.alert("This room is ready. Your instructor will share the live join link when class begins.");
+  }
+
+  return (
+    <StudentFrame role="student" title="" activeHref="/student/courses">
+      <Boundary
+        state={combinedState}
+        error={courses.error || lms.error || grades.error}
+        onRetry={() => {
+          courses.refresh();
+          calendar.refresh();
+          lms.refresh();
+          grades.refresh();
+        }}
+      >
+        {!course ? (
+          <div className="mh-hcc-page">
+            <EmptyState title="Course unavailable" body="This course is not part of your enrolment." />
+          </div>
+        ) : (
+          <div className="mh-hcc-page mh-student-course-premium" data-stu="STU-07">
+            {/* Screen chrome shared by all 8 student course screens */}
+            <header className="mh-student-course-premium__moodle-head">
+              <h1>
+                {course.courseCode}: {course.courseTitle.toUpperCase()}
+              </h1>
+              <p>
+                {sessionLabel}
+                <br />
+                {location}
+              </p>
+              <button type="button" className="mh-teacher-link" onClick={() => setInfoOpen(true)}>
+                ALL COURSE INFORMATION
+              </button>
+            </header>
+
+            {!showingActivity ? (
+              <div className="mh-hcc-profile__tabs mh-student-course-premium__tabs">
+                <button type="button" className={tab === "Course" ? "is-active" : ""} onClick={() => setTab("Course")}>
+                  Course
+                </button>
+                <button type="button" className={tab === "Grades" ? "is-active" : ""} onClick={() => setTab("Grades")}>
+                  Grades
+                </button>
+              </div>
+            ) : null}
+
+            {showingGrades ? (
+              /* Screen 3 — Grades */
+              <section className="mh-hcc-panel" data-stu="STU-08" data-screen="grades">
+                <table className="mh-hcc-table mh-student-grades-table">
+                  <thead>
+                    <tr>
+                      <th>PROJECT / ASSIGNMENT</th>
+                      <th>FEEDBACK / DETAILS</th>
+                      <th>MARK</th>
+                      <th>GRADE</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {gradesTable.length === 0 ? (
+                      <tr>
+                        <td colSpan={4}>No grade items for this course yet.</td>
+                      </tr>
+                    ) : (
+                      gradesTable.map((g) => (
+                        <tr key={g.id}>
+                          <td>
+                            <strong>{g.title}</strong>
+                            <div className="mh-teacher-muted">Weight: {Number(g.weightPercent).toFixed(2)}%</div>
+                          </td>
+                          <td>{g.score != null ? "—" : "No grades have been posted."}</td>
+                          <td>{g.score != null ? `${g.score} / ${g.maxScore}` : "—"}</td>
+                          <td>{g.letter || "—"}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </section>
+            ) : viewed && quizMode && viewed.type === "QUIZ" ? (
+              /* Screen 6 — Quiz attempt */
+              <section className="mh-student-quiz-attempt" data-stu="STU-QUIZ" data-screen="quiz-attempt">
+                <button type="button" className="mh-student-quiz-back" onClick={() => openActivity(viewed.id)}>
+                  ← Back
+                </button>
+                <div className="mh-student-activity-badge">
+                  <span className="mh-student-activity-badge__icon is-quiz" aria-hidden>
+                    Q
+                  </span>
+                  <div>
+                    <p className="mh-student-activity-type">QUIZ</p>
+                    <h2>{viewed.name}</h2>
+                  </div>
+                </div>
+                <div className="mh-student-quiz-list">
+                  {(viewed.questions || []).map((q, idx) => (
+                    <article key={q.id} className="mh-student-quiz-q">
+                      <aside>
+                        <strong>Question {idx + 1}</strong>
+                        <span className={answers[q.id] != null ? "is-answered" : ""}>
+                          {answers[q.id] != null ? "Answer saved" : "Not yet answered"}
+                        </span>
+                        <span>Marked out of {q.mark || "1.00"}</span>
+                        <button type="button" className="mh-student-quiz-flag">
+                          Flag question
+                        </button>
+                      </aside>
+                      <div className="mh-student-quiz-q__prompt">
+                        <p>{q.text}</p>
+                        <ul>
+                          {(q.answers || []).map((opt, oi) => (
+                            <li key={opt}>
+                              <label className={answers[q.id] === oi ? "is-selected" : ""}>
+                                <input
+                                  type="radio"
+                                  name={q.id}
+                                  checked={answers[q.id] === oi}
+                                  onChange={() => setAnswers((prev) => ({ ...prev, [q.id]: oi }))}
+                                />
+                                <span>
+                                  <b>{String.fromCharCode(97 + oi)}.</b> {opt}
+                                </span>
+                              </label>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+                {(viewed.questions || []).length === 0 ? (
+                  <p className="mh-teacher-muted">No questions published for this quiz yet.</p>
+                ) : null}
+                <div className="mh-student-quiz-footer">
+                  <button type="button" className="mh-hcc-btn">
+                    Next page
+                  </button>
+                </div>
+              </section>
+            ) : viewed ? (
+              /* Screens 1 gate / 4 BBB / 5 PAGE / 8 Evaluation */
+              <section className="mh-student-activity-view" data-stu="STU-ACT" data-screen={`activity-${viewed.type.toLowerCase()}`}>
+                <button type="button" className="mh-hcc-btn ghost" onClick={clearActivity}>
+                  Back
+                </button>
+                {viewed.id === "act-evaluation-criteria" ||
+                /evaluation/i.test(viewed.name) ||
+                (viewed.type === "FILE" &&
+                  (viewed.id === "act-course-syllabus" || /syllabus/i.test(viewed.name))) ? null : (
+                  <div className="mh-student-activity-badge">
+                    <span
+                      className={`mh-student-activity-badge__icon is-${viewed.type.toLowerCase()}`}
+                      aria-hidden
+                    >
+                      {viewed.type === "QUIZ" ? "Q" : viewed.type === "BIGBLUEBUTTON" ? "▶" : "P"}
+                    </span>
+                    <div>
+                      <p className="mh-student-activity-type">
+                        {viewed.type === "BIGBLUEBUTTON" ? "BIGBLUEBUTTON" : viewed.type}
+                      </p>
+                      <h2>{viewed.name}</h2>
+                    </div>
+                  </div>
+                )}
+                {viewed.type === "BIGBLUEBUTTON" ? (
+                  /* Screen 4 — Jitsi Meet join (student + teacher same room) */
+                  <div className="mh-lms-bbb mh-student-bbb" data-screen="bbb">
+                    <p className="mh-student-bbb__brand">JITSI MEET Online Class Link</p>
+                    <h3>Online Class Link</h3>
+                    <p>{viewed.note || "This room is ready. You can join the session now."}</p>
+                    {(viewed.joinUrl || joinUrl) ? (
+                      <p className="mh-teacher-muted" style={{ wordBreak: "break-all" }}>
+                        {viewed.joinUrl || joinUrl}
+                      </p>
+                    ) : null}
+                    <button type="button" className="mh-hcc-btn" onClick={() => joinSession(viewed.joinUrl || joinUrl)}>
+                      Join session
+                    </button>
+                  </div>
+                ) : viewed.type === "QUIZ" ? (
+                  /* Screen 1 — Attempt quiz gate (FINAL EXAM) */
+                  <div className="mh-student-quiz-gate" data-screen="quiz-gate">
+                    <button type="button" className="mh-hcc-btn" onClick={() => openActivity(viewed.id, true)}>
+                      Attempt quiz
+                    </button>
+                    <p className="mh-teacher-muted">Grading method: Highest grade</p>
+                  </div>
+                ) : viewed.id === "act-evaluation-criteria" || /evaluation/i.test(viewed.name) ? (
+                  /* Screen 8 — Evaluation criteria PAGE */
+                  <EvaluationCriteriaCard
+                    courseCode={course.courseCode}
+                    courseTitle={course.courseTitle}
+                    rows={evaluationRows}
+                    modified={viewed.modified}
+                  />
+                ) : viewed.type === "FILE" &&
+                  (viewed.id === "act-course-syllabus" || /syllabus/i.test(viewed.name)) ? (
+                  <SyllabusDocumentCard
+                    fileName={viewed.fileName}
+                    courseCode={course.courseCode}
+                    courseTitle={course.courseTitle}
+                    modified={viewed.modified}
+                  />
+                ) : viewed.type === "FILE" || viewed.type === "FOLDER" ? (
+                  <div className="mh-student-file-card" data-screen="file">
+                    <div className="mh-student-file-card__icon" aria-hidden>
+                      {viewed.type === "FOLDER" ? "F" : "PDF"}
+                    </div>
+                    <div>
+                      <strong>{viewed.name}</strong>
+                      <p className="mh-teacher-muted">{viewed.fileName || `${viewed.name}.pdf`}</p>
+                      <button type="button" className="mh-hcc-btn ghost">
+                        Download
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  /* Screen 5 — PAGE (Brief Course Description / Learning Objectives) */
+                  <div className="mh-lms-pagebody mh-student-pagebody" data-screen="page">
+                    <p>{viewed.body || `${viewed.name} content will appear here when published by your instructor.`}</p>
+                    {viewed.modified ? (
+                      <p className="mh-teacher-muted">Last modified: {viewed.modified}</p>
+                    ) : null}
+                  </div>
+                )}
+              </section>
+            ) : (
+              /* Screen 7 — Course outline: RESOURCES → EVALUATION → DAY 1–8 */
+              <section className="mh-lms-course mh-student-lms-course" data-screen="course-outline">
+                <div className="mh-lms-course__toolbar">
+                  <button
+                    type="button"
+                    className="mh-teacher-link"
+                    onClick={() => {
+                      const next: Record<string, boolean> = {};
+                      for (const t of topics) next[t.id] = true;
+                      setCollapsed(next);
+                    }}
+                  >
+                    Collapse all
+                  </button>
+                </div>
+                {topics.length === 0 ? (
+                  <p className="mh-teacher-muted">No course content published yet.</p>
+                ) : (
+                  topics.map((topic) => {
+                    const shut = Boolean(collapsed[topic.id]);
+                    const isEval = topic.id === "topic-eval";
+                    const isResources = topic.id === "topic-resources";
+                    return (
+                      <article
+                        key={topic.id}
+                        className={`mh-lms-topic mh-student-topic${isEval ? " is-eval" : ""}${isResources ? " is-resources" : ""}`}
+                        data-topic={topic.id}
+                      >
+                        <header className="mh-lms-topic__head">
+                          <button
+                            type="button"
+                            className="mh-lms-topic__toggle"
+                            onClick={() =>
+                              setCollapsed((prev) => ({ ...prev, [topic.id]: !prev[topic.id] }))
+                            }
+                          >
+                            {shut ? "▸" : "▾"}
+                          </button>
+                          <h2>{topic.title}</h2>
+                        </header>
+                        {shut ? null : (
+                          <div className="mh-lms-topic__body">
+                            {isEval ? (
+                              <EvaluationCriteriaCard
+                                courseCode={course.courseCode}
+                                courseTitle={course.courseTitle}
+                                rows={evaluationRows}
+                                compact
+                              />
+                            ) : null}
+                            {topic.activities.map((activity) => {
+                              if (isEval && (activity.id === "act-evaluation-criteria" || /evaluation/i.test(activity.name))) {
+                                return null;
+                              }
+                              return (
+                                <div key={activity.id} className="mh-lms-activity mh-student-activity-row">
+                                  <span
+                                    className={`mh-lms-activity__type is-${activity.type.toLowerCase()}`}
+                                    aria-hidden
+                                  >
+                                    {activityIcon(activity.type)}
+                                  </span>
+                                  <div>
+                                    <button
+                                      type="button"
+                                      className="mh-lms-activity__name"
+                                      onClick={() => openActivity(activity.id)}
+                                    >
+                                      {activity.name}
+                                    </button>
+                                    {activity.note ? <p>{activity.note}</p> : null}
+                                    {activity.fileName ? (
+                                      <p className="mh-teacher-muted">{activity.fileName}</p>
+                                    ) : null}
+                                    {activity.type === "QUIZ" ? (
+                                      <p className="mh-teacher-muted">Click to open · Attempt when ready</p>
+                                    ) : null}
+                                  </div>
+                                  <button
+                                    type="button"
+                                    className="mh-student-activity-open"
+                                    onClick={() => openActivity(activity.id)}
+                                  >
+                                    Open
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </article>
+                    );
+                  })
+                )}
+              </section>
+            )}
+
+            {infoOpen ? (
+              /* Screen 2 — ALL COURSE INFORMATION modal */
+              <div
+                className="mh-hcc-modal"
+                role="dialog"
+                aria-modal="true"
+                aria-label="All Course Information"
+                data-stu="STU-09"
+                data-screen="course-info"
+              >
+                <button
+                  type="button"
+                  className="mh-hcc-modal__backdrop"
+                  aria-label="Close"
+                  onClick={() => setInfoOpen(false)}
+                />
+                <div className="mh-hcc-modal__panel mh-student-course-premium__modal">
+                  <header className="mh-hcc-modal__head">
+                    <div>
+                      <p className="mh-teacher-muted">{course.courseTitle.toUpperCase()}</p>
+                      <h2>
+                        {course.courseCode} ({course.sectionCode})
+                      </h2>
+                    </div>
+                    <button
+                      type="button"
+                      className="mh-hcc-modal__x"
+                      onClick={() => setInfoOpen(false)}
+                      aria-label="Close"
+                    >
+                      ×
+                    </button>
+                  </header>
+                  <div className="mh-hcc-modal__body">
+                    <div className="mh-student-course-info-top">
+                      <dl className="mh-student-course-premium__meta">
+                        <div>
+                          <dt>Course dates</dt>
+                          <dd>
+                            {formatDate(startDate)} – {formatDate(endDate)}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Instructor(s)</dt>
+                          <dd>{instructorName}</dd>
+                        </div>
+                        <div>
+                          <dt>Location</dt>
+                          <dd>Campus: {location}</dd>
+                        </div>
+                      </dl>
+                      <div className="mh-student-course-info-views">
+                        <button type="button" className="mh-teacher-link">
+                          Weekly View
+                        </button>
+                        <button type="button" className="mh-teacher-link">
+                          Calendar View
+                        </button>
+                      </div>
+                    </div>
+                    <h3>Course schedule</h3>
+                    <div className="mh-student-course-premium__week">
+                      {scheduleDays.map((d) => (
+                        <div
+                          key={d.label}
+                          className={d.entries.length ? "has-slot" : ""}
+                          style={
+                            d.entries.length && scheduleColors[d.label]
+                              ? { background: scheduleColors[d.label] }
+                              : undefined
+                          }
+                        >
+                          <strong>{d.label}</strong>
+                          {d.entries.length === 0 ? (
+                            <p className="mh-teacher-muted">—</p>
+                          ) : (
+                            d.entries.map((e) => <p key={e}>{e}</p>)
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        )}
+      </Boundary>
+    </StudentFrame>
+  );
+}

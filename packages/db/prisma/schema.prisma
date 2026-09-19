@@ -26,17 +26,24 @@ model Institution {
 }
 
 model Person {
-  id            String    @id @default(uuid())
-  institutionId String
-  givenName     String
-  familyName    String
-  email         String
-  dateOfBirth   String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  rowVersion    Int       @default(1)
-  accounts      Account[]
-  students      Student[]
+  id                    String    @id @default(uuid())
+  institutionId         String
+  givenName             String
+  familyName            String
+  middleName            String?
+  preferredName         String?
+  email                 String
+  personalEmail         String?
+  phone                 String?
+  sinMasked             String?
+  emergencyContactName  String?
+  emergencyContactPhone String?
+  dateOfBirth           String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  rowVersion            Int       @default(1)
+  accounts              Account[]
+  students              Student[]
 
   @@unique([institutionId, email])
   @@index([institutionId])
@@ -59,6 +66,10 @@ model Account {
   sessions      Session[]
   notifications Notification[]
   aiInteractions AiInteraction[]
+  mailFolders   MailFolder[]
+  mailboxSettings MailboxSettings?
+  mailPlacements MailThreadPlacement[]
+  mailDistributionLists MailDistributionList[]
 
   @@unique([institutionId, email])
   @@index([institutionId])
@@ -101,12 +112,14 @@ model Student {
   studentNumber    String
   programName      String
   programVersionId String?
+  cohortId         String?
   standing         String            @default("good")
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   rowVersion       Int               @default(1)
   person           Person            @relation(fields: [personId], references: [id])
   programVersion   ProgramVersion?   @relation(fields: [programVersionId], references: [id])
+  cohort           Cohort?           @relation(fields: [cohortId], references: [id])
   enrolments       Enrolment[]
   gradeItems       GradeItem[]
   submissions      Submission[]
@@ -121,10 +134,21 @@ model Student {
   financeLedgerEntries FinanceLedgerEntry[]
   credentialRecords  CredentialRecord[]
   placements         Placement[]
+  programPlans       ProgramPlan[]
+  courseEvaluations  CourseEvaluation[]
+  workshopRegistrations WorkshopRegistration[]
+  workshopAttendance    WorkshopAttendance[]
+  leaveOfAbsenceRequests LeaveOfAbsenceRequest[]
+  requiredTasks      RequiredTask[]
+  taxDocuments       TaxDocument[]
+  extracurricularRecords ExtracurricularRecord[]
+  badges             StudentBadge[]
+  documents          StudentDocument[]
 
   @@unique([institutionId, studentNumber])
   @@index([institutionId])
   @@index([programVersionId])
+  @@index([cohortId])
 }
 
 model Program {
@@ -137,9 +161,99 @@ model Program {
   updatedAt     DateTime         @updatedAt
   rowVersion    Int              @default(1)
   versions      ProgramVersion[]
+  cohorts       Cohort[]
 
   @@unique([institutionId, code])
   @@index([institutionId])
+}
+
+/// Intake group: Programme + month/year + section (e.g. CS Fall 2024 · A).
+model Cohort {
+  id            String        @id @default(uuid())
+  institutionId String
+  programId     String
+  code          String
+  label         String
+  intakeYear    Int
+  intakeMonth   Int
+  sectionLabel  String        @default("A")
+  campus        String?
+  startDate     String?
+  endDate       String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  rowVersion    Int           @default(1)
+  program       Program       @relation(fields: [programId], references: [id])
+  students      Student[]
+  programPlans  ProgramPlan[]
+
+  @@unique([institutionId, code])
+  @@index([institutionId, programId])
+}
+
+/// Ordered programme timetable / progress for one student in a cohort.
+model ProgramPlan {
+  id            String            @id @default(uuid())
+  institutionId String
+  studentId     String
+  cohortId      String?
+  status        String            @default("active")
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  rowVersion    Int               @default(1)
+  student       Student           @relation(fields: [studentId], references: [id])
+  cohort        Cohort?           @relation(fields: [cohortId], references: [id])
+  items         ProgramPlanItem[]
+
+  @@index([institutionId, studentId])
+  @@index([cohortId])
+}
+
+model ProgramPlanItem {
+  id            String      @id @default(uuid())
+  institutionId String
+  planId        String
+  courseId      String?
+  courseCode    String
+  title         String
+  credits       Float       @default(0)
+  sortOrder     Int         @default(0)
+  /// main | practicum | makeup
+  category      String      @default("main")
+  /// completed | in_progress | not_started | dropped
+  status        String      @default("not_started")
+  startsOn      String?
+  endsOn        String?
+  scheduleText  String?
+  sectionId     String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  rowVersion    Int         @default(1)
+  plan          ProgramPlan @relation(fields: [planId], references: [id])
+  course        Course?     @relation(fields: [courseId], references: [id])
+
+  @@index([institutionId, planId, sortOrder])
+  @@index([courseId])
+}
+
+model CourseEvaluation {
+  id             String    @id @default(uuid())
+  institutionId  String
+  studentId      String
+  sectionId      String?
+  courseCode     String
+  courseTitle    String
+  status         String    @default("pending")
+  dueAt          DateTime?
+  submittedAt    DateTime?
+  overallRating  Int?
+  responsesJson  String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  rowVersion     Int       @default(1)
+  student        Student   @relation(fields: [studentId], references: [id])
+
+  @@index([institutionId, studentId, status])
 }
 
 model ProgramVersion {
@@ -263,47 +377,63 @@ model Course {
   isCoreqOf     CourseCorequisite[]  @relation("CourseIsCoreq")
   offerings     CourseOffering[]
   transferCredits TransferCredit[]
+  programPlanItems ProgramPlanItem[]
+  courseResources CourseResource[]
 
   @@unique([institutionId, code])
   @@index([institutionId])
 }
 
 model Section {
-  id                 String         @id @default(uuid())
+  id                 String          @id @default(uuid())
   institutionId      String
   courseId           String
   termId             String
+  academicBlockId    String?
   code               String
   instructorPersonId String
-  createdAt          DateTime       @default(now())
-  updatedAt          DateTime       @updatedAt
-  rowVersion         Int            @default(1)
-  course             Course         @relation(fields: [courseId], references: [id])
-  term               Term           @relation(fields: [termId], references: [id])
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  rowVersion         Int             @default(1)
+  course             Course          @relation(fields: [courseId], references: [id])
+  term               Term            @relation(fields: [termId], references: [id])
+  academicBlock      AcademicBlock?  @relation(fields: [academicBlockId], references: [id])
   enrolments         Enrolment[]
   assignments        Assignment[]
   classSessions      ClassSession[]
   assessments        Assessment[]
   attendanceRecords  AttendanceRecord[]
+  dayBlocks          CourseDayBlock[]
+  folders            CourseFolder[]
+  syllabusTopics     SyllabusTopic[]
 
   @@index([institutionId])
+  @@index([academicBlockId])
 }
 
 model Enrolment {
-  id            String      @id @default(uuid())
-  institutionId String
-  sectionId     String
-  studentId     String
-  status        String      @default("enrolled")
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-  rowVersion    Int         @default(1)
-  section       Section     @relation(fields: [sectionId], references: [id])
-  student       Student     @relation(fields: [studentId], references: [id])
-  gradeItems    GradeItem[]
+  id                 String      @id @default(uuid())
+  institutionId      String
+  sectionId          String
+  studentId          String
+  /// enrolled | completed | withdrawn
+  status             String      @default("enrolled")
+  attemptNumber      Int         @default(1)
+  countsTowardCgpa   Boolean     @default(true)
+  creditAwarded      Boolean     @default(false)
+  continuous         Boolean     @default(false)
+  originalEnrolmentId String?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+  rowVersion         Int         @default(1)
+  section            Section     @relation(fields: [sectionId], references: [id])
+  student            Student     @relation(fields: [studentId], references: [id])
+  gradeItems         GradeItem[]
 
-  @@unique([sectionId, studentId])
+  @@unique([sectionId, studentId, attemptNumber])
   @@index([institutionId])
+  @@index([studentId, status])
+  @@index([originalEnrolmentId])
 }
 
 model Assignment {
@@ -485,14 +615,19 @@ model Notification {
 }
 
 model MessageThread {
-  id                        String    @id @default(uuid())
+  id                        String                @id @default(uuid())
   institutionId             String
   subject                   String
   participantAccountIdsJson String
-  createdAt                 DateTime  @default(now())
-  updatedAt                 DateTime  @updatedAt
-  rowVersion                Int       @default(1)
+  /// standard | individuals | class | workshop | mail_merge | groups
+  messageType               String                @default("standard")
+  ccAccountIdsJson          String                @default("[]")
+  bccAccountIdsJson         String                @default("[]")
+  createdAt                 DateTime              @default(now())
+  updatedAt                 DateTime              @updatedAt
+  rowVersion                Int                   @default(1)
   messages                  Message[]
+  placements                MailThreadPlacement[]
 
   @@index([institutionId])
 }
@@ -896,7 +1031,7 @@ model CareerOpportunity {
   skillsJson    String   @default("[]")
   programCodesJson String @default("[]")
   status        String   @default("open")
-  href          String   @default("/student/f/st-20-career")
+  href          String   @default("/student/messages")
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   rowVersion    Int      @default(1)
@@ -1000,21 +1135,230 @@ model ServiceRequest {
 }
 
 model FinanceLedgerEntry {
+  id               String          @id @default(uuid())
+  institutionId    String
+  studentId        String
+  label            String
+  amountCad        Float
+  kind             String
+  status           String          @default("open")
+  source           String?
+  note             String?
+  dueAt            DateTime?
+  postedAt         DateTime        @default(now())
+  financialTermId  String?
+  reversedFromId   String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  rowVersion       Int             @default(1)
+  student          Student         @relation(fields: [studentId], references: [id])
+  financialTerm    FinancialTerm?  @relation(fields: [financialTermId], references: [id])
+
+  @@index([institutionId, studentId, postedAt])
+  @@index([financialTermId])
+  @@index([reversedFromId])
+}
+
+model FinancialTerm {
+  id            String               @id @default(uuid())
+  institutionId String
+  code          String
+  name          String
+  startsOn      String
+  endsOn        String
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  rowVersion    Int                  @default(1)
+  ledgerEntries FinanceLedgerEntry[]
+
+  @@unique([institutionId, code])
+  @@index([institutionId, startsOn])
+}
+
+model Workshop {
+  id            String                 @id @default(uuid())
+  institutionId String
+  code          String
+  title         String
+  description   String                 @default("")
+  creditsCeu    Float                  @default(0)
+  startsAt      DateTime
+  endsAt        DateTime?
+  location      String?
+  capacity      Int                    @default(30)
+  status        String                 @default("upcoming")
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+  rowVersion    Int                    @default(1)
+  registrations WorkshopRegistration[]
+  attendance    WorkshopAttendance[]
+
+  @@unique([institutionId, code])
+  @@index([institutionId, status, startsAt])
+}
+
+model WorkshopRegistration {
+  id            String   @id @default(uuid())
+  institutionId String
+  workshopId    String
+  studentId     String
+  /// pending | approved | declined | dropped | registered | completed
+  status        String   @default("pending")
+  note          String   @default("")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  rowVersion    Int      @default(1)
+  workshop      Workshop @relation(fields: [workshopId], references: [id])
+  student       Student  @relation(fields: [studentId], references: [id])
+
+  @@unique([workshopId, studentId])
+  @@index([institutionId, studentId, status])
+}
+
+model WorkshopAttendance {
+  id            String   @id @default(uuid())
+  institutionId String
+  workshopId    String
+  studentId     String
+  attendedOn    String
+  /// present | absent
+  status        String   @default("present")
+  note          String   @default("")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  rowVersion    Int      @default(1)
+  workshop      Workshop @relation(fields: [workshopId], references: [id])
+  student       Student  @relation(fields: [studentId], references: [id])
+
+  @@unique([workshopId, studentId, attendedOn])
+  @@index([institutionId, attendedOn])
+}
+
+model LeaveOfAbsenceRequest {
+  id                String    @id @default(uuid())
+  institutionId     String
+  studentId         String
+  reason            String
+  startsOn          String
+  endsOn            String
+  status            String    @default("pending")
+  approvalRequestId String?
+  decidedAt         DateTime?
+  decisionNote      String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  rowVersion        Int       @default(1)
+  student           Student   @relation(fields: [studentId], references: [id])
+
+  @@index([institutionId, studentId, status])
+}
+
+model RequiredTask {
   id            String    @id @default(uuid())
   institutionId String
   studentId     String
-  label         String
-  amountCad     Float
-  kind          String
-  status        String    @default("open")
+  title         String
+  detail        String?
   dueAt         DateTime?
-  postedAt      DateTime  @default(now())
+  status        String    @default("pending")
+  href          String?
+  completedAt   DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   rowVersion    Int       @default(1)
   student       Student   @relation(fields: [studentId], references: [id])
 
-  @@index([institutionId, studentId, postedAt])
+  @@index([institutionId, studentId, status])
+}
+
+model TaxDocument {
+  id                 String    @id @default(uuid())
+  institutionId      String
+  studentId          String
+  docType            String    @default("T2202")
+  taxYear            Int
+  title              String
+  status             String    @default("available")
+  eligibleTuitionCad Float?
+  enrolmentMonths    Int?
+  sinLast4           String?
+  /// pending | generated | submitted | available
+  craStatus          String    @default("pending")
+  issuedAt           DateTime?
+  downloadUrl        String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  rowVersion         Int       @default(1)
+  student            Student   @relation(fields: [studentId], references: [id])
+
+  @@unique([institutionId, studentId, docType, taxYear])
+  @@index([institutionId, studentId, taxYear])
+}
+
+model StudentDocument {
+  id            String   @id @default(uuid())
+  institutionId String
+  studentId     String
+  recordName    String
+  recordDate    String?
+  docLabel      String?
+  downloadUrl   String?
+  status        String   @default("available")
+  note          String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  rowVersion    Int      @default(1)
+  student       Student  @relation(fields: [studentId], references: [id])
+
+  @@index([institutionId, studentId, recordDate])
+}
+
+model InstitutionMailPolicy {
+  id                      String   @id @default(uuid())
+  institutionId           String   @unique
+  allowStudentForwarding  Boolean  @default(true)
+  allowSmsForwarding      Boolean  @default(false)
+  requireRegistrarAudit   Boolean  @default(true)
+  maxForwardAddressLength Int      @default(200)
+  note                    String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+  rowVersion              Int      @default(1)
+}
+
+model ExtracurricularRecord {
+  id            String   @id @default(uuid())
+  institutionId String
+  studentId     String
+  termCode      String?
+  category      String
+  title         String
+  detail        String?
+  status        String   @default("recorded")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  rowVersion    Int      @default(1)
+  student       Student  @relation(fields: [studentId], references: [id])
+
+  @@index([institutionId, studentId, category])
+}
+
+model StudentBadge {
+  id            String    @id @default(uuid())
+  institutionId String
+  studentId     String
+  code          String
+  title         String
+  description   String?
+  earnedAt      DateTime?
+  status        String    @default("available")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  rowVersion    Int       @default(1)
+  student       Student   @relation(fields: [studentId], references: [id])
+
+  @@unique([studentId, code])
+  @@index([institutionId, studentId, status])
 }
 
 model CredentialRecord {
@@ -1031,4 +1375,222 @@ model CredentialRecord {
   student       Student   @relation(fields: [studentId], references: [id])
 
   @@index([institutionId, studentId, status])
+}
+
+model AcademicBlock {
+  id            String    @id @default(uuid())
+  institutionId String
+  code          String
+  name          String
+  startsOn      String
+  endsOn        String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  rowVersion    Int       @default(1)
+  sections      Section[]
+
+  @@unique([institutionId, code])
+  @@index([institutionId, startsOn])
+}
+
+model CourseDayBlock {
+  id            String         @id @default(uuid())
+  institutionId String
+  sectionId     String
+  label         String
+  title         String
+  sortOrder     Int            @default(0)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  rowVersion    Int            @default(1)
+  section       Section        @relation(fields: [sectionId], references: [id])
+  lessons       CourseLesson[]
+
+  @@index([institutionId, sectionId, sortOrder])
+}
+
+model CourseLesson {
+  id            String         @id @default(uuid())
+  institutionId String
+  dayBlockId    String
+  title         String
+  body          String         @default("")
+  resourceHref  String?
+  sortOrder     Int            @default(0)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  rowVersion    Int            @default(1)
+  dayBlock      CourseDayBlock @relation(fields: [dayBlockId], references: [id])
+
+  @@index([institutionId, dayBlockId, sortOrder])
+}
+
+model CourseFolder {
+  id            String             @id @default(uuid())
+  institutionId String
+  sectionId     String
+  name          String
+  sortOrder     Int                @default(0)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  rowVersion    Int                @default(1)
+  section       Section            @relation(fields: [sectionId], references: [id])
+  items         CourseFolderItem[]
+
+  @@index([institutionId, sectionId, sortOrder])
+}
+
+model CourseFolderItem {
+  id            String       @id @default(uuid())
+  institutionId String
+  folderId      String
+  title         String
+  kind          String       @default("file")
+  href          String?
+  sizeLabel     String?
+  sortOrder     Int          @default(0)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  rowVersion    Int          @default(1)
+  folder        CourseFolder @relation(fields: [folderId], references: [id])
+
+  @@index([institutionId, folderId, sortOrder])
+}
+
+model SyllabusTopic {
+  id            String   @id @default(uuid())
+  institutionId String
+  sectionId     String
+  title         String
+  level         Int      @default(1)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  rowVersion    Int      @default(1)
+  section       Section  @relation(fields: [sectionId], references: [id])
+
+  @@index([institutionId, sectionId, sortOrder])
+}
+
+model MailFolder {
+  id            String                @id @default(uuid())
+  institutionId String
+  accountId     String
+  name          String
+  kind          String                @default("custom")
+  sortOrder     Int                   @default(0)
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+  rowVersion    Int                   @default(1)
+  account       Account               @relation(fields: [accountId], references: [id])
+  placements    MailThreadPlacement[]
+
+  @@unique([accountId, kind, name])
+  @@index([institutionId, accountId, sortOrder])
+}
+
+model MailThreadPlacement {
+  id            String        @id @default(uuid())
+  institutionId String
+  accountId     String
+  threadId      String
+  folderId      String
+  readAt        DateTime?
+  flagged       Boolean       @default(false)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  rowVersion    Int           @default(1)
+  account       Account       @relation(fields: [accountId], references: [id])
+  thread        MessageThread @relation(fields: [threadId], references: [id])
+  folder        MailFolder    @relation(fields: [folderId], references: [id])
+
+  @@unique([accountId, threadId])
+  @@index([institutionId, folderId])
+}
+
+model MailboxSettings {
+  id                    String   @id @default(uuid())
+  institutionId         String
+  accountId             String   @unique
+  forwardingEnabled     Boolean  @default(false)
+  forwardingAddress     String?
+  smsForwardingEnabled  Boolean  @default(false)
+  signature             String?
+  popupNotifications    Boolean  @default(true)
+  notificationSound     Boolean  @default(false)
+  autoResponderEnabled  Boolean  @default(false)
+  autoResponderBody     String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  rowVersion            Int      @default(1)
+  account               Account  @relation(fields: [accountId], references: [id])
+
+  @@index([institutionId])
+}
+
+model MailDistributionList {
+  id                    String   @id @default(uuid())
+  institutionId         String
+  accountId             String
+  name                  String
+  memberAccountIdsJson  String   @default("[]")
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  rowVersion            Int      @default(1)
+  account               Account  @relation(fields: [accountId], references: [id])
+
+  @@index([institutionId, accountId])
+}
+
+model CourseResourceCategory {
+  id            String           @id @default(uuid())
+  institutionId String
+  name          String
+  language      String           @default("English")
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  rowVersion    Int              @default(1)
+  resources     CourseResource[]
+
+  @@index([institutionId])
+}
+
+model CourseResource {
+  id              String                  @id @default(uuid())
+  institutionId   String
+  categoryId      String?
+  courseId        String?
+  name            String
+  language        String                  @default("English")
+  allowQuantities Boolean                 @default(false)
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  rowVersion      Int                     @default(1)
+  category        CourseResourceCategory? @relation(fields: [categoryId], references: [id])
+  course          Course?                 @relation(fields: [courseId], references: [id])
+
+  @@index([institutionId])
+  @@index([categoryId])
+  @@index([courseId])
+}
+
+model BadgeDefinition {
+  id            String   @id @default(uuid())
+  institutionId String
+  name          String
+  description   String   @default("")
+  badgeText     String   @default("")
+  imageUrl      String?
+  approvalMode  String   @default("Instant / Automated")
+  badgeType     String   @default("Designation / Academic Performance")
+  programsRule  String   @default("All Programs")
+  coursesRule   String   @default("Any")
+  termsRule     String   @default("Any")
+  averageType   String   @default("None")
+  status        String   @default("active")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  rowVersion    Int      @default(1)
+
+  @@index([institutionId])
 }

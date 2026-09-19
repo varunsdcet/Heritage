@@ -1,3 +1,7 @@
+import { buildAddProgramScreenForm } from "./addProgramForm";
+import { buildAddSessionScreenForm } from "./addSessionForm";
+import { SCHEDULING_SCREENS } from "@/lib/teacherSchedulingScreens";
+
 export type TeacherArchetype =
   | "dashboard"
   | "profileBio"
@@ -11,12 +15,29 @@ export type TeacherArchetype =
   | "courseList"
   | "courseDetail"
   | "courseMgmt"
+  | "activeCourses"
+  | "modulesBoard"
   | "announcements"
   | "versionEditor"
   | "evaluations"
   | "repository"
   | "pendingSchedules"
   | "courseHistory"
+  | "hccMyCourses"
+  | "hccEvaluations"
+  | "hccCourseHistory"
+  | "hccGradesSubmission"
+  | "hccPendingGrades"
+  | "hccAttendance"
+  | "hccStudents"
+  | "hccFlags"
+  | "hccEmpty"
+  | "hccRepository"
+  | "hccPendingSchedules"
+  | "hccTranscriptPending"
+  | "hccBadges"
+  | "hccCourseResources"
+  | "programSettings"
   | "table"
   | "form"
   | "cards"
@@ -40,12 +61,20 @@ export type TeacherArchetype =
   | "attendanceReview"
   | "assessmentBuilder"
   | "gradingSchemes"
+  | "programTypes"
+  | "manageTerms"
+  | "coursesSessions"
+  | "courseAdmin"
   | "pendingGrades"
   | "workshops"
   | "workshopDetail"
+  | "workshopEnrolments"
+  | "workshopAttendance"
   | "studentsDirectory"
   | "studentDetail"
   | "hub"
+  | "facultiesPrograms"
+  | "programSettings"
   | "grades"
   | "scheduler"
   | "calendar"
@@ -53,7 +82,116 @@ export type TeacherArchetype =
   | "authGate"
   | "alertList"
   | "gradebook"
-  | "statusFilter";
+  | "statusFilter"
+  | "assessmentHub"
+  | "masterScheduling"
+  | "academicCalendars"
+  | "courseTextbooks"
+  | "contentRepository"
+  | "courseConfigurations"
+  | "courseTypes"
+  | "reviewTerm"
+  | "scheduleManage";
+
+export type CourseLmsMoreId =
+  | "competencies"
+  | "competency-breakdown"
+  | "filters"
+  | "logs"
+  | "live-logs"
+  | "activity-report"
+  | "course-participation"
+  | "reports"
+  | "settings"
+  | "groups"
+  | "question-bank"
+  | "reuse";
+
+export type CourseLmsQuestion = {
+  id: string;
+  type: string;
+  typeCode: string;
+  text: string;
+  name: string;
+  status: string;
+  version: string;
+  createdByFirst: string;
+  createdByLast: string;
+  date: string;
+  comments: number;
+  needsChecking: string;
+  facilityIndex: string;
+  discriminativeEfficiency: string;
+  usage: number;
+  mark?: string;
+  feedback?: string;
+  answers?: string[];
+  correct?: number;
+  trueFalse?: string;
+  shortAnswer?: string;
+  pairs?: Array<{ q: string; a: string }>;
+};
+
+export type CourseLmsGroup = {
+  id: string;
+  name: string;
+  members: Array<{ id: string; name: string }>;
+};
+
+export type CourseLmsState = {
+  session: string;
+  location: string;
+  ended?: boolean;
+  endedMessage?: string;
+  finalMarksLabel?: string;
+  finalMarksHref?: string;
+  moreMenu: Array<{ id: CourseLmsMoreId; label: string }>;
+  topics: Array<{
+    id: string;
+    title: string;
+    summary?: string;
+    activities: Array<{
+      id?: string;
+      type: string;
+      name: string;
+      note?: string;
+      body?: string;
+      fileName?: string;
+      modified?: string;
+      hidden?: boolean;
+      joinUrl?: string | null;
+    }>;
+  }>;
+  activityTypes?: Array<{ code: string; label: string; kind: string }>;
+  gradeColumns: string[];
+  gradeWeights?: string[];
+  gradeEmpty?: string;
+  attendanceDates?: string[];
+  evaluationRows?: Array<{ component: string; weight: string }>;
+  logParticipants?: string[];
+  questionBank: {
+    category: string;
+    categoryHelp: string;
+    categories: Array<{ label: string; value: string }>;
+    showQuestionText: boolean;
+    showSubcategories: boolean;
+    showOld: boolean;
+    pageSize: number;
+    totalPages: number;
+    questions: CourseLmsQuestion[];
+  };
+  groups: CourseLmsGroup[];
+  availableUsers: Array<{ id: string; name: string }>;
+  competencies: Array<{ id: string; name: string; resource?: string }>;
+  competencyEmpty: string;
+  badges: Array<{ id: string; name: string; version?: string; language?: string }>;
+  badgeForm: {
+    issuerName: string;
+    issuerContact: string;
+    languages: Array<{ label: string; value: string }>;
+    imageTypes: string[];
+  };
+};
 
 export type TeacherBadgeTone =
   | "active"
@@ -114,9 +252,26 @@ export type TeacherScreenConfig = {
       action?: string;
       href?: string;
     }>;
+    gradeSubmissions?: Array<{
+      code: string;
+      sectionCode: string;
+      title: string;
+      status: string;
+      statusTone?: TeacherBadgeTone;
+      missing: string;
+      href?: string;
+    }>;
     announcements: Array<{ title: string; body: string; when: string }>;
     alerts: Array<{ title: string; body: string; tone: "critical" | "warning" | "info" }>;
     officeHours: Array<{ day: string; window: string; mode: string; remaining?: string }>;
+    endedCourses?: string[];
+  };
+  profileHeader?: {
+    name: string;
+    email: string;
+    status?: string;
+    topics?: string[];
+    avatarUrl?: string;
   };
   profileBio?: {
     name: string;
@@ -129,17 +284,54 @@ export type TeacherScreenConfig = {
     academic: Array<{ label: string; value: string }>;
     expertise: string[];
     bio: string;
+    connect?: { phone: string; email: string };
+    education?: { background: string; experience: string; organizations: string };
   };
   profileTopics?: {
     tabs: Array<{ label: string; href: string; active?: boolean }>;
     teaching: string[];
+    currentCourses?: string[];
+    previousCourses?: string[];
+    academicChair?: string[];
+    academicLead?: string;
     research: string[];
     certifications: Array<{ name: string; issuer: string; year: string }>;
+    teachingSchedule?: Array<{
+      course: string;
+      code: string;
+      title: string;
+      delivery: string;
+      location: string;
+      schedule: string;
+    }>;
   };
   availability?: {
     tabs: Array<{ label: string; href: string; active?: boolean }>;
-    slots: Array<{ day: string; start: string; end: string; mode: string; location: string }>;
+    slots: Array<{
+      day: string;
+      start: string;
+      end: string;
+      mode: string;
+      location: string;
+      date?: string;
+      repeats?: string;
+      endDate?: string;
+      note?: string;
+      title?: string;
+    }>;
     note?: string;
+    officeHours?: string;
+    generalInfo?: string;
+    teachingByDay?: Array<{
+      day: string;
+      entries: Array<{ course: string; section: string; time: string }>;
+    }>;
+    calendar?: {
+      year: number;
+      month: number;
+      monthLabel?: string;
+      markedDates: string[];
+    };
   };
   compensation?: {
     tabs: Array<{ label: string; href: string; active?: boolean }>;
@@ -153,6 +345,20 @@ export type TeacherScreenConfig = {
       label: string;
       entries: Array<{ day: string; time: string; course: string; room: string }>;
     }>;
+    teachingByDay?: Array<{
+      day: string;
+      entries: Array<{ course: string; section: string; time: string }>;
+    }>;
+    weekLabel?: string;
+    weekStart?: string;
+    weekEnd?: string;
+    weekDays?: Array<{
+      label: string;
+      date: string;
+      dateLabel?: string;
+      entries: Array<{ kind: string; title: string; time: string }>;
+    }>;
+    emptyMessage?: string;
   };
   settings?: {
     groups: Array<{
@@ -166,22 +372,301 @@ export type TeacherScreenConfig = {
     recentActivity: Array<{ event: string; when: string }>;
   };
   accomplishments?: {
+    tabs?: Array<{ label: string; href: string; active?: boolean }>;
     stats: Array<{ label: string; value: string }>;
-    items: Array<{ title: string; detail: string; year: string; tone?: TeacherBadgeTone }>;
+    items: Array<{
+      title: string;
+      detail: string;
+      year: string;
+      tone?: TeacherBadgeTone;
+      category?: "faculty" | "student";
+    }>;
+  };
+  hccMyCourses?: {
+    termFilter?: string;
+    statusFilter?: string;
+    termOptions?: string[];
+    statusOptions?: string[];
+    courses: Array<{
+      id: string;
+      code: string;
+      section: string;
+      title: string;
+      role?: string;
+      delivery: string;
+      students: string;
+      status: string;
+      statusTone?: TeacherBadgeTone;
+      location: string;
+      schedule: string;
+      href: string;
+      term?: string;
+    }>;
+  };
+  hccEvaluations?: {
+    rows: Array<{
+      course: string;
+      title: string;
+      offering: string;
+      evaluation: string;
+      dates: string;
+      schedule: string;
+    }>;
+  };
+  hccCourseHistory?: {
+    rows: Array<{
+      course: string;
+      title: string;
+      offering: string;
+      room: string;
+      dates: string;
+      schedule: string;
+    }>;
+  };
+  hccGradesSubmission?: {
+    courseFilter?: string;
+    statusFilter?: string;
+    courseOptions?: string[];
+    statusOptions?: string[];
+    rows: Array<{
+      id: string;
+      course: string;
+      title: string;
+      offering: string;
+      status: string;
+      gradingType: string;
+      dates: string;
+      href: string;
+    }>;
+  };
+  hccPendingGrades?: {
+    campusFilter?: string;
+    courseFilter?: string;
+    facultyFilter?: string;
+    campusOptions?: string[];
+    courseOptions?: string[];
+    facultyOptions?: string[];
+    rows: Array<{
+      course: string;
+      title: string;
+      offering: string;
+      instructor: string;
+      dates: string;
+      submittedBy: string;
+      submittedAt: string;
+      href: string;
+    }>;
+  };
+  hccAttendance?: {
+    dateFilter?: string;
+    studentFilter?: string;
+    courseFilter?: string;
+    centerLabel?: string;
+    prevLabel?: string;
+    nextLabel?: string;
+    groups: Array<{
+      course: string;
+      title: string;
+      offering: string;
+      meta: string;
+      students: Array<{
+        id: string;
+        name: string;
+        studentNumber: string;
+        status: string;
+        note: string;
+      }>;
+    }>;
+  };
+  hccStudents?: {
+    filters: Record<string, string>;
+    filterOptions?: Record<string, string[]>;
+    filterMenus?: Record<
+      string,
+      {
+        all: string;
+        leading?: string[];
+        flat?: string[];
+        groups?: Array<{
+          label: string;
+          options: string[];
+          sections?: Array<{ heading: string; options: string[] }>;
+        }>;
+      }
+    >;
+    perPageOptions?: string[];
+    letter?: string;
+    sidebar: Array<{ label: string; count: number; href: string; active?: boolean }>;
+    management: Array<{ label: string; href: string; count?: number }>;
+    results: number;
+    perPage: number;
+    page: number;
+    totalPages?: number;
+    rows: Array<{
+      id: string;
+      name: string;
+      studentNumber: string;
+      status: string;
+      advisors: string;
+      program: string;
+      programTerm: string;
+      admissionTerm: string;
+      date: string;
+      campus?: string;
+      pathway?: string;
+      schedule?: string;
+      nationality?: string;
+      agent?: string;
+    }>;
+    empty?: string | null;
+  };
+  hccFlags?: {
+    campus?: string;
+    status?: string;
+    resolved?: string;
+    template?: string;
+    results: number;
+    rows: Array<{
+      id: string;
+      student: string;
+      description: string;
+      status: string;
+      appliesHold: string;
+      date: string;
+    }>;
+  };
+  hccEmpty?: { empty: string };
+  hccRepository?: {
+    placeholder?: string;
+    rows?: Array<{ name: string; lms: string }>;
+    empty?: string;
+  };
+  hccPendingSchedules?: {
+    changeType?: string;
+    rows?: Array<{ course: string; type: string }>;
+    empty?: string;
+  };
+  hccTranscriptPending?: { banner: string };
+  hccBadges?: {
+    userFilter?: string;
+    badgeFilter?: string;
+    statusFilter?: string;
+    badgeOptions?: string[];
+    statusOptions?: string[];
+    rows?: Array<{ id: string; student: string; badge: string; status: string }>;
+    definitions?: Array<{
+      id: string;
+      name: string;
+      description: string;
+      badgeType: string;
+      approvalMode: string;
+      status: string;
+    }>;
+    empty?: string;
+  };
+  hccCourseResources?: {
+    empty?: string;
+    categoryCount?: number;
+    resourceCount?: number;
+    rows?: Array<{ id: string; kind: "category" | "resource"; name: string; meta: string }>;
+  };
+  programSettings?: {
+    programId?: string;
+    programName?: string;
+    tabs?: string[];
+    modal?: string;
+    footerDate?: string;
+    groups?: Array<{
+      title: string;
+      fields: Array<{
+        label: string;
+        value: string;
+        type?: string;
+        options?: Array<{ label: string; value: string }>;
+        unitValue?: string;
+        unitOptions?: Array<{ label: string; value: string }>;
+        language?: string;
+        hint?: string;
+        visibleWhen?: string;
+        visibleValue?: string;
+        prefix?: string;
+      }>;
+    }>;
+    pathway?: {
+      identity?: string;
+      status?: string;
+      selected?: string;
+      pathways?: string[];
+      columnMode?: "hours" | "credits";
+      courses?: Array<{
+        id: string;
+        code: string;
+        name: string;
+        hours?: string;
+        credits?: string;
+        schedule?: string;
+        prerequisites?: string;
+      }>;
+      electives?: Array<{ id: string; course: string; prerequisites: string }>;
+      electiveEmpty?: string;
+      availableCourses?: Array<{ id: string; label: string }>;
+      edit?: {
+        type: string;
+        name: string;
+        abbreviation: string;
+        defaultOutline: boolean;
+        status: string;
+        effectiveDating: boolean;
+        tierSettings: string;
+        courseSettings: string;
+      };
+    };
+    fees?: Array<{ id: string; type: string; domestic: string; international: string }>;
+    feesEmpty?: string;
+    deadlines?: Array<{ id: string; condition: string; type: string; penalty: string }>;
+    deadlinesEmpty?: string;
+    commissions?: Array<{ id: string; calculation: string; condition: string; rates: string }>;
+    commissionsEmpty?: string;
+    audits?: Array<{
+      id: string;
+      date: string;
+      current?: boolean;
+      changedBy: string;
+      changes: string;
+      canRestore: boolean;
+    }>;
+    modalData?: {
+      addTerm?: { title: string; fields: Array<{ label: string; value: string; type?: string; options?: Array<{ label: string; value: string }>; language?: string }>; submit: string };
+      addLedger?: { title: string; fields: Array<{ label: string; value: string; type?: string; options?: Array<{ label: string; value: string }>; prefix?: string }>; submit: string; ledgerId?: string };
+      addDeadline?: { title: string; fields: Array<{ label: string; value: string; type?: string; options?: Array<{ label: string; value: string }>; }>; submit: string };
+      addCommission?: { title: string; fields: Array<{ label: string; value: string; type?: string; options?: Array<{ label: string; value: string }>; hint?: string }>; submit: string };
+      createPathway?: { title: string; fields: Array<{ label: string; value: string; type?: string; options?: Array<{ label: string; value: string }>; }>; submit: string };
+      createTier?: { title: string; fields: Array<{ label: string; value: string; type?: string; options?: Array<{ label: string; value: string }>; language?: string; hint?: string }>; submit: string };
+      createElectiveGroup?: { title: string; fields: Array<{ label: string; value: string; type?: string; language?: string }>; submit: string };
+      auditReview?: { when: string; by: string; field: string; former: string; updated: string } | null;
+      assignedRecords?: { studentRecords: number; scheduleRecords: number };
+    };
   };
   courseList?: {
     filters: string[];
+    searchPlaceholder?: string;
+    kpis?: Array<{ label: string; value: string; hint?: string }>;
+    week?: Array<{ day: string; time: string; course: string; room: string; href?: string }>;
     courses: Array<{
+      id?: string;
       code: string;
       title: string;
+      section?: string;
       term: string;
       schedule: string;
       room: string;
+      location?: string;
       enrolled: string;
       capacity: string;
       status: string;
       statusTone?: TeacherBadgeTone;
       href: string;
+      attendanceHref?: string;
     }>;
   };
   courseDetail?: {
@@ -194,9 +679,56 @@ export type TeacherScreenConfig = {
     overview: Array<{ label: string; value: string }>;
     modules: Array<{ title: string; items: number; status: string }>;
     team: Array<{ name: string; role: string; initials: string }>;
+    roster?: Array<{ name: string; studentNumber: string; program: string; standing: string; email: string }>;
+    assessments?: Array<{ title: string; due: string; maxScore: string; weight: string }>;
+    lectures?: Array<{ title: string; when: string; location: string; joinUrl?: string }>;
+    labs?: Array<{ title: string; when: string; location: string }>;
+    resources?: Array<{ name: string; type: string; meta: string; href?: string }>;
+    lms?: CourseLmsState;
   };
   courseMgmt?: {
     tools: Array<{ title: string; detail: string; href: string; badge?: string }>;
+  };
+  activeCourses?: {
+    filters: {
+      campus: { label: string; value: string; options: Array<{ label: string; value: string }> };
+      course: { label: string; value: string; options: Array<{ label: string; value: string }> };
+      term: { label: string; value: string; options: Array<{ label: string; value: string }> };
+      student: { label: string; value: string; placeholder: string };
+      faculty: { label: string; value: string; options: Array<{ label: string; value: string }> };
+    };
+    showLabel?: string;
+    resultsLabel: string;
+    perPageOptions: Array<{ label: string; value: string }>;
+    perPage: string;
+    pageOptions: Array<{ label: string; value: string }>;
+    page: string;
+    columns: string[];
+    rows: Array<{
+      id?: string;
+      course: string;
+      code?: string;
+      section?: string;
+      title?: string;
+      location: string;
+      room?: string;
+      instructors: string;
+      dates: string;
+      enrolment: string;
+      viewHref: string;
+      attendanceHref: string;
+    }>;
+  };
+  modulesBoard?: {
+    course: string;
+    items: Array<{
+      title: string;
+      course: string;
+      items: number;
+      status: string;
+      due?: string;
+      href?: string;
+    }>;
   };
   announcements?: {
     course: string;
@@ -236,9 +768,127 @@ export type TeacherScreenConfig = {
   form?: {
     groups: Array<{
       title: string;
-      fields: Array<{ label: string; value: string; type?: "text" | "select" | "textarea" | "number" }>;
+      visibleWhen?: string;
+      fields: Array<{
+        label: string;
+        value: string;
+        type?: "text" | "select" | "textarea" | "number" | "checkbox" | "checkboxes" | "date" | "time" | "file" | "weekdays" | "pair";
+        options?: Array<{ label: string; value: string; filterKey?: string; group?: string }>;
+        unitValue?: string;
+        unitOptions?: Array<{ label: string; value: string }>;
+        dependsOn?: string;
+        visibleWhen?: string;
+        prefix?: string;
+        hint?: string;
+        sublabel?: string;
+        language?: string;
+        optional?: boolean;
+        visibleValue?: string;
+      }>;
     }>;
     submitLabel?: string;
+    stepLabel?: string;
+    warning?: string;
+    linkedCourses?: {
+      title?: string;
+      addLabel?: string;
+      emptyLabel?: string;
+      courseOptions?: Array<{ label: string; value: string }>;
+      rows?: Array<{ id: string; label: string }>;
+    };
+    customEventDates?: {
+      title?: string;
+      addLabel?: string;
+      events?: Array<{ id: string; name: string; date: string }>;
+    };
+    enrolmentConditions?: {
+      title?: string;
+      addLabel?: string;
+      emptyMessage?: string;
+      disabledNote?: string;
+      columns?: string[];
+      rows?: Array<{
+        id: string;
+        enrolmentDates: string;
+        programs: string;
+        completion: string;
+        standing: string;
+      }>;
+    };
+    deadlines?: {
+      title?: string;
+      addLabel?: string;
+      emptyMessage?: string;
+      columns?: string[];
+      rows?: Array<{ id: string; condition: string; type: string; penalty: string }>;
+    };
+    weeklyTimings?: {
+      title?: string;
+      days?: Array<{
+        day: string;
+        startHour: string;
+        startMinute: string;
+        finishHour: string;
+        finishMinute: string;
+      }>;
+    };
+    examSchedule?: {
+      title?: string;
+      addLabel?: string;
+      exams?: Array<{ id: string; date: string; startTime: string; finishTime: string; location: string }>;
+    };
+    gradingPreview?: {
+      title?: string;
+      schemeLabel?: string;
+      columns?: string[];
+      rows?: Array<{ letter: string; credit: string; condition: string }>;
+    };
+    tuitionNote?: string;
+    designations?: {
+      columns: string[];
+      addLabel?: string;
+      rows?: Array<{ label: string; condition: string; requirement: string }>;
+      modal?: {
+        title: string;
+        submitLabel?: string;
+        groups: Array<{
+          title: string;
+          fields: Array<{
+            label: string;
+            value: string;
+            type?: "text" | "select" | "textarea" | "number" | "checkbox" | "checkboxes" | "date" | "time" | "file" | "weekdays" | "pair";
+            options?: Array<{ label: string; value: string; filterKey?: string; group?: string }>;
+            unitValue?: string;
+            unitOptions?: Array<{ label: string; value: string }>;
+            hint?: string;
+            sublabel?: string;
+            language?: string;
+          }>;
+        }>;
+      };
+    };
+    /** MySIS grading-scheme grade ladder (Letter / Percent / Grade Point / Credit / Condition). */
+    gradeEntries?: {
+      addLabel?: string;
+      creditOptions?: Array<{ label: string; value: string }>;
+      conditionOptions?: Array<{ label: string; value: string }>;
+      draft?: {
+        letter: string;
+        percent: string;
+        percentUp: string;
+        gradePoint: string;
+        credit: string;
+        condition: string;
+      };
+      entries?: Array<{
+        letter: string;
+        percent: string;
+        percentUp: string;
+        gradePoint: string;
+        credit: string;
+        condition: string;
+      }>;
+    };
   };
   cards?: {
     items: Array<{
@@ -284,6 +934,7 @@ export type TeacherScreenConfig = {
       capacity: string;
       status: string;
       tone?: TeacherBadgeTone;
+      href?: string;
     }>;
   };
   approval?: {
@@ -327,6 +978,55 @@ export type TeacherScreenConfig = {
     agenda: string[];
     materials: Array<{ label: string; meta: string }>;
   };
+  workshopEnrolments?: {
+    studentPlaceholder: string;
+    studentValue: string;
+    workshopValue: string;
+    workshopOptions: Array<{ label: string; value: string }>;
+    statusValue: string;
+    statusOptions: Array<{ label: string; value: string }>;
+    letter: string;
+    searchLabel: string;
+    emptyMessage: string;
+    rows: Array<{
+      id: string;
+      studentName: string;
+      studentNumber: string;
+      workshop: string;
+      status: string;
+      statusTone?: TeacherBadgeTone;
+      enrolledOn: string;
+      note?: string;
+    }>;
+  };
+  workshopAttendance?: {
+    date: string;
+    studentPlaceholder: string;
+    studentValue: string;
+    workshopValue: string;
+    workshopOptions: Array<{ label: string; value: string }>;
+    loadLabel: string;
+    heading: string;
+    previousLabel: string;
+    previousDate: string;
+    nextLabel: string;
+    nextDate: string;
+    emptyMessage: string;
+    totalLabel: string;
+    saveLabel: string;
+    weekDates: Array<{ value: string; label: string; active?: boolean }>;
+    students: Array<{
+      id: string;
+      studentId: string;
+      workshopId: string;
+      workshopTitle?: string;
+      name: string;
+      studentNumber: string;
+      status: "Present" | "Absent";
+      note: string;
+      avatar?: string;
+    }>;
+  };
   studentsDirectory?: {
     rosterFilter: string;
     riskFilter: string;
@@ -350,9 +1050,57 @@ export type TeacherScreenConfig = {
     fields: Array<{ label: string; value: string }>;
     alerts: Array<{ title: string; body: string; tone: TeacherBadgeTone }>;
     courses: Array<{ code: string; title: string; grade: string; status: string }>;
+    assessments?: Array<{ title: string; course: string; score: string; status: string; due?: string }>;
+    requirements?: Array<{ code: string; title: string; credits: string; kind: string; status: string }>;
+    flags?: Array<{ title: string; body: string; when: string; tone: TeacherBadgeTone }>;
+    leave?: Array<{ title: string; body: string; status: string; when?: string }>;
+    alertTypes?: string[];
+    priorities?: string[];
   };
   hub?: {
     cards: Array<{ title: string; body: string; href: string; meta?: string }>;
+  };
+  programDirectory?: {
+    title?: string;
+    searchPlaceholder?: string;
+    emptyMessage?: string;
+    programs?: Array<{
+      id: string;
+      name: string;
+      code: string;
+      type: string;
+    }>;
+  };
+  facultiesPrograms?: {
+    createFacultyHref?: string;
+    createProgramHref?: string;
+    faculties?: Array<{
+      id: string;
+      name: string;
+      abbreviation: string;
+      active: boolean;
+      programs: Array<{
+        id: string;
+        name: string;
+        abbreviation: string;
+        active: boolean;
+        href?: string;
+      }>;
+    }>;
+  };
+  courseConfigurations?: {
+    searchPlaceholder?: string;
+    courses?: Array<{
+      id: string;
+      name: string;
+      abbreviation: string;
+      enrollmentPermission: string;
+      syllabusPrivacy: string;
+      repositorySettings: string;
+      textbookOptOut: string;
+      active: boolean;
+      href?: string;
+    }>;
   };
   gradesQueue?: Array<{
     code: string;
@@ -391,12 +1139,14 @@ export type TeacherScreenConfig = {
   alertList?: {
     badge: string;
     items: Array<{
+      id?: string;
       name: string;
       course: string;
       tag: string;
       tagTone: "danger" | "warning" | "info";
       body: string;
       avatar?: string;
+      href?: string;
     }>;
   };
   gradebook?: {
@@ -412,20 +1162,46 @@ export type TeacherScreenConfig = {
       status: string;
     }>;
     legend?: string[];
+    history?: Array<{
+      student: string;
+      assignment: string;
+      score: string;
+      status: string;
+      when?: string;
+    }>;
   };
   statusFilter?: {
-    filters: Array<{ label: string; count: string; active?: boolean }>;
+    filters: Array<{ label: string; count: string | number; active?: boolean }>;
     columns: string[];
     rows: Array<{
       cells: string[];
       badge?: string;
       badgeTone?: TeacherBadgeTone;
+      href?: string;
+    }>;
+  };
+  assessmentHub?: {
+    kpis: Array<{ label: string; value: string; hint?: string }>;
+    groups: Array<{
+      courseCode: string;
+      sectionCode: string;
+      courseTitle: string;
+      count: number;
+      items: Array<{
+        id: string;
+        title: string;
+        weight: string;
+        due: string;
+        status: string;
+        statusTone?: TeacherBadgeTone;
+        href?: string;
+      }>;
     }>;
   };
   modal?: {
     title: string;
     description: string;
-    fields: Array<{ label: string; value: string; type?: "text" | "select" | "time" }>;
+    fields: Array<{ label: string; value: string; type?: "text" | "select" | "time" | "textarea" }>;
     confirmLabel: string;
     cancelLabel: string;
     backdropHref?: string;
@@ -492,7 +1268,23 @@ export type TeacherScreenConfig = {
       preview: string;
       unread?: number;
       time: string;
+      studentId?: string;
+      chat?: Array<
+        | { kind: "message"; from: "them" | "me"; text: string; time: string }
+        | { kind: "attachment"; name: string; size: string; time: string }
+        | { kind: "system"; text: string }
+      >;
+      context?: {
+        program: string;
+        grade: string;
+        gradePct: string;
+        attendance: string;
+        attendanceTone: string;
+        missing: string;
+        sharedFiles: Array<{ name: string; size: string }>;
+      };
     }>;
+    activeThreadId?: string;
     chat: Array<
       | { kind: "message"; from: "them" | "me"; text: string; time: string }
       | { kind: "attachment"; name: string; size: string; time: string }
@@ -510,6 +1302,7 @@ export type TeacherScreenConfig = {
   };
   notifications?: {
     filters: Array<{ label: string; count?: number }>;
+    termLabel?: string;
     items: Array<{
       title: string;
       body: string;
@@ -517,6 +1310,9 @@ export type TeacherScreenConfig = {
       category: string;
       unread?: boolean;
       tone?: TeacherBadgeTone;
+      cta?: string;
+      href?: string;
+      icon?: string;
     }>;
     pagination: string;
   };
@@ -543,12 +1339,16 @@ export type TeacherScreenConfig = {
       updated: string;
       visibility: "Published" | "Hidden";
       selected?: boolean;
+      folder?: string;
     }>;
   };
   helpSupport?: {
     topics: Array<{ title: string; detail: string; icon?: string }>;
-    tickets: Array<{ id: string; subject: string; status: string; tone?: TeacherBadgeTone }>;
+    tickets: Array<{ id: string; subject: string; status: string; tone?: TeacherBadgeTone; updated?: string }>;
     references: Array<{ name: string; meta: string }>;
+    aiReply?: { query: string; answer: string } | null;
+    hours?: string;
+    contacts?: Array<{ label: string; value: string }>;
   };
   attendanceSession?: {
     alert: string;
@@ -556,9 +1356,11 @@ export type TeacherScreenConfig = {
     dateLabel: string;
     rosterTitle: string;
     draftStatus: string;
+    sectionId?: string;
     students: Array<{
       name: string;
       id: string;
+      studentId?: string;
       status: "Present" | "Absent" | "Late" | "Excused";
       note: string;
       pct: string;
@@ -594,6 +1396,9 @@ export type TeacherScreenConfig = {
     title: string;
     type: string;
     weight: string;
+    openDate?: string;
+    dueDate?: string;
+    types?: string[];
     rubricHeaders: string[];
     rubricRows: Array<{ criterion: string; excellent: string; good: string; poor: string }>;
     uploadHint: string;
@@ -607,8 +1412,16 @@ export type TeacherScreenConfig = {
     };
   };
   gradingSchemes?: {
-    schemeLabel: string;
-    rows: Array<{
+    /** Manage list (MySIS). When present, list UI is shown instead of the scale editor. */
+    searchPlaceholder?: string;
+    schemes?: Array<{
+      id: string;
+      name: string;
+      active: boolean;
+    }>;
+    /** Legacy letter-scale editor (optional). */
+    schemeLabel?: string;
+    rows?: Array<{
       letter: string;
       min: string;
       max: string;
@@ -617,8 +1430,203 @@ export type TeacherScreenConfig = {
       status: "PASS" | "FAIL";
       letterTone: "a" | "b" | "c" | "d" | "f";
     }>;
-    distribution: Array<{ label: string; meta: string; pct: number; tone: "a" | "b" | "c" | "d" | "f" }>;
-    presets: Array<{ label: string; value: string; tone: "warning" | "success" }>;
+    distribution?: Array<{ label: string; meta: string; pct: number; tone: "a" | "b" | "c" | "d" | "f" }>;
+    presets?: Array<{ label: string; value: string; tone: "warning" | "success" }>;
+  };
+  programTypes?: {
+    searchPlaceholder?: string;
+    types?: Array<{
+      id: string;
+      name: string;
+      abbreviation: string;
+      active: boolean;
+    }>;
+  };
+  courseTypes?: {
+    searchPlaceholder?: string;
+    types?: Array<{
+      id: string;
+      name: string;
+      abbreviation: string;
+      active: boolean;
+    }>;
+  };
+  manageTerms?: {
+    campusFilterLabel?: string;
+    campusOptions?: Array<{ label: string; value: string }>;
+    terms?: Array<{
+      id: string;
+      name: string;
+      code: string;
+      dates: string;
+      campuses: string[];
+    }>;
+  };
+  reviewTerm?: {
+    id: string;
+    name: string;
+    code: string;
+    startsOn: string;
+    endsOn: string;
+    campuses: string[];
+  };
+  scheduleManage?: {
+    scheduleId: string;
+    programTitle: string;
+    dateRange: string;
+    activeTab?: string;
+    viewMode?: "standard" | "calendar";
+    addSessionHref?: string;
+    totals: { courses: number; sessions: number; conflicts: number; enrolled: number };
+    sessions?: Array<{
+      id: string;
+      course: string;
+      title?: string;
+      instructors: string;
+      room: string;
+      dates: string;
+      schedule: string;
+    }>;
+    calendar?: {
+      monthLabel: string;
+      monthOptions?: string[];
+      nextMonthHint?: string;
+      startOffset?: number;
+      daysInMonth?: number;
+      events?: Array<{
+        id: string;
+        sessionId?: string;
+        day: number;
+        code: string;
+        title: string;
+        time: string;
+        tone?: string;
+      }>;
+    };
+    fees?: {
+      ledgers?: Array<{ id: string; type: string; domestic: string; international: string }>;
+      ledgerTypeOptions?: string[];
+    };
+    settings?: {
+      groups: Array<{
+        title: string;
+        fields: Array<{
+          label: string;
+          value: string;
+          type?: string;
+          options?: Array<{ label: string; value: string }>;
+          unitValue?: string;
+          unitOptions?: Array<{ label: string; value: string }>;
+          hint?: string;
+          optional?: boolean;
+        }>;
+      }>;
+    };
+  };
+  coursesSessions?: {
+    searchPlaceholder?: string;
+    filterCoursePlaceholder?: string;
+    courses?: Array<{
+      id: string;
+      name: string;
+      number: string;
+      creditValue: string;
+      notStarted: number;
+      inProgress: number;
+      completed: number;
+    }>;
+  };
+  courseAdmin?: {
+    courseId: string;
+    courseLabel: string;
+    tabs: string[];
+    activeTab: string;
+    statusFilter?: string;
+    statusOptions?: Array<{ label: string; value: string }>;
+    createSessionHref?: string;
+    sessions?: Array<{
+      id: string;
+      course: string;
+      courseId?: string;
+      location: string;
+      instructors: string;
+      schedule: string;
+      enrolled: number;
+      reserved: number;
+      waitList: number;
+      status: string;
+    }>;
+    linkedCourses?: {
+      emptyMessage?: string;
+      rows?: Array<{ id: string; course: string; type: string }>;
+      courseOptions?: Array<{ label: string; value: string }>;
+      conditionOptions?: Array<{ label: string; value: string }>;
+    };
+    textbooks?: {
+      emptyMessage?: string;
+      rows?: Array<{ id: string; name: string; isbn: string; price: string }>;
+      textbookOptions?: Array<{ label: string; value: string }>;
+    };
+    transferCourses?: {
+      emptyMessage?: string;
+      rows?: Array<{ id: string; institution: string; course: string }>;
+      institutionOptions?: Array<{ label: string; value: string }>;
+    };
+  };
+  masterScheduling?: {
+    programFilterLabel?: string;
+    programFilterValue?: string;
+    programOptions?: Array<{ label: string; value: string; group?: string }>;
+    rows?: Array<{
+      id: string;
+      dateRange: string;
+      session: string;
+      duration: string;
+      program: string;
+      canDelete?: boolean;
+    }>;
+  };
+  academicCalendars?: {
+    emptyMessage?: string;
+    rows?: Array<{
+      id: string;
+      name: string;
+      dates: string;
+      status: string;
+    }>;
+  };
+  courseTextbooks?: {
+    textbooks?: Array<{
+      id: string;
+      name: string;
+      detail?: string;
+      format: string;
+      isbn: string;
+      domestic: string;
+      international: string;
+      courses?: Array<{ id: string; label: string }>;
+    }>;
+  };
+  contentRepository?: {
+    courseFilterPlaceholder?: string;
+    searchLabel?: string;
+    repositoryFilter?: string;
+    repositoryOptions?: Array<{ label: string; value: string }>;
+    resultsLabel?: string;
+    perPage?: string;
+    perPageOptions?: Array<{ label: string; value: string }>;
+    page?: string;
+    courses?: Array<{
+      id: string;
+      number: string;
+      name: string;
+      lms: string;
+      status: "Active" | "Inactive";
+      courseTypes: string;
+      push: number;
+      pull: number;
+      history?: number;
+    }>;
   };
   pendingGrades?: {
     alert: string;
@@ -656,10 +1664,11 @@ export type TeacherScreenConfig = {
 
 const PROFILE_TABS = [
   { label: "Biography", href: "/instructor/f/t02-profile-biography" },
-  { label: "Topics & Expertise", href: "/instructor/f/t03-profile-topics" },
+  { label: "Topics", href: "/instructor/f/t03-profile-topics" },
   { label: "Availability", href: "/instructor/f/t04-profile-availability" },
   { label: "Compensation", href: "/instructor/f/t05-profile-compensation" },
   { label: "Schedule", href: "/instructor/f/t06-profile-schedule" },
+  { label: "Accomplishments", href: "/instructor/f/t34-accomplishments" },
 ] as const;
 
 function profileTabs(activeHref: string) {
@@ -690,8 +1699,8 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
   "/instructor": {
     path: "/instructor",
     figmaId: "3:3698",
-    title: "Teacher Dashboard",
-    subtitle: "Faculty teaching workspace for Fall 2026.",
+    title: "Home",
+    subtitle: "",
     breadcrumbs: ["Home", "Dashboard"],
     activeHref: "/instructor",
     archetype: "dashboard",
@@ -789,65 +1798,17 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
   "/instructor/sections": {
     path: "/instructor/sections",
     figmaId: "3:4608",
-    title: "My Courses",
-    subtitle: "Courses you are teaching this term.",
+    title: "MY COURSES",
+    subtitle: "",
     breadcrumbs: ["Home", "My Courses"],
     activeHref: "/instructor/sections",
-    archetype: "courseList",
-    primaryAction: "Browse Catalog",
-    primaryActionHref: "/instructor/f/t37-course-repository",
-    courseList: {
-      filters: ["Fall 2026", "All Status", "Accounting & Finance"],
-      courses: [
-        {
-          code: "ACC201",
-          title: "Financial Accounting I",
-          term: "Fall 2026",
-          schedule: "Mon / Wed 09:00–10:30",
-          room: "Hall A-102",
-          enrolled: "42",
-          capacity: "45",
-          status: "Active",
-          statusTone: "active",
-          href: "/instructor/f/t08-my-courses-detail",
-        },
-        {
-          code: "FIN301",
-          title: "Corporate Finance",
-          term: "Fall 2026",
-          schedule: "Tue / Thu 11:00–12:30",
-          room: "Hall B-204",
-          enrolled: "38",
-          capacity: "40",
-          status: "Active",
-          statusTone: "active",
-          href: "/instructor/f/t08-my-courses-detail",
-        },
-        {
-          code: "MKT210",
-          title: "Principles of Marketing",
-          term: "Fall 2026",
-          schedule: "Wed 14:00–17:00",
-          room: "Hall C-110",
-          enrolled: "35",
-          capacity: "40",
-          status: "Active",
-          statusTone: "active",
-          href: "/instructor/f/t08-my-courses-detail",
-        },
-        {
-          code: "BUS405",
-          title: "Strategic Management",
-          term: "Fall 2026",
-          schedule: "Fri 09:00–12:00",
-          room: "Seminar 5",
-          enrolled: "28",
-          capacity: "30",
-          status: "Draft Modules",
-          statusTone: "review",
-          href: "/instructor/f/t26-course-version-editor",
-        },
-      ],
+    archetype: "hccMyCourses",
+    hccMyCourses: {
+      termFilter: "All Terms",
+      statusFilter: "Active & Upcoming Courses",
+      termOptions: ["All Terms"],
+      statusOptions: ["Active & Upcoming Courses", "All Courses", "Ended Courses"],
+      courses: [],
     },
   },
 
@@ -996,22 +1957,18 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
   "/instructor/f/t08-my-courses-detail": {
     path: "/instructor/f/t08-my-courses-detail",
     figmaId: "3:4781",
-    title: "ACC201 — Financial Accounting I",
-    subtitle: "Course workspace for Fall 2026 Section A.",
-    breadcrumbs: ["Home", "My Courses", "ACC201"],
+    title: "ACSW 200: SOCIAL SERVICE WORK FUNDAMENTALS",
+    subtitle: "ACSWAPR26-01: Apr. 27, 2026 - May. 1, 2026",
+    breadcrumbs: ["Home", "Active Courses", "ACSW 200"],
     activeHref: "/instructor/sections",
     archetype: "courseDetail",
-    primaryAction: "Open Gradebook",
-    primaryActionHref: "/instructor/gradebook",
-    secondaryAction: "Announcements",
-    secondaryActionHref: "/instructor/f/t23-course-announcements",
     courseDetail: {
-      code: "ACC201",
-      title: "Financial Accounting I",
-      meta: "Fall 2026 · Section A · Mon/Wed 09:00–10:30 · Hall A-102 · 42/45 enrolled",
-      status: "Published",
-      tabs: ["Overview", "Modules", "Roster", "Assessments", "Lectures", "Labs", "Resources"],
-      activeTab: "Overview",
+      code: "ACSW 200",
+      title: "SOCIAL SERVICE WORK FUNDAMENTALS",
+      meta: "ACSWAPR26-01: Apr. 27, 2026 - May. 1, 2026 · #110 Heritage College- Surrey",
+      status: "Ended",
+      tabs: ["Course", "Class List", "Attendance", "Grades", "Badges", "More"],
+      activeTab: "Course",
       overview: [
         { label: "Credits", value: "3.0" },
         { label: "Delivery", value: "In-person + Lab" },
@@ -1045,57 +2002,71 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     courseMgmt: {
       tools: [
         {
+          title: "Courses & Sessions",
+          detail: "Browse course shells and section sessions.",
+          href: "/instructor/f/t54-courses-sessions",
+        },
+        {
           title: "Active Courses",
-          detail: "Review live sections, enrolment, and publish state.",
+          detail: "Filter live offerings by campus, term, and faculty.",
           href: "/instructor/f/t56-active-courses",
           badge: "4 live",
         },
         {
           title: "Add Course",
-          detail: "Create a new course shell for curriculum review.",
+          detail: "Create a new course instance with tuition and schedule defaults.",
           href: "/instructor/f/t55-add-course-form",
-        },
-        {
-          title: "Sessions & Meetings",
-          detail: "Manage lecture, lab, and seminar session templates.",
-          href: "/instructor/f/t54-courses-sessions",
-        },
-        {
-          title: "Textbooks",
-          detail: "Assign required and recommended course materials.",
-          href: "/instructor/f/t57-course-textbooks",
-        },
-        {
-          title: "Categories",
-          detail: "Organize courses by academic category.",
-          href: "/instructor/f/t58-course-categories",
-        },
-        {
-          title: "Groups & Types",
-          detail: "Configure course groups and delivery types.",
-          href: "/instructor/f/t59-course-groups-types",
-        },
-        {
-          title: "Resources",
-          detail: "Upload and tag shared instructional resources.",
-          href: "/instructor/f/t60-course-resources-management",
-        },
-        {
-          title: "Version Editor",
-          detail: "Edit outline drafts before curriculum approval.",
-          href: "/instructor/f/t26-course-version-editor",
-          badge: "1 draft",
-        },
-        {
-          title: "Pending Schedules",
-          detail: "Approve or return proposed meeting patterns.",
-          href: "/instructor/f/t38-pending-course-schedules",
-          badge: "3",
         },
         {
           title: "Course Repository",
           detail: "Browse master course definitions and archives.",
           href: "/instructor/f/t37-course-repository",
+        },
+        {
+          title: "Course Backups",
+          detail: "Restore archived course content packages.",
+          href: "/instructor/f/t65-course-backups",
+          badge: "0",
+        },
+        {
+          title: "Course Textbooks",
+          detail: "Assign required and recommended course materials.",
+          href: "/instructor/f/t57-course-textbooks",
+        },
+        {
+          title: "Course Configurations",
+          detail: "Brand defaults for repository, privacy, and enrolment.",
+          href: "/instructor/f/t66-course-configurations",
+        },
+        {
+          title: "Course Categories",
+          detail: "Organize courses by academic category.",
+          href: "/instructor/f/t58-course-categories",
+        },
+        {
+          title: "Course Groups",
+          detail: "Group related courses for curriculum blocks.",
+          href: "/instructor/f/t59-course-groups-types",
+        },
+        {
+          title: "Course Types",
+          detail: "Lecture, online, and delivery type definitions.",
+          href: "/instructor/f/t67-course-types",
+        },
+        {
+          title: "Course Resources",
+          detail: "Upload and tag shared instructional resources.",
+          href: "/instructor/f/t60-course-resources-management",
+        },
+        {
+          title: "Badges & Accomplishments",
+          detail: "Define badges students can earn in courses.",
+          href: "/instructor/f/t34-accomplishments",
+        },
+        {
+          title: "Grading Schemes",
+          detail: "Manage letter scales, percentages, and grade points.",
+          href: "/instructor/f/t61-grading-schemes",
         },
       ],
     },
@@ -1104,38 +2075,18 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
   "/instructor/f/t15-settings": {
     path: "/instructor/f/t15-settings",
     figmaId: "3:5875",
-    title: "Settings",
-    subtitle: "Time zone, locale, and notification preferences.",
-    breadcrumbs: ["Home", "Settings"],
+    title: "Change Your Time Zone",
+    subtitle: "",
+    breadcrumbs: ["Home", "My Profile / Settings", "Change Time Zone"],
     activeHref: "/instructor/f/t15-settings",
     archetype: "settings",
-    primaryAction: "Save Preferences",
     settings: {
       groups: [
         {
-          title: "Locale & Time",
+          title: "Change your time zone",
           fields: [
-            { label: "Time Zone", value: "America/Toronto (Eastern)", hint: "Used for timetable and office hours" },
-            { label: "Date Format", value: "MMM D, YYYY" },
-            { label: "Time Format", value: "24-hour" },
-            { label: "Language", value: "English (Canada)" },
-          ],
-        },
-        {
-          title: "Notifications",
-          fields: [
-            { label: "Email Digests", value: "Daily at 07:00" },
-            { label: "Grade Alerts", value: "Immediate" },
-            { label: "Attendance Reminders", value: "Enabled" },
-            { label: "Student Messages", value: "Push + Email" },
-          ],
-        },
-        {
-          title: "Teaching Defaults",
-          fields: [
-            { label: "Default Launch Mode", value: "In-person classroom" },
-            { label: "Attendance Grace Period", value: "10 minutes" },
-            { label: "Grade Release", value: "Manual publish" },
+            { label: "Current Time", value: "" },
+            { label: "New Time Zone", value: "UTC-08:00 Pacific Time (US & Canada)" },
           ],
         },
       ],
@@ -1181,25 +2132,50 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t25-add-availability-modal",
     figmaId: "4:7837",
     title: "Add Availability Slot",
-    subtitle: "Terminal Availability Hub · Dr. Sarah Mitchell Availability Scheduling",
+    subtitle: "Publish an office-hours window students can book.",
     breadcrumbs: ["Home", "My Profile", "Availability", "Add Slot"],
     activeHref: "/instructor/f/t02-profile-biography",
-    archetype: "modal",
-    modal: {
-      title: "Add Availability Slot",
-      description:
-        "This overlaps with ACC201 Sec-A class on Mon 09:00-10:30 AM — please adjust time or contact admin.",
-      fields: [
-        { label: "Availability Name", value: "Business Admin - Office Hours", type: "text" },
-        { label: "Availability Type", value: "Office Hours", type: "select" },
-        { label: "Date", value: "Mon Oct 12, 2026", type: "text" },
-        { label: "Start Time", value: "09:30 AM", type: "time" },
-        { label: "End Time", value: "11:30 AM", type: "time" },
-        { label: "Repeat Weekly on", value: "Mon · Wed · Fri", type: "text" },
+    archetype: "form",
+    primaryAction: "Save Availability Slot",
+    secondaryAction: "Cancel",
+    secondaryActionHref: "/instructor/f/t04-profile-availability",
+    form: {
+      submitLabel: "Save Availability Slot",
+      groups: [
+        {
+          title: "Slot Details",
+          fields: [
+            { label: "Availability Name", value: "", type: "text" },
+            {
+              label: "Availability Type",
+              value: "Office Hours",
+              type: "select",
+              options: [
+                { label: "Office Hours", value: "Office Hours" },
+                { label: "In-Person", value: "In-Person" },
+                { label: "Virtual", value: "Virtual" },
+                { label: "By Appointment", value: "By Appointment" },
+              ],
+            },
+            { label: "Location", value: "", type: "text", optional: true },
+            {
+              label: "Date",
+              value: "",
+              type: "date",
+              hint: "Pick the calendar date for this office-hours window.",
+            },
+            { label: "Start Time", value: "09:30", type: "time" },
+            { label: "End Time", value: "11:30", type: "time" },
+            {
+              label: "Repeat Weekly on",
+              value: "",
+              type: "weekdays",
+              optional: true,
+              hint: "Optional. Repeat this window on selected weekdays.",
+            },
+          ],
+        },
       ],
-      confirmLabel: "Save Availability Slot",
-      cancelLabel: "Cancel",
-      backdropHref: "/instructor/f/t04-profile-availability",
     },
   },
 
@@ -1252,44 +2228,15 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
   "/instructor/f/t34-accomplishments": {
     path: "/instructor/f/t34-accomplishments",
     figmaId: "4:10861",
-    title: "Accomplishments",
-    subtitle: "Awards, publications, and teaching recognitions.",
+    title: "My Accomplishments & Badges",
+    subtitle: "",
     breadcrumbs: ["Home", "My Profile", "Accomplishments"],
-    activeHref: "/instructor/f/t34-accomplishments",
+    activeHref: "/instructor/f/t02-profile-biography",
     archetype: "accomplishments",
     accomplishments: {
-      stats: [
-        { label: "Awards", value: "6" },
-        { label: "Publications", value: "14" },
-        { label: "Conference Talks", value: "9" },
-        { label: "Teaching Years", value: "12" },
-      ],
-      items: [
-        {
-          title: "Faculty Excellence in Teaching",
-          detail: "Heritage Community College · Accounting & Finance",
-          year: "2025",
-          tone: "success",
-        },
-        {
-          title: "ESG Disclosure Quality in Mid-Market Firms",
-          detail: "Journal of Applied Accounting Research",
-          year: "2024",
-          tone: "info",
-        },
-        {
-          title: "CPA Ontario Mentor of the Year (Nominee)",
-          detail: "Student pathway mentoring cohort",
-          year: "2023",
-          tone: "review",
-        },
-        {
-          title: "Digital Pedagogy Innovation Grant",
-          detail: "AI Course Studio pilot funding",
-          year: "2026",
-          tone: "active",
-        },
-      ],
+      tabs: profileTabs("/instructor/f/t34-accomplishments"),
+      stats: [],
+      items: [],
     },
   },
 
@@ -1358,57 +2305,37 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     },
   },
 
-  "/instructor/f/t37-course-repository": makeTable({
+  "/instructor/f/t37-course-repository": {
     path: "/instructor/f/t37-course-repository",
     figmaId: "4:11353",
-    title: "Course Repository",
-    subtitle: "SYS.TEACHER_HUB // ACADEMIC_ASSETS",
-    breadcrumbs: ["Home", "Course Management", "Repository"],
+    title: "Course Content Repository",
+    subtitle: "SYS.COURSE_MGMT // CONTENT_REPOSITORY",
+    breadcrumbs: ["Home", "Content Repository"],
     activeHref: "/instructor/f/t14-course-management",
-    archetype: "repository",
-    primaryAction: "Upload Asset",
-    countLabel: "86 shared learning assets",
-    columns: ["Resource Name", "Course", "Category", "Size", "Actions"],
-    columnTemplate:
-      "minmax(220px,1.6fr) minmax(90px,0.7fr) minmax(90px,0.7fr) minmax(70px,0.5fr) minmax(80px,0.5fr)",
-    rows: [
-      {
-        cells: ["ACC201_Syllabus_Fall26_v2.pdf", "ACC201", "Syllabi", "1.2 MB", "Download"],
-        badge: "Syllabi",
-        badgeTone: "info",
-        href: "/instructor/f/t08-my-courses-detail",
-      },
-      {
-        cells: ["Week3_Asset_Valuation_LectureNotes.pptx", "FIN301", "Lectures", "14.8 MB", "Download"],
-        badge: "Lectures",
-        badgeTone: "active",
-      },
-      {
-        cells: ["Interactive_Double_Entry_LabGuide.pdf", "ACC201-L", "Labs", "4.5 MB", "Download"],
-        badge: "Labs",
-        badgeTone: "warning",
-      },
-      {
-        cells: ["LMS_Instructor_Handbook_OS4.pdf", "Global", "Manuals", "8.1 MB", "Download"],
-        badge: "Manuals",
-        badgeTone: "muted",
-      },
-    ],
-    repository: {
-      folders: [
-        { name: "All Resources", files: 86, updated: "Oct 6, 2026" },
-        { name: "Course Syllabi", files: 12, updated: "Oct 5, 2026" },
-        { name: "Core Lecture Notes", files: 34, updated: "Oct 4, 2026" },
-        { name: "Laboratory Guides", files: 18, updated: "Sep 28, 2026" },
-        { name: "Audio & Video Media", files: 22, updated: "Sep 20, 2026" },
+    shell: "campus",
+    archetype: "contentRepository",
+    primaryAction: "Create Content Course",
+    primaryActionHref: "/instructor/f/t80-create-content-course",
+    contentRepository: {
+      courseFilterPlaceholder: "Enter Course Name / Number Here",
+      searchLabel: "Search Repository",
+      repositoryFilter: "Master Repository",
+      repositoryOptions: [
+        { label: "Master Repository", value: "Master Repository" },
+        { label: "Campus Repository", value: "Campus Repository" },
+        { label: "Shared Repository", value: "Shared Repository" },
       ],
-      files: [
-        { name: "ACC201_Syllabus_Fall26_v2.pdf", type: "Syllabi", size: "1.2 MB", updated: "Oct 5, 2026" },
-        { name: "Week3_Asset_Valuation_LectureNotes.pptx", type: "Lectures", size: "14.8 MB", updated: "Oct 3, 2026" },
-        { name: "Interactive_Double_Entry_LabGuide.pdf", type: "Labs", size: "4.5 MB", updated: "Sep 28, 2026" },
+      resultsLabel: "Results: 0",
+      perPage: "50",
+      perPageOptions: [
+        { label: "25", value: "25" },
+        { label: "50", value: "50" },
+        { label: "100", value: "100" },
       ],
+      page: "1",
+      courses: [],
     },
-  }),
+  },
 
   "/instructor/f/t38-pending-course-schedules": {
     path: "/instructor/f/t38-pending-course-schedules",
@@ -1475,45 +2402,92 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     },
   },
 
-  "/instructor/f/t54-courses-sessions": makeTable({
+  "/instructor/f/t54-courses-sessions": {
     path: "/instructor/f/t54-courses-sessions",
     figmaId: "4:14505",
-    title: "Courses & Sessions Catalog",
-    subtitle: "SYS.COURSE_REPOSITORY // ALL_WORKSPACES",
-    breadcrumbs: ["Home", "Course Management", "Sessions"],
+    title: "Manage Courses & Sessions",
+    subtitle: "SYS.COURSE_MGMT // SESSIONS_CATALOG",
+    breadcrumbs: ["Home", "Courses & Sessions"],
     activeHref: "/instructor/f/t14-course-management",
+    shell: "campus",
+    archetype: "coursesSessions",
     primaryAction: "Create Course",
-    countLabel: "Showing 5 of 32 courses",
-    columns: ["Course Name / Number", "Credit Value", "Sessions Status", "Actions"],
-    columnTemplate: "minmax(220px,1.6fr) minmax(100px,0.7fr) minmax(140px,1fr) minmax(90px,0.6fr)",
-    rows: [
-      {
-        cells: ["Computerized Accounting · CAPA-DAP 105", "4.0 Credits", "2 Active • 4 Completed", "Sessions"],
-        badge: "Active",
-        badgeTone: "active",
+    primaryActionHref: "/instructor/f/t55-add-course-form",
+    secondaryAction: "Bulk Actions",
+    coursesSessions: {
+      searchPlaceholder: "Search Courses",
+      filterCoursePlaceholder: "Enter Course Name / Number Here",
+      courses: [],
+    },
+  },
+
+  "/instructor/f/t77-course-admin": {
+    path: "/instructor/f/t77-course-admin",
+    figmaId: "4:14506",
+    title: "Course Sessions & Offerings",
+    subtitle: "SYS.COURSE_MGMT // COURSE_ADMIN",
+    breadcrumbs: ["Home", "Courses & Sessions", "Course Sessions"],
+    activeHref: "/instructor/f/t14-course-management",
+    shell: "campus",
+    archetype: "courseAdmin",
+    primaryAction: "Create Session / Offering",
+    primaryActionHref: "/instructor/f/t78-add-session-offering",
+    courseAdmin: {
+      courseId: "course-dap-practicum",
+      courseLabel: "0: DAP PRACTICUM",
+      tabs: [
+        "Course Settings",
+        "Course Sessions & Offerings",
+        "Cross-Listing / Linked Courses",
+        "Course Textbooks & e-Texts",
+        "Transfer Courses & Equivalence",
+      ],
+      activeTab: "Course Sessions & Offerings",
+      statusFilter: "Not Started",
+      statusOptions: [
+        { label: "Not Started", value: "Not Started" },
+        { label: "In Progress", value: "In Progress" },
+        { label: "Completed", value: "Completed" },
+        { label: "All Statuses", value: "" },
+      ],
+      createSessionHref: "/instructor/f/t78-add-session-offering",
+      sessions: [],
+      linkedCourses: {
+        emptyMessage: "No linked courses were found.",
+        rows: [],
+        courseOptions: [],
+        conditionOptions: [
+          { label: "Optional Enrolment", value: "Optional Enrolment" },
+          { label: "Required Enrolment", value: "Required Enrolment" },
+        ],
       },
-      {
-        cells: ["Modern Office Technology · CAPA-DAP 106", "3.5 Credits", "1 Active • 2 Completed", "Sessions"],
-        badge: "Active",
-        badgeTone: "active",
+      textbooks: {
+        emptyMessage: "No textbooks were found.",
+        rows: [],
+        textbookOptions: [{ label: "-- Select Textbook --", value: "" }],
       },
-      {
-        cells: ["Payroll Compliance Basics · CAPA-DAP 110", "3.0 Credits", "0 Active • 1 Completed", "Sessions"],
-        badge: "Completed",
-        badgeTone: "muted",
+      transferCourses: {
+        emptyMessage: "No transfer courses were found.",
+        rows: [],
+        institutionOptions: [{ label: "-- Select Institution --", value: "" }],
       },
-      {
-        cells: ["Business Communication Theory · CAPA-DIB 112", "3.0 Credits", "2 Active • 0 Completed", "Sessions"],
-        badge: "Active",
-        badgeTone: "active",
-      },
-      {
-        cells: ["Essential Workplace Skills · CAPA-Orientation", "1.0 Credits", "0 Active • 8 Completed", "Sessions"],
-        badge: "Completed",
-        badgeTone: "muted",
-      },
-    ],
-  }),
+    },
+  },
+
+  "/instructor/f/t78-add-session-offering": {
+    path: "/instructor/f/t78-add-session-offering",
+    figmaId: "4:14507",
+    title: "Add Session / Offering: 0",
+    subtitle: "SYS.COURSE_MGMT // SESSION_CREATE",
+    breadcrumbs: ["Home", "Courses & Sessions", "Course Sessions", "Add Session"],
+    activeHref: "/instructor/f/t14-course-management",
+    shell: "campus",
+    archetype: "form",
+    primaryAction: "Save Session",
+    secondaryAction: "Cancel",
+    secondaryActionHref: "/instructor/f/t77-course-admin",
+    form: buildAddSessionScreenForm("0"),
+  },
 
   "/instructor/f/t55-add-course-form": {
     path: "/instructor/f/t55-add-course-form",
@@ -1525,39 +2499,271 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     archetype: "form",
     primaryAction: "Save Course",
     secondaryAction: "Cancel",
+    secondaryActionHref: "/instructor/f/t54-courses-sessions",
     form: {
       submitLabel: "Save Course",
       groups: [
         {
           title: "Course Details",
           fields: [
-            { label: "Course Category", value: "DAP: Accounting", type: "select" },
-            { label: "Course Group", value: "Accounting Principles", type: "select" },
-            { label: "Course Name", value: "Computerized Accounting Core", type: "text" },
-            { label: "Course Number", value: "CAPA-DAP 105", type: "text" },
-            { label: "Course Credit Value", value: "4.0", type: "number" },
-            { label: "Intake Type", value: "Standard Intake", type: "select" },
+            {
+              label: "Course Category",
+              value: "",
+              type: "select",
+              options: [
+                { label: "Select Category", value: "" },
+                { label: "DAP: Accounting", value: "DAP: Accounting" },
+                { label: "Computer Science", value: "Computer Science" },
+                { label: "Nursing", value: "Nursing" },
+                { label: "Business Administration", value: "Business Administration" },
+                { label: "General Education", value: "General Education" },
+              ],
+            },
+            {
+              label: "Course Group",
+              value: "No Grouping",
+              type: "select",
+              options: [
+                { label: "No Grouping", value: "No Grouping" },
+                { label: "Accounting Principles", value: "Accounting Principles" },
+                { label: "Core", value: "Core" },
+                { label: "Elective", value: "Elective" },
+                { label: "Capstone", value: "Capstone" },
+              ],
+            },
+            { label: "Course Name", value: "", type: "text" },
+            { label: "Course Number", value: "", type: "text" },
+            { label: "Course Credit Value", value: "", type: "number" },
+            {
+              label: "Course In-take Type",
+              value: "Standard",
+              type: "select",
+              options: [
+                { label: "Standard", value: "Standard" },
+                { label: "Continuous", value: "Continuous" },
+                { label: "Cohort", value: "Cohort" },
+                { label: "Open Entry", value: "Open Entry" },
+              ],
+            },
+            {
+              label: "Course Enrollment Permission",
+              value: "No permission required",
+              type: "select",
+              options: [
+                { label: "No permission required", value: "No permission required" },
+                { label: "Instructor approval", value: "Instructor approval" },
+                { label: "Department approval", value: "Department approval" },
+                { label: "Prerequisite gate", value: "Prerequisite gate" },
+              ],
+            },
           ],
         },
         {
-          title: "Course Outline & Syllabus",
+          title: "Course Outline / Description",
+          fields: [
+            { label: "Course Description", value: "", type: "textarea" },
+            { label: "Course Syllabus", value: "", type: "file" },
+            {
+              label: "Course Syllabus Privacy",
+              value: "Private",
+              type: "select",
+              options: [
+                { label: "Private", value: "Private" },
+                { label: "Enrolled students", value: "Enrolled students" },
+                { label: "Institution", value: "Institution" },
+                { label: "Public", value: "Public" },
+              ],
+            },
+          ],
+        },
+        {
+          title: "Course Chair & Lead Accesses",
           fields: [
             {
-              label: "Course Description",
-              value: "Describe the course content, requirements and objectives here...",
-              type: "textarea",
+              label: "Override course category permissions",
+              value: "false",
+              type: "checkbox",
+              hint: "Override course category permissions for chair and lead access",
             },
-            { label: "Total Course Hours", value: "120 Hours", type: "text" },
-            { label: "Hours Per Day", value: "3 Hours", type: "text" },
           ],
         },
         {
-          title: "Course Tuition & Finances",
+          title: "Course Tuition",
           fields: [
-            { label: "Domestic Tuition Cost ($)", value: "1,200.00", type: "number" },
-            { label: "International Tuition Cost ($)", value: "3,400.00", type: "number" },
-            { label: "Grading Scheme", value: "Standard GPA Ladder", type: "select" },
-            { label: "Registration Limit", value: "Max 45 Students", type: "text" },
+            {
+              label: "Course tuition included in the program cost",
+              value: "false",
+              type: "checkbox",
+            },
+            {
+              label: "Course Cost Calculation",
+              value: "Total Amount",
+              type: "select",
+              options: [
+                { label: "Total Amount", value: "Total Amount" },
+                { label: "Per Credit", value: "Per Credit" },
+                { label: "Per Hour", value: "Per Hour" },
+                { label: "Program Package", value: "Program Package" },
+              ],
+            },
+            { label: "Domestic", value: "0.00", type: "number", hint: "$0.00" },
+            { label: "International", value: "0.00", type: "number", hint: "$0.00" },
+          ],
+        },
+        {
+          title: "Default Course Schedule",
+          fields: [
+            { label: "Total Course Hours", value: "", type: "number" },
+            { label: "Hours per Day", value: "", type: "number" },
+            {
+              label: "Weekly Schedule",
+              value: "Monday,Tuesday,Wednesday,Thursday,Friday",
+              type: "weekdays",
+            },
+            {
+              label: "Time of Day",
+              value: "Morning",
+              type: "select",
+              options: [
+                { label: "Morning", value: "Morning" },
+                { label: "Afternoon", value: "Afternoon" },
+                { label: "Evening", value: "Evening" },
+                { label: "Flexible", value: "Flexible" },
+              ],
+            },
+            { label: "Customize weekly schedule", value: "false", type: "checkbox" },
+          ],
+        },
+        {
+          title: "Grading",
+          fields: [
+            {
+              label: "Grading Scheme",
+              value: "",
+              type: "select",
+              options: [
+                { label: "Select Grading Scheme", value: "" },
+                { label: "DIB and DAP", value: "DIB and DAP" },
+                { label: "HCC Grading", value: "HCC Grading" },
+                { label: "Health Care Assistant", value: "Health Care Assistant" },
+                { label: "Pass / Fail", value: "Pass / Fail" },
+                { label: "Standard GPA Ladder", value: "Standard GPA Ladder" },
+                { label: "Competency Based", value: "Competency Based" },
+                { label: "Letter Only", value: "Letter Only" },
+              ],
+            },
+          ],
+        },
+        {
+          title: "Course Content Settings",
+          fields: [
+            {
+              label: "Repository Settings",
+              value: "Use brand settings",
+              type: "select",
+              options: [
+                { label: "Use brand settings", value: "Use brand settings" },
+                { label: "Course-specific", value: "Course-specific" },
+                { label: "Section-specific", value: "Section-specific" },
+                { label: "Disabled", value: "Disabled" },
+              ],
+            },
+          ],
+        },
+        {
+          title: "Miscellaneous Conditions",
+          fields: [
+            {
+              label: "Transcript",
+              value: "Visible on Transcript",
+              type: "select",
+              options: [
+                { label: "Visible on Transcript", value: "Visible on Transcript" },
+                { label: "Hidden", value: "Hidden" },
+                { label: "Internal only", value: "Internal only" },
+              ],
+            },
+            {
+              label: "Count Credits",
+              value: "Normal",
+              type: "select",
+              options: [
+                { label: "Normal", value: "Normal" },
+                { label: "Do not count", value: "Do not count" },
+                { label: "Half credit", value: "Half credit" },
+              ],
+            },
+            {
+              label: "Prior Experience",
+              value: "Eligible",
+              type: "select",
+              options: [
+                { label: "Eligible", value: "Eligible" },
+                { label: "Not eligible", value: "Not eligible" },
+                { label: "Requires review", value: "Requires review" },
+              ],
+            },
+            {
+              label: "Registration Limits",
+              value: "Normal",
+              type: "select",
+              options: [
+                { label: "Normal", value: "Normal" },
+                { label: "Restricted", value: "Restricted" },
+                { label: "Waitlist only", value: "Waitlist only" },
+              ],
+            },
+            {
+              label: "Repeat Enrollment Condition",
+              value: "Use program settings",
+              type: "select",
+              options: [
+                { label: "Use program settings", value: "Use program settings" },
+                { label: "Allow repeats", value: "Allow repeats" },
+                { label: "One attempt only", value: "One attempt only" },
+                { label: "Requires approval", value: "Requires approval" },
+              ],
+            },
+            {
+              label: "Commissions",
+              value: "Normal",
+              type: "select",
+              options: [
+                { label: "Normal", value: "Normal" },
+                { label: "Excluded", value: "Excluded" },
+                { label: "Special rate", value: "Special rate" },
+              ],
+            },
+            {
+              label: "Promotion Calculation",
+              value: "Normal",
+              type: "select",
+              options: [
+                { label: "Normal", value: "Normal" },
+                { label: "Excluded", value: "Excluded" },
+                { label: "Weighted", value: "Weighted" },
+              ],
+            },
+            {
+              label: "Full-time Calculation",
+              value: "Normal",
+              type: "select",
+              options: [
+                { label: "Normal", value: "Normal" },
+                { label: "Excluded", value: "Excluded" },
+                { label: "Half-time only", value: "Half-time only" },
+              ],
+            },
+            {
+              label: "Textbook Opt-Out",
+              value: "System Default",
+              type: "select",
+              options: [
+                { label: "System Default", value: "System Default" },
+                { label: "Allow opt-out", value: "Allow opt-out" },
+                { label: "Required materials", value: "Required materials" },
+              ],
+            },
           ],
         },
       ],
@@ -1567,95 +2773,332 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
   "/instructor/f/t56-active-courses": {
     path: "/instructor/f/t56-active-courses",
     figmaId: "4:14878",
-    title: "Active Course Deliveries",
-    subtitle: "SYS.WORKSPACE // ACTIVE_SESSIONS",
-    breadcrumbs: ["Home", "Course Management", "Active Courses"],
+    title: "ACTIVE COURSES",
+    subtitle: "",
+    breadcrumbs: ["Home", "Active Courses"],
     activeHref: "/instructor/f/t14-course-management",
-    archetype: "cards",
-    cards: {
-      items: [
+    archetype: "activeCourses",
+    activeCourses: {
+      filters: {
+        campus: {
+          label: "Filter Campus",
+          value: "ALL CAMPUSES",
+          options: [
+            { label: "ALL CAMPUSES", value: "ALL CAMPUSES" },
+            { label: "#110 Heritage College- Surrey", value: "#110 Heritage College- Surrey" },
+            { label: "Heritage College - Main", value: "Heritage College - Main" },
+          ],
+        },
+        course: {
+          label: "Filter Course",
+          value: "All Courses",
+          options: [
+            { label: "All Courses", value: "All Courses" },
+            { label: "0: DAP Practicum", value: "0: DAP Practicum" },
+            { label: "0: Work Experience", value: "0: Work Experience" },
+            { label: "000: Practicum", value: "000: Practicum" },
+            { label: "ACSW 100: Addictions Fundamentals", value: "ACSW 100: Addictions Fundamentals" },
+            { label: "ACSW 200: Social Service Work Fundamentals", value: "ACSW 200: Social Service Work Fundamentals" },
+            { label: "ACSW 300: Self-Care Techniques", value: "ACSW 300: Self-Care Techniques" },
+            { label: "ACSW 400: Resources and Networking", value: "ACSW 400: Resources and Networking" },
+            { label: "ACSW 500: Family Studies", value: "ACSW 500: Family Studies" },
+            { label: "ACSW 600: Relapse Prevention", value: "ACSW 600: Relapse Prevention" },
+            { label: "ACSW 700: Child and Youth Populations", value: "ACSW 700: Child and Youth Populations" },
+            { label: "ADMN 104: Introduction to Keyboarding", value: "ADMN 104: Introduction to Keyboarding" },
+            { label: "ADMN 104: Keyboarding", value: "ADMN 104: Keyboarding" },
+            { label: "ADMN 110: Office Administration", value: "ADMN 110: Office Administration" },
+            { label: "ADMN 114: Customer Service", value: "ADMN 114: Customer Service" },
+            { label: "BCOM 105: Business Communications", value: "BCOM 105: Business Communications" },
+            { label: "BETH 190: Business Ethics", value: "BETH 190: Business Ethics" },
+            { label: "BLAW 101: Business Law", value: "BLAW 101: Business Law" },
+            { label: "BMGT 101: Introduction to Human Resources", value: "BMGT 101: Introduction to Human Resources" },
+            { label: "BMGT 106: Introduction to Business Management", value: "BMGT 106: Introduction to Business Management" },
+            { label: "BMGT 112: Introduction to Organizational Behaviour", value: "BMGT 112: Introduction to Organizational Behaviour" },
+            { label: "BMGT 114: Introduction to Labour Relations", value: "BMGT 114: Introduction to Labour Relations" },
+            { label: "BMGT 115: Training and Development", value: "BMGT 115: Training and Development" },
+            { label: "BMGT 116: Recruitment and Selection", value: "BMGT 116: Recruitment and Selection" },
+            { label: "BMGT 117: Occupational Health and Safety", value: "BMGT 117: Occupational Health and Safety" },
+            { label: "BMGT 118: Compensation and Benefits", value: "BMGT 118: Compensation and Benefits" },
+            { label: "BTT 101: Bank Teller Training", value: "BTT 101: Bank Teller Training" },
+            { label: "CAPA - DAP 106: Modern Office Technology", value: "CAPA - DAP 106: Modern Office Technology" },
+            { label: "CAPS 190: Capstone Project", value: "CAPS 190: Capstone Project" },
+            { label: "CARE 500: Special Certificates", value: "CARE 500: Special Certificates" },
+            { label: "COMC 150: Professional Report Writing", value: "COMC 150: Professional Report Writing" },
+            { label: "COMP 101: Introduction to Computers", value: "COMP 101: Introduction to Computers" },
+          ],
+        },
+        term: {
+          label: "Filter Term",
+          value: "ALL TERMS",
+          options: [
+            { label: "ALL TERMS", value: "ALL TERMS" },
+            { label: "3rd Term-2026 — 2026-09-01 - 2026-12-31", value: "3rd Term-2026" },
+            { label: "2nd Term-2026 — 2026-05-01 - 2026-08-31", value: "2nd Term-2026" },
+            { label: "1st Term-2026 — 2026-01-01 - 2026-04-30", value: "1st Term-2026" },
+            { label: "3rd Term-2025 — 2025-09-01 - 2025-12-31", value: "3rd Term-2025" },
+            { label: "2nd Term-2025 — 2025-05-01 - 2025-08-31", value: "2nd Term-2025" },
+            { label: "1st Term-2025 — 2025-01-01 - 2025-04-30", value: "1st Term-2025" },
+            { label: "Bank Teller Program - September 13 to September 21", value: "Bank Teller Program Sep" },
+            { label: "PBMLT-HCA Cohort", value: "PBMLT-HCA Cohort" },
+          ],
+        },
+        student: {
+          label: "Filter Student",
+          value: "",
+          placeholder: "Student # or last name",
+        },
+        faculty: {
+          label: "Faculty",
+          value: "ALL FACULTY / INSTRUCTORS",
+          options: [
+            { label: "ALL FACULTY / INSTRUCTORS", value: "ALL FACULTY / INSTRUCTORS" },
+            { label: "Elena Vance", value: "Elena Vance" },
+            { label: "Sarah Mitchell", value: "Sarah Mitchell" },
+          ],
+        },
+      },
+      showLabel: "Show Courses",
+      resultsLabel: "Results: 1,408",
+      perPageOptions: [
+        { label: "50", value: "50" },
+        { label: "100", value: "100" },
+        { label: "250", value: "250" },
+        { label: "500", value: "500" },
+      ],
+      perPage: "250",
+      pageOptions: [
+        { label: "1", value: "1" },
+        { label: "2", value: "2" },
+        { label: "3", value: "3" },
+      ],
+      page: "1",
+      columns: ["Course", "Location", "Instructor(s)", "Dates", "Enrolment"],
+      rows: [
         {
-          title: "ACC201 · Intermediate Financial Accounting",
-          subtitle: "3 Sections Active · 87 Students",
-          meta: "Fall '26 Term · Syllabus 65% · Next Class: Today at 14:00",
-          badge: "In Progress",
-          badgeTone: "active",
-          href: "/instructor/f/t08-my-courses-detail",
+          id: "course-acsw-200",
+          course: "ACSW 200 (ACSWAPR26-01) Social Service Work Fundamentals",
+          code: "ACSW 200",
+          section: "ACSWAPR26-01",
+          title: "Social Service Work Fundamentals",
+          location: "#110 Heritage College- Surrey",
+          room: "Room Not Set",
+          instructors: "Not Set",
+          dates: "Apr. 27, 2026 - May. 1, 2026",
+          enrolment: "0%",
+          viewHref: "/instructor/f/t56-active-courses?view=course-acsw-200",
+          attendanceHref: "/instructor/attendance",
         },
         {
-          title: "FIN301 · Corporate Finance Theory",
-          subtitle: "2 Sections Active · 56 Students",
-          meta: "Fall '26 Term · Syllabus 40% · Next Class: Tomorrow at 09:30",
-          badge: "In Progress",
-          badgeTone: "active",
-          href: "/instructor/f/t08-my-courses-detail",
+          id: "course-dap-01",
+          course: "0 (01) DAP Practicum",
+          code: "0",
+          section: "01",
+          title: "DAP Practicum",
+          location: "#110 Heritage College- Surrey",
+          room: "Room Not Set",
+          instructors: "Not Set",
+          dates: "Continuous",
+          enrolment: "0%",
+          viewHref: "/instructor/f/t56-active-courses?view=course-dap-01",
+          attendanceHref: "/instructor/attendance",
         },
         {
-          title: "MGT102 · Introductory Strategy & Management",
-          subtitle: "4 Sections Active · 120 Students",
-          meta: "Fall '26 Term · Syllabus 80% · Next Class: Mon at 11:00",
-          badge: "In Progress",
-          badgeTone: "active",
+          id: "course-dap-dap01",
+          course: "0 (DAP-01) DAP Practicum",
+          code: "0",
+          section: "DAP-01",
+          title: "DAP Practicum",
+          location: "#110 Heritage College- Surrey",
+          room: "Room Not Set",
+          instructors: "Not Set",
+          dates: "Continuous",
+          enrolment: "0%",
+          viewHref: "/instructor/f/t56-active-courses?view=course-dap-dap01",
+          attendanceHref: "/instructor/attendance",
         },
         {
-          title: "HRM204 · Human Resource Compliance",
-          subtitle: "1 Section Active · 28 Students",
-          meta: "Fall '26 Term · Syllabus 15% · Next Class: Thu at 13:30",
-          badge: "In Progress",
-          badgeTone: "info",
+          id: "course-work-exp",
+          course: "0 (01) Work Experience",
+          code: "0",
+          section: "01",
+          title: "Work Experience",
+          location: "#110 Heritage College- Surrey",
+          room: "Room Not Set",
+          instructors: "Not Set",
+          dates: "Jan. 10, 2022 (Mon.) – Feb. 4, 2022 (Fri.)",
+          enrolment: "2%",
+          viewHref: "/instructor/f/t56-active-courses?view=course-work-exp",
+          attendanceHref: "/instructor/attendance",
         },
       ],
     },
   },
 
-  "/instructor/f/t57-course-textbooks": makeTable({
+  "/instructor/f/t57-course-textbooks": {
     path: "/instructor/f/t57-course-textbooks",
     figmaId: "4:15104",
-    title: "Course Textbook Adoptions",
-    subtitle: "SYS.BOOKSTORE_GATEWAY // AUDIT_ENGINE",
-    breadcrumbs: ["Home", "Course Management", "Textbooks"],
+    title: "Course Textbooks",
+    subtitle: "SYS.COURSE_MGMT // TEXTBOOKS",
+    breadcrumbs: ["Home", "Course Textbooks"],
     activeHref: "/instructor/f/t14-course-management",
-    primaryAction: "Add New Book",
-    countLabel: "Active adoptions & compliance",
-    columns: ["Book Title & Publisher", "ISBN / ISBN-13", "Adoption", "Opt-Out Rate", "Actions"],
-    columnTemplate:
-      "minmax(200px,1.5fr) minmax(110px,0.8fr) minmax(120px,0.9fr) minmax(100px,0.7fr) minmax(80px,0.5fr)",
-    rows: [
-      {
-        cells: [
-          "Principles of Auditing & GAAP · Pearson Publishing (12th Ed)",
-          "978-013444",
-          "Required (ACC201)",
-          "12% Opt-Out",
-          "Edit",
+    shell: "campus",
+    archetype: "courseTextbooks",
+    primaryAction: "Add Textbook",
+    primaryActionHref: "/instructor/f/t79-add-textbook",
+    courseTextbooks: {
+      textbooks: [],
+    },
+  },
+
+  "/instructor/f/t79-add-textbook": {
+    path: "/instructor/f/t79-add-textbook",
+    figmaId: "4:15105",
+    title: "Add Textbook",
+    subtitle: "SYS.COURSE_MGMT // TEXTBOOK_CREATE",
+    breadcrumbs: ["Home", "Course Textbooks", "Add Textbook"],
+    activeHref: "/instructor/f/t14-course-management",
+    shell: "campus",
+    archetype: "form",
+    primaryAction: "Save Textbook",
+    secondaryAction: "Cancel",
+    secondaryActionHref: "/instructor/f/t57-course-textbooks",
+    form: {
+      submitLabel: "Save Textbook",
+      groups: [
+        {
+          title: "Textbook Details",
+          fields: [
+            { label: "Textbook Name", value: "", type: "text" },
+            { label: "ISBN", value: "", type: "text" },
+            {
+              label: "Format",
+              value: "Not Set",
+              type: "select",
+              options: [
+                { label: "Not Set", value: "Not Set" },
+                { label: "Print", value: "Print" },
+                { label: "e-Book", value: "e-Book" },
+                { label: "Print / e-Book", value: "Print / e-Book" },
+                { label: "Loose-leaf", value: "Loose-leaf" },
+              ],
+            },
+          ],
+        },
+        {
+          title: "Textbook Fees",
+          fields: [
+            { label: "Domestic", value: "0.00", type: "text", prefix: "$" },
+            { label: "International", value: "0.00", type: "text", prefix: "$" },
+          ],
+        },
+      ],
+      linkedCourses: {
+        title: "Textbook Courses",
+        addLabel: "ADD",
+        emptyLabel: "No courses linked yet. Use ADD to associate this textbook.",
+        courseOptions: [
+          { label: "-- Select Course --", value: "" },
+          { label: "0: DAP Practicum", value: "repo-0-dap-practicum" },
+          { label: "ACSW 100: Addictions Fundamentals", value: "repo-acsw-100-addictions-fundamentals" },
+          { label: "ACSW 200: Social Service Work Fundamentals", value: "repo-acsw-200-social-service-work-fundamentals" },
+          { label: "ADMN 104: Introduction to Keyboarding", value: "repo-admn-104-introduction-to-keyboarding" },
         ],
-        badge: "Required",
-        badgeTone: "active",
+        rows: [],
       },
-      {
-        cells: [
-          "Corporate Finance Foundations · McGraw-Hill Education",
-          "978-007803",
-          "Optional (FIN301)",
-          "45% Opt-Out",
-          "Edit",
-        ],
-        badge: "Optional",
-        badgeTone: "info",
-      },
-      {
-        cells: [
-          "Managerial Accounting Ledger Concepts · Wiley Academic",
-          "978-111874",
-          "Required (ACC102)",
-          "8% Opt-Out",
-          "Edit",
-        ],
-        badge: "Required",
-        badgeTone: "active",
-      },
-    ],
-  }),
+    },
+  },
+
+  "/instructor/f/t80-create-content-course": {
+    path: "/instructor/f/t80-create-content-course",
+    figmaId: "4:11354",
+    title: "Create Content Course",
+    subtitle: "SYS.COURSE_MGMT // CONTENT_COURSE_CREATE",
+    breadcrumbs: ["Home", "Content Repository", "Create Content Course"],
+    activeHref: "/instructor/f/t14-course-management",
+    shell: "campus",
+    archetype: "form",
+    primaryAction: "Create Content Course",
+    secondaryAction: "Cancel",
+    secondaryActionHref: "/instructor/f/t37-course-repository",
+    form: {
+      submitLabel: "Create Content Course",
+      warning:
+        "Duplicate courses that are set to active will be deactivated automatically. Customized campus course assignment will be automatically modified if duplicated.",
+      groups: [
+        {
+          title: "Course Content Repository Settings",
+          fields: [
+            {
+              label: "Course",
+              value: "",
+              type: "select",
+              options: [
+                { label: "-- Select Course --", value: "" },
+                { label: "0: DAP Practicum", value: "repo-0-dap-practicum" },
+                { label: "0: MOA Work Experience", value: "repo-0-moa-work-experience" },
+                { label: "0: Work Experience", value: "repo-0-work-experience" },
+                { label: "000: Practicum", value: "repo-000-practicum" },
+                { label: "101: ECOM", value: "repo-101-ecom" },
+                { label: "101sdfdsrg: ecom", value: "repo-101sdfdsrg-ecom" },
+                { label: "121: ABCD", value: "repo-121-abcd" },
+                { label: "ACSW 100: Addictions Fundamentals", value: "repo-acsw-100-addictions-fundamentals" },
+                { label: "ACSW 200: Social Service Work Fundamentals", value: "repo-acsw-200-social-service-work-fundamentals" },
+                { label: "ACSW 300: Self-Care Techniques", value: "repo-acsw-300-self-care-techniques" },
+                { label: "ACSW 400: Resources and Networking", value: "repo-acsw-400-resources-and-networking" },
+                { label: "ACSW 500: Family Studies", value: "repo-acsw-500-family-studies" },
+                { label: "ACSW 600: Relapse Prevention", value: "repo-acsw-600-relapse-prevention" },
+                { label: "ACSW 700: Child and Youth Populations", value: "repo-acsw-700-child-and-youth-populations" },
+                { label: "ADMN 104: Introduction to Keyboarding", value: "repo-admn-104-introduction-to-keyboarding" },
+              ],
+            },
+            { label: "Note / Name", value: "", type: "text", visibleWhen: "Course" },
+            {
+              label: "Course Types",
+              value: "All Course Types",
+              type: "select",
+              visibleWhen: "Course",
+              options: [
+                { label: "All Course Types", value: "All Course Types" },
+                { label: "All Types", value: "All Types" },
+                { label: "Lecture", value: "Lecture" },
+                { label: "Online", value: "Online" },
+              ],
+            },
+            {
+              label: "Default",
+              value: "Yes",
+              type: "select",
+              visibleWhen: "Course",
+              options: [
+                { label: "Yes", value: "Yes" },
+                { label: "No", value: "No" },
+              ],
+            },
+            {
+              label: "Course Format",
+              value: "Topics",
+              type: "select",
+              visibleWhen: "Course",
+              options: [
+                { label: "Topics", value: "Topics" },
+                { label: "Weeks", value: "Weeks" },
+              ],
+            },
+            {
+              label: "Sections / Weeks",
+              value: "10",
+              type: "select",
+              visibleWhen: "Course",
+              options: Array.from({ length: 20 }, (_, i) => ({
+                label: String(i + 1),
+                value: String(i + 1),
+              })),
+            },
+          ],
+        },
+      ],
+    },
+  },
 
   "/instructor/f/t58-course-categories": makeTable({
     path: "/instructor/f/t58-course-categories",
@@ -1699,42 +3142,39 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
   "/instructor/f/t59-course-groups-types": makeTable({
     path: "/instructor/f/t59-course-groups-types",
     figmaId: "4:15699",
-    title: "Course Groups & Types",
-    subtitle: "SYS.COURSE_MGMT // GROUP_TYPES",
-    breadcrumbs: ["Home", "Course Management", "Groups & Types"],
+    title: "Course Groups",
+    subtitle: "SYS.COURSE_MGMT // GROUPS",
+    breadcrumbs: ["Home", "Course Management", "Course Groups"],
     activeHref: "/instructor/f/t14-course-management",
-    countLabel: "6 groups · 8 types",
-    columns: ["Group / Type", "Code", "Description", "Courses", "Status"],
+    primaryAction: "Add Course Group",
+    primaryActionHref: "/instructor/f/t68-add-course-group",
+    countLabel: "Course grouping catalog",
+    columns: ["Course Group Name", "Abbreviation", "Courses", "Status"],
     rows: [
       {
-        cells: ["Core Courses", "—", "Mandatory foundation modules required for department major", "12", "ACTIVE"],
+        cells: ["No Grouping", "—", "—", "ACTIVE"],
         badge: "ACTIVE",
         badgeTone: "active",
       },
       {
-        cells: ["Electives", "—", "Student choice catalog subjects within requirements", "—", "ACTIVE"],
+        cells: ["Accounting Principles", "ACC-P", "12", "ACTIVE"],
         badge: "ACTIVE",
         badgeTone: "active",
       },
       {
-        cells: ["Standard Lecture", "STD", "Theoretical classroom lectures", "42", "ACTIVE"],
+        cells: ["Core", "CORE", "18", "ACTIVE"],
         badge: "ACTIVE",
         badgeTone: "active",
       },
       {
-        cells: ["Lab session", "LAB", "Scientific or terminal hands-on projects", "—", "ACTIVE"],
+        cells: ["Elective", "ELEC", "9", "ACTIVE"],
         badge: "ACTIVE",
         badgeTone: "active",
       },
       {
-        cells: ["Workshop", "WKS", "Interactive modular collaboration groups", "11", "ACTIVE"],
+        cells: ["Capstone", "CAPS", "3", "ACTIVE"],
         badge: "ACTIVE",
         badgeTone: "active",
-      },
-      {
-        cells: ["Prerequisites", "—", "Required structural step-ladder courses", "—", "INACTIVE"],
-        badge: "INACTIVE",
-        badgeTone: "muted",
       },
     ],
   }),
@@ -2141,143 +3581,95 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     activeHref: "/instructor/f/t16-teacher-messages-chat",
     shell: "campus",
     archetype: "messages",
-    messages: {
-      threads: [
-        {
-          id: "ahmed",
-          name: "Ahmed Hassan",
-          role: "Student",
-          preview: "Attached my ACC201 draft for feedback…",
-          unread: 2,
-          time: "10:42",
-        },
-        {
-          id: "dean",
-          name: "Dean Alistair",
-          role: "Administration",
-          preview: "Faculty senate packet is ready for review.",
-          time: "Yesterday",
-        },
-        {
-          id: "helen",
-          name: "Prof. Helen Carter",
-          role: "Faculty",
-          preview: "Can we sync on the midterm schedule?",
-          time: "Mon",
-        },
-        {
-          id: "chloe",
-          name: "Chloe Miller",
-          role: "Student",
-          preview: "Office hours question about Module 2.",
-          time: "Sun",
-        },
-      ],
-      chat: [
-        {
-          kind: "attachment",
-          name: "ACC201_Draft_V2.pdf",
-          size: "420 KB",
-          time: "10:38",
-        },
-        {
-          kind: "message",
-          from: "them",
-          text: "Hi Dr. Mitchell — I've attached my revised draft. Could you review the adjusting entries section before Thursday?",
-          time: "10:39",
-        },
-        {
-          kind: "message",
-          from: "me",
-          text: "Received. I'll review tonight and send annotated notes. Please also check your attendance for last week's lab.",
-          time: "10:41",
-        },
-        {
-          kind: "system",
-          text: "Academic alert: attendance below threshold (72%). Advisor notification available.",
-        },
-      ],
-      context: {
-        program: "B.BA Management Science",
-        grade: "B+",
-        gradePct: "84.2%",
-        attendance: "72%",
-        attendanceTone: "At Risk",
-        missing: "1",
-        sharedFiles: [
-          { name: "ACC201_Draft_V2.pdf", size: "420 KB" },
-          { name: "Office_Hours_Notes.docx", size: "88 KB" },
-        ],
-      },
-    },
   },
 
   "/instructor/notifications": {
     path: "/instructor/notifications",
     figmaId: "4:6347",
-    title: "Notifications",
-    subtitle: "Alerts across grading, attendance, and academic operations.",
+    title: "Notification Center",
+    subtitle: "Manage critical system alerts and compliance dispatch logs.",
     breadcrumbs: ["Home", "Notifications"],
     activeHref: "/instructor/notifications",
     shell: "campus",
     archetype: "notifications",
+    primaryAction: "Notification Preferences",
+    secondaryAction: "Mark All as Read",
     notifications: {
+      termLabel: "Term: Fall 2026",
       filters: [
         { label: "All Alerts" },
         { label: "Unread", count: 7 },
         { label: "Academic", count: 3 },
-        { label: "Grading", count: 4 },
-        { label: "System", count: 2 },
+        { label: "Attendance", count: 2 },
+        { label: "Assignments", count: 1 },
+        { label: "System", count: 1 },
       ],
       items: [
         {
           title: "Grade submission approved",
-          body: "FIN301 midterm grades cleared curriculum audit and are ready to publish.",
-          when: "12 min ago",
-          category: "Grading",
+          body: "ACC201 Sec-A final marks matching systemic grading rubric published successfully.",
+          when: "2 hours ago",
+          category: "Assignments",
           unread: true,
           tone: "success",
+          cta: "View Gradebook",
+          href: "/instructor/gradebook",
+          icon: "file-text",
         },
         {
           title: "Attendance threshold alert",
-          body: "Ahmed Hassan (ACC201) dropped to 72% attendance — below early-warning threshold.",
-          when: "38 min ago",
-          category: "Academic",
+          body: "3 students fell below compliance safety line (75% threshold) in FIN301 Session-B.",
+          when: "4 hours ago",
+          category: "Attendance",
           unread: true,
           tone: "warning",
+          cta: "Open Attendance Sheet",
+          href: "/instructor/attendance",
+          icon: "user-check",
         },
         {
-          title: "New message from Dean Alistair",
-          body: "Faculty senate packet attached for Thursday review.",
-          when: "1 hour ago",
+          title: "Workshop reminder",
+          body: "Advanced Rubric Design tomorrow 2 PM at Academic Copilot Hub.",
+          when: "1 day ago",
+          category: "Academic",
+          tone: "info",
+          cta: "View Calendar Event",
+          href: "/instructor/calendar",
+          icon: "calendar",
+        },
+        {
+          title: "Student message received",
+          body: "Ahmed Hassan STU-4521 sent a revision artifact for ACC201.",
+          when: "1 day ago",
           category: "Academic",
           unread: true,
           tone: "info",
+          cta: "Go to Chat",
+          href: "/instructor/messages",
+          icon: "user",
         },
         {
-          title: "Lab roster updated",
-          body: "2 students added to ACC201 Lab C-01 for Oct 8 session.",
-          when: "3 hours ago",
+          title: "Schedule change conflict logged",
+          body: "BUS400 Friday Lecture shifted from Node C to Campus Center B315.",
+          when: "2 days ago",
           category: "System",
           tone: "muted",
+          cta: "Resolve Conflict",
+          href: "/instructor/calendar",
+          icon: "bell",
         },
         {
           title: "Rubric draft saved",
           body: "CS 301 Syllabus Grading Rubric Studio auto-saved v0.6.",
           when: "Yesterday",
-          category: "Grading",
+          category: "Assignments",
           tone: "info",
-        },
-        {
-          title: "Calendar conflict detected",
-          body: "Office hours overlap Academic Board meeting on Oct 9 14:00.",
-          when: "Yesterday",
-          category: "System",
-          unread: true,
-          tone: "danger",
+          cta: "Open Rubric Studio",
+          href: "/instructor/rubrics",
+          icon: "file-text",
         },
       ],
-      pagination: "Showing 1–6 of 24",
+      pagination: "Showing 1–6 of 24 notifications",
     },
   },
 
@@ -2367,6 +3759,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
           updated: "Oct 5, 2026",
           visibility: "Published",
           selected: true,
+          folder: "Week Materials",
         },
         {
           name: "Journal_Entry_Template.xlsx",
@@ -2375,6 +3768,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
           updated: "Oct 4, 2026",
           visibility: "Published",
           selected: true,
+          folder: "Week Materials",
         },
         {
           name: "Lab_C01_Checklist.pdf",
@@ -2383,6 +3777,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
           updated: "Oct 3, 2026",
           visibility: "Published",
           selected: true,
+          folder: "Week Materials",
         },
         {
           name: "Midterm_Practice_Set.pdf",
@@ -2391,6 +3786,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
           updated: "Oct 2, 2026",
           visibility: "Hidden",
           selected: true,
+          folder: "Assessments",
         },
         {
           name: "Instructor_Notes_Private.docx",
@@ -2398,6 +3794,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
           size: "64 KB",
           updated: "Oct 1, 2026",
           visibility: "Hidden",
+          folder: "Syllabus & Policies",
         },
       ],
     },
@@ -2412,7 +3809,6 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     activeHref: "/instructor/f/t33-help-support",
     shell: "campus",
     archetype: "helpSupport",
-    primaryAction: "Consult AI",
     helpSupport: {
       topics: [
         { title: "Gradebook & Publishing", detail: "Submission windows, overrides, and audit trails.", icon: "bar-chart" },
@@ -2422,14 +3818,16 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
         { title: "Student Messaging", detail: "Secure threads and academic context panels.", icon: "file-text" },
         { title: "Account & Security", detail: "MFA, sessions, and recovery codes.", icon: "user" },
       ],
-      tickets: [
-        { id: "TKT-9201", subject: "Cannot publish FIN301 midterm grades", status: "In Progress", tone: "warning" },
-        { id: "TKT-9188", subject: "Office hours booking widget offline", status: "Resolved", tone: "success" },
-      ],
+      tickets: [],
       references: [
-        { name: "Faculty_Grade_Submission_Guide.pdf", meta: "PDF · 12 pages" },
-        { name: "Early_Warning_Protocol.pdf", meta: "PDF · 6 pages" },
-        { name: "AI_Studio_Faculty_Quickstart.pdf", meta: "PDF · 9 pages" },
+        { name: "Faculty Grade Submission Guide", meta: "PDF · 12 pages" },
+        { name: "Early Warning Protocol", meta: "PDF · 6 pages" },
+        { name: "AI Studio Faculty Quickstart", meta: "PDF · 9 pages" },
+      ],
+      hours: "Mon–Fri · 8:00–18:00 ET",
+      contacts: [
+        { label: "Registrar", value: "registrar@heritage.edu" },
+        { label: "IT Helpdesk", value: "helpdesk@heritage.edu" },
       ],
     },
   },
@@ -2637,36 +4035,390 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
   "/instructor/f/t61-grading-schemes": {
     path: "/instructor/f/t61-grading-schemes",
     figmaId: "4:16047",
-    title: "Grading Schemes",
-    subtitle: "SYS.COURSE_MGMT // GRADING_RULES",
-    breadcrumbs: ["Home", "Course Management", "Grading Schemes"],
+    title: "Manage Grading Schemes",
+    subtitle: "SYS.COURSE_MGMT // GRADING_SCHEMES",
+    breadcrumbs: ["Home", "Grading Schemes"],
     activeHref: "/instructor/f/t14-course-management",
     shell: "campus",
     archetype: "gradingSchemes",
-    primaryAction: "+ New Scheme",
-    secondaryAction: "Custom Standard Scheme",
+    primaryAction: "Create Grading Scheme",
+    primaryActionHref: "/instructor/f/t64-add-grading-scheme",
     gradingSchemes: {
-      schemeLabel: "Grading Scale Configuration",
-      rows: [
-        { letter: "A+", min: "90%", max: "100%", gpa: "4.0", description: "Outstanding, absolute mastery of core requirements", status: "PASS", letterTone: "a" },
-        { letter: "A", min: "85%", max: "89%", gpa: "3.9", description: "Excellent evaluation, minor structural errors", status: "PASS", letterTone: "a" },
-        { letter: "B+", min: "80%", max: "84%", gpa: "3.3", description: "Very good standard competency validation", status: "PASS", letterTone: "b" },
-        { letter: "B", min: "75%", max: "79%", gpa: "3.0", description: "Good overall understanding of complex units", status: "PASS", letterTone: "b" },
-        { letter: "C+", min: "70%", max: "74%", gpa: "2.3", description: "Satisfactory compliance performance", status: "PASS", letterTone: "c" },
-        { letter: "C", min: "65%", max: "69%", gpa: "2.0", description: "Average validation metrics met", status: "PASS", letterTone: "c" },
-        { letter: "D", min: "60%", max: "64%", gpa: "1.0", description: "Marginal outcome progress limits", status: "PASS", letterTone: "d" },
-        { letter: "F", min: "0%", max: "59%", gpa: "0.0", description: "Failure to establish outcome competencies", status: "FAIL", letterTone: "f" },
+      searchPlaceholder: "Enter Search Filter Here",
+      schemes: [],
+    },
+  },
+
+  "/instructor/f/t64-add-grading-scheme": {
+    path: "/instructor/f/t64-add-grading-scheme",
+    figmaId: "4:16048",
+    title: "Add Grading Scheme",
+    subtitle: "SYS.COURSE_MGMT // GRADING_SCHEME_CREATE",
+    breadcrumbs: ["Home", "Grading Schemes", "Add Grading Schemes"],
+    activeHref: "/instructor/f/t14-course-management",
+    shell: "campus",
+    archetype: "form",
+    primaryAction: "Save Grading Scheme",
+    secondaryAction: "Cancel",
+    secondaryActionHref: "/instructor/f/t61-grading-schemes",
+    form: {
+      submitLabel: "Save Grading Scheme",
+      groups: [
+        {
+          title: "Grading Scheme Details",
+          fields: [
+            { label: "Grading Scheme Name", value: "", type: "text" },
+            {
+              label: "This is the default grading scheme",
+              value: "false",
+              type: "checkbox",
+            },
+            {
+              label: "Use Letter Grades",
+              value: "Yes",
+              type: "select",
+              options: [
+                { label: "Yes", value: "Yes" },
+                { label: "No", value: "No" },
+              ],
+            },
+            {
+              label: "Use Percentages",
+              value: "Yes",
+              type: "select",
+              options: [
+                { label: "Yes", value: "Yes" },
+                { label: "No", value: "No" },
+              ],
+            },
+            {
+              label: "Enable round-up options for marginal letter grades in final standings.",
+              value: "false",
+              type: "checkbox",
+            },
+            {
+              label: "Use Grade Points",
+              value: "Yes",
+              type: "select",
+              options: [
+                { label: "Yes", value: "Yes" },
+                { label: "No", value: "No" },
+              ],
+            },
+            {
+              label: "Active / Inactive",
+              value: "Active",
+              type: "select",
+              options: [
+                { label: "Active", value: "Active" },
+                { label: "Inactive", value: "Inactive" },
+              ],
+            },
+          ],
+        },
       ],
-      distribution: [
-        { label: "A Range (A+, A)", meta: "52 Students (24%)", pct: 24, tone: "a" },
-        { label: "B Range (B+, B)", meta: "98 Students (45%)", pct: 45, tone: "b" },
-        { label: "C Range (C+, C)", meta: "46 Students (21%)", pct: 21, tone: "c" },
-        { label: "D Range", meta: "15 Students (7%)", pct: 7, tone: "d" },
-        { label: "F Range (Fail)", meta: "6 Students (3%)", pct: 3, tone: "f" },
+      gradeEntries: {
+        addLabel: "Add",
+        creditOptions: [
+          { label: "Yes", value: "Yes" },
+          { label: "No", value: "No" },
+        ],
+        conditionOptions: [
+          { label: "None", value: "None" },
+          { label: "Pass", value: "Pass" },
+          { label: "Fail", value: "Fail" },
+          { label: "Incomplete", value: "Incomplete" },
+          { label: "Withdraw", value: "Withdraw" },
+        ],
+        draft: {
+          letter: "",
+          percent: "",
+          percentUp: "0.00",
+          gradePoint: "",
+          credit: "Yes",
+          condition: "None",
+        },
+        entries: [],
+      },
+    },
+  },
+
+  "/instructor/f/t65-course-backups": makeTable({
+    path: "/instructor/f/t65-course-backups",
+    figmaId: "4:16501",
+    title: "Course Backups",
+    subtitle: "SYS.COURSE_MGMT // BACKUPS",
+    breadcrumbs: ["Home", "Course Management", "Course Backups"],
+    activeHref: "/instructor/f/t14-course-management",
+    countLabel: "0 backups",
+    columns: ["Backup Name", "Course", "Created", "Size", "Status", "Actions"],
+    rows: [],
+  }),
+
+  "/instructor/f/t66-course-configurations": {
+    path: "/instructor/f/t66-course-configurations",
+    figmaId: "4:16502",
+    title: "Course Configurations",
+    subtitle: "",
+    breadcrumbs: ["Home", "Course Management", "Course Configurations"],
+    activeHref: "/instructor/f/t66-course-configurations",
+    archetype: "courseConfigurations",
+    primaryAction: "Create Configuration",
+    primaryActionHref: "/instructor/f/t66-course-configurations?courseId=new",
+    searchPlaceholder: "Enter Search Filter Here",
+    courseConfigurations: {
+      searchPlaceholder: "Enter Search Filter Here",
+      courses: [
+        {
+          id: "course-dap-practicum",
+          name: "DAP PRACTICUM",
+          abbreviation: "0",
+          enrollmentPermission: "No permission required",
+          syllabusPrivacy: "Private",
+          repositorySettings: "Use brand settings",
+          textbookOptOut: "System Default",
+          active: true,
+          href: "/instructor/f/t66-course-configurations?courseId=course-dap-practicum",
+        },
+        {
+          id: "course-capa-dap-105",
+          name: "Computerized Accounting",
+          abbreviation: "CAPA-DAP 105",
+          enrollmentPermission: "No permission required",
+          syllabusPrivacy: "Private",
+          repositorySettings: "Use brand settings",
+          textbookOptOut: "System Default",
+          active: true,
+          href: "/instructor/f/t66-course-configurations?courseId=course-capa-dap-105",
+        },
+        {
+          id: "course-capa-dap-106",
+          name: "Modern Office Technology",
+          abbreviation: "CAPA-DAP 106",
+          enrollmentPermission: "Instructor approval",
+          syllabusPrivacy: "Enrolled students",
+          repositorySettings: "Course-specific",
+          textbookOptOut: "Allow opt-out",
+          active: true,
+          href: "/instructor/f/t66-course-configurations?courseId=course-capa-dap-106",
+        },
+        {
+          id: "course-capa-dap-110",
+          name: "Payroll Compliance Basics",
+          abbreviation: "CAPA-DAP 110",
+          enrollmentPermission: "No permission required",
+          syllabusPrivacy: "Private",
+          repositorySettings: "Use brand settings",
+          textbookOptOut: "System Default",
+          active: true,
+          href: "/instructor/f/t66-course-configurations?courseId=course-capa-dap-110",
+        },
+        {
+          id: "course-capa-dib-112",
+          name: "Business Communication Theory",
+          abbreviation: "CAPA-DIB 112",
+          enrollmentPermission: "No permission required",
+          syllabusPrivacy: "Institution",
+          repositorySettings: "Use brand settings",
+          textbookOptOut: "No opt-out",
+          active: true,
+          href: "/instructor/f/t66-course-configurations?courseId=course-capa-dib-112",
+        },
       ],
-      presets: [
-        { label: "Academic Pass Threshold", value: "60.0% (D)", tone: "warning" },
-        { label: "Honours Threshold", value: "80.0% (B+)", tone: "success" },
+    },
+  },
+
+  "/instructor/f/t67-course-types": {
+    path: "/instructor/f/t67-course-types",
+    figmaId: "4:16503",
+    title: "Manage Course Types",
+    subtitle: "SYS.COURSE_MGMT // COURSE_TYPES",
+    breadcrumbs: ["Home", "Course Types"],
+    activeHref: "/instructor/f/t14-course-management",
+    shell: "campus",
+    archetype: "courseTypes",
+    primaryAction: "Create Course Type",
+    primaryActionHref: "/instructor/f/t69-add-course-type",
+    courseTypes: {
+      searchPlaceholder: "Enter Search Filter Here",
+      types: [
+        { id: "ctype-lecture", name: "Lecture", abbreviation: "LEC", active: true },
+        { id: "ctype-online", name: "Online", abbreviation: "ON", active: true },
+      ],
+    },
+  },
+
+  "/instructor/f/t68-add-course-group": {
+    path: "/instructor/f/t68-add-course-group",
+    figmaId: "4:16504",
+    title: "Add Course Group",
+    subtitle: "SYS.COURSE_MGMT // GROUP_CREATE",
+    breadcrumbs: ["Home", "Course Groups", "Add Course Group"],
+    activeHref: "/instructor/f/t14-course-management",
+    shell: "campus",
+    archetype: "form",
+    primaryAction: "Save Course Group",
+    secondaryAction: "Cancel",
+    secondaryActionHref: "/instructor/f/t59-course-groups-types",
+    form: {
+      submitLabel: "Save Course Group",
+      groups: [
+        {
+          title: "Course Group Details",
+          fields: [
+            { label: "Course Group Name", value: "", type: "text", language: "English" },
+            { label: "Abbreviation", value: "", type: "text", language: "English" },
+          ],
+        },
+      ],
+    },
+  },
+
+  "/instructor/f/t69-add-course-type": {
+    path: "/instructor/f/t69-add-course-type",
+    figmaId: "4:16505",
+    title: "Add Course Type",
+    subtitle: "SYS.COURSE_MGMT // TYPE_CREATE",
+    breadcrumbs: ["Home", "Course Types", "Add Course Type"],
+    activeHref: "/instructor/f/t14-course-management",
+    shell: "campus",
+    archetype: "form",
+    primaryAction: "Save Course Type",
+    secondaryAction: "Cancel",
+    secondaryActionHref: "/instructor/f/t67-course-types",
+    form: {
+      submitLabel: "Save Course Type",
+      groups: [
+        {
+          title: "Course Type Details",
+          fields: [
+            { label: "Course Type Name", value: "", type: "text", language: "English" },
+            { label: "Abbreviation", value: "", type: "text", language: "English" },
+            {
+              label: "Active / Inactive",
+              value: "Active",
+              type: "select",
+              options: [
+                { label: "Active", value: "Active" },
+                { label: "Inactive", value: "Inactive" },
+              ],
+            },
+            {
+              label: "Learning Style",
+              value: "Face to Face",
+              type: "select",
+              options: [
+                { label: "Face to Face", value: "Face to Face" },
+                { label: "Online", value: "Online" },
+                { label: "Hybrid", value: "Hybrid" },
+              ],
+            },
+            {
+              label: "Asynchronous",
+              value: "No",
+              type: "select",
+              options: [
+                { label: "No", value: "No" },
+                { label: "Yes", value: "Yes" },
+              ],
+            },
+            {
+              label: "Customize enrolment permissions",
+              value: "false",
+              type: "checkbox",
+            },
+          ],
+        },
+      ],
+    },
+  },
+
+  "/instructor/f/t70-add-badge": {
+    path: "/instructor/f/t70-add-badge",
+    figmaId: "4:16506",
+    title: "Add Badge / Accomplishment",
+    subtitle: "SYS.COURSE_MGMT // BADGE_CREATE",
+    breadcrumbs: ["Home", "Badges & Accomplishments", "Add Badge / Accomplishment"],
+    activeHref: "/instructor/f/t14-course-management",
+    shell: "campus",
+    archetype: "form",
+    primaryAction: "Save Badge / Accomplishment",
+    secondaryAction: "Cancel",
+    secondaryActionHref: "/instructor/f/t82-badges-accomplishments",
+    form: {
+      submitLabel: "Save Badge / Accomplishment",
+      groups: [
+        {
+          title: "Badge / Accomplishment Details",
+          fields: [
+            { label: "Name", value: "", type: "text", language: "English" },
+            { label: "Description", value: "", type: "textarea", language: "English" },
+            { label: "Badge Text", value: "", type: "textarea", language: "English" },
+            { label: "Badge Image", value: "", type: "file", language: "English" },
+          ],
+        },
+        {
+          title: "Badge / Accomplishment Settings",
+          fields: [
+            {
+              label: "Badge Approval",
+              value: "Instant / Automated",
+              type: "select",
+              options: [
+                { label: "Instant / Automated", value: "Instant / Automated" },
+                { label: "Manual review", value: "Manual review" },
+              ],
+            },
+            {
+              label: "Badge Type",
+              value: "Designation / Academic Performance",
+              type: "select",
+              options: [
+                { label: "Designation / Academic Performance", value: "Designation / Academic Performance" },
+                { label: "Participation", value: "Participation" },
+                { label: "Skill", value: "Skill" },
+              ],
+            },
+            {
+              label: "Program(s)",
+              value: "All Programs",
+              type: "select",
+              options: [
+                { label: "All Programs", value: "All Programs" },
+                { label: "DAP", value: "DAP" },
+                { label: "DIB", value: "DIB" },
+              ],
+            },
+            {
+              label: "Courses Completed",
+              value: "Any",
+              type: "select",
+              options: [
+                { label: "Any", value: "Any" },
+                { label: "All required", value: "All required" },
+              ],
+            },
+            {
+              label: "Terms Completed",
+              value: "Any",
+              type: "select",
+              options: [
+                { label: "Any", value: "Any" },
+                { label: "Minimum 1", value: "Minimum 1" },
+              ],
+            },
+            {
+              label: "Required Average Type",
+              value: "None",
+              type: "select",
+              options: [
+                { label: "None", value: "None" },
+                { label: "GPA", value: "GPA" },
+                { label: "Percent", value: "Percent" },
+              ],
+            },
+          ],
+        },
       ],
     },
   },
@@ -2705,164 +4457,134 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
   "/instructor/f/t11-workshops": {
     path: "/instructor/f/t11-workshops",
     figmaId: "3:5292",
-    title: "Professional Development",
-    subtitle: "WORKSHOPS // Rubric_Design // CTE_PORTAL",
-    breadcrumbs: ["Home", "Workshops"],
+    title: "My Workshops",
+    subtitle: "Workshops assigned and available for this campus.",
+    breadcrumbs: ["Home", "My Workshops"],
     activeHref: "/instructor/f/t11-workshops",
     archetype: "workshops",
-    primaryAction: "New enrollment",
+    primaryAction: "New Workshop Enrolment",
     primaryActionHref: "/instructor/f/t42-new-workshop-enrollment",
     workshops: {
-      tabs: ["Available (5)", "Registered (2)", "Completed (8)"],
-      activeTab: "Available (5)",
-      credits: "CREDITS COMPLETED: 16.0 CEUs",
-      cards: [
-        {
-          tag: "AI-AUGMENTED",
-          org: "Center for Teaching Excellence",
-          seats: "8 Seats Left",
-          title: "Advanced Rubric Design with AI Models",
-          description:
-            "Drafting rigorous, AI-matched grading schemas that map perfectly to the fall syllabus requirements.",
-          when: "Oct 15, 2:00 PM - 4:00 PM",
-          where: "Room A101 / Hybrid",
-          href: "/instructor/f/t24-workshop-detail",
-        },
-      ],
-      registrations: [{ title: "Neuromorphic FinTech Ethics", when: "Oct 12 @ 09:00 AM" }],
+      tabs: ["My Workshops (0)", "Available Workshops (0)", "Completed Workshops (0)"],
+      activeTab: "My Workshops (0)",
+      credits: "",
+      cards: [],
+      registrations: [],
     },
   },
 
   "/instructor/f/t24-workshop-detail": {
     path: "/instructor/f/t24-workshop-detail",
     figmaId: "4:7678",
-    title: "Advanced Rubric Design",
-    subtitle: "Faculty workshop details and materials.",
-    breadcrumbs: ["Home", "Workshops", "Advanced Rubric Design"],
+    title: "Workshop Detail",
+    subtitle: "Workshop details and materials.",
+    breadcrumbs: ["Home", "Workshops", "Detail"],
     activeHref: "/instructor/f/t11-workshops",
     archetype: "workshopDetail",
-    primaryAction: "Enroll in workshop",
     workshopDetail: {
-      title: "Advanced Rubric Design",
+      title: "Workshop",
       status: "Open for Enrollment",
-      when: "October 22, 2026 · 9:00 AM–12:00 PM",
-      where: "Learning Commons · Room 204 · Heritage Community College",
-      seats: "12 of 30 seats remaining",
-      description: "A practical session for faculty designing transparent, reliable analytic rubrics. Dr. Sarah Mitchell can earn three professional-development credits.",
-      agenda: ["Rubric anatomy and alignment", "Performance-level calibration", "Peer review and revision", "Canvas gradebook integration"],
-      materials: [
-        { label: "Rubric Design Workbook", meta: "PDF · 2.4 MB" },
-        { label: "Calibration Sample Pack", meta: "ZIP · 8.1 MB" },
-      ],
+      when: "—",
+      where: "—",
+      seats: "—",
+      description: "Select a workshop to view details.",
+      agenda: [],
+      materials: [],
     },
   },
 
-  "/instructor/f/t40-workshop-enrollment-status": makeTable({
+  "/instructor/f/t40-workshop-enrollment-status": {
     path: "/instructor/f/t40-workshop-enrollment-status",
     figmaId: "4:11882",
-    title: "Workshop Enrolments",
-    subtitle: "WORKSHOPS // ENROLMENT_LEDGER // FALL_26",
-    breadcrumbs: ["Home", "Workshops", "Enrollment Status"],
-    activeHref: "/instructor/f/t11-workshops",
-    filters: ["Term: Fall '26", "Category: All", "Status: Pending"],
-    countLabel: "Pending (2) · Approved (5) · Declined (1)",
-    columns: ["Workshop Title", "Host", "Date & Time", "Location", "Seats", "Status", "Applied"],
-    columnTemplate:
-      "minmax(160px,1.3fr) minmax(120px,1fr) minmax(110px,0.9fr) minmax(100px,0.8fr) minmax(70px,0.5fr) minmax(100px,0.8fr) minmax(90px,0.7fr)",
-    rows: [
-      {
-        cells: [
-          "Generative AI Pedagogies",
-          "Dr. James Wilson",
-          "Oct 15, 2:00 PM",
-          "Online / Zoom",
-          "15/30",
-          "Pending Review",
-          "Oct 02, 2026",
-        ],
-        badge: "Pending Review",
-        badgeTone: "warning",
-      },
-      {
-        cells: [
-          "Canvas Rubric Automation",
-          "Prof. Helen Carter",
-          "Oct 19, 10:00 AM",
-          "Room B302",
-          "28/30",
-          "Approved",
-          "Oct 01, 2026",
-        ],
-        badge: "Approved",
-        badgeTone: "success",
-      },
-    ],
-  }),
+    title: "WORKSHOP ENROLMENTS",
+    subtitle: "Search and review student workshop enrolments.",
+    breadcrumbs: ["Home", "Workshop Enrolments"],
+    activeHref: "/instructor/f/t40-workshop-enrollment-status",
+    archetype: "workshopEnrolments",
+    workshopEnrolments: {
+      studentPlaceholder: "Student #, login or last name",
+      studentValue: "",
+      workshopValue: "",
+      workshopOptions: [{ label: "All Workshops", value: "" }],
+      statusValue: "pending",
+      statusOptions: [
+        { label: "All Statuses", value: "all" },
+        { label: "Pending", value: "pending" },
+        { label: "Approved", value: "approved" },
+        { label: "Declined", value: "declined" },
+        { label: "Dropped", value: "dropped" },
+      ],
+      letter: "ALL",
+      searchLabel: "Search Workshops",
+      emptyMessage: "No workshop enrolments were found.",
+      rows: [],
+    },
+  },
 
-  "/instructor/f/t41-workshop-attendance": makeTable({
+  "/instructor/f/t41-workshop-attendance": {
     path: "/instructor/f/t41-workshop-attendance",
     figmaId: "4:12042",
-    title: "Workshop Attendance",
-    subtitle: "WORKSHOPS // PROFESSIONAL_DEVELOPMENT // LEDGER",
-    breadcrumbs: ["Home", "Workshops", "Attendance"],
-    activeHref: "/instructor/f/t11-workshops",
-    primaryAction: "Download Certificate PDF",
-    countLabel: "Attendance rate 92% · 24 workshops · 72.0 CEU hours",
-    columns: ["Workshop Session", "Date", "Time", "Duration", "Status", "Certificate", "CEU Earned"],
-    columnTemplate:
-      "minmax(160px,1.3fr) minmax(100px,0.8fr) minmax(100px,0.8fr) minmax(70px,0.5fr) minmax(90px,0.7fr) minmax(90px,0.7fr) minmax(80px,0.6fr)",
-    rows: [
-      {
-        cells: ["Generative AI Pedagogies", "Oct 15, 2026", "14:00 - 16:00", "2.0h", "Present ✓", "Earned", "2.0 CEUs"],
-        badge: "Present ✓",
-        badgeTone: "success",
-      },
-      {
-        cells: ["Flipped Classroom Methods", "Sep 22, 2026", "09:00 - 12:00", "3.0h", "Present ✓", "Earned", "3.0 CEUs"],
-        badge: "Present ✓",
-        badgeTone: "success",
-      },
-      {
-        cells: ["Cybersecurity for Educators", "Sep 08, 2026", "13:00 - 15:00", "2.0h", "Absent ✗", "N/A", "0.0 CEUs"],
-        badge: "Absent ✗",
-        badgeTone: "danger",
-      },
-    ],
-  }),
+    title: "WORKSHOP ATTENDANCE",
+    subtitle: "Mark present / absent for workshop sessions.",
+    breadcrumbs: ["Home", "Workshop Attendance"],
+    activeHref: "/instructor/f/t41-workshop-attendance",
+    archetype: "workshopAttendance",
+    primaryAction: "Week View",
+    secondaryAction: "Print Roster",
+    workshopAttendance: {
+      date: "2026-09-18",
+      studentPlaceholder: "Student # or last name",
+      studentValue: "",
+      workshopValue: "",
+      workshopOptions: [{ label: "All Workshops", value: "" }],
+      loadLabel: "Load Attendance",
+      heading: "ATTENDANCE FOR: SEP. 18, 2026 (FRI.)",
+      previousLabel: "« Sep. 17, 2026",
+      previousDate: "2026-09-17",
+      nextLabel: "Sep. 19, 2026 »",
+      nextDate: "2026-09-19",
+      emptyMessage: "No students were found. Please change the filters above to see other possibilities.",
+      totalLabel: "Total Students: 0",
+      saveLabel: "Save Attendance",
+      weekDates: [],
+      students: [],
+    },
+  },
 
   "/instructor/f/t42-new-workshop-enrollment": {
     path: "/instructor/f/t42-new-workshop-enrollment",
     figmaId: "4:12222",
-    title: "Available Workshops",
-    subtitle: "WORKSHOPS // REGISTER_NEW_SKILLS // CAMPUS_OS",
-    breadcrumbs: ["Home", "Workshops", "New Enrollment"],
-    activeHref: "/instructor/f/t11-workshops",
+    title: "NEW WORKSHOP ENROLMENT",
+    subtitle: "Register a student into a workshop offering.",
+    breadcrumbs: ["Home", "Workshop Enrolments", "New Workshop Enrolment"],
+    activeHref: "/instructor/f/t40-workshop-enrollment-status",
     archetype: "form",
-    primaryAction: "Register Now",
+    primaryAction: "Save Enrolment",
     secondaryAction: "Cancel",
+    secondaryActionHref: "/instructor/f/t40-workshop-enrollment-status?status=pending",
     form: {
-      submitLabel: "Register Now",
+      submitLabel: "Save Enrolment",
       groups: [
         {
-          title: "Workshop Selection",
-          fields: [
-            { label: "Workshop", value: "AI in Education: Practical Applications", type: "select" },
-            { label: "Conducted by", value: "Dr. James Wilson", type: "text" },
-            { label: "Category", value: "Technology", type: "select" },
-            { label: "Seats", value: "12/30 seats available", type: "text" },
-          ],
+          title: "Student",
+          fields: [{ label: "Student", value: "", type: "text", hint: "Student #, login or last name" }],
         },
         {
-          title: "Schedule",
+          title: "Workshop",
           fields: [
-            { label: "Date", value: "Oct 15, 2025", type: "text" },
-            { label: "Time", value: "9:00 AM - 12:00 PM", type: "text" },
-            { label: "Location", value: "Online Zoom", type: "text" },
+            { label: "Workshop", value: "", type: "select", options: [{ label: "All Workshops", value: "" }] },
             {
-              label: "Description",
-              value: "Practical prompts, syllabus design, and automated grade assistants in the modern classroom.",
-              type: "textarea",
+              label: "Status",
+              value: "pending",
+              type: "select",
+              options: [
+                { label: "Pending", value: "pending" },
+                { label: "Approved", value: "approved" },
+                { label: "Declined", value: "declined" },
+                { label: "Dropped", value: "dropped" },
+              ],
             },
+            { label: "Note", value: "", type: "textarea", optional: true },
           ],
         },
       ],
@@ -2872,84 +4594,22 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
   "/instructor/f/t12-students-view": {
     path: "/instructor/f/t12-students-view",
     figmaId: "3:5401",
-    title: "Assigned Student Directory",
-    subtitle: "STUDENTS_MGMT // ACCESS_RESTRICTED // DR_SARAH",
+    title: "STUDENTS",
+    subtitle: "",
     breadcrumbs: ["Home", "Students"],
     activeHref: "/instructor/f/t12-students-view",
-    archetype: "studentsDirectory",
-    studentsDirectory: {
-      rosterFilter: "Roster: ACC201 Sec-A",
-      riskFilter: "Risk Level: All",
-      note: "YOU ONLY VIEW ASSIGNED CLASS SECTIONS.",
-      students: [
-        {
-          id: "ST-9284",
-          name: "Aris Thorne",
-          program: "BSc Finance",
-          attendance: "72%",
-          gpa: "2.8",
-          missing: "2",
-          risk: "High Risk",
-          riskTone: "danger",
-        },
-        {
-          id: "ST-4412",
-          name: "Maya Chen",
-          program: "AS Computer Science",
-          attendance: "96%",
-          gpa: "3.7",
-          missing: "0",
-          risk: "Normal",
-          riskTone: "active",
-        },
-        {
-          id: "ST-7781",
-          name: "Luis Ortega",
-          program: "BSc Accounting",
-          attendance: "88%",
-          gpa: "3.2",
-          missing: "1",
-          risk: "Normal",
-          riskTone: "active",
-        },
-      ],
-      drawer: {
-        name: "Aris Thorne",
-        meta: "ST-9284 // BSC_FIN",
-        alert: "URGENT VERIFICATION",
-        body: "Attendance is currently at 72% (deviation limit breached). 2 missing homework submissions for ACC201.",
-        action: "Send Direct Notification",
-      },
-    },
+    archetype: "hccStudents",
   },
 
   "/instructor/f/t22-student-detail-full-page": {
     path: "/instructor/f/t22-student-detail-full-page",
     figmaId: "4:7293",
-    title: "Aris Thorne",
-    subtitle: "Student academic profile at Heritage Community College.",
-    breadcrumbs: ["Home", "Students", "Aris Thorne"],
+    title: "Student detail",
+    subtitle: "Live student academic profile",
+    breadcrumbs: ["Home", "Students", "Detail"],
     activeHref: "/instructor/f/t12-students-view",
     archetype: "studentDetail",
     primaryAction: "Create academic alert",
-    studentDetail: {
-      name: "Aris Thorne",
-      meta: "HCC-2026-1842 · B.BA Accounting · Advisor: Dr. Sarah Mitchell",
-      tabs: ["Overview", "Assessments", "Requirements", "Flags", "Leave"],
-      fields: [
-        { label: "Institution", value: "Heritage Community College" },
-        { label: "Current GPA", value: "2.1" },
-        { label: "Attendance", value: "68%" },
-        { label: "Academic Standing", value: "Conditional" },
-      ],
-      alerts: [
-        { title: "High academic risk", body: "Three missing assessments and attendance below 70%.", tone: "danger" },
-      ],
-      courses: [
-        { code: "ACC201", title: "Financial Accounting I", grade: "C+", status: "Correction Pending" },
-        { code: "FIN210", title: "Personal Finance", grade: "B-", status: "Active" },
-      ],
-    },
   },
 
   "/instructor/f/t43-create-student-profile": {
@@ -2960,19 +4620,27 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     breadcrumbs: ["Home", "Students", "Create Profile"],
     activeHref: "/instructor/f/t12-students-view",
     archetype: "form",
-    primaryAction: "Create Profile",
-    secondaryAction: "Save as Draft",
+    primaryAction: "Save Student Profile",
+    secondaryAction: "Cancel",
+    secondaryActionHref: "/instructor/f/t12-students-view",
     form: {
-      submitLabel: "Create Profile",
+      submitLabel: "Save Student Profile",
       groups: [
         {
-          title: "New Student Onboarding Form",
+          title: "Identity",
           fields: [
-            { label: "First Name *", value: "Maria", type: "text" },
-            { label: "Last Name *", value: "Santos", type: "text" },
-            { label: "Academic Program *", value: "Associate of AAS - Accounting", type: "select" },
-            { label: "Student Status", value: "Active", type: "select" },
-            { label: "Primary Email Address *", value: "m.santos@campus.edu", type: "text" },
+            { label: "Given Name", value: "", type: "text" },
+            { label: "Family Name", value: "", type: "text" },
+            { label: "Email", value: "", type: "text" },
+            { label: "Program", value: "", type: "select", options: [] },
+            { label: "Student Status", value: "", type: "select", options: [] },
+          ],
+        },
+        {
+          title: "Section placement",
+          fields: [
+            { label: "Course Name", value: "", type: "select", options: [] },
+            { label: "Section", value: "", type: "select", options: [], dependsOn: "Course Name" },
           ],
         },
       ],
@@ -2988,35 +4656,6 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     activeHref: "/instructor/f/t12-students-view",
     archetype: "alertList",
     primaryAction: "Create alert",
-    alertList: {
-      badge: "12 ACTIVE",
-      items: [
-        {
-          name: "Maria Santos",
-          course: "BUS101",
-          tag: "ATTENDANCE RISK",
-          tagTone: "danger",
-          body: "Attendance has fallen below 60% standard threshold.",
-          avatar: "MS",
-        },
-        {
-          name: "John Lee",
-          course: "ACC201",
-          tag: "GRADE / MISSING WORK",
-          tagTone: "warning",
-          body: "3 assignments flagged as missing over past fortnight.",
-          avatar: "JL",
-        },
-        {
-          name: "Sarah Kim",
-          course: "MAT201",
-          tag: "PERFORMANCE SLIP",
-          tagTone: "info",
-          body: "Mid-term grade projected to drop below C average.",
-          avatar: "SK",
-        },
-      ],
-    },
   },
 
   "/instructor/f/t45-student-flags": makeTable({
@@ -3027,6 +4666,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     breadcrumbs: ["Home", "Students", "Student Flags"],
     activeHref: "/instructor/f/t12-students-view",
     primaryAction: "Create Flag",
+    primaryActionHref: "/instructor/f/t45-create-flag",
     columns: ["Student Name", "Flag Type", "Description", "Priority", "Status"],
     rows: [
       {
@@ -3064,6 +4704,29 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
       },
     ],
   }),
+
+  "/instructor/f/t45-create-flag": {
+    path: "/instructor/f/t45-create-flag",
+    figmaId: "4:12620",
+    title: "Create Flag",
+    subtitle: "Add a student flag from your assigned sections.",
+    breadcrumbs: ["Home", "Students", "Student Flags", "Create Flag"],
+    activeHref: "/instructor/f/t12-students-view",
+    archetype: "modal",
+    modal: {
+      title: "Create Student Flag",
+      description: "Flag a student for academic risk, holds, or success notes.",
+      fields: [
+        { label: "Student Name", value: "", type: "text" },
+        { label: "Flag Type", value: "ACADEMIC RISK", type: "select" },
+        { label: "Description", value: "", type: "text" },
+        { label: "Priority", value: "High", type: "select" },
+      ],
+      confirmLabel: "Create Flag",
+      cancelLabel: "Cancel",
+      backdropHref: "/instructor/f/t45-student-flags",
+    },
+  },
 
   "/instructor/f/t46-student-assessments": makeTable({
     path: "/instructor/f/t46-student-assessments",
@@ -3265,63 +4928,206 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     subtitle: "SYS.STUDENTS // COHORT_EXPLORER",
     breadcrumbs: ["Home", "Students", "Status Filter"],
     activeHref: "/instructor/f/t12-students-view",
-    archetype: "statusFilter",
-    statusFilter: {
-      filters: [
-        { label: "New Inquiry", count: "—" },
-        { label: "Approved Application", count: "—" },
-        { label: "Declined Application", count: "82" },
-        { label: "Registered Student", count: "—" },
-        { label: "Active Student", count: "279", active: true },
-        { label: "Graduated", count: "437" },
-        { label: "Incomplete", count: "—" },
-        { label: "Withdrawn Students", count: "247" },
-        { label: "Dismissed", count: "408" },
-        { label: "Refused Visa", count: "105" },
-        { label: "File not Logged", count: "111" },
-      ],
-      columns: ["Student Name", "Student ID", "Program Major", "Advisor", "Cohort Admission Term", "Status"],
-      rows: [
-        {
-          cells: ["Mitchell, Arthur", "MH-2026-9810", "Accounting", "D. Mitchell", "Fall 2026 Term", "ACTIVE"],
-          badge: "ACTIVE",
-          badgeTone: "active",
-        },
-        {
-          cells: ["Manning, Jessica", "MH-2026-1024", "Corporate Finance", "J. Vance", "Fall 2026 Term", "ACTIVE"],
-          badge: "ACTIVE",
-          badgeTone: "active",
-        },
-        {
-          cells: ["McDonald, Douglas", "MH-2025-4512", "Business Admin", "S. Harris", "Spring 2025 Term", "ACTIVE"],
-          badge: "ACTIVE",
-          badgeTone: "active",
-        },
-        {
-          cells: ["Miller, Gregory", "MH-2026-8822", "Economics", "D. Mitchell", "Fall 2026 Term", "ACTIVE"],
-          badge: "ACTIVE",
-          badgeTone: "active",
-        },
-      ],
+    archetype: "hccStudents",
+  },
+
+  "/instructor/f/t64-pending-transcript-changes": {
+    path: "/instructor/f/t64-pending-transcript-changes",
+    figmaId: "4:16400",
+    title: "Pending Transcript Changes",
+    subtitle: "SYS.TRANSCRIPT // PENDING",
+    breadcrumbs: ["Home", "Pending Transcript Changes"],
+    activeHref: "/instructor/f/t64-pending-transcript-changes",
+    archetype: "hccTranscriptPending",
+    hccTranscriptPending: {
+      banner: "Currently no transcript changes are pending.",
     },
   },
 
   "/instructor/f/t13-program-management": {
     path: "/instructor/f/t13-program-management",
     figmaId: "3:5572",
-    title: "Program Management",
-    subtitle: "Academic program operations for Heritage Community College.",
-    breadcrumbs: ["Home", "Program Management"],
+    title: "MANAGE FACULTIES & PROGRAMS",
+    subtitle: "",
+    breadcrumbs: ["Home", "Faculties & Programs"],
     activeHref: "/instructor/f/t13-program-management",
-    archetype: "hub",
-    hub: {
-      cards: [
-        { title: "Program Types", body: "Manage degree, diploma, certificate, and non-credit program categories.", href: "/instructor/f/t50-program-types", meta: "8 active types" },
-        { title: "Manage Terms", body: "Configure academic terms, registration windows, and grade deadlines.", href: "/instructor/f/t51-manage-terms", meta: "Fall 2026 active" },
-        { title: "Academic Calendars", body: "Review key dates and institution-wide academic events.", href: "/instructor/f/t52-academic-calendars", meta: "24 upcoming events" },
-        { title: "Master Scheduling", body: "Coordinate rooms, instructors, and section meeting patterns.", href: "/instructor/f/t53-master-scheduling", meta: "6 conflicts" },
-        { title: "Program Change Request", body: "Submit curriculum changes for academic approval.", href: "/instructor/f/t27-program-change-request", meta: "Dr. Sarah Mitchell · 2 drafts" },
+    archetype: "facultiesPrograms",
+    primaryAction: "Create Faculty",
+    primaryActionHref: "/instructor/f/t81-add-faculty",
+    secondaryAction: "Create Program",
+    secondaryActionHref: "/instructor/f/t74-add-program",
+    facultiesPrograms: {
+      createFacultyHref: "/instructor/f/t81-add-faculty",
+      createProgramHref: "/instructor/f/t74-add-program",
+      faculties: [
+        {
+          id: "fac-accounting-payroll",
+          name: "Accounting/Payroll",
+          abbreviation: "",
+          active: true,
+          programs: [
+            { id: "prog-capa", name: "Certificate in Accounting and Payroll Administrator", abbreviation: "CAPA", active: true, href: "/instructor/f/t83-program-settings?programId=prog-capa" },
+            { id: "prog-dap", name: "Diploma in Accounting and Payroll administrator", abbreviation: "DAP", active: true, href: "/instructor/f/t83-program-settings?programId=prog-dap" },
+          ],
+        },
+        {
+          id: "fac-business",
+          name: "Business",
+          abbreviation: "",
+          active: true,
+          programs: [
+            { id: "prog-btt", name: "Bank Teller Training", abbreviation: "BTT", active: true, href: "/instructor/f/t83-program-settings?programId=prog-btt" },
+            { id: "prog-coa", name: "Certificate Office Administration", abbreviation: "COA", active: true, href: "/instructor/f/t83-program-settings?programId=prog-coa" },
+            { id: "prog-csms", name: "Corporate Sales Management Strategies Certificate", abbreviation: "CSMS", active: true, href: "/instructor/f/t83-program-settings?programId=prog-csms" },
+            { id: "prog-dmm", name: "Digital Marketing Management", abbreviation: "DMM", active: true, href: "/instructor/f/t83-program-settings?programId=prog-dmm" },
+            { id: "prog-dib", name: "Diploma in International Business", abbreviation: "DIB", active: true, href: "/instructor/f/t83-program-settings?programId=prog-dib" },
+            { id: "prog-hra", name: "Human Resources Administration", abbreviation: "HRA", active: true, href: "/instructor/f/t83-program-settings?programId=prog-hra" },
+            { id: "prog-ma", name: "Marketing Administration", abbreviation: "MA", active: true, href: "/instructor/f/t83-program-settings?programId=prog-ma" },
+            { id: "prog-oa", name: "Office Administration", abbreviation: "OA", active: true, href: "/instructor/f/t83-program-settings?programId=prog-oa" },
+            { id: "prog-rsms", name: "Retail Sales Management Strategies Certificate", abbreviation: "RSMS", active: true, href: "/instructor/f/t83-program-settings?programId=prog-rsms" },
+          ],
+        },
+        {
+          id: "fac-computer-science",
+          name: "Computer Science",
+          abbreviation: "",
+          active: true,
+          programs: [
+            { id: "prog-nsa", name: "Network Support Administrator", abbreviation: "NSA", active: true, href: "/instructor/f/t83-program-settings?programId=prog-nsa" },
+            { id: "prog-nst", name: "Network Support Technician", abbreviation: "NST", active: true, href: "/instructor/f/t83-program-settings?programId=prog-nst" },
+          ],
+        },
+        {
+          id: "fac-ecea",
+          name: "Early Childhood Educator Assistant",
+          abbreviation: "ECEA",
+          active: true,
+          programs: [
+            { id: "prog-ecea1", name: "Child Growth Development part 1 & 2", abbreviation: "ECEA option 1", active: true, href: "/instructor/f/t83-program-settings?programId=prog-ecea1" },
+            { id: "prog-ecea2", name: "Child Growth Development Part I & II + Interpersonal Communication", abbreviation: "ECEA (Option 2)", active: true, href: "/instructor/f/t83-program-settings?programId=prog-ecea2" },
+          ],
+        },
+        {
+          id: "fac-health-science",
+          name: "Health Science",
+          abbreviation: "",
+          active: true,
+          programs: [
+            { id: "prog-acsw", name: "Addictions Community Support Worker", abbreviation: "ACSW", active: true, href: "/instructor/f/t83-program-settings?programId=prog-acsw" },
+            { id: "prog-hca", name: "Health Care Assistant", abbreviation: "HCA", active: true, href: "/instructor/f/t83-program-settings?programId=prog-hca" },
+            { id: "prog-hca3", name: "Interpersonal Communication (HCA-3)", abbreviation: "HCA", active: true, href: "/instructor/f/t83-program-settings?programId=prog-hca3" },
+            { id: "prog-moa", name: "Medical Office Assistant", abbreviation: "MOA", active: true, href: "/instructor/f/t83-program-settings?programId=prog-moa" },
+            { id: "prog-sssw", name: "Social Services Support Worker", abbreviation: "SSSW", active: true, href: "/instructor/f/t83-program-settings?programId=prog-sssw" },
+          ],
+        },
+        {
+          id: "fac-hospitality-management",
+          name: "Hospitality Management",
+          abbreviation: "",
+          active: true,
+          programs: [
+            { id: "prog-dhm", name: "Diploma in Hospitality Management", abbreviation: "DHM", active: true, href: "/instructor/f/t83-program-settings?programId=prog-dhm" },
+          ],
+        },
+        {
+          id: "fac-languages",
+          name: "Languages",
+          abbreviation: "",
+          active: true,
+          programs: [
+            { id: "prog-esc", name: "English Skills for College", abbreviation: "ESC", active: true, href: "/instructor/f/t83-program-settings?programId=prog-esc" },
+          ],
+        },
       ],
+    },
+  },
+
+  "/instructor/f/t74-add-program": {
+    path: "/instructor/f/t74-add-program",
+    figmaId: "4:16600",
+    title: "ADD PROGRAM",
+    subtitle: "SYS.PROGRAM_ADMIN // PROGRAM_CREATE",
+    breadcrumbs: ["Home", "Faculties & Programs", "Add Program"],
+    activeHref: "/instructor/f/t13-program-management",
+    archetype: "form",
+    primaryAction: "Save Program",
+    secondaryAction: "Cancel",
+    secondaryActionHref: "/instructor/f/t13-program-management",
+    form: buildAddProgramScreenForm(),
+  },
+
+  "/instructor/f/t81-add-faculty": {
+    path: "/instructor/f/t81-add-faculty",
+    figmaId: "3:5572",
+    title: "ADD FACULTY",
+    subtitle: "",
+    breadcrumbs: ["Home", "Faculties & Programs", "Add Faculty"],
+    activeHref: "/instructor/f/t13-program-management",
+    archetype: "form",
+    primaryAction: "Save Faculty",
+    secondaryActionHref: "/instructor/f/t13-program-management",
+    form: {
+      submitLabel: "Save Faculty",
+      groups: [
+        {
+          title: "FACULTY DETAILS",
+          fields: [
+            { label: "Faculty Name", value: "", type: "text", language: "English" },
+            { label: "Faculty Abbreviation", value: "", type: "text" },
+            {
+              label: "Active / Inactive",
+              value: "Active",
+              type: "select",
+              options: [
+                { label: "Active", value: "Active" },
+                { label: "Inactive", value: "Inactive" },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  },
+
+  "/instructor/f/t82-badges-accomplishments": {
+    path: "/instructor/f/t82-badges-accomplishments",
+    figmaId: "4:16420",
+    title: "BADGES / ACCOMPLISHMENTS",
+    subtitle: "",
+    breadcrumbs: ["Home", "Badges / Accomplishments"],
+    activeHref: "/instructor/f/t14-course-management",
+    archetype: "hccBadges",
+    primaryAction: "Add Badge / Accomplishment",
+    primaryActionHref: "/instructor/f/t70-add-badge",
+    hccBadges: {
+      userFilter: "",
+      badgeFilter: "All Badges",
+      statusFilter: "Pending",
+      badgeOptions: ["All Badges"],
+      statusOptions: ["Pending", "Awarded", "Denied", "All"],
+      rows: [],
+      empty: "No badges / accomplishments were found.",
+    },
+  },
+
+  "/instructor/f/t83-program-settings": {
+    path: "/instructor/f/t83-program-settings",
+    figmaId: "3:5572",
+    title: "PROGRAM SETTINGS",
+    subtitle: "",
+    breadcrumbs: ["Home", "Faculties & Programs", "Program Settings"],
+    activeHref: "/instructor/f/t13-program-management",
+    archetype: "programSettings",
+    programSettings: {
+      tabs: [
+        "Program Settings",
+        "Program Pathway",
+        "Fees & Tuition Price List",
+        "Deadlines & Penalties",
+        "Commission Rates",
+        "Audit Changes",
+      ],
+      footerDate: "Sep. 19, 2026",
     },
   },
 
@@ -3369,139 +5175,192 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     },
   },
 
-  "/instructor/f/t50-program-types": makeTable({
+  "/instructor/f/t50-program-types": {
     path: "/instructor/f/t50-program-types",
     figmaId: "4:13533",
-    title: "Program Types",
-    subtitle: "SYS.PROGRAM_ADMIN // CONFIGURATION",
-    breadcrumbs: ["Home", "Program Management", "Program Types"],
+    title: "Manage Program Types",
+    subtitle: "SYS.PROGRAM_ADMIN // PROGRAM_TYPES",
+    breadcrumbs: ["Home", "Program Types"],
     activeHref: "/instructor/f/t13-program-management",
-    primaryAction: "Add Program Type",
-    columns: ["Type Name", "Code", "Description", "Active Programs", "Status"],
-    rows: [
-      {
-        cells: ["Bachelor's Degree", "BACC", "Four-year undergraduate program of academic study.", "4 Programs", "Active"],
-        badge: "Active",
-        badgeTone: "active",
-      },
-      {
-        cells: ["Associate Degree", "ASSOC", "Two-year foundation study leading to university track.", "2 Programs", "Active"],
-        badge: "Active",
-        badgeTone: "active",
-      },
-      {
-        cells: [
-          "Advanced Diploma",
-          "ADIP",
-          "Professional competency track focused on industry sync.",
-          "1 Program",
-          "Active",
-        ],
-        badge: "Active",
-        badgeTone: "active",
-      },
-      {
-        cells: [
-          "Micro-Credential",
-          "MICRO",
-          "Short intensive industry outcomes & skills focus.",
-          "12 Programs",
-          "Active",
-        ],
-        badge: "Active",
-        badgeTone: "active",
-      },
-      {
-        cells: [
-          "Post-Grad Certificate",
-          "PGCERT",
-          "Specialist postgraduate cohort training matrix.",
-          "0 Programs",
-          "Inactive",
-        ],
-        badge: "Inactive",
-        badgeTone: "muted",
-      },
-    ],
-  }),
+    shell: "campus",
+    archetype: "programTypes",
+    primaryAction: "Create Program Type",
+    primaryActionHref: "/instructor/f/t75-add-program-type",
+    programTypes: {
+      searchPlaceholder: "Enter Search Filter Here",
+      types: [],
+    },
+  },
 
-  "/instructor/f/t51-manage-terms": makeTable({
-    path: "/instructor/f/t51-manage-terms",
-    figmaId: "4:13710",
-    title: "Manage Academic Terms",
-    subtitle: "SYS.PROGRAM_ADMIN // TERM_SCHEDULER",
-    breadcrumbs: ["Home", "Program Management", "Terms"],
+  "/instructor/f/t75-add-program-type": {
+    path: "/instructor/f/t75-add-program-type",
+    figmaId: "4:13534",
+    title: "Add Program Type",
+    subtitle: "SYS.PROGRAM_ADMIN // PROGRAM_TYPE_CREATE",
+    breadcrumbs: ["Home", "Program Types", "Add Program Type"],
     activeHref: "/instructor/f/t13-program-management",
-    primaryAction: "Add Term",
-    columns: ["Term Name", "Code", "Start Date", "End Date", "Registration Open", "Registration Close", "Status"],
-    columnTemplate:
-      "minmax(100px,0.9fr) minmax(60px,0.5fr) minmax(100px,0.8fr) minmax(100px,0.8fr) minmax(100px,0.8fr) minmax(100px,0.8fr) minmax(80px,0.6fr)",
-    rows: [
-      {
-        cells: ["Fall 2025", "FA25", "Sep 01, 2025", "Dec 20, 2025", "May 01, 2025", "Aug 15, 2025", "Active"],
-        badge: "Active",
-        badgeTone: "active",
-      },
-      {
-        cells: ["Spring 2026", "SP26", "Jan 10, 2026", "May 05, 2026", "Oct 01, 2025", "Jan 05, 2026", "Upcoming"],
-        badge: "Upcoming",
-        badgeTone: "info",
-      },
-      {
-        cells: ["Summer 2026", "SU26", "Jun 01, 2026", "Aug 20, 2026", "Mar 01, 2026", "May 15, 2026", "Upcoming"],
-        badge: "Upcoming",
-        badgeTone: "info",
-      },
-      {
-        cells: ["Winter 2026", "WI26", "Nov 01, 2026", "Dec 30, 2026", "Sep 01, 2026", "Oct 15, 2026", "Draft"],
-        badge: "Draft",
-        badgeTone: "draft",
-      },
-    ],
-  }),
-
-  "/instructor/f/t52-academic-calendars": {
-    path: "/instructor/f/t52-academic-calendars",
-    figmaId: "4:14049",
-    title: "Academic Calendar Management",
-    subtitle: "SYS.REGISTRY_HUB // CALENDAR_ENGINE",
-    breadcrumbs: ["Home", "Program Management", "Academic Calendars"],
-    activeHref: "/instructor/f/t13-program-management",
-    archetype: "calendar",
-    primaryAction: "Schedule Event",
-    calendarBoard: {
-      months: ["September 2026", "October 2026", "November 2026", "December 2026"],
-      events: [
-        { date: "Sep 1", label: "Classes Start · Fall 2026 Term", tone: "active" },
-        { date: "Sep 11", label: "Add/Drop Deadline", tone: "warning" },
-        { date: "Sep 15", label: "Senate Review", tone: "info" },
-        { date: "Sep 25", label: "Midterm Setup", tone: "info" },
-        { date: "Oct 12", label: "Thanksgiving · College Closed", tone: "muted" },
-        { date: "Dec 18", label: "Final grades due", tone: "danger" },
+    shell: "campus",
+    archetype: "form",
+    primaryAction: "Save Program Type",
+    secondaryAction: "Cancel",
+    secondaryActionHref: "/instructor/f/t50-program-types",
+    form: {
+      submitLabel: "Save Program Type",
+      groups: [
+        {
+          title: "Program Type Details",
+          fields: [
+            { label: "Program Type Name", value: "", type: "text", language: "English" },
+            { label: "Abbreviation", value: "", type: "text", language: "English" },
+            {
+              label: "Active / Inactive",
+              value: "Active",
+              type: "select",
+              options: [
+                { label: "Active", value: "Active" },
+                { label: "Inactive", value: "Inactive" },
+              ],
+            },
+          ],
+        },
       ],
     },
   },
 
-  "/instructor/f/t53-master-scheduling": {
-    path: "/instructor/f/t53-master-scheduling",
-    figmaId: "4:14305",
-    title: "Master Schedule Planner",
-    subtitle: "SYS.SCHEDULER // DR_SARAH_MITCHELL",
-    breadcrumbs: ["Home", "Program Management", "Master Scheduling"],
+  "/instructor/f/t51-manage-terms": {
+    path: "/instructor/f/t51-manage-terms",
+    figmaId: "4:13710",
+    title: "Manage Terms",
+    subtitle: "SYS.PROGRAM_ADMIN // TERM_SCHEDULER",
+    breadcrumbs: ["Home", "Manage Terms"],
     activeHref: "/instructor/f/t13-program-management",
-    archetype: "scheduler",
-    primaryAction: "Auto-Resolve Conflicts",
-    secondaryAction: "Weekly Grid View",
-    scheduler: {
-      days: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
-      slots: [
-        { day: 0, start: "08:00", end: "09:30", label: "FIN301-A", room: "Room 201", tone: "primary" },
-        { day: 1, start: "09:30", end: "11:00", label: "ACC201-B", room: "Room C104", tone: "primary" },
-        { day: 2, start: "09:30", end: "11:00", label: "ACC201-B · ROOM OVERLAP CONFLICT", room: "Room C104", tone: "muted" },
-        { day: 3, start: "11:00", end: "12:30", label: "MKT105", room: "Room 303", tone: "primary" },
-        { day: 4, start: "13:30", end: "15:00", label: "HRM204", room: "Room B102", tone: "primary" },
-        { day: 1, start: "13:30", end: "15:00", label: "FIN301-Lab", room: "Room 201", tone: "primary" },
+    shell: "campus",
+    archetype: "manageTerms",
+    primaryAction: "Create Term",
+    primaryActionHref: "/instructor/f/t76-add-term",
+    manageTerms: {
+      campusFilterLabel: "Filter Campus",
+      campusOptions: [
+        { label: "ALL CAMPUSES", value: "" },
+        { label: "#110 Heritage College- Surrey", value: "#110 Heritage College- Surrey" },
+        { label: "Heritage Community College - Distance", value: "Heritage Community College - Distance" },
+        { label: "Heritage Community College - Victoria", value: "Heritage Community College - Victoria" },
       ],
+      terms: [],
+    },
+  },
+
+  "/instructor/f/t76-add-term": {
+    path: "/instructor/f/t76-add-term",
+    figmaId: "4:13711",
+    title: "Add Term",
+    subtitle: "SYS.PROGRAM_ADMIN // TERM_CREATE",
+    breadcrumbs: ["Home", "Manage Terms", "Add Term"],
+    activeHref: "/instructor/f/t13-program-management",
+    shell: "campus",
+    archetype: "form",
+    primaryAction: "Save Term",
+    secondaryAction: "Cancel",
+    secondaryActionHref: "/instructor/f/t51-manage-terms",
+    form: {
+      submitLabel: "Save Term",
+      groups: [
+        {
+          title: "Term Details",
+          fields: [
+            { label: "Term Name", value: "", type: "text", language: "English" },
+            { label: "Term Abbreviation", value: "", type: "text", language: "English" },
+            {
+              label: "Campuses",
+              value: "",
+              type: "checkboxes",
+              options: [
+                { label: "#110 Heritage College- Surrey", value: "#110 Heritage College- Surrey" },
+                {
+                  label: "Heritage Community College - Distance",
+                  value: "Heritage Community College - Distance",
+                },
+                {
+                  label: "Heritage Community College - Victoria",
+                  value: "Heritage Community College - Victoria",
+                },
+              ],
+            },
+          ],
+        },
+        {
+          title: "Term Dates",
+          fields: [
+            { label: "Start Date", value: "", type: "date", sublabel: "Primary Dates" },
+            { label: "End Date", value: "", type: "date" },
+            { label: "Midterm Date", value: "", type: "date", optional: true, sublabel: "Other Dates (Optional)" },
+            { label: "Last Instruction Date", value: "", type: "date", optional: true },
+            { label: "Exam Start Date", value: "", type: "date", optional: true },
+            { label: "Exam End Date", value: "", type: "date", optional: true },
+            { label: "Census Date", value: "", type: "date", optional: true },
+          ],
+        },
+      ],
+      customEventDates: {
+        title: "Custom Event Dates",
+        addLabel: "+ Add Event Date",
+        events: [],
+      },
+      enrolmentConditions: {
+        title: "Enrolment Conditions",
+        addLabel: "Add Enrolment Condition",
+        emptyMessage: "No enrolment conditions exist for this term.",
+        disabledNote: "Self-enrolment is currently disabled.",
+        columns: ["Enrolment Dates", "Programs", "Completion Conditions", "Standing Conditions"],
+        rows: [],
+      },
+      deadlines: {
+        title: "Deadlines",
+        addLabel: "Add Deadline",
+        emptyMessage: "No deadlines exist for this term.",
+        columns: ["Condition", "Type", "Penalty"],
+        rows: [],
+      },
+    },
+  },
+
+  "/instructor/f/t84-review-term": {
+    path: "/instructor/f/t84-review-term",
+    figmaId: "4:13712",
+    title: "Review Term",
+    subtitle: "SYS.PROGRAM_ADMIN // TERM_REVIEW",
+    breadcrumbs: ["Home", "Manage Terms", "Review Term"],
+    activeHref: "/instructor/f/t13-program-management",
+    shell: "campus",
+    archetype: "reviewTerm",
+    reviewTerm: {
+      id: "",
+      name: "",
+      code: "",
+      startsOn: "",
+      endsOn: "",
+      campuses: [],
+    },
+  },
+
+  "/instructor/f/t85-manage-schedule": {
+    path: "/instructor/f/t85-manage-schedule",
+    figmaId: "4:14308",
+    title: "Manage Schedule",
+    subtitle: "SYS.PROGRAM_MGMT // SCHEDULE_MANAGE",
+    breadcrumbs: ["Home", "Scheduling", "Manage Schedule"],
+    activeHref: "/instructor/f/t13-program-management",
+    shell: "campus",
+    archetype: "scheduleManage",
+    scheduleManage: {
+      scheduleId: "ms-dib-nov-2026",
+      programTitle: "Schedule: Diploma in International Business",
+      dateRange: "Monday, November 2, 2026 - Monday, April 3, 2028",
+      totals: { courses: 28, sessions: 28, conflicts: 0, enrolled: 1 },
+      addSessionHref: "/instructor/f/t78-add-session-offering",
+      sessions: [],
+      fees: { ledgers: [], ledgerTypeOptions: ["Assessment Fee", "Application Fee", "Textbooks", "Tuition Fee"] },
+      settings: { groups: [] },
     },
   },
 
@@ -3677,11 +5536,20 @@ TEACHER_SCREENS["/instructor/f/in-20-workshops"] = {
   title: "Workshops",
 };
 TEACHER_SCREENS["/instructor/f/in-06-assessment-manager"] = {
-  ..._t10,
   path: "/instructor/f/in-06-assessment-manager",
   figmaId: "17:6962",
   title: "Assessment Manager",
-  subtitle: "Assessments · ACC201 gradebook ledger",
+  subtitle: "Assessments across your teaching sections",
+  breadcrumbs: ["Home", "Gradebook", "Assessments"],
+  activeHref: "/instructor/assessments",
+  archetype: "table",
+  primaryAction: "Create Assessment",
+  primaryActionHref: "/instructor/f/t19-create-edit-assessment",
+  secondaryAction: "Open Gradebook",
+  secondaryActionHref: "/instructor/gradebook",
+  columns: ["Assessment", "Course / Section", "Weight", "Due", "Status"],
+  rows: [],
+  countLabel: "0 assessments",
 };
 TEACHER_SCREENS["/instructor/f/in-07-gradebook"] = {
   ..._t10,
@@ -3690,6 +5558,8 @@ TEACHER_SCREENS["/instructor/f/in-07-gradebook"] = {
   title: "ACC201 Gradebook",
   subtitle: "Draft gradebook · Save Draft · Publish Grades",
 };
+
+Object.assign(TEACHER_SCREENS, SCHEDULING_SCREENS);
 
 // Legacy pretty routes → same live SIS configs (no orphan GenericLiveScreen pages)
 const _t16 = TEACHER_SCREENS["/instructor/f/t16-teacher-messages-chat"];
@@ -3708,9 +5578,30 @@ if (_t12) {
 }
 if (_t10) {
   TEACHER_SCREENS["/instructor/assessments"] = {
-    ..._t10,
     path: "/instructor/assessments",
+    figmaId: _t10.figmaId,
     title: "Assessments",
+    subtitle: "Published assessments for your teaching sections",
+    breadcrumbs: ["Home", "Gradebook", "Assessments"],
+    activeHref: "/instructor/assessments",
+    archetype: "assessmentHub",
+    primaryAction: "Create Assessment",
+    primaryActionHref: "/instructor/f/t19-create-edit-assessment",
+    secondaryAction: "Open Gradebook",
+    secondaryActionHref: "/instructor/gradebook",
+    assessmentHub: {
+      kpis: [],
+      groups: [],
+    },
+  };
+  TEACHER_SCREENS["/instructor/gradebook"] = {
+    ..._t10,
+    path: "/instructor/gradebook",
+    title: "Gradebook",
+    subtitle: "Live scores, drafts, and publish history",
+    activeHref: "/instructor/gradebook",
+    breadcrumbs: ["Home", "Gradebook"],
+    primaryAction: "Publish Final Marks",
     primaryActionHref: "/instructor/gradebook",
   };
 }
@@ -3730,15 +5621,25 @@ if (_t23) {
   };
 }
 if (_t08) {
-  TEACHER_SCREENS["/instructor/modules"] = { ..._t08, path: "/instructor/modules", title: "Modules" };
+  TEACHER_SCREENS["/instructor/modules"] = {
+    path: "/instructor/modules",
+    figmaId: _t08.figmaId,
+    title: "Modules",
+    subtitle: "Learning modules across your teaching sections.",
+    breadcrumbs: ["Home", "My Courses", "Modules"],
+    activeHref: "/instructor/sections",
+    archetype: "modulesBoard",
+    primaryAction: "Open course workspace",
+    primaryActionHref: "/instructor/f/t08-my-courses-detail",
+  };
   TEACHER_SCREENS["/instructor/lectures"] = {
-    ..._t08,
+    ...TEACHER_SCREENS["/instructor/f/in-08-lectures"],
     path: "/instructor/lectures",
     title: "Lectures",
     primaryAction: "Schedule Lecture",
   };
   TEACHER_SCREENS["/instructor/labs"] = {
-    ..._t08,
+    ...TEACHER_SCREENS["/instructor/f/in-10-lab-sessions"],
     path: "/instructor/labs",
     title: "Labs",
     primaryAction: "Open Lab Roster",
@@ -3758,7 +5659,27 @@ if (_t08) {
 }
 
 export function getTeacherScreen(path: string): TeacherScreenConfig | undefined {
-  return TEACHER_SCREENS[path];
+  const exact = TEACHER_SCREENS[path];
+  if (exact) return exact;
+
+  // Dynamic section workspace: /instructor/sections/:sectionId
+  const sectionMatch = path.match(/^\/instructor\/sections\/([^/]+)$/);
+  if (sectionMatch) {
+    const base =
+      TEACHER_SCREENS["/instructor/f/t08-my-courses-detail"] ||
+      TEACHER_SCREENS["/instructor/sections/demo"];
+    if (!base) return undefined;
+    return {
+      ...base,
+      path,
+      title: "Course workspace",
+      subtitle: "Section detail and teaching tabs",
+      activeHref: "/instructor/sections",
+      breadcrumbs: ["Home", "My Courses", "Section"],
+    };
+  }
+
+  return undefined;
 }
 
 export const TEACHER_SCREEN_PATHS = Object.keys(TEACHER_SCREENS);

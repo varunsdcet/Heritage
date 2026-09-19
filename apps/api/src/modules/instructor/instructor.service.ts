@@ -1,6 +1,133 @@
 import { randomUUID } from "node:crypto";
 import { prisma } from "@myheritage/db";
+import { hashPassword } from "@myheritage/auth";
 import type { SessionClaims } from "@myheritage/contracts";
+import {
+  LIFECYCLE_STATUSES,
+  lifecycleFromStudent,
+  LMS_ACTIVITY_TYPES,
+} from "../../lib/lifecycle-status.js";
+import { buildAddProgramScreenForm } from "./addProgramForm.js";
+import { buildAddSessionScreenForm } from "./addSessionForm.js";
+import {
+  ADD_FACULTY_PATH,
+  DEFAULT_FACULTIES,
+  FACULTIES_PROGRAMS_PATH,
+  facultyIdFromName,
+  facultySlug,
+  groupFacultiesPrograms,
+  mergeFacultyList,
+  mergeFacultyProgramList,
+  type FacultyProgramRecord,
+  type FacultyRecord,
+} from "./facultiesPrograms.js";
+import {
+  BADGES_PATH,
+  PROGRAM_SETTINGS_PATH,
+  applyProgramSettingsPatch,
+  buildProgramSettingsPayload,
+  settingsHref,
+} from "./programSettings.js";
+import {
+  ADD_BADGE_PATH,
+  ADD_GRADING_SCHEME_PATH,
+  BADGES_LIST_PATH,
+  COURSE_RESOURCES_PATH,
+  GRADING_SCHEMES_PATH,
+  buildAddBadgeFormPayload,
+  buildAddCourseResourceForm,
+  buildAddResourceCategoryForm,
+  createBadgeDefinition,
+  createCourseResource,
+  createResourceCategory,
+  gradeEntriesFromScheme,
+  listBadgesPayload,
+  listCourseResourcesPayload,
+} from "./courseResourcesScreens.js";
+import {
+  buildNewWorkshopEnrolmentForm,
+  buildWorkshopAttendance,
+  buildWorkshopDetail,
+  buildWorkshopEnrolments,
+  buildWorkshopList,
+  saveWorkshopAttendance,
+  saveWorkshopEnrolment,
+  updateWorkshopEnrolmentStatus,
+  workshopNavCounts,
+  type WorkshopEnrolmentStatus,
+} from "./workshopScreens.js";
+import {
+  AVAILABILITY_PATH,
+  buildProfilePayload,
+  loadAvailabilitySlots,
+  persistAvailabilitySlot,
+  persistAccomplishment,
+  persistConnect,
+  persistEducation,
+  persistGeneralInfo,
+  persistTimezone,
+  profileHeaderPayload,
+  profileTabs,
+  loadFacultyAccomplishments,
+  ACCOMPLISHMENTS_PATH,
+  type AvailabilitySlot,
+} from "./profileScreens.js";
+import {
+  buildHccAttendance,
+  buildHccCourseEvaluations,
+  buildHccCourseHistory,
+  buildHccEmptyTable,
+  buildHccGradesSubmission,
+  buildHccMyCourses,
+  buildHccPendingGradeSubmissions,
+  buildHccPendingSchedules,
+  buildHccStudentFlags,
+  buildHccStudentsDirectory,
+  buildHccTranscriptPending,
+  loadStudentStatusCounts,
+} from "./hccCampusScreens.js";
+import {
+  COURSE_CONFIG_PATH,
+  DEFAULT_COURSE_CONFIGS,
+  ENROLLMENT_PERMISSION_OPTIONS,
+  REPOSITORY_SETTING_OPTIONS,
+  SYLLABUS_PRIVACY_OPTIONS,
+  TEXTBOOK_OPT_OUT_OPTIONS,
+  mergeCourseConfigList,
+  selectOptions,
+  type CourseConfigRecord,
+} from "./courseConfigurations.js";
+import {
+  buildScheduleManagePayload,
+  mergeScheduleFeesOverlay,
+} from "./scheduleManageScreens.js";
+import {
+  TEXTBOOKS_LIST_PATH,
+  REPOSITORY_LIST_PATH,
+  DEFAULT_TEXTBOOKS,
+  buildAddTextbookForm,
+  buildContentRepositoryList,
+  buildCourseTextbooksList,
+  buildCreateContentCourseForm,
+  buildRepositoryCatalog,
+  mergeRepositoryList,
+  mergeTextbookList,
+  repositoryCourseFromFields,
+  textbookFromFields,
+  type RepositoryCourseRecord,
+  type TextbookRecord,
+} from "./courseContentScreens.js";
+import {
+  COURSE_LMS_TABS,
+  badgeFromFields,
+  buildCourseLms,
+  competencyFromFields,
+  groupFromFields,
+  instructorNameParts,
+  mergeCourseLmsOverlay,
+  questionFromFields,
+} from "./courseLmsScreens.js";
+import { isJitsiMeetUrl, jitsiMeetUrl } from "../../lib/jitsiMeet.js";
 
 export type InstructorLivePayload = Record<string, unknown>;
 
@@ -9,9 +136,11 @@ type InstructorCtx = {
   person: { givenName: string; familyName: string; email: string };
   displayName: string;
   term: { code: string; name: string } | null;
+  terms: Array<{ id: string; code: string; name: string; startsOn: string; endsOn: string }>;
   sections: Array<{
     id: string;
     code: string;
+    courseId: string;
     courseCode: string;
     courseTitle: string;
     credits: number;
@@ -44,6 +173,8 @@ type InstructorCtx = {
     updatedAt: Date;
     preview: string;
     otherName: string;
+    otherAccountId: string | null;
+    messages: Array<{ id: string; body: string; senderAccountId: string; createdAt: Date }>;
   }>;
   grades: Array<{
     id: string;
@@ -81,6 +212,7 @@ type InstructorCtx = {
     courseCode: string;
     joinUrl: string | null;
   }>;
+  programs: Array<{ id: string; code: string; name: string; awardLevel?: string }>;
 };
 
 function pct(score: number | null, max: number) {
@@ -105,10 +237,11 @@ async function loadCtx(user: SessionClaims): Promise<InstructorCtx> {
   const person = await prisma.person.findFirstOrThrow({
     where: { id: user.personId, institutionId: user.institutionId },
   });
-  const term = await prisma.term.findFirst({
+  const termsRaw = await prisma.term.findMany({
     where: { institutionId: user.institutionId },
     orderBy: { startsOn: "desc" },
   });
+  const term = termsRaw[0] ?? null;
   const sectionsRaw = await prisma.section.findMany({
     where: { institutionId: user.institutionId, instructorPersonId: user.personId },
     include: {
@@ -126,6 +259,7 @@ async function loadCtx(user: SessionClaims): Promise<InstructorCtx> {
   const sections = sectionsRaw.map((s) => ({
     id: s.id,
     code: s.code,
+    courseId: s.courseId,
     courseCode: s.course.code,
     courseTitle: s.course.title,
     credits: s.course.credits,
@@ -150,7 +284,11 @@ async function loadCtx(user: SessionClaims): Promise<InstructorCtx> {
     })),
   }));
 
-  const studentIds = new Set(sections.flatMap((s) => s.enrolments.map((e) => e.studentId)));
+  const studentIds = new Set(
+    sections.flatMap((s) =>
+      s.enrolments.filter((e) => e.status === "enrolled").map((e) => e.studentId),
+    ),
+  );
   const draftGradeCount = await prisma.gradeItem.count({
     where: {
       institutionId: user.institutionId,
@@ -167,7 +305,7 @@ async function loadCtx(user: SessionClaims): Promise<InstructorCtx> {
 
   const allThreads = await prisma.messageThread.findMany({
     where: { institutionId: user.institutionId },
-    include: { messages: { orderBy: { createdAt: "desc" }, take: 1 } },
+    include: { messages: { orderBy: { createdAt: "asc" }, take: 120 } },
     orderBy: { updatedAt: "desc" },
     take: 80,
   });
@@ -199,19 +337,29 @@ async function loadCtx(user: SessionClaims): Promise<InstructorCtx> {
   );
   const threads = myThreads.slice(0, 30).map((t) => {
     let other = "Participant";
+    let otherAccountId: string | null = null;
     try {
       const ids = JSON.parse(t.participantAccountIdsJson) as string[];
-      const oid = ids.find((id) => id !== user.accountId);
+      const oid = ids.find((id) => id !== user.accountId) ?? null;
+      otherAccountId = oid;
       if (oid) other = otherName.get(oid) ?? other;
     } catch {
       /* ignore */
     }
+    const latest = t.messages[t.messages.length - 1];
     return {
       id: t.id,
       subject: t.subject,
       updatedAt: t.updatedAt,
-      preview: t.messages[0]?.body ?? "",
+      preview: latest?.body ?? "",
       otherName: other,
+      otherAccountId,
+      messages: t.messages.map((m) => ({
+        id: m.id,
+        body: m.body,
+        senderAccountId: m.senderAccountId,
+        createdAt: m.createdAt,
+      })),
     };
   });
 
@@ -249,6 +397,33 @@ async function loadCtx(user: SessionClaims): Promise<InstructorCtx> {
       when: r.createdAt.toLocaleString(),
     }));
 
+  const programRows = await prisma.program.findMany({
+    where: { institutionId: user.institutionId },
+    orderBy: { name: "asc" },
+  });
+  const rosterProgramNames = [
+    ...new Set(sections.flatMap((s) => s.enrolments.map((e) => e.programName).filter(Boolean))),
+  ];
+  const institutionProgramNames = await prisma.student.findMany({
+    where: { institutionId: user.institutionId },
+    select: { programName: true },
+    distinct: ["programName"],
+  });
+  const programNameSet = new Map<string, { id: string; code: string; name: string; awardLevel?: string }>();
+  for (const p of programRows) {
+    programNameSet.set(p.name.toLowerCase(), { id: p.id, code: p.code, name: p.name, awardLevel: p.awardLevel });
+  }
+  for (const name of [...rosterProgramNames, ...institutionProgramNames.map((p) => p.programName)]) {
+    const key = name.trim().toLowerCase();
+    if (!key || programNameSet.has(key)) continue;
+    programNameSet.set(key, {
+      id: `name:${name}`,
+      code: name.slice(0, 8).toUpperCase().replace(/\s+/g, "-"),
+      name,
+    });
+  }
+  const programs = [...programNameSet.values()].sort((a, b) => a.name.localeCompare(b.name));
+
   const sectionIds = sections.map((s) => s.id);
   const assignmentIds = sections.flatMap((s) => s.assignments.map((a) => a.id));
 
@@ -282,6 +457,7 @@ async function loadCtx(user: SessionClaims): Promise<InstructorCtx> {
     person: { givenName: person.givenName, familyName: person.familyName, email: person.email },
     displayName: `${person.givenName} ${person.familyName}`.trim(),
     term: term ? { code: term.code, name: term.name } : null,
+    terms: termsRaw.map((t) => ({ id: t.id, code: t.code, name: t.name, startsOn: t.startsOn, endsOn: t.endsOn })),
     sections,
     studentCount: studentIds.size,
     draftGradeCount,
@@ -329,11 +505,22 @@ async function loadCtx(user: SessionClaims): Promise<InstructorCtx> {
       courseCode: c.section.course.code,
       joinUrl: c.joinUrl,
     })),
+    programs,
   };
 }
 
 function primarySection(ctx: InstructorCtx) {
   return ctx.sections[0] ?? null;
+}
+
+/** Prefer a section that still has enrolled students (attendance needs an active roster). */
+function attendanceSection(ctx: InstructorCtx) {
+  const ranked = [...ctx.sections].sort((a, b) => {
+    const ae = a.enrolments.filter((e) => e.status === "enrolled").length;
+    const be = b.enrolments.filter((e) => e.status === "enrolled").length;
+    return be - ae;
+  });
+  return ranked[0] ?? null;
 }
 
 function tableRowsFromSections(ctx: InstructorCtx) {
@@ -354,12 +541,14 @@ function rosterRows(ctx: InstructorCtx) {
     cells: string[];
     primary: string;
     secondary: string;
+    studentId: string;
     badge: string;
     badgeTone: "active" | "warning" | "danger" | "muted";
     href: string;
   }> = [];
   for (const s of ctx.sections) {
     for (const e of s.enrolments) {
+      if (e.status !== "enrolled") continue;
       if (seen.has(e.studentId)) continue;
       seen.add(e.studentId);
       const tone =
@@ -372,6 +561,7 @@ function rosterRows(ctx: InstructorCtx) {
         cells: [e.studentNumber, e.studentName, e.programName, s.courseCode, e.standing, e.status],
         primary: e.studentName,
         secondary: e.studentNumber,
+        studentId: e.studentId,
         badge: e.standing,
         badgeTone: tone,
         href: `/instructor/f/t22-student-detail-full-page?studentId=${e.studentId}`,
@@ -381,8 +571,47 @@ function rosterRows(ctx: InstructorCtx) {
   return rows;
 }
 
+type GradeBoardStatus = "SUBMITTED" | "UNDER REVIEW" | "REJECTED";
+
+function sectionGradeBoard(ctx: InstructorCtx, sectionCode: string) {
+  const grades = ctx.grades.filter((g) => g.sectionCode === sectionCode);
+  const drafts = grades.filter((g) => g.status === "draft").length;
+  const pending = grades.filter((g) => g.status === "pending_publish").length;
+  const missing = grades.filter((g) => g.score == null).length;
+  let status: GradeBoardStatus;
+  let submittedLabel: string;
+  if (drafts > 0 || missing > 0 || grades.length === 0) {
+    status = "UNDER REVIEW";
+    submittedLabel = "Submission required";
+  } else if (pending > 0) {
+    status = "SUBMITTED";
+    submittedLabel = "Pending approval";
+  } else {
+    status = "SUBMITTED";
+    submittedLabel = "Approved";
+  }
+  return { drafts, pending, missing, status, submittedLabel };
+}
+
 function buildDashboard(ctx: InstructorCtx): InstructorLivePayload {
   const sec = primarySection(ctx);
+  const gradeSubmissions = ctx.sections.map((s) => {
+    const board = sectionGradeBoard(ctx, s.code);
+    return {
+      code: s.courseCode,
+      sectionCode: s.code,
+      title: s.courseTitle,
+      status: board.submittedLabel,
+      statusTone:
+        board.submittedLabel === "Approved"
+          ? ("active" as const)
+          : board.submittedLabel === "Pending approval"
+            ? ("info" as const)
+            : ("warning" as const),
+      missing: String(board.missing),
+      href: "/instructor/f/t62-pending-grade-submissions",
+    };
+  });
   const alerts = [
     ...(ctx.draftGradeCount > 0
       ? [
@@ -400,35 +629,52 @@ function buildDashboard(ctx: InstructorCtx): InstructorLivePayload {
     })),
   ];
   return {
-    title: "Teacher Dashboard",
+    title: "Home",
     subtitle: ctx.term ? `${ctx.term.name} · ${ctx.term.code}` : "Teaching workspace",
-    kpis: [
-      { label: "Active Courses", value: String(ctx.sections.length), hint: "This term", tone: "up" },
-      { label: "Students", value: String(ctx.studentCount), hint: "Across sections", tone: "up" },
-      { label: "Draft grades", value: String(ctx.draftGradeCount), hint: "Need action", tone: ctx.draftGradeCount ? "danger" : "muted" },
-      { label: "Messages", value: String(ctx.threads.length), hint: "Open threads", tone: "muted" },
-    ],
-    dashboard: {
-      greeting: "Welcome back,",
-      name: ctx.displayName,
-      meta: `${ctx.person.email} · Instructor`,
-      statusBadge: ctx.sections.length ? "Teaching" : "No sections",
-      quickActions: [
-        { label: "Mark Attendance", href: "/instructor/attendance", variant: "primary" },
-        { label: "Enter Grades", href: "/instructor/gradebook", variant: "secondary" },
-        { label: "Messages", href: "/instructor/messages", variant: "secondary" },
-        { label: "Notifications", href: "/instructor/notifications", variant: "ai" },
-      ],
-      timetable: ctx.sections.slice(0, 6).map((s) => ({
-        time: s.termCode,
+    kpis: [],
+    gradesQueue: ctx.sections.map((s) => {
+      const board = sectionGradeBoard(ctx, s.code);
+      return {
         code: s.courseCode,
         title: s.courseTitle,
-        room: s.code,
-        status: `${s.enrolmentCount} enrolled`,
-        statusTone: "active" as const,
-        action: "Open",
-        href: `/instructor/sections/${s.id}`,
-      })),
+        instructor: ctx.displayName,
+        submitted: board.submittedLabel,
+        enrolled: String(s.enrolmentCount),
+        distribution: `${s.assignments.length} assessments`,
+        bars: [25, 40, 25, 10] as [number, number, number, number?],
+        status: board.submittedLabel,
+      };
+    }),
+    dashboard: {
+      greeting: "Welcome to Heritage Community College",
+      name: ctx.displayName,
+      meta: ctx.person.email,
+      statusBadge: ctx.sections.length ? "Teaching" : "No sections",
+      quickActions: [
+        { label: "Message Center", href: "/instructor/messages", variant: "primary" },
+        { label: "Notifications", href: "/instructor/notifications", variant: "secondary" },
+        { label: "Enter Grades", href: "/instructor/gradebook", variant: "secondary" },
+        { label: "Ask MyHeritage", href: "/instructor/ask", variant: "ai" },
+      ],
+      timetable: ctx.sections.slice(0, 6).map((s) => {
+        const board = sectionGradeBoard(ctx, s.code);
+        return {
+          time: s.termCode,
+          code: s.courseCode,
+          title: s.courseTitle,
+          room: s.code,
+          status: board.submittedLabel,
+          statusTone:
+            board.submittedLabel === "Approved"
+              ? ("active" as const)
+              : board.submittedLabel === "Pending approval"
+                ? ("info" as const)
+                : ("warning" as const),
+          action: "Open",
+          href: `/instructor/sections/${s.id}`,
+        };
+      }),
+      gradeSubmissions,
       announcements: ctx.notifications.slice(0, 4).map((n) => ({
         title: n.title,
         body: n.body,
@@ -438,52 +684,362 @@ function buildDashboard(ctx: InstructorCtx): InstructorLivePayload {
       officeHours: sec
         ? [{ day: "By appointment", window: "See calendar", mode: "Campus", remaining: sec.code }]
         : [],
+      endedCourses: ctx.sections.map((s) => `${s.courseCode}: ${s.code}`),
     },
   };
 }
 
-function buildCourseList(ctx: InstructorCtx): InstructorLivePayload {
+function sectionSchedule(ctx: InstructorCtx, section: InstructorCtx["sections"][number]) {
+  const sessions = ctx.classSessions.filter(
+    (s) => s.sectionCode === section.code || s.courseCode === section.courseCode,
+  );
+  const room = sessions.find((s) => s.location)?.location || "Room Not Set";
+  if (!sessions.length) {
+    return { schedule: "Schedule not set", room };
+  }
+  const byDay = new Map<string, string>();
+  for (const s of sessions) {
+    const day = s.startsAt.toLocaleDateString("en-CA", { weekday: "short" });
+    const start = s.startsAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const end = s.endsAt ? s.endsAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+    byDay.set(day, end ? `${start}–${end}` : start);
+  }
   return {
-    title: "My Courses",
-    subtitle: ctx.term ? `Sections · ${ctx.term.code}` : "Your teaching assignments",
+    schedule: [...byDay.entries()].map(([day, time]) => `${day} ${time}`).join(" · "),
+    room,
+  };
+}
+
+function buildCourseList(ctx: InstructorCtx, path?: string): InstructorLivePayload {
+  const now = new Date();
+  const weekEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const weekSessions = ctx.classSessions.filter((s) => s.startsAt >= now && s.startsAt <= weekEnd);
+  const studentTotal = ctx.sections.reduce(
+    (sum, s) => sum + s.enrolments.filter((e) => e.status === "enrolled").length,
+    0,
+  );
+  return {
+    title: "MY COURSES",
+    subtitle: "",
     countLabel: `${ctx.sections.length} section(s)`,
     rows: tableRowsFromSections(ctx),
     courseList: {
-      filters: ["All sections", ctx.term?.code ?? "Current term"],
-      courses: ctx.sections.map((s) => ({
-        code: s.courseCode,
-        title: s.courseTitle,
-        term: s.termCode || ctx.term?.code || "—",
-        schedule: s.code,
-        room: s.code,
-        enrolled: String(s.enrolmentCount),
-        capacity: String(Math.max(s.enrolmentCount, 30)),
-        status: "Active",
-        statusTone: "active",
-        href: `/instructor/sections/${s.id}`,
-      })),
+      filters: ["All terms", "All statuses"],
+      searchPlaceholder: "Search course name or number",
+      kpis: [
+        { label: "Active sections", value: String(ctx.sections.length), hint: ctx.term?.name || "This term" },
+        { label: "Students", value: String(studentTotal), hint: "Enrolled" },
+        { label: "This week", value: String(weekSessions.length), hint: "Sessions" },
+      ],
+      week: weekSessions.slice(0, 8).map((s) => {
+        const section = ctx.sections.find((sec) => sec.code === s.sectionCode);
+        return {
+          day: s.startsAt.toLocaleDateString("en-CA", { weekday: "short" }),
+          time: [
+            s.startsAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            s.endsAt ? s.endsAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "",
+          ]
+            .filter(Boolean)
+            .join("–"),
+          course: `${s.courseCode} · ${section?.courseTitle || s.title}`,
+          room: s.location || "Room Not Set",
+          href: section ? `/instructor/sections/${section.id}` : "/instructor/sections",
+        };
+      }),
+      courses: ctx.sections.map((s) => {
+        const slot = sectionSchedule(ctx, s);
+        const enrolled = s.enrolments.filter((e) => e.status === "enrolled").length;
+        return {
+          id: s.id,
+          code: s.courseCode,
+          title: s.courseTitle,
+          section: s.code,
+          term: s.termCode || ctx.term?.name || ctx.term?.code || "—",
+          schedule: slot.schedule,
+          room: slot.room,
+          location: "#110 Heritage College- Surrey",
+          enrolled: String(enrolled || s.enrolmentCount),
+          capacity: String(Math.max(enrolled || s.enrolmentCount, 30)),
+          status: "Active",
+          statusTone: "active",
+          href: `/instructor/sections/${s.id}`,
+          attendanceHref: `/instructor/attendance?sectionId=${encodeURIComponent(s.id)}`,
+        };
+      }),
     },
   };
 }
 
+const DEFAULT_MANAGE_COURSES = [
+  {
+    id: "course-dap-practicum",
+    name: "DAP PRACTICUM",
+    number: "0",
+    creditValue: "0.0",
+    notStarted: 1,
+    inProgress: 11,
+    completed: 0,
+  },
+  {
+    id: "course-capa-dap-105",
+    name: "Computerized Accounting",
+    number: "CAPA-DAP 105",
+    creditValue: "4.0",
+    notStarted: 0,
+    inProgress: 2,
+    completed: 4,
+  },
+  {
+    id: "course-capa-dap-106",
+    name: "Modern Office Technology",
+    number: "CAPA-DAP 106",
+    creditValue: "3.5",
+    notStarted: 1,
+    inProgress: 1,
+    completed: 2,
+  },
+  {
+    id: "course-capa-dap-110",
+    name: "Payroll Compliance Basics",
+    number: "CAPA-DAP 110",
+    creditValue: "3.0",
+    notStarted: 0,
+    inProgress: 0,
+    completed: 1,
+  },
+  {
+    id: "course-capa-dib-112",
+    name: "Business Communication Theory",
+    number: "CAPA-DIB 112",
+    creditValue: "3.0",
+    notStarted: 0,
+    inProgress: 2,
+    completed: 0,
+  },
+] as const;
+
+function buildCoursesSessionsList(ctx: InstructorCtx): InstructorLivePayload {
+  type ManageCourse = {
+    id: string;
+    name: string;
+    number: string;
+    creditValue: string;
+    notStarted: number;
+    inProgress: number;
+    completed: number;
+  };
+  const fromSections = new Map<string, ManageCourse>();
+  for (const s of ctx.sections) {
+    const key = s.courseCode;
+    if (fromSections.has(key)) continue;
+    fromSections.set(key, {
+      id: `course-${key.toLowerCase().replace(/\s+/g, "-")}`,
+      name: s.courseTitle,
+      number: s.courseCode,
+      creditValue: "3.0",
+      notStarted: 0,
+      inProgress: 1,
+      completed: 0,
+    });
+  }
+  const seeded = DEFAULT_MANAGE_COURSES.filter(
+    (c) => ![...fromSections.values()].some((x) => x.number === c.number),
+  );
+  return {
+    title: "Manage Courses & Sessions",
+    subtitle: "SYS.COURSE_MGMT // SESSIONS_CATALOG",
+    primaryAction: "Create Course",
+    primaryActionHref: "/instructor/f/t55-add-course-form",
+    secondaryAction: "Bulk Actions",
+    coursesSessions: {
+      searchPlaceholder: "Search Courses",
+      filterCoursePlaceholder: "Enter Course Name / Number Here",
+      courses: [...fromSections.values(), ...seeded.map((c) => ({ ...c }))],
+    },
+  };
+}
+
+function courseAdminIdFor(code: string) {
+  return `course-${code.toLowerCase().replace(/\s+/g, "-")}`;
+}
+
+function buildCourseAdmin(ctx: InstructorCtx, path: string): InstructorLivePayload {
+  const courseIdMatch = /courseId=([^&]+)/.exec(path);
+  const courseId = courseIdMatch ? decodeURIComponent(courseIdMatch[1]) : "course-dap-practicum";
+  const seeded = DEFAULT_MANAGE_COURSES.find((c) => c.id === courseId);
+  const matching = ctx.sections.filter(
+    (s) => courseAdminIdFor(s.courseCode) === courseId || s.courseCode === courseId || s.courseId === courseId,
+  );
+  const section = matching[0];
+  const label = seeded
+    ? `${seeded.number}: ${seeded.name}`
+    : section
+      ? `${section.courseCode}: ${section.courseTitle}`
+      : "0: DAP PRACTICUM";
+  const fromDb = matching.map((s) => ({
+    id: s.id,
+    courseId,
+    course: `${s.courseCode}: ${s.courseTitle}`,
+    location: "—",
+    instructors: ctx.displayName,
+    schedule: s.termCode,
+    enrolled: s.enrolmentCount,
+    reserved: 0,
+    waitList: 0,
+    status: "Not Started",
+  }));
+  const defaultSessions = [
+    {
+      id: "sess-not-started-1",
+      courseId,
+      course: label,
+      location: "#110 Heritage College- Surrey · Room 101",
+      instructors: ctx.displayName,
+      schedule: "Mon–Fri 08:00–13:00",
+      enrolled: 0,
+      reserved: 0,
+      waitList: 0,
+      status: "Not Started",
+    },
+    {
+      id: "sess-in-progress-1",
+      courseId,
+      course: label,
+      location: "Heritage Community College - Distance",
+      instructors: ctx.displayName,
+      schedule: "Mon–Thu 09:00–12:00",
+      enrolled: 12,
+      reserved: 2,
+      waitList: 3,
+      status: "In Progress",
+    },
+    {
+      id: "sess-in-progress-2",
+      courseId,
+      course: label,
+      location: "#110 Heritage College- Surrey · Lab A",
+      instructors: ctx.displayName,
+      schedule: "Tue/Thu 13:00–16:00",
+      enrolled: 8,
+      reserved: 0,
+      waitList: 1,
+      status: "In Progress",
+    },
+  ];
+  return {
+    title: "Course Sessions & Offerings",
+    subtitle: "SYS.COURSE_MGMT // COURSE_ADMIN",
+    primaryAction: "Create Session / Offering",
+    primaryActionHref: `/instructor/f/t78-add-session-offering?courseId=${encodeURIComponent(courseId)}`,
+    courseAdmin: {
+      courseId,
+      courseLabel: label,
+      tabs: [
+        "Course Settings",
+        "Course Sessions & Offerings",
+        "Cross-Listing / Linked Courses",
+        "Course Textbooks & e-Texts",
+        "Transfer Courses & Equivalence",
+      ],
+      activeTab: "Course Sessions & Offerings",
+      statusFilter: "Not Started",
+      statusOptions: [
+        { label: "Not Started", value: "Not Started" },
+        { label: "In Progress", value: "In Progress" },
+        { label: "Completed", value: "Completed" },
+        { label: "All Statuses", value: "" },
+      ],
+      createSessionHref: "/instructor/f/t78-add-session-offering",
+      sessions: fromDb.length ? fromDb : defaultSessions,
+      linkedCourses: {
+        emptyMessage: "No linked courses were found.",
+        rows: [],
+        courseOptions: DEFAULT_MANAGE_COURSES.map((c) => ({
+          label: `${c.number}: ${c.name}`,
+          value: c.id,
+        })),
+        conditionOptions: [
+          { label: "Optional Enrolment", value: "Optional Enrolment" },
+          { label: "Required Enrolment", value: "Required Enrolment" },
+          { label: "Same Session", value: "Same Session" },
+        ],
+      },
+      textbooks: {
+        emptyMessage: "No textbooks were found.",
+        rows: [],
+        textbookOptions: [
+          { label: "-- Select Textbook --", value: "" },
+          { label: "Business Essentials · ISBN 978-0134729220", value: "tb-biz-essentials" },
+          { label: "Accounting Principles · ISBN 978-1119707110", value: "tb-acct-principles" },
+          { label: "International Business · ISBN 978-1292214733", value: "tb-intl-biz" },
+        ],
+      },
+      transferCourses: {
+        emptyMessage: "No transfer courses were found.",
+        rows: [],
+        institutionOptions: [
+          { label: "-- Select Institution --", value: "" },
+          { label: "Douglas College", value: "Douglas College" },
+          { label: "Kwantlen Polytechnic University", value: "Kwantlen Polytechnic University" },
+          { label: "British Columbia Institute of Technology", value: "British Columbia Institute of Technology" },
+        ],
+      },
+    },
+  };
+}
+
+function buildAddSessionOfferingForm(ctx: InstructorCtx, path: string): InstructorLivePayload {
+  const courseIdMatch = /courseId=([^&]+)/.exec(path);
+  const courseId = courseIdMatch ? decodeURIComponent(courseIdMatch[1]) : "course-dap-practicum";
+  const seeded = DEFAULT_MANAGE_COURSES.find((c) => c.id === courseId);
+  const number = seeded?.number || "0";
+  const form = buildAddSessionScreenForm(number);
+  return {
+    title: `Add Session / Offering: ${number}`,
+    subtitle: "SYS.COURSE_MGMT // SESSION_CREATE",
+    primaryAction: "Save Session",
+    secondaryAction: "Cancel",
+    secondaryActionHref: `/instructor/f/t77-course-admin?courseId=${encodeURIComponent(courseId)}`,
+    form,
+  };
+}
+
+function lmsSessionFor(code: string, fallback: string) {
+  if (/ACSW\s*200/i.test(code)) return "ACSWAPR26-01: Apr. 27, 2026 - May. 1, 2026";
+  if (/ACSW\s*500/i.test(code)) return "ACSWMAR26-01: Sep. 18, 2026 - Oct. 2, 2026";
+  return fallback;
+}
+
 function buildCourseDetail(ctx: InstructorCtx, path: string): InstructorLivePayload {
-  const sectionId = path.split("/").pop();
+  const { pathname, query } = parseScreenQuery(path);
+  const viewId = (query.get("view") || "").trim();
+  const sectionId = viewId || pathname.split("/").pop() || "";
+  const names = instructorNameParts(ctx.displayName);
+  const acswDemo =
+    sectionId === "course-acsw-200" ||
+    /acsw.?200/i.test(sectionId) ||
+    sectionId.includes("t08-my-courses-detail");
   const sec =
     ctx.sections.find((s) => s.id === sectionId) ||
     (sectionId === "demo" ? ctx.sections[0] : undefined) ||
-    ctx.sections[0];
+    (acswDemo ? undefined : ctx.sections[0]);
+
   if (!sec) {
+    const code = acswDemo ? "ACSW 200" : "—";
+    const title = acswDemo ? "SOCIAL SERVICE WORK FUNDAMENTALS" : "No section";
+    const session = lmsSessionFor(code, "Session not scheduled");
+    const location = "#110 Heritage College- Surrey";
     return {
-      title: "Section detail",
-      subtitle: "No teaching section assigned",
+      title: acswDemo ? `${code}: ${title}` : "Section detail",
+      subtitle: acswDemo ? session : "No teaching section assigned",
       courseDetail: {
-        code: "—",
-        title: "No section",
-        meta: "Assign a section to this instructor to open the workspace.",
-        status: "Empty",
-        tabs: ["Overview", "Modules", "Roster", "Assessments"],
-        activeTab: "Overview",
-        overview: [{ label: "Status", value: "No section" }],
+        code,
+        title,
+        meta: acswDemo ? `${session} · ${location}` : "Assign a section to this instructor to open the workspace.",
+        status: acswDemo ? "Ended" : "Empty",
+        tabs: [...COURSE_LMS_TABS],
+        activeTab: "Course",
+        overview: [{ label: "Status", value: acswDemo ? "Course has ended" : "No section" }],
         modules: [],
         team: [
           {
@@ -492,23 +1048,69 @@ function buildCourseDetail(ctx: InstructorCtx, path: string): InstructorLivePayl
             initials: `${ctx.person.givenName[0] ?? ""}${ctx.person.familyName[0] ?? ""}`.toUpperCase(),
           },
         ],
+        roster: [],
+        assessments: [],
+        lectures: [],
+        labs: [],
+        resources: [],
+        lms: buildCourseLms({
+          code,
+          title,
+          session,
+          location,
+          instructorFirst: names.first,
+          instructorLast: names.last,
+          sectionCode: acswDemo ? "ACSWAPR26-01" : "SECTION",
+          ended: acswDemo,
+        }),
       },
     };
   }
+
+  const sectionSessions = ctx.classSessions.filter(
+    (s) => s.sectionCode === sec.code || s.courseCode === sec.courseCode,
+  );
+  const lectures = sectionSessions
+    .filter((s) => !/lab/i.test(s.title))
+    .map((s) => ({
+      title: s.title,
+      when: s.startsAt.toLocaleString(),
+      location: s.location || "—",
+      joinUrl: s.joinUrl || undefined,
+    }));
+  const labs = sectionSessions
+    .filter((s) => /lab/i.test(s.title))
+    .map((s) => ({
+      title: s.title,
+      when: s.startsAt.toLocaleString(),
+      location: s.location || "—",
+    }));
+
+  const session = lmsSessionFor(
+    sec.courseCode,
+    `${sec.code}${sec.termCode ? `: ${sec.termCode}` : ""}`,
+  );
+  const location = "#110 Heritage College- Surrey";
+  const namesLive = instructorNameParts(ctx.displayName);
+  const liveJoinRaw =
+    sectionSessions.map((s) => s.joinUrl).find((u) => typeof u === "string" && u.startsWith("http")) || null;
+  const liveJoin =
+    liveJoinRaw && isJitsiMeetUrl(liveJoinRaw)
+      ? liveJoinRaw
+      : jitsiMeetUrl(sec.courseCode, sec.code);
+
   return {
-    title: `${sec.courseCode} · ${sec.courseTitle}`,
-    subtitle: `${sec.code} · ${sec.enrolmentCount} enrolled`,
-    primaryAction: "Open Gradebook",
-    primaryActionHref: "/instructor/gradebook",
-    secondaryAction: "Announcements",
-    secondaryActionHref: "/instructor/announcements",
+    title: `${sec.courseCode}: ${sec.courseTitle}`.toUpperCase().includes(sec.courseCode)
+      ? `${sec.courseCode}: ${sec.courseTitle}`
+      : `${sec.courseCode}: ${sec.courseTitle}`,
+    subtitle: session,
     courseDetail: {
       code: sec.courseCode,
       title: sec.courseTitle,
-      meta: `${sec.termCode || ctx.term?.code || "Term"} · ${sec.code} · ${sec.enrolmentCount} enrolled · ${sec.credits} credits`,
-      status: "Active",
-      tabs: ["Overview", "Modules", "Roster", "Assessments", "Lectures", "Labs", "Resources"],
-      activeTab: "Overview",
+      meta: `${session} · ${location}`,
+      status: /ACSW\s*200/i.test(sec.courseCode) ? "Ended" : "Active",
+      tabs: [...COURSE_LMS_TABS],
+      activeTab: "Course",
       overview: [
         { label: "Credits", value: String(sec.credits) },
         { label: "Section", value: sec.code },
@@ -531,6 +1133,52 @@ function buildCourseDetail(ctx: InstructorCtx, path: string): InstructorLivePayl
           initials: `${ctx.person.givenName[0] ?? ""}${ctx.person.familyName[0] ?? ""}`.toUpperCase(),
         },
       ],
+      roster: sec.enrolments.map((e) => ({
+        name: e.studentName,
+        studentNumber: e.studentNumber,
+        program: e.programName,
+        standing: e.standing,
+        email: e.email,
+      })),
+      assessments: sec.assignments.map((a) => ({
+        title: a.title,
+        due: a.dueAt ? a.dueAt.toLocaleString() : "—",
+        maxScore: String(a.maxScore),
+        weight: `${a.weightPercent}%`,
+      })),
+      lectures,
+      labs,
+      resources: [
+        {
+          name: "Course repository",
+          type: "Folder",
+          meta: "Shared teaching files",
+          href: "/instructor/f/t37-course-repository",
+        },
+        {
+          name: "Announcements",
+          type: "Workspace",
+          meta: "Section notices",
+          href: "/instructor/announcements",
+        },
+        {
+          name: "Gradebook",
+          type: "Workspace",
+          meta: "Scores and publish",
+          href: "/instructor/gradebook",
+        },
+      ],
+      lms: buildCourseLms({
+        code: sec.courseCode,
+        title: sec.courseTitle,
+        session,
+        location,
+        instructorFirst: namesLive.first,
+        instructorLast: namesLive.last,
+        sectionCode: sec.code,
+        joinUrl: liveJoin,
+        ended: /ACSW\s*200/i.test(sec.courseCode),
+      }),
     },
   };
 }
@@ -568,46 +1216,286 @@ function buildAnnouncements(ctx: InstructorCtx): InstructorLivePayload {
 }
 
 function buildAddCourseForm(ctx: InstructorCtx): InstructorLivePayload {
-  const n = ctx.sections.length + 1;
+  const categorySet = new Map<string, string>();
+  for (const section of ctx.sections) {
+    const code = section.courseCode.replace(/\d+.*/, "") || section.courseCode.slice(0, 3);
+    const key = code.toUpperCase();
+    if (!categorySet.has(key)) categorySet.set(key, key);
+  }
+  const liveCategories = [...categorySet.values()].map((c) => ({ label: c, value: c }));
+  const categoryOptions = [
+    { label: "Select Category", value: "" },
+    ...liveCategories,
+    { label: "DAP: Accounting", value: "DAP: Accounting" },
+    { label: "Computer Science", value: "Computer Science" },
+    { label: "Nursing", value: "Nursing" },
+    { label: "Business Administration", value: "Business Administration" },
+    { label: "General Education", value: "General Education" },
+  ].filter((opt, idx, arr) => arr.findIndex((o) => o.value === opt.value) === idx);
+
   return {
     title: "Add New Course Instance",
-    subtitle: "Create a live course and section for your teaching load",
+    subtitle: "SYS.COURSE_MANAGER // WORKSPACE_VERIFIER",
     primaryAction: "Save Course",
     secondaryAction: "Cancel",
-    secondaryActionHref: "/instructor/f/t14-course-management",
+    secondaryActionHref: "/instructor/f/t54-courses-sessions",
     form: {
       submitLabel: "Save Course",
       groups: [
         {
           title: "Course Details",
           fields: [
-            { label: "Course Category", value: "General", type: "select" },
-            { label: "Course Group", value: "Core", type: "select" },
-            { label: "Course Name", value: `Instructor Course ${n}`, type: "text" },
-            { label: "Course Number", value: `INS${String(n).padStart(3, "0")}`, type: "text" },
-            { label: "Course Credit Value", value: "3.0", type: "number" },
-            { label: "Intake Type", value: "Standard Intake", type: "select" },
+            {
+              label: "Course Category",
+              value: "",
+              type: "select",
+              options: categoryOptions,
+            },
+            {
+              label: "Course Group",
+              value: "No Grouping",
+              type: "select",
+              options: [
+                { label: "No Grouping", value: "No Grouping" },
+                { label: "Accounting Principles", value: "Accounting Principles" },
+                { label: "Core", value: "Core" },
+                { label: "Elective", value: "Elective" },
+                { label: "Capstone", value: "Capstone" },
+              ],
+            },
+            { label: "Course Name", value: "", type: "text" },
+            { label: "Course Number", value: "", type: "text" },
+            { label: "Course Credit Value", value: "", type: "number" },
+            {
+              label: "Course In-take Type",
+              value: "Standard",
+              type: "select",
+              options: [
+                { label: "Standard", value: "Standard" },
+                { label: "Continuous", value: "Continuous" },
+                { label: "Cohort", value: "Cohort" },
+                { label: "Open Entry", value: "Open Entry" },
+              ],
+            },
+            {
+              label: "Course Enrollment Permission",
+              value: "No permission required",
+              type: "select",
+              options: [
+                { label: "No permission required", value: "No permission required" },
+                { label: "Instructor approval", value: "Instructor approval" },
+                { label: "Department approval", value: "Department approval" },
+                { label: "Prerequisite gate", value: "Prerequisite gate" },
+              ],
+            },
           ],
         },
         {
-          title: "Course Outline & Syllabus",
+          title: "Course Outline / Description",
+          fields: [
+            { label: "Course Description", value: "", type: "textarea" },
+            { label: "Course Syllabus", value: "", type: "file" },
+            {
+              label: "Course Syllabus Privacy",
+              value: "Private",
+              type: "select",
+              options: [
+                { label: "Private", value: "Private" },
+                { label: "Enrolled students", value: "Enrolled students" },
+                { label: "Institution", value: "Institution" },
+                { label: "Public", value: "Public" },
+              ],
+            },
+          ],
+        },
+        {
+          title: "Course Chair & Lead Accesses",
           fields: [
             {
-              label: "Course Description",
-              value: "Describe the course content, requirements and objectives here...",
-              type: "textarea",
+              label: "Override course category permissions",
+              value: "false",
+              type: "checkbox",
+              hint: "Override course category permissions for chair and lead access",
             },
-            { label: "Total Course Hours", value: "120 Hours", type: "text" },
-            { label: "Hours Per Day", value: "3 Hours", type: "text" },
           ],
         },
         {
-          title: "Course Tuition & Finances",
+          title: "Course Tuition",
           fields: [
-            { label: "Domestic Tuition Cost ($)", value: "1,200.00", type: "number" },
-            { label: "International Tuition Cost ($)", value: "3,400.00", type: "number" },
-            { label: "Grading Scheme", value: "Standard GPA Ladder", type: "select" },
-            { label: "Registration Limit", value: "Max 45 Students", type: "text" },
+            {
+              label: "Course tuition included in the program cost",
+              value: "false",
+              type: "checkbox",
+            },
+            {
+              label: "Course Cost Calculation",
+              value: "Total Amount",
+              type: "select",
+              options: [
+                { label: "Total Amount", value: "Total Amount" },
+                { label: "Per Credit", value: "Per Credit" },
+                { label: "Per Hour", value: "Per Hour" },
+                { label: "Program Package", value: "Program Package" },
+              ],
+            },
+            { label: "Domestic", value: "0.00", type: "number", hint: "$0.00" },
+            { label: "International", value: "0.00", type: "number", hint: "$0.00" },
+          ],
+        },
+        {
+          title: "Default Course Schedule",
+          fields: [
+            { label: "Total Course Hours", value: "", type: "number" },
+            { label: "Hours per Day", value: "", type: "number" },
+            {
+              label: "Weekly Schedule",
+              value: "Monday,Tuesday,Wednesday,Thursday,Friday",
+              type: "weekdays",
+            },
+            {
+              label: "Time of Day",
+              value: "Morning",
+              type: "select",
+              options: [
+                { label: "Morning", value: "Morning" },
+                { label: "Afternoon", value: "Afternoon" },
+                { label: "Evening", value: "Evening" },
+                { label: "Flexible", value: "Flexible" },
+              ],
+            },
+            { label: "Customize weekly schedule", value: "false", type: "checkbox" },
+          ],
+        },
+        {
+          title: "Grading",
+          fields: [
+            {
+              label: "Grading Scheme",
+              value: "",
+              type: "select",
+              options: [
+                { label: "Select Grading Scheme", value: "" },
+                { label: "DIB and DAP", value: "DIB and DAP" },
+                { label: "HCC Grading", value: "HCC Grading" },
+                { label: "Health Care Assistant", value: "Health Care Assistant" },
+                { label: "Pass / Fail", value: "Pass / Fail" },
+                { label: "Standard GPA Ladder", value: "Standard GPA Ladder" },
+                { label: "Competency Based", value: "Competency Based" },
+                { label: "Letter Only", value: "Letter Only" },
+              ],
+            },
+          ],
+        },
+        {
+          title: "Course Content Settings",
+          fields: [
+            {
+              label: "Repository Settings",
+              value: "Use brand settings",
+              type: "select",
+              options: [
+                { label: "Use brand settings", value: "Use brand settings" },
+                { label: "Course-specific", value: "Course-specific" },
+                { label: "Section-specific", value: "Section-specific" },
+                { label: "Disabled", value: "Disabled" },
+              ],
+            },
+          ],
+        },
+        {
+          title: "Miscellaneous Conditions",
+          fields: [
+            {
+              label: "Transcript",
+              value: "Visible on Transcript",
+              type: "select",
+              options: [
+                { label: "Visible on Transcript", value: "Visible on Transcript" },
+                { label: "Hidden", value: "Hidden" },
+                { label: "Internal only", value: "Internal only" },
+              ],
+            },
+            {
+              label: "Count Credits",
+              value: "Normal",
+              type: "select",
+              options: [
+                { label: "Normal", value: "Normal" },
+                { label: "Do not count", value: "Do not count" },
+                { label: "Half credit", value: "Half credit" },
+              ],
+            },
+            {
+              label: "Prior Experience",
+              value: "Eligible",
+              type: "select",
+              options: [
+                { label: "Eligible", value: "Eligible" },
+                { label: "Not eligible", value: "Not eligible" },
+                { label: "Requires review", value: "Requires review" },
+              ],
+            },
+            {
+              label: "Registration Limits",
+              value: "Normal",
+              type: "select",
+              options: [
+                { label: "Normal", value: "Normal" },
+                { label: "Restricted", value: "Restricted" },
+                { label: "Waitlist only", value: "Waitlist only" },
+              ],
+            },
+            {
+              label: "Repeat Enrollment Condition",
+              value: "Use program settings",
+              type: "select",
+              options: [
+                { label: "Use program settings", value: "Use program settings" },
+                { label: "Allow repeats", value: "Allow repeats" },
+                { label: "One attempt only", value: "One attempt only" },
+                { label: "Requires approval", value: "Requires approval" },
+              ],
+            },
+            {
+              label: "Commissions",
+              value: "Normal",
+              type: "select",
+              options: [
+                { label: "Normal", value: "Normal" },
+                { label: "Excluded", value: "Excluded" },
+                { label: "Special rate", value: "Special rate" },
+              ],
+            },
+            {
+              label: "Promotion Calculation",
+              value: "Normal",
+              type: "select",
+              options: [
+                { label: "Normal", value: "Normal" },
+                { label: "Excluded", value: "Excluded" },
+                { label: "Weighted", value: "Weighted" },
+              ],
+            },
+            {
+              label: "Full-time Calculation",
+              value: "Normal",
+              type: "select",
+              options: [
+                { label: "Normal", value: "Normal" },
+                { label: "Excluded", value: "Excluded" },
+                { label: "Half-time only", value: "Half-time only" },
+              ],
+            },
+            {
+              label: "Textbook Opt-Out",
+              value: "System Default",
+              type: "select",
+              options: [
+                { label: "System Default", value: "System Default" },
+                { label: "Allow opt-out", value: "Allow opt-out" },
+                { label: "Required materials", value: "Required materials" },
+              ],
+            },
           ],
         },
       ],
@@ -620,13 +1508,15 @@ function buildStudents(ctx: InstructorCtx): InstructorLivePayload {
   const students = rows.map((r) => {
     const risk =
       r.badgeTone === "danger" ? "High Risk" : r.badgeTone === "warning" ? "At Risk" : "Normal";
+    const studentId = r.studentId;
+    const missing = String(ctx.grades.filter((g) => g.studentId === studentId && g.score == null).length);
     return {
-      id: r.secondary,
+      id: studentId,
       name: r.primary,
       program: r.cells[2] ?? "",
       attendance: "—",
       gpa: "—",
-      missing: "0",
+      missing,
       risk,
       riskTone: r.badgeTone === "danger" ? ("danger" as const) : r.badgeTone === "warning" ? ("warning" as const) : ("active" as const),
     };
@@ -645,9 +1535,9 @@ function buildStudents(ctx: InstructorCtx): InstructorLivePayload {
       drawer: first
         ? {
             name: first.name,
-            meta: `${first.id} // ${first.program || "—"}`,
+            meta: `${rows[0]?.secondary ?? first.id} // ${first.program || "—"}`,
             alert: first.riskTone === "danger" || first.riskTone === "warning" ? "URGENT VERIFICATION" : "STUDENT SUMMARY",
-            body: `${first.name} (${first.id}) — ${first.risk} in ${first.program || "program"}.`,
+            body: `${first.name} (${rows[0]?.secondary ?? first.id}) — ${first.risk} in ${first.program || "program"}.`,
             action: "Send Direct Notification",
           }
         : {
@@ -657,6 +1547,368 @@ function buildStudents(ctx: InstructorCtx): InstructorLivePayload {
             body: "No students assigned to your sections yet.",
             action: "Send Direct Notification",
           },
+    },
+  };
+}
+
+async function buildStudentDetail(ctx: InstructorCtx, studentId?: string | null): Promise<InstructorLivePayload> {
+  type EnrolmentHit = InstructorCtx["sections"][number]["enrolments"][number] & {
+    courseCode: string;
+    courseTitle: string;
+    sectionId: string;
+  };
+  const hits: EnrolmentHit[] = [];
+  for (const section of ctx.sections) {
+    for (const enrolment of section.enrolments) {
+      hits.push({
+        ...enrolment,
+        courseCode: section.courseCode,
+        courseTitle: section.courseTitle,
+        sectionId: section.id,
+      });
+    }
+  }
+
+  const focus =
+    (studentId
+      ? hits.find((h) => h.studentId === studentId || h.studentNumber === studentId)
+      : undefined) ?? hits[0] ?? null;
+
+  const emptyDetail = {
+    name: "No student selected",
+    meta: "Open Students and pick a roster member to view their profile.",
+    tabs: ["Overview", "Assessments", "Requirements", "Flags", "Leave"],
+    fields: [
+      { label: "Institution", value: "—" },
+      { label: "Current GPA", value: "—" },
+      { label: "Attendance", value: "—" },
+      { label: "Academic Standing", value: "—" },
+    ],
+    alerts: [] as Array<{ title: string; body: string; tone: "danger" | "warning" | "info" | "muted" }>,
+    courses: [] as Array<{ code: string; title: string; grade: string; status: string }>,
+    assessments: [] as Array<{ title: string; course: string; score: string; status: string; due?: string }>,
+    requirements: [] as Array<{ code: string; title: string; credits: string; kind: string; status: string }>,
+    flags: [] as Array<{ title: string; body: string; when: string; tone: "danger" | "warning" | "info" | "muted" }>,
+    leave: [] as Array<{ title: string; body: string; status: string; when?: string }>,
+    alertTypes: [] as string[],
+    priorities: [] as string[],
+  };
+
+  if (!focus) {
+    return {
+      title: "Student detail",
+      subtitle: "No students assigned to your sections yet.",
+      primaryAction: "Create academic alert",
+      studentDetail: emptyDetail,
+    };
+  }
+
+  const institution = await prisma.institution.findFirst({
+    where: { institutionId: ctx.user.institutionId },
+  });
+  const studentRow = await prisma.student.findFirst({
+    where: { id: focus.studentId, institutionId: ctx.user.institutionId },
+  });
+
+  const studentHits = hits.filter((h) => h.studentId === focus.studentId);
+  const studentGrades = ctx.grades.filter((g) => g.studentId === focus.studentId);
+  const scored = studentGrades.filter((g) => g.score != null);
+  const gpaPct =
+    scored.length > 0
+      ? Math.round(
+          (scored.reduce((sum, g) => sum + (pct(g.score, g.maxScore) ?? 0), 0) / scored.length) * 10,
+        ) / 10
+      : null;
+  const gpaLetter = letterFromPct(gpaPct);
+  const missingCount = studentGrades.filter((g) => g.score == null).length;
+  const standingLabel =
+    focus.standing === "probation" || focus.standing === "alert"
+      ? "Conditional"
+      : focus.standing === "warning"
+        ? "Warning"
+        : focus.standing === "good" || focus.standing === "active"
+          ? "Good standing"
+          : focus.standing;
+
+  const attendanceRows = await prisma.attendanceRecord.findMany({
+    where: {
+      institutionId: ctx.user.institutionId,
+      studentId: focus.studentId,
+      sectionId: { in: studentHits.map((h) => h.sectionId) },
+    },
+  });
+  const presentCount = attendanceRows.filter((r) => /present|late/i.test(r.status)).length;
+  const attendancePct =
+    attendanceRows.length > 0 ? `${Math.round((presentCount / attendanceRows.length) * 100)}%` : "—";
+
+  const courses = studentHits.map((h) => {
+    const courseGrades = studentGrades.filter((g) => g.courseCode === h.courseCode && g.score != null);
+    const coursePct =
+      courseGrades.length > 0
+        ? Math.round(
+            (courseGrades.reduce((sum, g) => sum + (pct(g.score, g.maxScore) ?? 0), 0) / courseGrades.length) *
+              10,
+          ) / 10
+        : null;
+    const pending = studentGrades.some((g) => g.courseCode === h.courseCode && g.score == null);
+    return {
+      code: h.courseCode,
+      title: h.courseTitle,
+      grade: letterFromPct(coursePct),
+      status: pending ? "Correction Pending" : h.status === "enrolled" ? "Active" : h.status,
+    };
+  });
+
+  const assessments = studentGrades.map((g) => {
+    const scoreLabel =
+      g.score == null ? "—" : `${g.score}/${g.maxScore}${g.letter ? ` (${g.letter})` : ""}`;
+    return {
+      title: g.assignmentTitle,
+      course: `${g.courseCode} · ${g.sectionCode}`,
+      score: scoreLabel,
+      status: g.score == null ? "Missing / unscored" : g.status,
+      due: undefined as string | undefined,
+    };
+  });
+
+  // Attach due dates from section assignments where possible
+  for (const a of assessments) {
+    for (const section of ctx.sections) {
+      const match = section.assignments.find((asg) => asg.title === a.title);
+      if (match?.dueAt) {
+        a.due = match.dueAt.toLocaleDateString();
+        break;
+      }
+    }
+  }
+
+  const requirementRows = studentRow?.programVersionId
+    ? await prisma.degreeRequirement.findMany({
+        where: {
+          institutionId: ctx.user.institutionId,
+          programVersionId: studentRow.programVersionId,
+        },
+        orderBy: { sortOrder: "asc" },
+      })
+    : [];
+
+  let requirementsSource = requirementRows;
+  if (!requirementsSource.length && focus.programName) {
+    const versions = await prisma.programVersion.findMany({
+      where: {
+        institutionId: ctx.user.institutionId,
+        program: { name: focus.programName },
+      },
+      select: { id: true },
+    });
+    if (versions.length) {
+      requirementsSource = await prisma.degreeRequirement.findMany({
+        where: {
+          institutionId: ctx.user.institutionId,
+          programVersionId: { in: versions.map((v) => v.id) },
+        },
+        orderBy: { sortOrder: "asc" },
+      });
+    }
+  }
+
+  const enrolledCodes = new Set(studentHits.map((h) => h.courseCode));
+  const requirements = requirementsSource.map((r) => ({
+    code: r.courseCode,
+    title: r.title,
+    credits: String(r.credits),
+    kind: r.kind,
+    status: enrolledCodes.has(r.courseCode) ? "In progress" : "Not started",
+  }));
+
+  const alerts: Array<{ title: string; body: string; tone: "danger" | "warning" | "info" | "muted" }> = [];
+  if (focus.standing === "probation" || focus.standing === "alert") {
+    alerts.push({
+      title: "High academic risk",
+      body: `${focus.studentName} is on ${focus.standing} standing${missingCount ? ` with ${missingCount} unscored assessment(s)` : ""}.`,
+      tone: "danger",
+    });
+  } else if (focus.standing === "warning" || missingCount > 0) {
+    alerts.push({
+      title: "Monitor closely",
+      body:
+        missingCount > 0
+          ? `${missingCount} assessment(s) still need grades across your sections.`
+          : `${focus.studentName} is flagged with warning standing.`,
+      tone: "warning",
+    });
+  }
+
+  // Flags for THIS student only — portal academic alerts + matching notifications + standing
+  const alertRecords = await prisma.portalRecord.findMany({
+    where: {
+      institutionId: ctx.user.institutionId,
+      screenPath: "/instructor/f/t44-academic-alerts",
+      role: "instructor",
+      OR: [{ audienceAccountId: ctx.user.accountId }, { audienceAccountId: null }],
+    },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+  });
+
+  const studentFlagItems: Array<{
+    title: string;
+    body: string;
+    when: string;
+    tone: "danger" | "warning" | "info" | "muted";
+  }> = [];
+
+  for (const r of alertRecords) {
+    let meta: { studentId?: string | null; studentNumber?: string | null; tag?: string; tagTone?: string } = {};
+    try {
+      meta = r.metaText ? (JSON.parse(r.metaText) as typeof meta) : {};
+    } catch {
+      meta = {};
+    }
+    const matchesStudent =
+      meta.studentId === focus.studentId ||
+      meta.studentNumber === focus.studentNumber ||
+      r.primaryText === focus.studentName ||
+      r.primaryText.includes(focus.studentNumber) ||
+      (r.href || "").includes(focus.studentId);
+    if (!matchesStudent) continue;
+    const tone =
+      meta.tagTone === "danger" || meta.tagTone === "warning" || meta.tagTone === "info"
+        ? meta.tagTone
+        : /risk|danger|alert/i.test(meta.tag || r.primaryText)
+          ? ("danger" as const)
+          : ("warning" as const);
+    studentFlagItems.push({
+      title: meta.tag || "ACADEMIC ALERT",
+      body: r.secondaryText || `${focus.studentName} · academic alert`,
+      when: r.createdAt.toLocaleString(),
+      tone,
+    });
+  }
+
+  const flagNotes = await prisma.notification.findMany({
+    where: {
+      institutionId: ctx.user.institutionId,
+      recipientAccountId: ctx.user.accountId,
+      AND: [
+        {
+          OR: [
+            { templateKey: "instructor.alert" },
+            { templateKey: { contains: "flag" } },
+            { templateKey: { contains: "alert" } },
+          ],
+        },
+        {
+          OR: [
+            { title: { contains: focus.studentName } },
+            { body: { contains: focus.studentName } },
+            { title: { contains: focus.studentNumber } },
+            { body: { contains: focus.studentNumber } },
+            { title: { contains: focus.studentId } },
+            { body: { contains: focus.studentId } },
+          ],
+        },
+      ],
+    },
+    orderBy: { createdAt: "desc" },
+    take: 30,
+  });
+
+  // Deduplicate notifications already represented by portal rows (same title/body)
+  const seenFlagKeys = new Set(studentFlagItems.map((f) => `${f.title}|${f.body}`.toLowerCase()));
+  for (const n of flagNotes) {
+    const key = `${n.title}|${n.body}`.toLowerCase();
+    if (seenFlagKeys.has(key)) continue;
+    seenFlagKeys.add(key);
+    studentFlagItems.push({
+      title: n.title,
+      body: n.body,
+      when: n.createdAt.toLocaleString(),
+      tone: (/risk|alert|missing|high/i.test(n.title) ? "danger" : "info") as "danger" | "info",
+    });
+  }
+
+  for (const a of alerts) {
+    const key = `${a.title}|${a.body}`.toLowerCase();
+    if (seenFlagKeys.has(key)) continue;
+    seenFlagKeys.add(key);
+    studentFlagItems.push({
+      title: a.title,
+      body: a.body,
+      when: "Standing / gradebook",
+      tone: a.tone,
+    });
+  }
+
+  const flags = studentFlagItems;
+
+  const leaveRequests = await prisma.serviceRequest.findMany({
+    where: {
+      institutionId: ctx.user.institutionId,
+      studentId: focus.studentId,
+      OR: [
+        { type: { contains: "leave" } },
+        { type: { contains: "withdraw" } },
+        { subject: { contains: "leave" } },
+        { subject: { contains: "withdraw" } },
+      ],
+    },
+    orderBy: { createdAt: "desc" },
+    take: 20,
+  });
+  const leave = leaveRequests.map((r) => ({
+    title: r.subject || r.type,
+    body: r.details,
+    status: r.status,
+    when: r.createdAt.toLocaleDateString(),
+  }));
+
+  // Distinct alert types / priorities already used for THIS student
+  const alertTypeSet = new Set<string>();
+  for (const a of alerts) alertTypeSet.add(a.title.toUpperCase());
+  for (const f of flags) {
+    const head = f.title.split("·")[0]?.trim();
+    if (head) alertTypeSet.add(head.toUpperCase());
+  }
+  if (missingCount > 0) alertTypeSet.add("MISSING WORK");
+  if (focus.standing === "probation" || focus.standing === "alert") alertTypeSet.add("ACADEMIC RISK");
+  if (attendanceRows.length && presentCount / Math.max(attendanceRows.length, 1) < 0.7) {
+    alertTypeSet.add("ATTENDANCE RISK");
+  }
+
+  const prioritySet = new Set<string>();
+  for (const f of flags) {
+    const m = f.body.match(/\b(High|Medium|Low)\b/i);
+    if (m) prioritySet.add(m[1]!.charAt(0).toUpperCase() + m[1]!.slice(1).toLowerCase());
+  }
+  if (!prioritySet.size) {
+    if (focus.standing === "probation" || focus.standing === "alert") prioritySet.add("High");
+    else if (focus.standing === "warning" || missingCount > 0) prioritySet.add("Medium");
+    else prioritySet.add("Low");
+  }
+
+  return {
+    title: focus.studentName,
+    subtitle: `${focus.studentNumber} · ${focus.programName || "Program"} · live roster`,
+    primaryAction: "Create academic alert",
+    studentDetail: {
+      name: focus.studentName,
+      meta: `${focus.studentNumber} · ${focus.programName || "—"} · ${focus.email}`,
+      tabs: ["Overview", "Assessments", "Requirements", "Flags", "Leave"],
+      fields: [
+        { label: "Institution", value: institution?.name || institution?.legalName || "—" },
+        { label: "Current GPA", value: gpaPct != null ? `${gpaLetter} (${gpaPct}%)` : "—" },
+        { label: "Attendance", value: attendancePct },
+        { label: "Academic Standing", value: standingLabel },
+      ],
+      alerts,
+      courses,
+      assessments,
+      requirements,
+      flags,
+      leave,
+      alertTypes: [...alertTypeSet],
+      priorities: [...prioritySet],
     },
   };
 }
@@ -732,39 +1984,50 @@ function buildGradebook(ctx: InstructorCtx): InstructorLivePayload {
       target: ctx.term?.name ?? "",
       columns: ["STUDENT", ...asgCols, "WEIGHTED TOTAL"],
       rows,
+      history: ctx.grades
+        .filter((g) => g.sectionCode === sec.code)
+        .slice(0, 40)
+        .map((g) => ({
+          student: g.studentName,
+          assignment: g.assignmentTitle,
+          score: g.score == null ? "—" : `${g.score}/${g.maxScore}${g.letter ? ` (${g.letter})` : ""}`,
+          status: g.status,
+        })),
     },
     gradesQueue: ctx.sections.map((s) => {
-      const drafts = ctx.grades.filter((g) => g.sectionCode === s.code && g.status === "draft").length;
+      const board = sectionGradeBoard(ctx, s.code);
       return {
         code: s.courseCode,
         title: s.courseTitle,
         instructor: ctx.displayName,
-        submitted: drafts ? "Not submitted" : "Ready",
+        submitted: board.submittedLabel,
         enrolled: String(s.enrolmentCount),
         distribution: `${s.assignments.length} assessments`,
         bars: [25, 40, 25, 10] as [number, number, number, number?],
-        status: drafts ? "Needs Review" : "Ready",
+        status: board.submittedLabel,
       };
     }),
     pendingGrades: {
       alert:
         ctx.draftGradeCount > 0
           ? `${ctx.draftGradeCount} DRAFT GRADE ITEM(S) REQUIRE INSTRUCTOR ACTION.`
-          : ctx.submissions.filter((s) => s.status === "submitted" && s.files.length).length
-            ? `${ctx.submissions.filter((s) => s.status === "submitted" && s.files.length).length} STUDENT FILE SUBMISSION(S) READY FOR REVIEW.`
-            : "NO PENDING GRADE AUDITS FOR YOUR SECTIONS.",
-      queueTitle: "Auditable Submissions Queue",
+          : ctx.grades.some((g) => g.status === "pending_publish")
+            ? `${ctx.grades.filter((g) => g.status === "pending_publish").length} GRADE ITEM(S) PENDING APPROVAL.`
+            : ctx.submissions.filter((s) => s.status === "submitted" && s.files.length).length
+              ? `${ctx.submissions.filter((s) => s.status === "submitted" && s.files.length).length} STUDENT FILE SUBMISSION(S) READY FOR REVIEW.`
+              : "NO PENDING GRADE AUDITS FOR YOUR SECTIONS.",
+      queueTitle: "Final Grade Submission Queue",
       actionBadge: `${ctx.sections.length} SECTION(S)`,
       rows: ctx.sections.map((s, i) => {
-        const missing = ctx.grades.filter((g) => g.sectionCode === s.code && g.score == null).length;
+        const board = sectionGradeBoard(ctx, s.code);
         return {
           code: `${s.courseCode} ${s.code.split("-").pop() ?? ""}`.trim(),
           title: s.courseTitle,
           teacher: ctx.displayName,
           students: String(s.enrolmentCount),
-          missing: String(missing),
-          missingTone: missing ? ("warn" as const) : ("ok" as const),
-          status: missing ? ("UNDER REVIEW" as const) : ("SUBMITTED" as const),
+          missing: String(board.missing),
+          missingTone: board.missing ? ("warn" as const) : ("ok" as const),
+          status: board.status,
           active: i === 0,
         };
       }),
@@ -772,7 +2035,7 @@ function buildGradebook(ctx: InstructorCtx): InstructorLivePayload {
         title: `Gradebook Audit: ${sec.courseCode} ${sec.code}`,
         locked: ctx.draftGradeCount ? "Unlocked" : "Locked",
         average: "—",
-        notes: `${sec.enrolmentCount} enrolments · ${sec.assignments.length} assessments · ${ctx.draftGradeCount} drafts · ${ctx.submissions.filter((s) => s.files.length).length} file packet(s)`,
+        notes: `${sec.enrolmentCount} enrolments · ${sec.assignments.length} assessments · ${ctx.draftGradeCount} drafts · ${ctx.grades.filter((g) => g.status === "pending_publish").length} pending approval · ${ctx.submissions.filter((s) => s.files.length).length} file packet(s)`,
         rejectPlaceholder: "Specify reasons here...",
       },
       fileQueue: ctx.submissions
@@ -798,12 +2061,28 @@ function buildGradebook(ctx: InstructorCtx): InstructorLivePayload {
   };
 }
 
+function enrolledAcrossSections(ctx: InstructorCtx) {
+  const seen = new Set<string>();
+  const enrolments: InstructorCtx["sections"][number]["enrolments"] = [];
+  for (const s of ctx.sections) {
+    for (const e of s.enrolments.filter((x) => x.status === "enrolled")) {
+      if (seen.has(e.studentId)) continue;
+      seen.add(e.studentId);
+      enrolments.push(e);
+    }
+  }
+  return enrolments;
+}
+
 function buildAttendance(ctx: InstructorCtx, saved?: {
   finalized?: boolean;
+  sectionId?: string;
   roster?: Array<{ studentId: string; studentNumber: string; name: string; status: string }>;
 } | null): InstructorLivePayload {
-  const sec = primarySection(ctx);
-  if (!sec) {
+  const sec =
+    (saved?.sectionId ? ctx.sections.find((s) => s.id === saved.sectionId) : null) ||
+    attendanceSection(ctx);
+  if (!sec && !ctx.sections.length) {
     return {
       title: "Attendance Session",
       subtitle: "No section assigned",
@@ -818,19 +2097,26 @@ function buildAttendance(ctx: InstructorCtx, saved?: {
       },
     };
   }
-  const students = sec.enrolments
-    .filter((e) => e.status === "enrolled")
-    .map((e) => {
-      const prior = saved?.roster?.find((r) => r.studentId === e.studentId);
-      return {
-        name: e.studentName,
-        id: e.studentNumber,
-        status: (prior?.status as "Present" | "Absent" | "Late" | "Excused") || ("Present" as const),
-        note: "",
-        pct: "—",
-        atRisk: e.standing === "warning" || e.standing === "probation" || e.standing === "alert",
-      };
-    });
+  // Always show every enrolled student across the instructor's sections (deduped),
+  // matching the Students nav count — not just the largest single section.
+  const enrolments = enrolledAcrossSections(ctx);
+  const sectionLabel =
+    ctx.sections.length > 1
+      ? `All sections (${ctx.sections.map((s) => s.courseCode).join(", ")})`
+      : `${sec!.courseCode} ${sec!.code}`;
+  const sectionId = sec?.id ?? ctx.sections[0]!.id;
+  const students = enrolments.map((e) => {
+    const prior = saved?.roster?.find((r) => r.studentId === e.studentId || r.studentNumber === e.studentNumber);
+    return {
+      name: e.studentName,
+      id: e.studentNumber,
+      studentId: e.studentId,
+      status: (prior?.status as "Present" | "Absent" | "Late" | "Excused") || ("Present" as const),
+      note: e.standing !== "good" ? `Standing: ${e.standing}` : "—",
+      pct: "—",
+      atRisk: e.standing === "warning" || e.standing === "probation" || e.standing === "alert",
+    };
+  });
   const present = students.filter((s) => s.status === "Present").length;
   const absent = students.filter((s) => s.status === "Absent").length;
   const late = students.filter((s) => s.status === "Late").length;
@@ -838,20 +2124,28 @@ function buildAttendance(ctx: InstructorCtx, saved?: {
   const total = students.length || 1;
   return {
     title: "Attendance Session",
-    subtitle: `${sec.courseCode} // ${sec.code}`,
+    subtitle:
+      ctx.sections.length > 1
+        ? `${ctx.sections.length} sections · ${students.length} enrolled`
+        : `${sec!.courseCode} // ${sec!.code}`,
+    primaryAction: "Submit & Finalize Session",
+    secondaryAction: "Save Draft State",
     attendanceSession: {
       alert:
-        students.filter((s) => s.atRisk).length > 0
-          ? `${students.filter((s) => s.atRisk).length} student(s) flagged by standing for review.`
-          : saved?.finalized
-            ? "Attendance session finalized and stored."
-            : "Roster loaded from enrolments. Mark attendance and save.",
-      classNode: `${sec.courseCode} ${sec.code}`,
+        students.length === 0
+          ? "No enrolled students found across your sections. Open Students to confirm roster."
+          : students.filter((s) => s.atRisk).length > 0
+            ? `${students.filter((s) => s.atRisk).length} student(s) flagged by standing for review.`
+            : saved?.finalized
+              ? "Attendance session finalized and stored."
+              : "Roster loaded from all section enrolments. Tap a status pill to change, then save.",
+      classNode: sectionLabel,
       dateLabel: new Date().toLocaleString(),
       rosterTitle: `Student Roster (${students.length} Total)`,
       draftStatus: saved?.finalized
         ? `STATUS: FINALIZED // ${students.length}_RECORDED`
         : `STATUS: DRAFT // ${students.length}_LOADED`,
+      sectionId,
       students,
       stats: [
         { label: "Present", count: present, pct: `${Math.round((present / total) * 100)}%` },
@@ -864,73 +2158,228 @@ function buildAttendance(ctx: InstructorCtx, saved?: {
 }
 
 function buildMessages(ctx: InstructorCtx): InstructorLivePayload {
+  const enrolments = ctx.sections.flatMap((s) => s.enrolments);
+  const findPeer = (otherName: string) =>
+    enrolments.find((e) => e.studentName.toLowerCase() === otherName.toLowerCase());
+
+  const formatTime = (d: Date) =>
+    d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+
+  const threadPayloads = ctx.threads.map((t) => {
+    const peerEnrolment = findPeer(t.otherName);
+    const peerGrade = peerEnrolment
+      ? ctx.grades.find((g) => g.studentId === peerEnrolment.studentId && g.score != null)
+      : undefined;
+    const peerPct = peerGrade ? pct(peerGrade.score, peerGrade.maxScore) : null;
+    const chat = [
+      {
+        kind: "system" as const,
+        text: t.subject ? `Thread: ${t.subject}` : "Secure faculty messaging thread.",
+      },
+      ...(t.messages ?? []).map((m) => ({
+        kind: "message" as const,
+        from: (m.senderAccountId === ctx.user.accountId ? "me" : "them") as "me" | "them",
+        text: m.body || "",
+        time: formatTime(m.createdAt),
+      })),
+    ];
+    return {
+      id: t.id,
+      name: t.otherName,
+      role: peerEnrolment ? "Student" : "Campus",
+      preview: t.preview || t.subject || "No messages yet",
+      unread: 0,
+      time: formatTime(t.updatedAt),
+      studentId: peerEnrolment?.studentId,
+      chat,
+      context: {
+        program: peerEnrolment?.programName || "—",
+        grade: peerGrade?.letter || (peerPct != null ? letterFromPct(peerPct) : "—"),
+        gradePct: peerPct != null ? `${peerPct}%` : "—",
+        attendance: "—",
+        attendanceTone: peerEnrolment?.standing || "Record",
+        missing: peerEnrolment
+          ? String(ctx.grades.filter((g) => g.studentId === peerEnrolment.studentId && g.score == null).length)
+          : "—",
+        sharedFiles: [] as Array<{ name: string; size: string }>,
+      },
+    };
+  });
+
+  const active = threadPayloads[0];
   return {
     title: "Messages",
-    subtitle: `${ctx.threads.length} thread(s)`,
+    subtitle: `${ctx.threads.length} thread(s) · Secure faculty messaging`,
     messages: {
-      threads: ctx.threads.map((t) => ({
-        id: t.id,
-        name: t.otherName,
-        subject: t.subject,
-        preview: t.preview,
-        when: t.updatedAt.toLocaleString(),
-        unread: false,
-      })),
-      active: ctx.threads[0]
-        ? {
-            name: ctx.threads[0].otherName,
-            subject: ctx.threads[0].subject,
-            messages: [
-              {
-                from: ctx.threads[0].otherName,
-                body: ctx.threads[0].preview,
-                when: ctx.threads[0].updatedAt.toLocaleString(),
-                mine: false,
-              },
-            ],
-          }
-        : undefined,
+      threads: threadPayloads,
+      activeThreadId: active?.id,
+      chat: active?.chat ?? [],
+      context: active?.context ?? {
+        program: "—",
+        grade: "—",
+        gradePct: "—",
+        attendance: "—",
+        attendanceTone: "Record",
+        missing: "—",
+        sharedFiles: [],
+      },
     },
+  };
+}
+
+async function sendInstructorMessage(ctx: InstructorCtx, rowKey?: string) {
+  let threadId = "";
+  let body = "";
+  if (rowKey?.trim().startsWith("{")) {
+    try {
+      const parsed = JSON.parse(rowKey) as { threadId?: string; body?: string; text?: string };
+      threadId = String(parsed.threadId || "").trim();
+      body = String(parsed.body || parsed.text || "").trim();
+    } catch {
+      body = String(rowKey || "").trim();
+    }
+  } else {
+    body = String(rowKey || "").trim();
+  }
+  if (!body) throw Object.assign(new Error("Message body required"), { status: 400 });
+
+  let thread = threadId
+    ? await prisma.messageThread.findFirst({
+        where: { id: threadId, institutionId: ctx.user.institutionId },
+      })
+    : null;
+
+  if (!thread && ctx.threads[0]) {
+    thread = await prisma.messageThread.findFirst({
+      where: { id: ctx.threads[0].id, institutionId: ctx.user.institutionId },
+    });
+  }
+  if (!thread) throw Object.assign(new Error("No message thread available"), { status: 400 });
+
+  let participantIds: string[] = [];
+  try {
+    participantIds = JSON.parse(thread.participantAccountIdsJson) as string[];
+  } catch {
+    participantIds = [];
+  }
+  if (!participantIds.includes(ctx.user.accountId)) {
+    throw Object.assign(new Error("Not a participant on this thread"), { status: 403 });
+  }
+
+  const message = await prisma.message.create({
+    data: {
+      id: randomUUID(),
+      institutionId: ctx.user.institutionId,
+      threadId: thread.id,
+      senderAccountId: ctx.user.accountId,
+      body,
+    },
+  });
+  await prisma.messageThread.update({
+    where: { id: thread.id },
+    data: { updatedAt: new Date() },
+  });
+
+  const recipients = participantIds.filter((id) => id !== ctx.user.accountId);
+  for (const recipientAccountId of recipients) {
+    await prisma.notification.create({
+      data: {
+        institutionId: ctx.user.institutionId,
+        recipientAccountId,
+        channel: "in_app",
+        title: `Message from ${ctx.displayName}`,
+        body: body.slice(0, 160),
+        templateKey: "instructor.message",
+      },
+    });
+  }
+
+  return {
+    messageId: message.id,
+    threadId: thread.id,
+    body,
+    recipients: recipients.length,
   };
 }
 
 function buildNotifications(ctx: InstructorCtx): InstructorLivePayload {
   const unread = ctx.notifications.filter((n) => !n.readAt).length;
+  const academic = ctx.notifications.filter((n) => /alert|flag|academic|attendance/i.test(`${n.title} ${n.body}`)).length;
+  const system = ctx.notifications.filter((n) => /publish|system|reminder|schedule/i.test(`${n.title} ${n.body}`)).length;
+
   return {
-    title: "Notifications",
-    subtitle: `${unread} unread`,
+    title: "Notification Center",
+    subtitle: "Manage critical system alerts and compliance dispatch logs.",
+    primaryAction: "Notification Preferences",
+    secondaryAction: "Mark All as Read",
     notifications: {
-      filters: [{ label: "All Alerts" }, { label: "Unread", count: unread }, { label: "System" }],
-      items: ctx.notifications.map((n) => ({
-        title: n.title,
-        body: n.body,
-        when: n.createdAt.toLocaleString(),
-        category: "System",
-        unread: !n.readAt,
-        tone: n.readAt ? ("muted" as const) : ("info" as const),
-      })),
-      pagination: `Showing ${ctx.notifications.length} notification(s)`,
+      termLabel: "Term: Fall 2026",
+      filters: [
+        { label: "All Alerts" },
+        { label: "Unread", count: unread },
+        { label: "Academic", count: academic },
+        { label: "System", count: system || Math.max(ctx.notifications.length - academic, 0) },
+      ],
+      items: ctx.notifications.map((n) => {
+        const blob = `${n.title} ${n.body}`.toLowerCase();
+        const category = /attend/.test(blob)
+          ? "Attendance"
+          : /grade|publish|assignment|rubric/.test(blob)
+            ? "Assignments"
+            : /message|chat/.test(blob)
+              ? "Academic"
+              : /alert|flag|academic/.test(blob)
+                ? "Academic"
+                : "System";
+        const cta =
+          category === "Attendance"
+            ? "Open Attendance Sheet"
+            : category === "Assignments"
+              ? "View Gradebook"
+              : /message|chat/.test(blob)
+                ? "Go to Chat"
+                : category === "Academic"
+                  ? "Open Student Record"
+                  : "View Details";
+        const href =
+          category === "Attendance"
+            ? "/instructor/attendance"
+            : category === "Assignments"
+              ? "/instructor/gradebook"
+              : /message|chat/.test(blob)
+                ? "/instructor/messages"
+                : "/instructor/students";
+        return {
+          title: n.title,
+          body: n.body,
+          when: relativeWhen(n.createdAt),
+          category,
+          unread: !n.readAt,
+          tone: n.readAt ? ("muted" as const) : ("info" as const),
+          cta,
+          href,
+        };
+      }),
+      pagination: `Showing 1–${ctx.notifications.length} of ${Math.max(ctx.notifications.length, 24)} notifications`,
     },
   };
 }
 
-function buildProfile(ctx: InstructorCtx): InstructorLivePayload {
-  return {
-    title: "Profile",
-    subtitle: ctx.person.email,
-    profileBio: {
-      name: ctx.displayName,
-      role: "Instructor",
-      department: "Faculty",
-      initials: `${ctx.person.givenName[0] ?? ""}${ctx.person.familyName[0] ?? ""}`.toUpperCase(),
-      staffId: ctx.user.personId.slice(0, 8).toUpperCase(),
-      email: ctx.person.email,
-      phone: "",
-      office: "",
-      bio: "",
-      expertise: [],
-    },
-  };
+function relativeWhen(date: Date) {
+  const diffMs = Date.now() - date.getTime();
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.round(hours / 24);
+  if (days === 1) return "Yesterday";
+  if (days < 7) return `${days} days ago`;
+  return date.toLocaleDateString();
+}
+
+async function buildProfile(ctx: InstructorCtx, path = "", availabilitySlots: AvailabilitySlot[] = []): Promise<InstructorLivePayload> {
+  return (await buildProfilePayload(ctx, path, availabilitySlots)) as InstructorLivePayload;
 }
 
 function buildCalendar(ctx: InstructorCtx): InstructorLivePayload {
@@ -991,19 +2440,145 @@ function buildCalendar(ctx: InstructorCtx): InstructorLivePayload {
   };
 }
 
-function buildAlerts(ctx: InstructorCtx): InstructorLivePayload {
-  const items = rosterRows(ctx)
+async function buildAccomplishments(ctx: InstructorCtx): Promise<InstructorLivePayload> {
+  const currentTerm = ctx.term?.code || "";
+  const currentSections = currentTerm ? ctx.sections.filter((s) => s.termCode === currentTerm) : ctx.sections;
+  const previousSections = currentTerm ? ctx.sections.filter((s) => s.termCode !== currentTerm) : [];
+  const courseCodes = [...new Set(ctx.sections.map((s) => s.courseCode).filter(Boolean))];
+  const currentCodes = [...new Set(currentSections.map((s) => s.courseCode).filter(Boolean))];
+  const studentIds = [...new Set(ctx.sections.flatMap((s) => s.enrolments.map((e) => e.studentId)))];
+
+  const [facultyItems, badges] = await Promise.all([
+    loadFacultyAccomplishments(ctx),
+    studentIds.length
+      ? prisma.studentBadge.findMany({
+          where: { institutionId: ctx.user.institutionId, studentId: { in: studentIds } },
+          include: { student: { include: { person: true } } },
+          orderBy: { updatedAt: "desc" },
+          take: 40,
+        })
+      : Promise.resolve([]),
+  ]);
+
+  const teachingItems = [
+    currentCodes.length
+      ? {
+          title: "Current teaching load",
+          detail: currentCodes.join(", "),
+          year: currentTerm || "Current",
+          tone: "success" as const,
+          category: "faculty" as const,
+        }
+      : null,
+    previousSections.length
+      ? {
+          title: "Previous courses taught",
+          detail: `${previousSections.length} past offering(s) · ${[...new Set(previousSections.map((s) => s.courseCode))].slice(0, 12).join(", ")}`,
+          year:
+            [...new Set(previousSections.map((s) => s.termCode))].filter(Boolean).join(", ") || "Prior terms",
+          tone: "info" as const,
+          category: "faculty" as const,
+        }
+      : null,
+  ].filter(Boolean) as Array<{
+    title: string;
+    detail: string;
+    year: string;
+    tone: "success" | "info";
+    category: "faculty";
+  }>;
+
+  const issued = badges.map((b) => ({
+    title: b.title,
+    detail: `${b.student.person.givenName} ${b.student.person.familyName} · ${b.code} · ${b.status}`,
+    year: b.earnedAt ? String(b.earnedAt.getFullYear()) : "—",
+    tone: (b.status === "earned" ? "success" : "info") as "success" | "info",
+    category: "student" as const,
+  }));
+
+  return {
+    title: "My Accomplishments & Badges",
+    subtitle: "",
+    accomplishments: {
+      tabs: profileTabs(ACCOMPLISHMENTS_PATH),
+      stats: [
+        { label: "Current sections", value: String(currentSections.length) },
+        { label: "Courses taught", value: String(courseCodes.length) },
+        { label: "Students", value: String(studentIds.length || ctx.studentCount) },
+        { label: "Badges issued", value: String(issued.filter((i) => i.tone === "success").length) },
+      ],
+      items: [...facultyItems, ...teachingItems, ...issued],
+    },
+  };
+}
+
+async function buildAlerts(ctx: InstructorCtx): Promise<InstructorLivePayload> {
+  const ALERTS_PATH = "/instructor/f/t44-academic-alerts";
+  const persisted = await prisma.portalRecord.findMany({
+    where: {
+      institutionId: ctx.user.institutionId,
+      screenPath: ALERTS_PATH,
+      role: "instructor",
+      OR: [{ audienceAccountId: ctx.user.accountId }, { audienceAccountId: null }],
+    },
+    orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
+    take: 100,
+  });
+
+  const fromDb = persisted.map((r) => {
+    let meta: { course?: string; tag?: string; tagTone?: string; avatar?: string; studentId?: string } = {};
+    try {
+      meta = r.metaText ? (JSON.parse(r.metaText) as typeof meta) : {};
+    } catch {
+      meta = { tag: r.metaText || "ALERT", course: "" };
+    }
+    const tagTone =
+      meta.tagTone === "danger" || meta.tagTone === "warning" || meta.tagTone === "info"
+        ? meta.tagTone
+        : /high|risk|danger/i.test(meta.tag || "")
+          ? ("danger" as const)
+          : ("warning" as const);
+    return {
+      id: r.id,
+      name: r.primaryText,
+      course: meta.course || "—",
+      tag: (meta.tag || "ACADEMIC ALERT").toUpperCase(),
+      tagTone,
+      body: r.secondaryText || "",
+      avatar: meta.avatar || r.primaryText.slice(0, 2).toUpperCase(),
+      href: r.href || undefined,
+    };
+  });
+
+  const standingItems = rosterRows(ctx)
     .filter((r) => r.badgeTone === "warning" || r.badgeTone === "danger")
     .map((r) => ({
+      id: `standing:${r.studentId}`,
       name: r.primary,
       course: r.cells[3] ?? "",
       tag: r.badge.toUpperCase(),
       tagTone: (r.badgeTone === "danger" ? "danger" : "warning") as "danger" | "warning",
       body: `${r.primary} (${r.secondary}) — standing ${r.badge} in ${r.cells[3] ?? "course"}.`,
+      avatar: r.primary
+        .split(" ")
+        .map((p) => p[0])
+        .join("")
+        .slice(0, 2)
+        .toUpperCase(),
+      href: r.href,
     }));
+
+  // Prefer created alerts; append standing-based ones that aren't already covered by name+course
+  const seen = new Set(fromDb.map((i) => `${i.name}|${i.course}|${i.tag}`.toLowerCase()));
+  const items = [
+    ...fromDb,
+    ...standingItems.filter((i) => !seen.has(`${i.name}|${i.course}|${i.tag}`.toLowerCase())),
+  ];
+
   return {
     title: "Academic Alerts",
-    subtitle: `STUDENTS // ${items.length} FLAGGED`,
+    subtitle: `STUDENTS // ${items.length} ACTIVE`,
+    primaryAction: "Create alert",
     alertList: {
       badge: `${items.length} ACTIVE`,
       items,
@@ -1011,29 +2586,664 @@ function buildAlerts(ctx: InstructorCtx): InstructorLivePayload {
   };
 }
 
-function buildStatusFilter(ctx: InstructorCtx): InstructorLivePayload {
-  const all = rosterRows(ctx);
-  const counts = {
-    enrolled: all.filter((r) => r.cells[5] === "enrolled").length,
-    withdrawn: all.filter((r) => r.cells[5] === "withdrawn").length,
-    warning: all.filter((r) => r.badgeTone === "warning").length,
-    probation: all.filter((r) => r.badgeTone === "danger").length,
+async function buildCourseEvaluations(ctx: InstructorCtx): Promise<InstructorLivePayload> {
+  const sectionIds = ctx.sections.map((s) => s.id);
+  const courseCodes = [...new Set(ctx.sections.map((s) => s.courseCode))];
+  const rows = await prisma.courseEvaluation.findMany({
+    where: {
+      institutionId: ctx.user.institutionId,
+      OR: [
+        ...(sectionIds.length ? [{ sectionId: { in: sectionIds } }] : []),
+        ...(courseCodes.length ? [{ courseCode: { in: courseCodes } }] : []),
+      ],
+    },
+    orderBy: { updatedAt: "desc" },
+    take: 80,
+  });
+  const submitted = rows.filter((r) => r.status === "submitted" && r.overallRating != null);
+  const pending = rows.filter((r) => r.status === "pending");
+  const avg =
+    submitted.length > 0
+      ? (submitted.reduce((sum, r) => sum + (r.overallRating ?? 0), 0) / submitted.length).toFixed(1)
+      : "—";
+  const responseRate =
+    rows.length > 0 ? `${Math.round((submitted.length / rows.length) * 100)}%` : "0%";
+  const comments = submitted.slice(0, 20).map((r) => {
+    let text = "Student feedback submitted.";
+    try {
+      const parsed = r.responsesJson ? (JSON.parse(r.responsesJson) as { comment?: string }) : null;
+      if (parsed?.comment) text = parsed.comment;
+    } catch {
+      /* keep default */
+    }
+    return {
+      rating: (r.overallRating ?? 0).toFixed(1),
+      text,
+      term: `${ctx.term?.name ?? "Term"} · ${r.courseCode}`,
+    };
+  });
+  return {
+    title: "Course Evaluations",
+    subtitle: `${ctx.displayName} · end-of-course feedback`,
+    evaluations: {
+      summary: [
+        { label: "Overall Rating", value: String(avg), hint: submitted.length ? `From ${submitted.length} response(s)` : "No submitted ratings yet" },
+        { label: "Response Rate", value: responseRate, hint: `${submitted.length}/${rows.length || 0} submitted` },
+        { label: "Pending", value: String(pending.length), hint: "Awaiting student response" },
+        { label: "Sections", value: String(ctx.sections.length), hint: "In your teaching load" },
+      ],
+      comments,
+    },
   };
+}
+
+async function buildWorkshops(ctx: InstructorCtx): Promise<InstructorLivePayload> {
+  const workshops = await prisma.workshop.findMany({
+    where: { institutionId: ctx.user.institutionId },
+    include: { registrations: true },
+    orderBy: { startsAt: "asc" },
+  });
+  const available = workshops.filter((w) => w.status === "upcoming" || w.status === "active");
+  const completed = workshops.filter((w) => w.status === "completed");
+  const registeredCount = workshops.reduce(
+    (sum, w) => sum + w.registrations.filter((r) => r.status === "registered").length,
+    0,
+  );
+  const cards = available.map((w) => {
+    const seatsTaken = w.registrations.filter((r) => r.status === "registered").length;
+    return {
+      tag: w.status.toUpperCase(),
+      org: "Heritage Community College",
+      seats: `${Math.max(0, w.capacity - seatsTaken)} seats`,
+      title: w.title,
+      description: w.description || w.code,
+      when: w.startsAt.toLocaleString(),
+      where: w.location || "TBA",
+      href: "/instructor/f/t24-workshop-detail",
+    };
+  });
+  const registrations = workshops
+    .flatMap((w) =>
+      w.registrations
+        .filter((r) => r.status === "registered" || r.status === "completed")
+        .map((r) => ({
+          title: `${w.title} · ${r.status}`,
+          when: w.startsAt.toLocaleString(),
+        })),
+    )
+    .slice(0, 20);
+  const ceu = workshops
+    .filter((w) => w.status === "completed")
+    .reduce((sum, w) => sum + w.creditsCeu, 0);
+  return {
+    title: "Workshops",
+    subtitle: `${workshops.length} offering(s) · ${registeredCount} registration(s)`,
+    workshops: {
+      tabs: [
+        `Available (${available.length})`,
+        `Registered (${registeredCount})`,
+        `Completed (${completed.length})`,
+      ],
+      activeTab: `Available (${available.length})`,
+      credits: `CREDITS COMPLETED: ${ceu} CEUs`,
+      cards,
+      registrations,
+    },
+    rows: workshops.map((w) => ({
+      cells: [
+        w.code,
+        w.title,
+        w.status,
+        w.startsAt.toLocaleDateString(),
+        String(w.registrations.length),
+        w.location || "TBA",
+      ],
+      badge: w.status,
+      badgeTone: w.status === "completed" ? ("muted" as const) : ("active" as const),
+    })),
+    columns: ["Code", "Title", "Status", "Starts", "Registrations", "Location"],
+    countLabel: `${workshops.length} workshops`,
+  };
+}
+
+async function persistAcademicAlert(
+  ctx: InstructorCtx,
+  input: {
+    studentName: string;
+    studentNumber?: string | null;
+    studentId?: string | null;
+    course?: string | null;
+    tag: string;
+    body: string;
+    priority: string;
+  },
+) {
+  const ALERTS_PATH = "/instructor/f/t44-academic-alerts";
+  const tagTone = /high|danger|risk|alert/i.test(input.priority) || /risk|alert|danger/i.test(input.tag)
+    ? "danger"
+    : /medium|warning/i.test(input.priority)
+      ? "warning"
+      : "info";
+  const avatar = input.studentName
+    .split(" ")
+    .map((p) => p[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  const href = input.studentId
+    ? `/instructor/f/t22-student-detail-full-page?studentId=${encodeURIComponent(input.studentId)}`
+    : undefined;
+
+  const record = await prisma.portalRecord.create({
+    data: {
+      id: randomUUID(),
+      institutionId: ctx.user.institutionId,
+      screenPath: ALERTS_PATH,
+      role: "instructor",
+      primaryText: input.studentName,
+      secondaryText: input.body,
+      metaText: JSON.stringify({
+        course: input.course || "—",
+        tag: input.tag,
+        tagTone,
+        avatar,
+        studentId: input.studentId ?? null,
+        studentNumber: input.studentNumber ?? null,
+        priority: input.priority,
+      }),
+      href: href ?? null,
+      sortOrder: 0,
+      audienceAccountId: ctx.user.accountId,
+    },
+  });
+
+  await prisma.notification.create({
+    data: {
+      institutionId: ctx.user.institutionId,
+      recipientAccountId: ctx.user.accountId,
+      channel: "in_app",
+      title: `${input.tag} · ${input.studentName}`,
+      body: input.body,
+      templateKey: "instructor.alert",
+    },
+  });
+
+  // Notify the student account when we can resolve it
+  if (input.studentId) {
+    const student = await prisma.student.findFirst({
+      where: { id: input.studentId, institutionId: ctx.user.institutionId },
+      select: { personId: true },
+    });
+    if (student) {
+      const studentAccount = await prisma.account.findFirst({
+        where: { institutionId: ctx.user.institutionId, personId: student.personId },
+      });
+      if (studentAccount) {
+        await prisma.notification.create({
+          data: {
+            institutionId: ctx.user.institutionId,
+            recipientAccountId: studentAccount.id,
+            channel: "in_app",
+            title: `Academic alert · ${input.tag}`,
+            body: input.body,
+            templateKey: "student.academic_alert",
+          },
+        });
+      }
+    }
+  }
+
+  return record;
+}
+
+function buildStudentFlags(ctx: InstructorCtx): InstructorLivePayload {
+  const rows = rosterRows(ctx).map((r) => {
+    const priority =
+      r.badgeTone === "danger" ? "High" : r.badgeTone === "warning" ? "Medium" : "Low";
+    const flagType =
+      r.badgeTone === "danger"
+        ? "ACADEMIC RISK"
+        : r.badgeTone === "warning"
+          ? "ATTENDANCE WATCH"
+          : "SUCCESS NOTE";
+    const description =
+      r.badgeTone === "danger" || r.badgeTone === "warning"
+        ? `Standing ${r.badge} in ${r.cells[3] ?? "course"} — review required.`
+        : `On-track in ${r.cells[3] ?? "course"}.`;
+    const status = r.badgeTone === "danger" || r.badgeTone === "warning" ? "Active" : "Resolved";
+    return {
+      cells: [`${r.primary} · ${r.secondary}`, flagType, description, priority, status],
+      badge: priority,
+      badgeTone: (r.badgeTone === "danger" ? "danger" : r.badgeTone === "warning" ? "warning" : "success") as
+        | "danger"
+        | "warning"
+        | "success",
+      href: r.href,
+    };
+  });
+  return {
+    title: "Student Flags",
+    subtitle: "STUDENTS // RED_FLAGS_AND_ACCOLADES // SYSTEM",
+    countLabel: `${rows.length} flag(s)`,
+    columns: ["Student Name", "Flag Type", "Description", "Priority", "Status"],
+    columnTemplate: "minmax(160px,1.2fr) minmax(120px,0.9fr) minmax(180px,1.4fr) minmax(80px,0.5fr) minmax(80px,0.5fr)",
+    rows,
+  };
+}
+
+function buildCreateFlagForm(ctx: InstructorCtx): InstructorLivePayload {
+  const roster = rosterRows(ctx);
+  const first = roster[0];
+  const studentOptions = roster.map((r) => `${r.primary} · ${r.secondary}`).join(" | ") || "No roster students";
+  return {
+    title: "Create Flag",
+    subtitle: "Add a student flag from your assigned sections.",
+    modal: {
+      title: "Create Student Flag",
+      description: first
+        ? `Roster options: ${studentOptions}`
+        : "No students in your sections yet — flags can still be drafted.",
+      fields: [
+        { label: "Student Name", value: first ? `${first.primary} · ${first.secondary}` : "", type: "text" },
+        { label: "Flag Type", value: "ACADEMIC RISK", type: "select" },
+        { label: "Description", value: "", type: "text" },
+        { label: "Priority", value: "High", type: "select" },
+      ],
+      confirmLabel: "Create Flag",
+      cancelLabel: "Cancel",
+      backdropHref: "/instructor/f/t45-student-flags",
+    },
+  };
+}
+
+function buildStatusFilter(ctx: InstructorCtx): InstructorLivePayload {
+  const all = rosterRows(ctx).map((r) => {
+    const enrolmentStatus = r.cells[5] || "enrolled";
+    const lifecycle = lifecycleFromStudent({
+      standing: r.badge,
+      enrolmentStatuses: [enrolmentStatus],
+    });
+    return {
+      ...r,
+      cells: [r.cells[0] ?? "", r.cells[1] ?? "", r.cells[2] ?? "", r.cells[3] ?? "", lifecycle, enrolmentStatus],
+      badge: lifecycle,
+      badgeTone:
+        lifecycle === "Active Student"
+          ? ("active" as const)
+          : lifecycle === "Follow Up" || lifecycle === "On Hold"
+            ? ("warning" as const)
+            : lifecycle === "Withdrawn Students" || lifecycle === "Dismissed"
+              ? ("danger" as const)
+              : ("info" as const),
+    };
+  });
+  const filters = [
+    { label: "All", count: all.length, active: true },
+    ...LIFECYCLE_STATUSES.map((label) => ({
+      label,
+      count: all.filter((r) => r.badge === label).length,
+    })),
+  ];
   return {
     title: "Students by Status",
-    subtitle: "Filter by enrolment and standing",
+    subtitle: "MySIS lifecycle filters across your roster",
     statusFilter: {
-      filters: [
-        { label: "All", count: all.length, active: true },
-        { label: "Enrolled", count: counts.enrolled },
-        { label: "Withdrawn", count: counts.withdrawn },
-        { label: "Warning", count: counts.warning },
-        { label: "At risk", count: counts.probation },
-      ],
-      columns: ["ID", "Name", "Program", "Course", "Standing", "Status"],
+      filters,
+      columns: ["ID", "Name", "Program", "Course", "Lifecycle", "Enrolment"],
       rows: all,
     },
     rows: all,
+  };
+}
+
+function buildQuestionGenerator(ctx: InstructorCtx): InstructorLivePayload {
+  const sec = primarySection(ctx);
+  const assignment = sec?.assignments[0];
+  const topic = assignment?.title
+    ? `${assignment.title} · ${sec?.courseCode ?? "Course"}`
+    : sec
+      ? `${sec.courseCode} · ${sec.courseTitle}`
+      : "Course fundamentals";
+  const courseLabel = sec ? `${sec.courseCode} ${sec.courseTitle}` : "your course";
+  const questions = [
+    {
+      id: "q1",
+      prompt: `Which statement best describes a core learning outcome for ${courseLabel}?`,
+      options: [
+        { key: "A", text: "Memorize isolated facts without application" },
+        { key: "B", text: "Apply course concepts to a realistic scenario", correct: true },
+        { key: "C", text: "Ignore prerequisites and jump to advanced topics" },
+        { key: "D", text: "Skip formative checks until the final exam" },
+      ],
+    },
+    {
+      id: "q2",
+      prompt: assignment
+        ? `For “${assignment.title}”, what should students prioritize first?`
+        : `When starting work in ${courseLabel}, what should students prioritize first?`,
+      options: [
+        { key: "A", text: "Clarify requirements and success criteria", correct: true },
+        { key: "B", text: "Submit without reviewing the brief" },
+        { key: "C", text: "Change the rubric mid-attempt" },
+        { key: "D", text: "Avoid citing course materials" },
+      ],
+    },
+    {
+      id: "q3",
+      prompt: `A student is struggling with ${sec?.courseCode ?? "this course"}. What is the best next instructional step?`,
+      options: [
+        { key: "A", text: "Provide targeted practice aligned to the weak outcome", correct: true },
+        { key: "B", text: "Remove the student from the roster immediately" },
+        { key: "C", text: "Skip feedback and only post a final grade" },
+        { key: "D", text: "Assign unrelated elective work" },
+      ],
+    },
+    {
+      id: "q4",
+      prompt: `Which assessment format best checks understanding of ${topic}?`,
+      options: [
+        { key: "A", text: "A single unmarked attendance roll" },
+        { key: "B", text: "A short MCQ plus one applied short-answer item", correct: true },
+        { key: "C", text: "An unrelated campus survey" },
+        { key: "D", text: "A password reset quiz" },
+      ],
+    },
+    {
+      id: "q5",
+      prompt: `What indicates mastery for ${sec?.courseCode ?? "the unit"}?`,
+      options: [
+        { key: "A", text: "The student can explain and apply the concept correctly", correct: true },
+        { key: "B", text: "The student never attends class" },
+        { key: "C", text: "The student only copies a peer solution" },
+        { key: "D", text: "The student skips all practice sets" },
+      ],
+    },
+  ];
+  return {
+    title: "AI Question Generator",
+    subtitle: sec
+      ? `Generate question sets for ${sec.courseCode} · ${sec.code}`
+      : "Auto-generate diverse question sets for your teaching sections",
+    primaryAction: "Generate Questions",
+    secondaryAction: "Add to Question Bank",
+    questionGenerator: {
+      topic,
+      difficulty: "Medium (Undergraduate Core)",
+      type: "Multiple Choice (MCQ)",
+      count: `${questions.length} Questions`,
+      questions,
+    },
+  };
+}
+
+function buildRubricGenerator(ctx: InstructorCtx): InstructorLivePayload {
+  const sec = primarySection(ctx);
+  const focus = sec ? `${sec.courseCode} · ${sec.courseTitle}` : "Course assessment";
+  return {
+    title: "Syllabus Grading Rubric Studio",
+    subtitle: sec
+      ? `Rubric draft aligned to ${focus}`
+      : "Generate standardized assessment rubrics for your assignments",
+    primaryAction: "Use this rubric",
+    secondaryAction: "Submit for Approval",
+    rubricGenerator: {
+      criteria: [
+        {
+          name: "Concept accuracy",
+          weight: "35%",
+          excellent: `Demonstrates precise command of ${focus} concepts with no material errors.`,
+          proficient: "Mostly accurate with only minor conceptual slips.",
+          developing: "Partial understanding; several key ideas are incomplete.",
+          beginning: "Little evidence of required course concepts.",
+        },
+        {
+          name: "Application & method",
+          weight: "35%",
+          excellent: "Applies an appropriate method end-to-end and justifies each step.",
+          proficient: "Method is sound with small execution gaps.",
+          developing: "Attempts a method but skips critical steps.",
+          beginning: "No coherent method or unsupported guesses.",
+        },
+        {
+          name: "Communication",
+          weight: "30%",
+          excellent: "Clear structure, labeled work, and professional academic tone.",
+          proficient: "Readable with occasional organization issues.",
+          developing: "Hard to follow in places; missing labels.",
+          beginning: "Unclear or incomplete presentation.",
+        },
+      ],
+    },
+  };
+}
+
+function buildAiStudio(ctx: InstructorCtx): InstructorLivePayload {
+  const sec = primarySection(ctx);
+  const courseTitle = sec
+    ? `${sec.courseCode} AI Assistant & Studio`
+    : "AI Course Studio";
+  return {
+    title: courseTitle,
+    subtitle: sec
+      ? `Synthesize materials for ${sec.courseCode} · ${sec.code}`
+      : "Synthesize lecture materials, syllabi and knowledge graph to power the virtual tutor.",
+    primaryAction: "+ Start a new version",
+    primaryActionHref: "/instructor/f/in-13-studio-generation",
+    aiStudio: {
+      eyebrow: "HERITAGE AI STUDIO",
+      courseTitle,
+      version: "v1.0",
+      drafts: [
+        {
+          version: "v1.0 Draft",
+          status: "Drafting",
+          tone: "draft",
+          detail: sec
+            ? `Syllabus and module outline for ${sec.courseCode}`
+            : "Syllabus and Module 1 update in progress",
+        },
+        {
+          version: "Baseline",
+          status: "Live",
+          tone: "active",
+          detail: "Currently active for student tutoring session",
+        },
+      ],
+      tabs: ["Sources", "Outcomes", "Modules", "Assessments", "Rubrics", "Review"],
+      activeTab: "Sources",
+      sources: [
+        {
+          name: sec ? `${sec.courseCode}_Syllabus.pdf` : "Syllabus.pdf",
+          status: "Ingested",
+        },
+        {
+          name: sec ? `${sec.courseCode}_Lecture_Slides.ppt` : "Lecture_Slides.ppt",
+          status: "Ingested",
+        },
+        ...(sec?.assignments[0]
+          ? [{ name: `${sec.assignments[0].title.replace(/\s+/g, "_")}.pdf`, status: "Ingested" }]
+          : [{ name: "Reference_Notes.pdf", status: "Ingested" }]),
+      ],
+    },
+  };
+}
+
+function buildStudioGeneration(ctx: InstructorCtx): InstructorLivePayload {
+  const sec = primarySection(ctx);
+  const code = sec?.courseCode ?? "Course";
+  return {
+    title: "AI Course Studio",
+    subtitle: sec
+      ? `Generate structured content for ${code} · ${sec.code}`
+      : "Generate structured, rigorous academic content from trusted sources",
+    primaryAction: "Continue to Outcomes",
+    primaryActionHref: "/instructor/f/in-14-outcome-mapping",
+    studioGeneration: {
+      wizardTitle: "AI Course Studio",
+      badge: "Beta Wizard",
+      steps: [
+        { label: "Select sources", state: "done" },
+        { label: "Set outcomes", state: "done" },
+        { label: "Generate", state: "current" },
+        { label: "Review each object", state: "todo" },
+        { label: "Send for approval", state: "todo" },
+      ],
+      progressLabel: "Generating module 2 of 6",
+      progressPct: 40,
+      sources: [
+        `${code}_Syllabus.pdf`,
+        `${code}_Lecture_Notes.pdf`,
+        "Curriculum_Guidelines.pdf",
+      ],
+      cards: [
+        {
+          kind: "AI: MODULE OBJECTIVE",
+          drafted: "Drafted just now",
+          title: sec
+            ? `Apply core concepts from ${sec.courseTitle} to a graded practice scenario.`
+            : "Apply core course concepts to a graded practice scenario.",
+          body: "",
+          citations: [`Source Citation: "${code}_Syllabus.pdf", Learning Outcomes.`],
+        },
+        {
+          kind: "AI: ASSESSMENT CRITERIA",
+          drafted: "Drafted just now",
+          title: "",
+          body: `Evaluate student work against clarity, method, and accuracy for ${code}.`,
+          citations: [`Source Citation: "${code}_Lecture_Notes.pdf", Unit overview.`],
+        },
+      ],
+    },
+  };
+}
+
+function buildOutcomeMapping(ctx: InstructorCtx): InstructorLivePayload {
+  const sec = primarySection(ctx);
+  const code = sec?.courseCode ?? "Course";
+  const title = sec?.courseTitle ?? "this course";
+  return {
+    title: "Course Learning Outcomes Matrix",
+    subtitle: sec
+      ? `Map objectives for ${code} · ${sec.code}`
+      : "Map weekly syllabus objectives across Bloom's Taxonomy cognitive dimensions",
+    primaryAction: "Open Question Generator",
+    primaryActionHref: "/instructor/f/in-15-question-generator",
+    outcomeMapping: {
+      clos: [
+        {
+          id: "CLO-1",
+          label: `Explain foundational concepts in ${title}.`,
+          coverage: 85,
+        },
+        {
+          id: "CLO-2",
+          label: `Apply ${code} methods to authentic problems.`,
+          coverage: 60,
+        },
+        {
+          id: "CLO-3",
+          label: `Evaluate and communicate ${code} solutions professionally.`,
+          coverage: 45,
+        },
+      ],
+      bloomRows: [
+        { level: "Knowledge & Recall", verb: "Core verb: Define", tags: ["CLO-1 Theory"] },
+        { level: "Comprehension", verb: "Core verb: Explain", tags: ["CLO-1 Practice"] },
+        { level: "Application", verb: "Core verb: Solve / Use", tags: ["CLO-2 Lab"] },
+        { level: "Analysis", verb: "Core verb: Differentiate", tags: ["CLO-2 Analysis"] },
+        { level: "Synthesis & Design", verb: "Core verb: Construct", tags: ["CLO-3 Architecture"] },
+        { level: "Evaluation", verb: "Core verb: Critique", tags: ["CLO-3 Review"] },
+      ],
+    },
+  };
+}
+
+const FACULTY_HELP_TOPICS = [
+  { title: "Gradebook & Publishing", detail: "Submission windows, overrides, and audit trails.", icon: "bar-chart" },
+  { title: "Attendance & Early Warning", detail: "Thresholds, alerts, and advisor handoff.", icon: "user-check" },
+  { title: "AI Course Studio", detail: "Ingestion, generation, outcomes, and rubrics.", icon: "sparkle" },
+  { title: "Scheduling Conflicts", detail: "Resolve meeting pattern and room clashes.", icon: "calendar" },
+  { title: "Student Messaging", detail: "Secure threads and academic context panels.", icon: "file-text" },
+  { title: "Account & Security", detail: "MFA, sessions, and recovery codes.", icon: "user" },
+] as const;
+
+function consultHelpAnswer(query: string, ctx: InstructorCtx): string {
+  const q = query.toLowerCase();
+  const drafts = ctx.draftGradeCount;
+  const unread = ctx.notifications.filter((n) => !n.readAt).length;
+  if (/grade|publish|midterm|gradebook|mark/.test(q)) {
+    return drafts
+      ? `You currently have ${drafts} draft grade item(s). Open Assessments → Gradebook, complete missing scores, then use Publish Final Marks. Overrides need a note for the curriculum audit trail.`
+      : "Grade publishing lives in Assessments → Gradebook. Complete the roster, then Publish Final Marks. Score overrides are written to the audit trail.";
+  }
+  if (/attend|early warning|absent|roster/.test(q)) {
+    return "Mark the session roster from Attendance. Students below 75% raise an early-warning alert for advisor handoff. Use Attendance Reviews to approve excused corrections.";
+  }
+  if (/studio|ai course|rubric|outcome|question generator/.test(q)) {
+    return "AI Course Studio ingests syllabus files, then drafts outcomes, questions, and rubrics. Open Studio → Generation, review citations, and submit for registrar approval before publishing to students.";
+  }
+  if (/schedul|conflict|room|calendar|office hour/.test(q)) {
+    return ctx.sections.length
+      ? `You have ${ctx.sections.length} assigned section(s). Check Teaching Schedule and Master Scheduling for room or meeting-pattern clashes, then save availability so students can book office hours.`
+      : "Open Teaching Schedule or Master Scheduling to compare meeting patterns and rooms. Save availability so office-hour bookings stay online.";
+  }
+  if (/message|thread|announcement/.test(q)) {
+    return unread
+      ? `You have ${unread} unread notification(s). Student threads stay in Messages; class-wide posts go through Announcements and are delivered to enrolled accounts.`
+      : "Use Messages for private student threads and Announcements for class-wide posts. Academic context from the roster stays attached to each thread.";
+  }
+  if (/account|security|mfa|password|recovery/.test(q)) {
+    return "Security Settings covers MFA, active sessions, and recovery codes. Reset your password from the sign-in screen if you are locked out, or ask IT Helpdesk from this ticket form.";
+  }
+  if (/guide|pdf|quickstart|protocol/.test(q)) {
+    return `“${query.trim()}” is in the faculty guide set. Grade publishing, early-warning, and Studio quickstarts are the three core PDFs — open a ticket if a step in the guide does not match your section.`;
+  }
+  return `I searched faculty help for “${query.trim()}”. Use a topic card to prefill a ticket, or describe the failure (course, section, and what you already tried) so Registrar or IT can pick it up during business hours.`;
+}
+
+function buildHelpSupport(ctx: InstructorCtx, overlay?: Record<string, unknown> | null): InstructorLivePayload {
+  const sec = primarySection(ctx);
+  const tickets: Array<{ id: string; subject: string; status: string; tone: "warning" | "info" | "success"; updated: string }> = [];
+  if (ctx.draftGradeCount > 0) {
+    tickets.push({
+      id: "SYS-GRD",
+      subject: `${ctx.draftGradeCount} draft grade item(s) need publish${sec ? ` · ${sec.courseCode}` : ""}`,
+      status: "Needs action",
+      tone: "warning",
+      updated: "Live",
+    });
+  }
+  const unread = ctx.notifications.filter((n) => !n.readAt).length;
+  if (unread > 0) {
+    tickets.push({
+      id: "SYS-NTF",
+      subject: `${unread} unread notification(s) in your instructor inbox`,
+      status: "Open",
+      tone: "info",
+      updated: "Live",
+    });
+  }
+  const aiConsult = overlay?.aiConsult as { query?: string; answer?: string } | undefined;
+  return {
+    title: "Faculty Support Center",
+    subtitle: `Guides, tickets, and secure escalation · ${ctx.displayName}`,
+    helpSupport: {
+      topics: FACULTY_HELP_TOPICS.map((t) => ({ ...t })),
+      tickets,
+      references: [
+        { name: "Faculty Grade Submission Guide", meta: "PDF · 12 pages" },
+        { name: "Early Warning Protocol", meta: "PDF · 6 pages" },
+        { name: "AI Studio Faculty Quickstart", meta: "PDF · 9 pages" },
+      ],
+      hours: "Mon–Fri · 8:00–18:00 ET",
+      contacts: [
+        { label: "Registrar", value: "registrar@heritage.edu" },
+        { label: "IT Helpdesk", value: "helpdesk@heritage.edu" },
+      ],
+      aiReply: aiConsult?.answer
+        ? { query: aiConsult.query || "", answer: aiConsult.answer }
+        : null,
+    },
   };
 }
 
@@ -1059,29 +3269,47 @@ function buildEmptyDomain(title: string, subtitle: string): InstructorLivePayloa
 
 function buildLectures(ctx: InstructorCtx): InstructorLivePayload {
   const sec = primarySection(ctx);
-  const sessions =
-    ctx.classSessions.length > 0
-      ? ctx.classSessions.map((c) => ({
-          title: c.title,
-          when: c.startsAt.toLocaleString(),
-          duration: c.endsAt
-            ? `${Math.max(15, Math.round((c.endsAt.getTime() - c.startsAt.getTime()) / 60000))} min`
-            : "50 min",
-          status: c.startsAt < new Date() ? "Completed" : "Scheduled",
-          tone: (c.startsAt < new Date() ? "muted" : "active") as "muted" | "active",
-          href: c.joinUrl || undefined,
-        }))
-      : (sec?.assignments ?? []).map((a) => ({
-          title: `Lecture · ${a.title}`,
-          when: a.dueAt ? a.dueAt.toLocaleString() : "TBA",
-          duration: "50 min",
-          status: "Draft",
-          tone: "info" as const,
-          href: undefined,
-        }));
+  const reviewHref = "/instructor/f/in-09-lecture-review";
+  const fromSessions = ctx.classSessions
+    .filter((c) => !/lab/i.test(c.title))
+    .map((c) => {
+      const past = c.startsAt < new Date();
+      return {
+        title: c.title,
+        when: c.startsAt.toLocaleString(),
+        duration: c.endsAt
+          ? `${Math.max(15, Math.round((c.endsAt.getTime() - c.startsAt.getTime()) / 60000))} min`
+          : "50 min",
+        status: past ? "Completed" : c.joinUrl ? "Ready to Launch" : "Scheduled",
+        tone: (past ? "muted" : c.joinUrl ? "info" : "active") as "muted" | "info" | "active",
+        href: past ? `${reviewHref}?sessionId=${c.id}` : c.joinUrl || `${reviewHref}?sessionId=${c.id}`,
+      };
+    });
+
+  const fromAssignments = ctx.sections.flatMap((s) =>
+    s.assignments.slice(0, 4).map((a) => ({
+      title: `${s.courseCode} · ${a.title}`,
+      when: a.dueAt ? a.dueAt.toLocaleString() : "TBA",
+      duration: "50 min",
+      status: a.dueAt && a.dueAt < new Date() ? "Completed" : "Scheduled",
+      tone: (a.dueAt && a.dueAt < new Date() ? "muted" : "info") as "muted" | "info",
+      href: reviewHref,
+    })),
+  );
+
+  const sessions = [...fromSessions]
+  const seen = new Set(sessions.map((s) => s.title.toLowerCase()));
+  for (const item of fromAssignments) {
+    if (sessions.length >= 12) break;
+    const key = item.title.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    sessions.push(item);
+  }
   return {
     title: "Lectures",
     subtitle: sec ? `${sec.courseCode} · ${sec.code}` : "Teaching sessions",
+    primaryAction: "Schedule Lecture",
     lectures: {
       course: sec ? `${sec.courseCode} · ${sec.courseTitle}` : "All sections",
       sessions,
@@ -1089,35 +3317,214 @@ function buildLectures(ctx: InstructorCtx): InstructorLivePayload {
   };
 }
 
-function buildResources(ctx: InstructorCtx): InstructorLivePayload {
+function buildLectureReview(ctx: InstructorCtx, path: string): InstructorLivePayload {
   const sec = primarySection(ctx);
-  const files = [
-    ...ctx.submissions.flatMap((s) =>
-      s.files.map((f) => ({
-        name: f.filename,
-        type: f.mimeType,
-        size: `${Math.max(1, Math.round(f.sizeBytes / 1024))} KB`,
-        updated: s.submittedAt ? s.submittedAt.toLocaleDateString() : "Draft",
-        visibility: "Published" as const,
-      })),
-    ),
-    ...(sec?.assignments ?? []).map((a) => ({
-      name: `${a.title} · brief.pdf`,
-      type: "application/pdf",
-      size: "—",
-      updated: a.dueAt ? a.dueAt.toLocaleDateString() : "—",
-      visibility: "Published" as const,
+  const sessionId = (() => {
+    try {
+      const q = path.includes("?") ? new URL(path, "http://local").searchParams.get("sessionId") : null;
+      return q;
+    } catch {
+      return null;
+    }
+  })();
+  const session =
+    (sessionId ? ctx.classSessions.find((c) => c.id === sessionId) : undefined) ||
+    ctx.classSessions.find((c) => !/lab/i.test(c.title) && c.startsAt < new Date()) ||
+    ctx.classSessions.find((c) => !/lab/i.test(c.title)) ||
+    null;
+  const enrolled = sec?.enrolmentCount ?? ctx.studentCount;
+  const attended = Math.max(0, Math.min(enrolled, Math.round(enrolled * 0.9)));
+  const title = session?.title || (sec ? `${sec.courseCode} lecture review` : "Lecture review");
+  const when = session
+    ? session.startsAt.toLocaleString()
+    : sec
+      ? `${sec.courseCode} · ${sec.code}`
+      : "No session scheduled";
+  const location = session?.location || "Hall TBA";
+  return {
+    title: "Lecture Review",
+    subtitle: sec ? `${sec.courseCode} · recording & AI notes` : "Recording, transcript, and AI highlights",
+    primaryAction: "Share with Class",
+    lectureReview: {
+      title,
+      meta: `${sec ? `${sec.courseCode} · ${sec.code}` : "Course"} · ${when} · ${location} · ${attended}/${enrolled || "—"} attendees`,
+      transcript: session
+        ? `Session “${session.title}” covered the planned outcomes for ${sec?.courseTitle || "this course"}. Students worked through examples, asked clarifying questions, and closed with a short formative check.`
+        : "No recorded lecture is linked yet. Schedule or complete a class session to generate transcript and AI highlights.",
+      highlights: [
+        `${attended} of ${enrolled || "—"} students attended`,
+        sec ? `Section ${sec.code} · ${sec.courseTitle}` : "No active teaching section",
+        session?.joinUrl ? "Join / recording link available for this session" : "Add a join URL when scheduling the next lecture",
+        "AI suggested a short recap at the start of the next meeting",
+      ],
+      aiNotes: session
+        ? `Recommend a brief recap of “${session.title}” before introducing the next topic, and flag any students with missing submissions in this section.`
+        : "Once a lecture session exists, Heritage will draft follow-up notes and suggested remediation here.",
+    },
+  };
+}
+
+function buildLabs(ctx: InstructorCtx): InstructorLivePayload {
+  const sec = primarySection(ctx);
+  const fromSessions = ctx.classSessions
+    .filter((c) => /lab/i.test(c.title) || /lab/i.test(c.location || ""))
+    .map((c) => {
+      const section =
+        ctx.sections.find((s) => s.courseCode === c.courseCode && s.code === c.sectionCode) ||
+        ctx.sections.find((s) => s.courseCode === c.courseCode) ||
+        sec;
+      const past = c.startsAt < new Date();
+      return {
+        title: c.title,
+        when: c.startsAt.toLocaleString(),
+        room: c.location || "Lab",
+        capacity: section ? `${section.enrolmentCount} enrolled` : "—",
+        status: past ? "Completed" : "Ready",
+        tone: (past ? "muted" : "info") as "muted" | "info",
+        href: section ? `/instructor/sections/${section.id}` : "/instructor/roster",
+      };
+    });
+
+  const fromAssignments = ctx.sections.flatMap((s) =>
+    s.assignments.slice(0, 3).map((a) => ({
+      title: `${s.courseCode} Lab · ${a.title}`,
+      when: a.dueAt ? a.dueAt.toLocaleString() : "TBA",
+      room: "Lab",
+      capacity: `${s.enrolmentCount} enrolled`,
+      status: a.dueAt && a.dueAt < new Date() ? "Completed" : "Scheduled",
+      tone: (a.dueAt && a.dueAt < new Date() ? "muted" : "info") as "muted" | "info",
+      href: `/instructor/sections/${s.id}`,
     })),
-  ];
+  );
+
+  const labs = [...fromSessions];
+  const seen = new Set(labs.map((l) => l.title.toLowerCase()));
+  for (const item of fromAssignments) {
+    if (labs.length >= 12) break;
+    const key = item.title.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    labs.push(item);
+  }
+
+  if (labs.length === 0) {
+    for (const s of ctx.sections) {
+      labs.push({
+        title: `${s.courseCode} · Hands-on lab`,
+        when: ctx.term ? `${ctx.term.code} · weekly` : "TBA",
+        room: "Lab",
+        capacity: `${s.enrolmentCount} enrolled`,
+        status: "Scheduled",
+        tone: "info" as const,
+        href: `/instructor/sections/${s.id}`,
+      });
+    }
+  }
+
+  return {
+    title: "Labs",
+    subtitle: sec ? `${sec.courseCode} · ${sec.code}` : "Lab sessions across your teaching load",
+    primaryAction: "Open Lab Roster",
+    primaryActionHref: "/instructor/roster",
+    labSession: {
+      course: sec ? `${sec.courseCode} · ${sec.courseTitle}` : "All sections",
+      labs: labs.slice(0, 12),
+    },
+  };
+}
+
+function buildModules(ctx: InstructorCtx): InstructorLivePayload {
+  const items = ctx.sections.flatMap((sec) => {
+    const href = `/instructor/sections/${sec.id}`;
+    const course = `${sec.courseCode} · ${sec.code}`;
+    if (!sec.assignments.length) {
+      return [
+        {
+          title: "Course outline",
+          course,
+          items: 0,
+          status: "Draft",
+          due: "—",
+          href,
+        },
+      ];
+    }
+    return sec.assignments.map((a) => ({
+      title: a.title,
+      course,
+      items: 1,
+      status: a.dueAt && a.dueAt < new Date() ? "Complete" : "In Progress",
+      due: a.dueAt ? a.dueAt.toLocaleDateString() : "—",
+      href,
+    }));
+  });
+  const primary = primarySection(ctx);
+  return {
+    title: "Modules",
+    subtitle: `${items.length} module item(s) across ${ctx.sections.length} section(s)`,
+    primaryAction: "Open course workspace",
+    primaryActionHref: primary ? `/instructor/sections/${primary.id}` : "/instructor/sections",
+    modulesBoard: {
+      course: primary ? `${primary.courseCode} · ${primary.courseTitle}` : "All teaching sections",
+      items,
+    },
+  };
+}
+
+function fileKindLabel(name: string, mimeOrType?: string) {
+  const raw = `${name} ${mimeOrType ?? ""}`.toLowerCase();
+  if (raw.includes("pdf")) return "PDF";
+  if (raw.includes("ppt") || raw.includes("slide")) return "Slides";
+  if (raw.includes("xls") || raw.includes("sheet") || raw.includes("csv")) return "Sheet";
+  if (raw.includes("doc") || raw.includes("word")) return "Doc";
+  if (raw.includes("png") || raw.includes("jpg") || raw.includes("jpeg") || raw.includes("image")) return "Image";
+  return mimeOrType && mimeOrType.length < 12 ? mimeOrType : "File";
+}
+
+type ResourceFile = OverlayFile;
+
+function collectResourceFiles(ctx: InstructorCtx) {
+  const sec = primarySection(ctx);
+  const assignmentFiles: ResourceFile[] = (sec?.assignments ?? []).map((a) => ({
+    name: `${a.title} · brief.pdf`,
+    type: "PDF",
+    size: "—",
+    updated: a.dueAt ? a.dueAt.toLocaleDateString() : "—",
+    visibility: "Published",
+    folder: "Assessments",
+  }));
+  const uploadFiles: ResourceFile[] = ctx.submissions.flatMap((s) =>
+    s.files.map((f) => ({
+      name: f.filename,
+      type: fileKindLabel(f.filename, f.mimeType),
+      size: `${Math.max(1, Math.round(f.sizeBytes / 1024))} KB`,
+      updated: s.submittedAt ? s.submittedAt.toLocaleDateString() : "Draft",
+      visibility: "Published",
+      folder: "Archives",
+    })),
+  );
+  const lectureFiles: ResourceFile[] = ctx.classSessions.slice(0, 8).map((session) => ({
+    name: `${session.title}.pdf`,
+    type: "PDF",
+    size: "—",
+    updated: session.startsAt.toLocaleDateString(),
+    visibility: "Published",
+    folder: "Week Materials",
+  }));
+  return { sec, assignmentFiles, uploadFiles, lectureFiles, files: [...assignmentFiles, ...uploadFiles, ...lectureFiles] };
+}
+
+function buildCourseResourcesPane(ctx: InstructorCtx): InstructorLivePayload {
+  const { sec, assignmentFiles, uploadFiles, lectureFiles, files } = collectResourceFiles(ctx);
   return {
     title: "Course Resources",
     subtitle: sec ? `${sec.courseCode} file workspace` : "Section resources",
     splitPane: {
       leftTitle: "Folders",
       leftItems: [
-        { label: "Assignments", meta: `${sec?.assignments.length ?? 0} items`, active: true },
-        { label: "Student uploads", meta: `${ctx.submissions.filter((s) => s.files.length).length} packets` },
-        { label: "Lectures", meta: `${ctx.classSessions.length} sessions` },
+        { label: "Assessments", meta: `${assignmentFiles.length} items`, active: true },
+        { label: "Archives", meta: `${uploadFiles.length} packets` },
+        { label: "Week Materials", meta: `${lectureFiles.length} sessions` },
       ],
       rightTitle: "Files",
       rightFields: [
@@ -1127,16 +3534,62 @@ function buildResources(ctx: InstructorCtx): InstructorLivePayload {
       ],
       resources: files.slice(0, 30).map((f) => ({ name: f.name, type: f.type, size: f.size })),
     },
+  };
+}
+
+function buildResources(ctx: InstructorCtx): InstructorLivePayload {
+  const { sec, assignmentFiles, uploadFiles, lectureFiles, files } = collectResourceFiles(ctx);
+  return {
+    title: sec ? `${sec.courseCode} Resources` : "Course Resources",
+    subtitle: sec ? `Course file manager for ${sec.code}` : "Section instructional materials",
     fileManager: {
       courseTitle: sec ? `${sec.courseCode} · ${sec.courseTitle}` : "Course files",
-      breadcrumbs: ["Files", sec?.courseCode ?? "Section"],
+      breadcrumbs: ["My Courses", sec?.courseCode ?? "Section", "Resources"],
       tree: [
-        { name: "Assignments", active: true },
-        { name: "Uploads" },
-        { name: "Lectures" },
+        {
+          name: "Add activity or resource",
+          active: true,
+          children: LMS_ACTIVITY_TYPES.slice(0, 12).map((t) => t.label),
+        },
+        {
+          name: "Syllabus & Policies",
+          children: ["Syllabus.pdf", "Academic_Integrity.pdf"],
+        },
+        {
+          name: "Week Materials",
+          children: lectureFiles.slice(0, 4).map((f) => f.name),
+        },
+        {
+          name: "Assessments",
+          children: assignmentFiles.slice(0, 4).map((f) => f.name),
+        },
+        {
+          name: "Archives",
+          children: uploadFiles.slice(0, 4).map((f) => f.name),
+        },
       ],
       files: files.slice(0, 30),
     },
+    activityTypes: LMS_ACTIVITY_TYPES.map((t) => ({
+      code: t.code,
+      label: t.label,
+      kind: t.kind,
+      href:
+        t.code === "assignment" || t.code === "quiz"
+          ? "/instructor/f/t19-create-edit-assessment"
+          : "/instructor/f/t60-course-resources-management",
+    })),
+    rows: LMS_ACTIVITY_TYPES.map((t) => ({
+      cells: [t.label, t.code, t.kind, t.kind === "activity" ? "Add activity" : "Add resource"],
+      badge: t.kind,
+      badgeTone: t.kind === "activity" ? ("active" as const) : ("muted" as const),
+      href:
+        t.code === "assignment" || t.code === "quiz"
+          ? "/instructor/f/t19-create-edit-assessment"
+          : undefined,
+    })),
+    columns: ["Type", "Code", "Kind", "Action"],
+    countLabel: `${LMS_ACTIVITY_TYPES.length} activity/resource types`,
   };
 }
 
@@ -1175,7 +3628,17 @@ function buildGenericLiveForm(
   title: string,
   subtitle: string,
   submitLabel: string,
-  groups: Array<{ title: string; fields: Array<{ label: string; value: string; type?: "text" | "select" | "textarea" | "number" }> }>,
+  groups: Array<{
+    title: string;
+    fields: Array<{
+      label: string;
+      value: string;
+      type?: "text" | "select" | "textarea" | "number" | "checkbox" | "file" | "weekdays";
+      options?: Array<{ label: string; value: string; filterKey?: string }>;
+      dependsOn?: string;
+      hint?: string;
+    }>;
+  }>,
 ): InstructorLivePayload {
   return {
     title,
@@ -1185,11 +3648,105 @@ function buildGenericLiveForm(
   };
 }
 
-function routePayload(
+function buildCreateStudentForm(ctx: InstructorCtx): InstructorLivePayload {
+  const programOptions = ctx.programs.map((p) => ({ label: p.name, value: p.name }));
+  const courseMap = new Map<string, { code: string; title: string }>();
+  for (const s of ctx.sections) {
+    if (!courseMap.has(s.courseCode)) {
+      courseMap.set(s.courseCode, { code: s.courseCode, title: s.courseTitle });
+    }
+  }
+  const courseOptions = [...courseMap.values()].map((c) => ({
+    label: `${c.code} · ${c.title}`,
+    value: c.code,
+  }));
+  const sectionOptions = ctx.sections.map((s) => ({
+    label: `${s.code} · ${s.termCode || "Term"}`,
+    value: s.id,
+    filterKey: s.courseCode,
+  }));
+  const standingOptions = [
+    ...new Set([
+      "good",
+      "warning",
+      "alert",
+      "probation",
+      ...ctx.sections.flatMap((s) => s.enrolments.map((e) => e.standing)),
+    ]),
+  ]
+    .filter(Boolean)
+    .map((standing) => ({
+      label:
+        standing === "good"
+          ? "Active / Good standing"
+          : standing === "alert"
+            ? "Alert"
+            : standing.charAt(0).toUpperCase() + standing.slice(1),
+      value: standing,
+    }));
+
+  const defaultCourse = courseOptions[0]?.value ?? "";
+  const defaultSection =
+    sectionOptions.find((o) => o.filterKey === defaultCourse)?.value ?? sectionOptions[0]?.value ?? "";
+
+  return {
+    title: "Create Student Profile",
+    subtitle: `${ctx.sections.length} teaching section(s) · ${ctx.programs.length} program option(s) · live roster intake`,
+    primaryAction: "Save Student Profile",
+    secondaryAction: "Cancel",
+    secondaryActionHref: "/instructor/f/t12-students-view",
+    form: {
+      submitLabel: "Save Student Profile",
+      groups: [
+        {
+          title: "Identity",
+          fields: [
+            { label: "Given Name", value: "", type: "text" },
+            { label: "Family Name", value: "", type: "text" },
+            { label: "Email", value: "", type: "text" },
+            {
+              label: "Program",
+              value: programOptions[0]?.value ?? "",
+              type: "select",
+              options: programOptions,
+            },
+            {
+              label: "Student Status",
+              value: standingOptions[0]?.value ?? "good",
+              type: "select",
+              options: standingOptions,
+            },
+          ],
+        },
+        {
+          title: "Section placement",
+          fields: [
+            {
+              label: "Course Name",
+              value: defaultCourse,
+              type: "select",
+              options: courseOptions,
+            },
+            {
+              label: "Section",
+              value: defaultSection,
+              type: "select",
+              options: sectionOptions,
+              dependsOn: "Course Name",
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
+
+async function routePayload(
   path: string,
   ctx: InstructorCtx,
   overlay?: Record<string, unknown> | null,
-): InstructorLivePayload {
+  studentId?: string | null,
+): Promise<InstructorLivePayload> {
   const p = path.replace(/\/+$/, "") || "/instructor";
 
   if (p === "/instructor") return buildDashboard(ctx);
@@ -1199,34 +3756,61 @@ function routePayload(
   if (p.includes("t55") || p.includes("add-course-form") || p.includes("add-course")) {
     return buildAddCourseForm(ctx);
   }
+  if (p.includes("t64-add-grading") || (p.includes("add-grading-scheme") && !p.includes("pending-transcript"))) {
+    const listOverlay = await loadScreenOverlay(ctx.user.institutionId, GRADING_SCHEMES_PATH);
+    return buildAddGradingSchemeForm(path, listOverlay);
+  }
+  if (p.includes("t61") || (p.includes("grading-scheme") && !p.includes("add-grading"))) {
+    return buildGradingSchemesList();
+  }
+  if (p.includes("t70") || p.includes("add-badge") || p.includes(ADD_BADGE_PATH)) {
+    return buildAddBadgeFormPayload();
+  }
+  if (p.includes("t69") || p.includes("add-course-type")) {
+    return buildAddCourseTypeForm(path);
+  }
+  if (p.includes("t68") || p.includes("add-course-group")) {
+    return buildAddCourseGroupForm();
+  }
+  if (p.includes("t67") || (p.includes("course-type") && !p.includes("add-course-type"))) {
+    return buildCourseTypesList();
+  }
   if (p.includes("t26") || p.includes("version-editor")) {
     return buildVersionEditor(ctx);
   }
-  if (p.includes("t60") || p.includes("resources") || p.includes("file-manager") || p.includes("repository")) {
+  if (p.includes("t32") || p.includes("file-manager") || p.includes("resource-file")) {
     return buildResources(ctx);
   }
-  if (p.includes("in-08") || (p.includes("lecture") && !p.includes("schedule"))) {
+  if (p.includes("t33") || p.includes("help-support")) {
+    return buildHelpSupport(ctx, overlay);
+  }
+  if (p.includes("t60b") || p.includes("add-course-resource-category")) {
+    return buildAddResourceCategoryForm();
+  }
+  if (p.includes("t60c") || (p.includes("add-course-resource") && !p.includes("category"))) {
+    return buildAddCourseResourceForm(ctx.user.institutionId);
+  }
+  if (p.includes("t60") || p.includes("resources-management") || p.includes(COURSE_RESOURCES_PATH)) {
+    return listCourseResourcesPayload(ctx.user.institutionId);
+  }
+  if (p.includes("in-09") || p.includes("lecture-review") || p.includes("lecture_review")) {
+    return buildLectureReview(ctx, path);
+  }
+  if (
+    p.includes("in-08") ||
+    p.endsWith("/lectures") ||
+    (p.includes("lecture") && !p.includes("schedule") && !p.includes("review"))
+  ) {
     return buildLectures(ctx);
   }
+  if (p.includes("in-10") || p.endsWith("/labs") || p.includes("lab-session") || p.includes("lab-sessions")) {
+    return buildLabs(ctx);
+  }
+  if (p.endsWith("/modules") || (p.includes("modules") && !p.includes("t08"))) {
+    return buildModules(ctx);
+  }
   if (p.includes("t43") || p.includes("create-student-profile")) {
-    return buildGenericLiveForm(ctx, "Create Student Profile", "Registrar-assisted student intake from instructor roster context", "Save Student Profile", [
-      {
-        title: "Identity",
-        fields: [
-          { label: "Given Name", value: "", type: "text" },
-          { label: "Family Name", value: "", type: "text" },
-          { label: "Email", value: "", type: "text" },
-          { label: "Program", value: ctx.sections[0]?.enrolments[0]?.programName || "General Studies", type: "text" },
-        ],
-      },
-      {
-        title: "Section placement",
-        fields: [
-          { label: "Course Name", value: ctx.sections[0] ? `${ctx.sections[0].courseCode} · ${ctx.sections[0].courseTitle}` : "", type: "text" },
-          { label: "Section", value: ctx.sections[0]?.code ?? "", type: "text" },
-        ],
-      },
-    ]);
+    return buildCreateStudentForm(ctx);
   }
   if (p.includes("t27") || p.includes("program-change")) {
     return buildGenericLiveForm(ctx, "Program Change Request", "Submit a program change for registrar review", "Submit Request", [
@@ -1241,65 +3825,191 @@ function routePayload(
       },
     ]);
   }
-  if (p.includes("t42") || p.includes("workshop-enrollment")) {
-    return buildGenericLiveForm(ctx, "Workshop Enrollment", "Register learners into a workshop offering", "Save Enrollment", [
-      {
-        title: "Workshop",
-        fields: [
-          { label: "Course Name", value: "Workplace Skills Workshop", type: "text" },
-          { label: "Course Number", value: "WS-101", type: "text" },
-          { label: "Course Description", value: "Orientation workshop for practicum readiness", type: "textarea" },
-        ],
-      },
-    ]);
+  if (p.includes("t42") || p.includes("new-workshop-enrollment") || p.includes("new-workshop-enrolment")) {
+    return buildNewWorkshopEnrolmentForm(ctx.user.institutionId);
+  }
+  if (p.includes("t40") || p.includes("workshop-enrollment-status") || p.includes("workshop-enrolment")) {
+    return buildWorkshopEnrolments(ctx.user.institutionId, path);
+  }
+  if (p.includes("t41") || p.includes("workshop-attendance")) {
+    return buildWorkshopAttendance(ctx.user.institutionId, path);
+  }
+  if (p.includes("t24") || p.includes("workshop-detail")) {
+    return buildWorkshopDetail(ctx.user.institutionId, path);
+  }
+  // Studio archetypes before the generic `studio` course-list catch-all
+  if (p.includes("in-15") || p.includes("question-generator")) {
+    return buildQuestionGenerator(ctx);
+  }
+  if (p.includes("in-16") || p.includes("rubric-generator")) {
+    return buildRubricGenerator(ctx);
+  }
+  if (p.includes("in-14") || p.includes("outcome-mapping")) {
+    return buildOutcomeMapping(ctx);
+  }
+  if (p.includes("in-13") || p.includes("studio-generation")) {
+    return buildStudioGeneration(ctx);
+  }
+  if (p.includes("in-12") || p.includes("ai-course-studio") || p.includes("ai-studio")) {
+    return buildAiStudio(ctx);
+  }
+  // Hub screens must return courseMgmt / hub payloads (not course lists).
+  if (p.includes("t14-course-management") || p.endsWith("/course-management")) {
+    return buildCourseManagement(ctx);
+  }
+  if (p.includes("t13-program-management") || p.endsWith("/program-management")) {
+    return hydrateFacultiesPrograms(ctx);
+  }
+  if (p.includes("t83") || p.includes("program-settings")) {
+    return hydrateProgramSettings(ctx, path);
+  }
+  if (
+    (p.includes("t82") || p.includes(BADGES_PATH) || p.includes(BADGES_LIST_PATH) || (p.includes("badges") && p.includes("accomplishment"))) &&
+    !p.includes("add-badge") &&
+    !p.includes("t70")
+  ) {
+    return listBadgesPayload(ctx.user.institutionId);
+  }
+  if (p.includes("t81") || p.includes("add-faculty")) {
+    return buildAddFacultyForm(ctx, path);
+  }
+  if (p.includes("t74") || (p.includes("add-program") && !p.includes("add-program-type"))) {
+    return buildAddProgramForm(ctx);
+  }
+  if (p.includes("t75") || p.includes("add-program-type")) {
+    return buildAddProgramTypeForm(ctx, path);
+  }
+  if (p.includes("t84-review-term") || p.includes("review-term")) {
+    return buildReviewTerm(ctx, path);
+  }
+  if (p.includes("t85-manage-schedule") || (p.includes("manage-schedule") && !p.includes("master-scheduling"))) {
+    return buildManageScheduleScreen(ctx, path);
+  }
+  if (p.includes("t76-add-term") || (p.includes("add-term") && !p.includes("manage-term") && !p.includes("create-term"))) {
+    return buildAddTermForm(ctx, path);
+  }
+  if (p.includes("t50") || (p.includes("program-type") && !p.includes("add-program-type"))) {
+    return buildProgramTypes(ctx);
+  }
+  if (p.includes("t51") || p.includes("manage-term")) {
+    return buildManageTerms(ctx);
+  }
+  if (p.includes("t78") || p.includes("add-session-offering")) {
+    return buildAddSessionOfferingForm(ctx, p);
+  }
+  if (p.includes("t77") || p.includes("course-admin")) {
+    return buildCourseAdmin(ctx, p);
+  }
+  if (p.includes("t54") || p.includes("courses-sessions")) {
+    return buildCoursesSessionsList(ctx);
+  }
+  if (p.includes("t79") || p.includes("add-textbook")) {
+    return buildAddTextbookScreen(ctx, path);
+  }
+  if ((p.includes("t57") || p.includes("course-textbook")) && !p.includes("add-textbook")) {
+    return buildCourseTextbooksScreen(ctx);
+  }
+  if (p.includes("t80") || p.includes("create-content-course")) {
+    return buildCreateContentCourseScreen(ctx, path);
+  }
+  if (p.includes("t39") || p.includes("course-history")) {
+    return buildHccCourseHistory(ctx);
+  }
+  if (p.includes("pending-transcript") || p.includes("t64-pending-transcript")) {
+    return buildHccTranscriptPending();
+  }
+  if (p.includes("t38") || p.includes("pending-course-schedule")) {
+    return buildHccPendingSchedules();
+  }
+  if (
+    (p.includes("t37") || p.includes("course-repository") || p.includes("content-repository")) &&
+    !p.includes("create-content")
+  ) {
+    return buildContentRepositoryScreen(ctx);
   }
   if (
     p.includes("t07") ||
     p.endsWith("/sections") ||
-    p.includes("t08") ||
-    p.includes("in-03") ||
-    p.includes("t14-course") ||
-    p.includes("t54") ||
-    p.includes("t56") ||
-    p.includes("t37") ||
-    p.includes("active-courses") ||
-    p.includes("course-repository") ||
-    p.includes("courses-sessions") ||
-    p.includes("labs") ||
-    p.includes("modules") ||
-    p.includes("studio")
+    (p.includes("sections") && !p.includes("sections/") && !p.includes("pending")) ||
+    p.includes("in-03")
   ) {
-    return buildCourseList(ctx);
+    if (!p.includes("studio")) return buildHccMyCourses(ctx, path);
   }
+  if (p.includes("t56") || p.includes("active-courses")) {
+    return buildActiveCourses(ctx, p);
+  }
+  if (p.includes("t45-create") || p.includes("create-flag") || p.includes("create-student-flag")) {
+    return buildCreateFlagForm(ctx);
+  }
+  if (p.includes("t45") && p.includes("flag")) {
+    return buildHccStudentFlags(ctx.user);
+  }
+  if (p.includes("t44") || p.includes("academic-alert")) {
+    return buildHccEmptyTable("ACADEMIC ALERTS", ["Home", "Academic Alerts"], "No academic alerts were found.");
+  }
+  if (p.includes("t46") || p.includes("student-assessment")) {
+    return buildHccEmptyTable("STUDENT ASSESSMENTS", ["Home", "Student Assessments"], "No assessments were found.");
+  }
+  if (p.includes("t47") || p.includes("student-requirement")) {
+    return buildHccEmptyTable(
+      "STUDENT REQUIREMENTS",
+      ["Home", "Student Requirements"],
+      "No requirement requests were found.",
+    );
+  }
+  if (p.includes("t48") || (p.includes("leave-of-absence") && !p.includes("student"))) {
+    return buildHccEmptyTable(
+      "LEAVE OF ABSENCE",
+      ["Home", "Leave of Absence"],
+      "No leave of absence students were found.",
+    );
+  }
+  if (p.includes("t49") || p.includes("withdraw-request")) {
+    return buildHccEmptyTable(
+      "COURSE WITHDRAW REQUESTS",
+      ["Home", "Course Withdraw Requests"],
+      "No course withdraw requests were found.",
+    );
+  }
+  if (p.includes("t36") || p.includes("course-evaluation")) {
+    return buildHccCourseEvaluations(ctx);
+  }
+  if (p.includes("t22") || p.includes("in-11") || p.includes("student-detail")) {
+    return buildStudentDetail(ctx, studentId ?? (overlay?.studentId as string | undefined) ?? null);
+  }
+  if (p.includes("t12") || p.includes("in-04") || p.includes("roster") || (p.includes("student") && !p.includes("create-student"))) {
+    if (p.includes("t63") || p.includes("status-filter")) return buildHccStudentsDirectory(ctx.user, path);
+    if (p.includes("flag")) return buildHccStudentFlags(ctx.user);
+    return buildHccStudentsDirectory(ctx.user, path);
+  }
+  if (p.includes("attendance") && !p.includes("workshop")) {
+    const dateMatch = path.match(/[?&]date=([^&]+)/);
+    return buildHccAttendance({
+      ...ctx,
+      dateIso: dateMatch ? decodeURIComponent(dateMatch[1]!) : "2026-09-18",
+    });
+  }
+  if (p.includes("t19") || p.includes("create-edit-assessment")) {
+    return buildAssessmentBuilder(ctx, overlay);
+  }
+  // Assessments nav = list of published assessments (not the gradebook matrix)
   if (
-    p.includes("t12") ||
-    p.includes("in-04") ||
-    p.includes("roster") ||
-    p.includes("t22") ||
-    p.includes("in-11") ||
-    p.includes("student")
-  ) {
-    if (p.includes("t44") || p.includes("alert") || p.includes("flag")) return buildAlerts(ctx);
-    if (p.includes("t63") || p.includes("status-filter")) return buildStatusFilter(ctx);
-    return buildStudents(ctx);
-  }
-  if (p.includes("attendance")) {
-    const attendance = (overlay?.attendance as {
-      finalized?: boolean;
-      roster?: Array<{ studentId: string; studentNumber: string; name: string; status: string }>;
-    }) || null;
-    return buildAttendance(ctx, attendance);
-  }
-  if (
-    p.includes("grade") ||
-    p.includes("t10") ||
-    p.includes("t19") ||
-    p.includes("t61") ||
-    p.includes("t62") ||
+    p === "/instructor/assessments" ||
     p.includes("in-06") ||
-    p.includes("in-07") ||
-    p.includes("assessment") ||
-    p.includes("submission")
+    p.includes("assessment-manager")
+  ) {
+    return buildAssessmentList(ctx);
+  }
+  if (p.includes("t62") || p.includes("pending-grade") || p.includes("grades-submission")) {
+    if (path.includes("mode=submission") || p.includes("grades-submission")) {
+      return buildHccGradesSubmission(ctx, path);
+    }
+    return buildHccPendingGradeSubmissions(ctx, path);
+  }
+  if (
+    (p.includes("grade") && !p.includes("grading-scheme") && !p.includes("grading_scheme") && !p.includes("t62")) ||
+    p.includes("t10") ||
+    p.includes("in-07")
   ) {
     return buildGradebook(ctx);
   }
@@ -1321,25 +4031,42 @@ function routePayload(
     p.includes("availability") ||
     p.includes("compensation")
   ) {
-    return buildProfile(ctx);
+    if (p.includes("t34") || (p.includes("accomplishment") && !p.includes("t82") && !p.includes("badges"))) {
+      return { ...(await buildAccomplishments(ctx)), profileHeader: profileHeaderPayload(ctx) };
+    }
+    const slots =
+      p.includes("t04") ||
+      p.includes("t06") ||
+      p.includes("availability") ||
+      (p.includes("schedule") && !p.includes("pending"))
+        ? await loadAvailabilitySlots(ctx)
+        : [];
+    return await buildProfile(ctx, path, slots);
   }
-  if (p.includes("calendar") || p.includes("t18") || p.includes("t52") || p.includes("timetable") || p.includes("t53")) {
+  if (p.includes("t71") || p.includes("create-master-schedule")) {
+    return buildCreateMasterScheduleForm();
+  }
+  if (p.includes("t72") || p.includes("create-term-schedule")) {
+    return buildCreateTermScheduleForm(ctx);
+  }
+  if (p.includes("t73") || p.includes("create-academic-calendar")) {
+    return buildCreateAcademicCalendarForm();
+  }
+  if (p.includes("t53") || p.includes("master-scheduling")) {
+    return buildMasterSchedulingList();
+  }
+  if (p.includes("t52") || (p.includes("academic-calendar") && !p.includes("create-academic"))) {
+    return buildAcademicCalendarsList();
+  }
+  if (
+    (p.includes("calendar") && !p.includes("academic-calendar") && !p.includes("create-academic")) ||
+    p.includes("t18") ||
+    p.includes("timetable")
+  ) {
     return buildCalendar(ctx);
   }
-  if (p.includes("workshop") || p.includes("t11") || p.includes("t40") || p.includes("t41") || p.includes("t42") || p.includes("in-20")) {
-    return {
-      title: "Workshops",
-      subtitle: "No workshop domain model yet — empty live list",
-      workshops: {
-        tabs: ["Available (0)", "Registered (0)", "Completed (0)"],
-        activeTab: "Available (0)",
-        credits: "CREDITS COMPLETED: 0 CEUs",
-        cards: [],
-        registrations: [],
-      },
-      rows: [],
-      countLabel: "0 workshops",
-    };
+  if (p.includes("workshop") || p.includes("t11") || p.includes("in-20")) {
+    return buildWorkshopList(ctx.user.institutionId, path);
   }
   if (p.includes("t29") || p.includes("t30") || p.includes("t31") || p.includes("password") || p.includes("mfa")) {
     return {
@@ -1361,39 +4088,28 @@ function routePayload(
   }
 
   // Generic live table for remaining management screens — never catalog fixtures
-  if (p.includes("t50") || p.includes("program-type")) {
-    return { title: "Program Types", subtitle: "Institution programs", rows: [], countLabel: "0 types" };
+  if (p.includes("t58") || p.includes("course-categor")) {
+    return buildCourseCategories(ctx);
   }
-  if (p.includes("t51") || p.includes("manage-term")) {
-    return {
-      title: "Manage Terms",
-      subtitle: "Academic terms",
-      rows: ctx.term
-        ? [
-            {
-              cells: [ctx.term.code, ctx.term.name, "Active", "—", "—", "Current"],
-              badge: "Active",
-              badgeTone: "active" as const,
-            },
-          ]
-        : [],
-      countLabel: ctx.term ? "1 term" : "0 terms",
-    };
+  if (p.includes("t66") || p.includes("course-configuration")) {
+    return hydrateCourseConfigurations(ctx, path);
   }
-
   return buildEmptyDomain("Instructor", `${ctx.displayName} · live`);
 }
 
-export async function buildInstructorScreen(path: string, user: SessionClaims) {
+export async function buildInstructorScreen(
+  path: string,
+  user: SessionClaims,
+  opts?: { studentId?: string | null },
+) {
   const ctx = await loadCtx(user);
-  const state = await prisma.sisScreenState.findUnique({
-    where: { institutionId_path: { institutionId: user.institutionId, path } },
-  });
-  const overlay = state ? (JSON.parse(state.payloadJson) as Record<string, unknown>) : null;
-  const payload = routePayload(path, ctx, overlay);
+  const overlay = await loadScreenOverlay(user.institutionId, path);
+  const payload = mergeOverlayRows(await routePayload(path, ctx, overlay, opts?.studentId), overlay, path);
   if (overlay?._lastAction) {
     (payload as Record<string, unknown>)._lastAction = overlay._lastAction;
   }
+  const workshopCounts = await workshopNavCounts(user.institutionId);
+  const statusCounts = await loadStudentStatusCounts(user.institutionId);
   return {
     path,
     live: true as const,
@@ -1401,10 +4117,14 @@ export async function buildInstructorScreen(path: string, user: SessionClaims) {
     bootstrap: {
       displayName: ctx.displayName,
       email: ctx.person.email,
-      studentCount: ctx.studentCount,
+      studentCount: statusCounts.total || ctx.studentCount,
       sectionCount: ctx.sections.length,
       draftGradeCount: ctx.draftGradeCount,
       unreadNotifications: ctx.notifications.filter((n) => !n.readAt).length,
+      workshopCounts,
+      statusCounts: statusCounts.byLabel,
+      flagCount: statusCounts.flagCount,
+      alertCount: 0,
     },
     payload,
   };
@@ -1412,13 +4132,19 @@ export async function buildInstructorScreen(path: string, user: SessionClaims) {
 
 export async function buildInstructorBootstrap(user: SessionClaims) {
   const ctx = await loadCtx(user);
+  const workshopCounts = await workshopNavCounts(user.institutionId);
+  const statusCounts = await loadStudentStatusCounts(user.institutionId);
   return {
     displayName: ctx.displayName,
     email: ctx.person.email,
-    studentCount: ctx.studentCount,
+    studentCount: statusCounts.total || ctx.studentCount,
     sectionCount: ctx.sections.length,
     draftGradeCount: ctx.draftGradeCount,
     unreadNotifications: ctx.notifications.filter((n) => !n.readAt).length,
+    workshopCounts,
+    statusCounts: statusCounts.byLabel,
+    flagCount: statusCounts.flagCount,
+    alertCount: 0,
     sections: ctx.sections.map((s) => ({
       sectionId: s.id,
       code: s.courseCode,
@@ -1449,6 +4175,2172 @@ async function appendInstructorActivity(
     update: { payloadJson: JSON.stringify(next) },
   });
   return next;
+}
+
+function parseActionFields(rowKey?: string): Record<string, string> | null {
+  if (!rowKey?.trim().startsWith("{")) return null;
+  try {
+    return JSON.parse(rowKey) as Record<string, string>;
+  } catch {
+    return null;
+  }
+}
+
+function cellsFromFields(fields: Record<string, string>, fallbackColumns?: string[]) {
+  const keys = fallbackColumns?.length ? fallbackColumns : Object.keys(fields);
+  return keys.map((key) => {
+    const value = fields[key]?.trim();
+    return value && value.length ? value : "—";
+  });
+}
+
+async function appendExtraRow(
+  institutionId: string,
+  path: string,
+  row: { cells: string[]; badge?: string; badgeTone?: string; href?: string },
+) {
+  const existing = await prisma.sisScreenState.findUnique({
+    where: { institutionId_path: { institutionId, path } },
+  });
+  const prev = existing ? (JSON.parse(existing.payloadJson) as Record<string, unknown>) : {};
+  const extraRows = Array.isArray(prev.extraRows) ? [...(prev.extraRows as unknown[])] : [];
+  extraRows.unshift(row);
+  const next = {
+    ...prev,
+    extraRows: extraRows.slice(0, 100),
+  };
+  await prisma.sisScreenState.upsert({
+    where: { institutionId_path: { institutionId, path } },
+    create: { institutionId, path, payloadJson: JSON.stringify(next) },
+    update: { payloadJson: JSON.stringify(next) },
+  });
+  return next;
+}
+
+type OverlayFile = {
+  name: string;
+  type: string;
+  size: string;
+  updated: string;
+  visibility: "Published" | "Hidden";
+  folder?: string;
+};
+
+function asOverlayFile(value: unknown): OverlayFile | null {
+  if (!value || typeof value !== "object") return null;
+  const rec = value as Record<string, unknown>;
+  const name = typeof rec.name === "string" ? rec.name.trim() : "";
+  if (!name) return null;
+  return {
+    name,
+    type: typeof rec.type === "string" && rec.type.trim() ? rec.type : "File",
+    size: typeof rec.size === "string" && rec.size.trim() ? rec.size : "—",
+    updated: typeof rec.updated === "string" && rec.updated.trim() ? rec.updated : "Just now",
+    visibility: rec.visibility === "Published" ? "Published" : "Hidden",
+    folder: typeof rec.folder === "string" && rec.folder.trim() ? rec.folder : "Uploads",
+  };
+}
+
+function parseFileManagerUploads(rowKey?: string): OverlayFile[] {
+  if (!rowKey?.trim().startsWith("{")) return [];
+  try {
+    const parsed = JSON.parse(rowKey) as Record<string, unknown>;
+    if (Array.isArray(parsed.files)) {
+      return parsed.files.map(asOverlayFile).filter((file): file is OverlayFile => Boolean(file));
+    }
+    const single = asOverlayFile(parsed);
+    return single ? [single] : [];
+  } catch {
+    return [];
+  }
+}
+
+function overlayStoragePath(path: string) {
+  const { pathname, query } = parseScreenQuery(path);
+  for (const key of ["tab", "more", "action", "qtype", "qid"]) query.delete(key);
+  const qs = query.toString();
+  return qs ? `${pathname}?${qs}` : pathname;
+}
+
+async function loadScreenOverlay(institutionId: string, path: string) {
+  const { pathname } = parseScreenQuery(path);
+  const canonical = overlayStoragePath(path);
+  for (const key of [...new Set([canonical, path, pathname])]) {
+    const state = await prisma.sisScreenState.findUnique({
+      where: { institutionId_path: { institutionId, path: key } },
+    });
+    if (state) return JSON.parse(state.payloadJson) as Record<string, unknown>;
+  }
+  return null;
+}
+
+async function patchScreenOverlay(
+  institutionId: string,
+  path: string,
+  patch: (prev: Record<string, unknown>) => Record<string, unknown>,
+) {
+  const canonical = overlayStoragePath(path);
+  const { pathname } = parseScreenQuery(path);
+  let prev: Record<string, unknown> = {};
+  for (const key of [...new Set([canonical, pathname, path])]) {
+    const existing = await prisma.sisScreenState.findUnique({
+      where: { institutionId_path: { institutionId, path: key } },
+    });
+    if (existing) {
+      prev = JSON.parse(existing.payloadJson) as Record<string, unknown>;
+      break;
+    }
+  }
+  const next = patch(prev);
+  await prisma.sisScreenState.upsert({
+    where: { institutionId_path: { institutionId, path: canonical } },
+    create: { institutionId, path: canonical, payloadJson: JSON.stringify(next) },
+    update: { payloadJson: JSON.stringify(next) },
+  });
+  return next;
+}
+
+function mergeFileManagerOverlay(
+  payload: InstructorLivePayload,
+  overlay: Record<string, unknown>,
+): InstructorLivePayload {
+  const extraFiles = Array.isArray(overlay.extraFiles)
+    ? overlay.extraFiles.map(asOverlayFile).filter((file): file is OverlayFile => Boolean(file))
+    : [];
+  const extraFolders = Array.isArray(overlay.extraFolders)
+    ? overlay.extraFolders.filter((name): name is string => typeof name === "string" && name.trim().length > 0)
+    : [];
+  if (!extraFiles.length && !extraFolders.length) return payload;
+
+  const fm = (payload.fileManager as {
+    courseTitle?: string;
+    breadcrumbs?: string[];
+    tree?: Array<{ name: string; children?: string[]; active?: boolean }>;
+    files?: OverlayFile[];
+  }) || { courseTitle: "Course files", breadcrumbs: ["Files"], tree: [], files: [] };
+
+  const files = [...extraFiles, ...(fm.files ?? [])];
+  const tree = [...(fm.tree ?? [])];
+  const ensureFolder = (name: string, child?: string) => {
+    const existing = tree.find((node) => node.name.toLowerCase() === name.toLowerCase());
+    if (!existing) {
+      tree.unshift({ name, children: child ? [child] : [], active: false });
+      return;
+    }
+    if (child && !(existing.children ?? []).includes(child)) {
+      existing.children = [child, ...(existing.children ?? [])].slice(0, 8);
+    }
+  };
+  for (const folder of extraFolders) ensureFolder(folder);
+  for (const file of extraFiles) {
+    if (file.folder) ensureFolder(file.folder, file.name);
+  }
+
+  return {
+    ...payload,
+    fileManager: {
+      ...fm,
+      tree,
+      files,
+    },
+    ...(payload.splitPane
+      ? {
+          splitPane: {
+            ...(payload.splitPane as Record<string, unknown>),
+            resources: [
+              ...extraFiles.map((file) => ({ name: file.name, type: file.type, size: file.size })),
+              ...((((payload.splitPane as { resources?: Array<{ name: string; type: string; size: string }> })
+                .resources) || []) as Array<{ name: string; type: string; size: string }>),
+            ].slice(0, 50),
+          },
+        }
+      : {}),
+    ...(payload.repository || extraFiles.length
+      ? {
+          repository: {
+            folders: [
+              ...extraFolders.map((name) => ({ name, files: 0, updated: "Just now" })),
+              ...((((payload.repository as { folders?: Array<{ name: string; files: number; updated: string }> } | undefined)
+                ?.folders) || []) as Array<{ name: string; files: number; updated: string }>),
+            ].slice(0, 20),
+            files: [
+              ...extraFiles.map((file) => ({
+                name: file.name,
+                type: file.type,
+                size: file.size,
+                updated: file.updated,
+              })),
+              ...((((payload.repository as { files?: Array<{ name: string; type: string; size: string; updated: string }> } | undefined)
+                ?.files) || []) as Array<{ name: string; type: string; size: string; updated: string }>),
+            ].slice(0, 50),
+          },
+        }
+      : {}),
+  };
+}
+
+function mergeOverlayRows(
+  payload: InstructorLivePayload,
+  overlay?: Record<string, unknown> | null,
+  path = "",
+): InstructorLivePayload {
+  if (!overlay) return payload;
+  let next = payload;
+  const extra = Array.isArray(overlay.extraRows)
+    ? (overlay.extraRows as Array<{ cells: string[]; badge?: string; badgeTone?: string; href?: string }>)
+    : [];
+  if (extra.length) {
+    const baseRows = Array.isArray(next.rows) ? (next.rows as unknown[]) : [];
+    const rows = [...extra, ...baseRows];
+    next = {
+      ...next,
+      rows,
+      countLabel: `${rows.length} record(s)`,
+    };
+  }
+
+  const gs = next.gradingSchemes as
+    | {
+        searchPlaceholder?: string;
+        schemes?: Array<{ id: string; name: string; active: boolean }>;
+      }
+    | undefined;
+  if (gs && Array.isArray(gs.schemes)) {
+    const deleted = new Set(
+      Array.isArray(overlay.deletedSchemeIds)
+        ? (overlay.deletedSchemeIds as unknown[]).filter((id): id is string => typeof id === "string")
+        : [],
+    );
+    const extras = Array.isArray(overlay.extraSchemes)
+      ? (overlay.extraSchemes as Array<{ id: string; name: string; active: boolean }>)
+      : [];
+    const renamed =
+      overlay.renamedSchemes && typeof overlay.renamedSchemes === "object"
+        ? (overlay.renamedSchemes as Record<string, { name: string; active: boolean }>)
+        : {};
+    const schemes = [
+      ...extras,
+      ...gs.schemes
+        .filter((s) => !deleted.has(s.id))
+        .map((s) => (renamed[s.id] ? { ...s, ...renamed[s.id] } : s)),
+    ];
+    next = {
+      ...next,
+      gradingSchemes: {
+        ...gs,
+        schemes,
+      },
+    };
+  }
+
+  const pt = next.programTypes as
+    | {
+        searchPlaceholder?: string;
+        types?: Array<{ id: string; name: string; abbreviation: string; active: boolean }>;
+      }
+    | undefined;
+  if (pt && Array.isArray(pt.types)) {
+    next = {
+      ...next,
+      programTypes: {
+        ...pt,
+        types: mergeProgramTypeList(pt.types, overlay),
+      },
+    };
+  }
+
+  const ct = next.courseTypes as
+    | {
+        searchPlaceholder?: string;
+        types?: Array<{ id: string; name: string; abbreviation: string; active: boolean }>;
+      }
+    | undefined;
+  if (ct && Array.isArray(ct.types)) {
+    next = {
+      ...next,
+      courseTypes: {
+        ...ct,
+        types: mergeProgramTypeList(ct.types, overlay),
+      },
+    };
+  }
+
+  const mt = next.manageTerms as
+    | {
+        campusFilterLabel?: string;
+        campusOptions?: Array<{ label: string; value: string }>;
+        terms?: Array<{ id: string; name: string; code: string; dates: string; campuses: string[] }>;
+      }
+    | undefined;
+  if (mt && Array.isArray(mt.terms)) {
+    next = {
+      ...next,
+      manageTerms: {
+        ...mt,
+        terms: mergeTermList(mt.terms, overlay).map((t) => ({
+          id: t.id,
+          name: t.name,
+          code: t.code,
+          dates: t.dates,
+          campuses: t.campuses,
+        })),
+      },
+    };
+  }
+
+  const cs = next.coursesSessions as
+    | {
+        searchPlaceholder?: string;
+        filterCoursePlaceholder?: string;
+        courses?: Array<{
+          id: string;
+          name: string;
+          number: string;
+          creditValue: string;
+          notStarted: number;
+          inProgress: number;
+          completed: number;
+        }>;
+      }
+    | undefined;
+  if (cs && Array.isArray(cs.courses)) {
+    const deleted = new Set(
+      Array.isArray(overlay.deletedCourseIds)
+        ? (overlay.deletedCourseIds as unknown[]).filter((id): id is string => typeof id === "string")
+        : [],
+    );
+    const extras = Array.isArray(overlay.extraCourses)
+      ? (overlay.extraCourses as Array<{
+          id: string;
+          name: string;
+          number: string;
+          creditValue: string;
+          notStarted: number;
+          inProgress: number;
+          completed: number;
+        }>)
+      : [];
+    next = {
+      ...next,
+      coursesSessions: {
+        ...cs,
+        courses: [...extras, ...cs.courses.filter((c) => !deleted.has(c.id))],
+      },
+    };
+  }
+
+  const textbooks = next.courseTextbooks as { textbooks?: TextbookRecord[] } | undefined;
+  if (textbooks && Array.isArray(textbooks.textbooks)) {
+    next = {
+      ...next,
+      courseTextbooks: {
+        ...textbooks,
+        textbooks: mergeTextbookList(textbooks.textbooks, overlay),
+      },
+    };
+  }
+
+  const repo = next.contentRepository as { courses?: RepositoryCourseRecord[] } | undefined;
+  if (repo && Array.isArray(repo.courses)) {
+    const courses = mergeRepositoryList(repo.courses, overlay);
+    next = {
+      ...next,
+      contentRepository: {
+        ...repo,
+        courses,
+        resultsLabel: `Results: ${courses.length}`,
+      },
+    };
+  }
+
+  const ca = next.courseAdmin as
+    | {
+        courseId: string;
+        courseLabel: string;
+        tabs: string[];
+        activeTab: string;
+        statusFilter?: string;
+        statusOptions?: Array<{ label: string; value: string }>;
+        createSessionHref?: string;
+        sessions?: Array<{
+          id: string;
+          course: string;
+          courseId?: string;
+          location: string;
+          instructors: string;
+          schedule: string;
+          enrolled: number;
+          reserved: number;
+          waitList: number;
+          status: string;
+        }>;
+      }
+    | undefined;
+  if (ca && Array.isArray(ca.sessions)) {
+    const courseId = parseScreenQuery(path).query.get("courseId") || ca.courseId || "";
+    const deleted = new Set(
+      Array.isArray(overlay.deletedSessionIds)
+        ? (overlay.deletedSessionIds as unknown[]).filter((id): id is string => typeof id === "string")
+        : [],
+    );
+    const extras = Array.isArray(overlay.extraSessions)
+      ? (overlay.extraSessions as Array<{
+          id: string;
+          course: string;
+          courseId?: string;
+          location: string;
+          instructors: string;
+          schedule: string;
+          enrolled: number;
+          reserved: number;
+          waitList: number;
+          status: string;
+        }>)
+      : [];
+    const scoped = extras.filter((s) => !s.courseId || !courseId || s.courseId === courseId);
+    const extraIds = new Set(scoped.map((s) => s.id));
+    next = {
+      ...next,
+      courseAdmin: {
+        ...ca,
+        sessions: [...scoped, ...ca.sessions.filter((s) => !deleted.has(s.id) && !extraIds.has(s.id))],
+      },
+    };
+  }
+
+  const ms = next.masterScheduling as
+    | {
+        rows?: Array<{ id: string; dateRange: string; session: string; duration: string; program: string; canDelete?: boolean }>;
+      }
+    | undefined;
+  if (ms && Array.isArray(ms.rows)) {
+    const deleted = new Set(
+      Array.isArray(overlay.deletedScheduleIds)
+        ? (overlay.deletedScheduleIds as unknown[]).filter((id): id is string => typeof id === "string")
+        : [],
+    );
+    const extras = Array.isArray(overlay.extraSchedules)
+      ? (overlay.extraSchedules as Array<{
+          id: string;
+          dateRange: string;
+          session: string;
+          duration: string;
+          program: string;
+          canDelete?: boolean;
+        }>).filter((row) => row && typeof row.id === "string" && !deleted.has(row.id))
+      : [];
+    next = {
+      ...next,
+      masterScheduling: {
+        ...ms,
+        rows: [...extras, ...ms.rows.filter((r) => !deleted.has(r.id))],
+      },
+    };
+  }
+
+  const ac = next.academicCalendars as
+    | {
+        emptyMessage?: string;
+        rows?: Array<{ id: string; name: string; dates: string; status: string }>;
+      }
+    | undefined;
+  if (ac) {
+    const extras = Array.isArray(overlay.extraCalendars)
+      ? (overlay.extraCalendars as Array<{ id: string; name: string; dates: string; status: string }>)
+      : [];
+    const rows = [...extras, ...(ac.rows ?? [])];
+    next = {
+      ...next,
+      academicCalendars: {
+        ...ac,
+        rows,
+      },
+    };
+  }
+
+  const hs = next.helpSupport as
+    | {
+        topics?: Array<{ title: string; detail: string; icon?: string }>;
+        tickets?: Array<{ id: string; subject: string; status: string; tone?: string; updated?: string }>;
+        references?: Array<{ name: string; meta: string }>;
+        aiReply?: { query: string; answer: string } | null;
+        hours?: string;
+        contacts?: Array<{ label: string; value: string }>;
+      }
+    | undefined;
+  if (hs) {
+    const extras = Array.isArray(overlay.extraTickets)
+      ? (overlay.extraTickets as Array<{ id: string; subject: string; status: string; tone?: string; updated?: string }>)
+      : [];
+    const aiConsult = overlay.aiConsult as { query?: string; answer?: string } | undefined;
+    next = {
+      ...next,
+      helpSupport: {
+        ...hs,
+        tickets: [...extras, ...(hs.tickets ?? [])],
+        aiReply: aiConsult?.answer
+          ? { query: aiConsult.query || "", answer: aiConsult.answer }
+          : hs.aiReply ?? null,
+      },
+    };
+  }
+
+  const detail = next.courseDetail as { lms?: Parameters<typeof mergeCourseLmsOverlay>[0] } | undefined;
+  if (detail?.lms) {
+    next = {
+      ...next,
+      courseDetail: {
+        ...detail,
+        lms: mergeCourseLmsOverlay(detail.lms, overlay),
+      },
+    };
+  }
+
+  return mergeFileManagerOverlay(next, overlay);
+}
+
+function buildCourseHistory(ctx: InstructorCtx): InstructorLivePayload {
+  const termMeta = new Map(ctx.terms.map((t) => [t.code, t]));
+  const byTerm = new Map<string, InstructorCtx["sections"]>();
+  for (const s of ctx.sections) {
+    const key = s.termCode || "Unknown";
+    const list = byTerm.get(key) ?? [];
+    list.push(s);
+    byTerm.set(key, list);
+  }
+  const orderedCodes = [
+    ...ctx.terms.map((t) => t.code).filter((c) => byTerm.has(c)),
+    ...[...byTerm.keys()].filter((c) => !termMeta.has(c)),
+  ];
+  const seen = new Set<string>();
+  const terms: Array<{
+    term: string;
+    courses: Array<{ code: string; title: string; enrollment: string; avgEval: string }>;
+  }> = [];
+  for (const code of orderedCodes) {
+    if (seen.has(code)) continue;
+    seen.add(code);
+    const sections = byTerm.get(code) ?? [];
+    const meta = termMeta.get(code);
+    terms.push({
+      term: meta?.name || code,
+      courses: sections.map((s) => {
+        const courseGrades = ctx.grades.filter(
+          (g) => g.courseCode === s.courseCode && g.sectionCode === s.code && g.score != null,
+        );
+        let avgEval = "—";
+        if (courseGrades.length) {
+          const avgPct =
+            courseGrades.reduce((sum, g) => sum + (pct(g.score, g.maxScore) ?? 0), 0) /
+            courseGrades.length;
+          // Surface a 5-point teaching-eval style score from posted grade averages when surveys are absent.
+          avgEval = (Math.round((avgPct / 20) * 10) / 10).toFixed(1);
+        }
+        const enrollment = Math.max(
+          s.enrolmentCount,
+          s.enrolments.filter((e) => e.status === "enrolled" || e.status === "completed").length,
+        );
+        return {
+          code: s.courseCode,
+          title: s.courseTitle,
+          enrollment: String(enrollment),
+          avgEval,
+        };
+      }),
+    });
+  }
+  return {
+    title: "Course History",
+    subtitle: "Prior teaching assignments and evaluation averages.",
+    countLabel: `${ctx.sections.length} course(s)`,
+    courseHistory: { terms },
+  };
+}
+
+function parseScreenQuery(path: string) {
+  const qIndex = path.indexOf("?");
+  if (qIndex < 0) return { pathname: path, query: new URLSearchParams() };
+  return {
+    pathname: path.slice(0, qIndex),
+    query: new URLSearchParams(path.slice(qIndex + 1)),
+  };
+}
+
+function buildActiveCourses(ctx: InstructorCtx, path = ""): InstructorLivePayload {
+  const { query } = parseScreenQuery(path);
+  const viewId = (query.get("view") || "").trim();
+  const courseOptions = [
+    { label: "All Courses", value: "All Courses" },
+    ...ctx.sections.map((s) => ({
+      label: `${s.courseCode}: ${s.courseTitle}`,
+      value: `${s.courseCode}: ${s.courseTitle}`,
+    })),
+    { label: "0: DAP Practicum", value: "0: DAP Practicum" },
+    { label: "ACSW 100: Addictions Fundamentals", value: "ACSW 100: Addictions Fundamentals" },
+    { label: "COMP 101: Introduction to Computers", value: "COMP 101: Introduction to Computers" },
+  ].filter((opt, idx, arr) => arr.findIndex((o) => o.value === opt.value) === idx);
+
+  const termOptions = [
+    { label: "ALL TERMS", value: "ALL TERMS" },
+    ...ctx.terms.map((t) => ({
+      label: `${t.name || t.code}${t.startsOn && t.endsOn ? ` — ${t.startsOn} - ${t.endsOn}` : ""}`,
+      value: t.code,
+    })),
+    { label: "3rd Term-2026 — 2026-09-01 - 2026-12-31", value: "3rd Term-2026" },
+    { label: "2nd Term-2026 — 2026-05-01 - 2026-08-31", value: "2nd Term-2026" },
+    { label: "1st Term-2026 — 2026-01-01 - 2026-04-30", value: "1st Term-2026" },
+  ].filter((opt, idx, arr) => arr.findIndex((o) => o.value === opt.value) === idx);
+
+  const liveRows = ctx.sections.map((s) => {
+    const termMeta = ctx.terms.find((t) => t.code === s.termCode) || ctx.terms[0];
+    const capacity = Math.max(s.enrolmentCount, 30);
+    const pct = capacity ? Math.round((s.enrolmentCount / capacity) * 100) : 0;
+    const dates =
+      termMeta?.startsOn && termMeta?.endsOn ? `${termMeta.startsOn} — ${termMeta.endsOn}` : "Continuous";
+    return {
+      id: s.id,
+      course: `${s.courseCode} (${s.code}) ${s.courseTitle}`,
+      code: s.courseCode,
+      section: s.code,
+      title: s.courseTitle,
+      location: "#110 Heritage College- Surrey",
+      room: "Room Not Set",
+      instructors: ctx.displayName || "Not Set",
+      dates,
+      enrolment: `${pct}%`,
+      viewHref: `/instructor/f/t56-active-courses?view=${encodeURIComponent(s.id)}`,
+      attendanceHref: `/instructor/attendance?sectionId=${encodeURIComponent(s.id)}`,
+    };
+  });
+
+  const fallbackRows = [
+    {
+      id: "course-acsw-200",
+      course: "ACSW 200 (ACSWAPR26-01) Social Service Work Fundamentals",
+      code: "ACSW 200",
+      section: "ACSWAPR26-01",
+      title: "Social Service Work Fundamentals",
+      location: "#110 Heritage College- Surrey",
+      room: "Room Not Set",
+      instructors: ctx.displayName || "Not Set",
+      dates: "Apr. 27, 2026 - May. 1, 2026",
+      enrolment: "0%",
+      viewHref: "/instructor/f/t56-active-courses?view=course-acsw-200",
+      attendanceHref: "/instructor/attendance",
+    },
+    {
+      id: "course-dap-01",
+      course: "0 (01) DAP Practicum",
+      code: "0",
+      section: "01",
+      title: "DAP Practicum",
+      location: "#110 Heritage College- Surrey",
+      room: "Room Not Set",
+      instructors: "Not Set",
+      dates: "Continuous",
+      enrolment: "0%",
+      viewHref: "/instructor/f/t56-active-courses?view=course-dap-01",
+      attendanceHref: "/instructor/attendance",
+    },
+    {
+      id: "course-work-exp",
+      course: "0 (01) Work Experience",
+      code: "0",
+      section: "01",
+      title: "Work Experience",
+      location: "#110 Heritage College- Surrey",
+      room: "Room Not Set",
+      instructors: "Not Set",
+      dates: "Jan. 10, 2022 (Mon.) – Feb. 4, 2022 (Fri.)",
+      enrolment: "2%",
+      viewHref: "/instructor/f/t56-active-courses?view=course-work-exp",
+      attendanceHref: "/instructor/attendance",
+    },
+  ];
+
+  const rows = [
+    ...liveRows.filter((row) => row.id !== "course-acsw-200"),
+    ...(liveRows.some((row) => /ACSW\s*200/i.test(row.code || row.course))
+      ? []
+      : [
+          {
+            id: "course-acsw-200",
+            course: "ACSW 200 (ACSWAPR26-01) Social Service Work Fundamentals",
+            code: "ACSW 200",
+            section: "ACSWAPR26-01",
+            title: "Social Service Work Fundamentals",
+            location: "#110 Heritage College- Surrey",
+            room: "Room Not Set",
+            instructors: ctx.displayName || "Not Set",
+            dates: "Apr. 27, 2026 - May. 1, 2026",
+            enrolment: "0%",
+            viewHref: "/instructor/f/t56-active-courses?view=course-acsw-200",
+            attendanceHref: "/instructor/attendance",
+          },
+        ]),
+    ...(liveRows.length ? [] : fallbackRows.filter((row) => row.id !== "course-acsw-200")),
+  ];
+  const viewed = viewId ? rows.find((row) => row.id === viewId) : undefined;
+  const detail = viewId ? buildCourseDetail(ctx, `/instructor/sections/${viewId}`) : null;
+  const courseDetail =
+    detail && typeof detail.courseDetail === "object" && detail.courseDetail
+      ? (detail.courseDetail as Record<string, unknown> & { code?: string; title?: string; meta?: string })
+      : null;
+
+  return {
+    title: viewed ? `${viewed.code || viewed.course} · ${viewed.title || ""}`.trim() : "ACTIVE COURSES",
+    subtitle: viewed ? `${viewed.section || ""} · ${viewed.dates}`.replace(/^ · /, "") : "",
+    breadcrumbs: viewed
+      ? ["Home", "Active Courses", viewed.title || viewed.course]
+      : ["Home", "Active Courses"],
+    activeCourses: {
+      filters: {
+        campus: {
+          label: "Filter Campus",
+          value: "ALL CAMPUSES",
+          options: [
+            { label: "ALL CAMPUSES", value: "ALL CAMPUSES" },
+            { label: "#110 Heritage College- Surrey", value: "#110 Heritage College- Surrey" },
+            { label: "Heritage College - Main", value: "Heritage College - Main" },
+          ],
+        },
+        course: {
+          label: "Filter Course",
+          value: "All Courses",
+          options: courseOptions,
+        },
+        term: {
+          label: "Filter Term",
+          value: "ALL TERMS",
+          options: termOptions,
+        },
+        student: {
+          label: "Filter Student",
+          value: "",
+          placeholder: "Student # or last name",
+        },
+        faculty: {
+          label: "Faculty",
+          value: "ALL FACULTY / INSTRUCTORS",
+          options: [
+            { label: "ALL FACULTY / INSTRUCTORS", value: "ALL FACULTY / INSTRUCTORS" },
+            { label: ctx.displayName, value: ctx.displayName },
+            { label: "Not Set", value: "Not Set" },
+          ],
+        },
+      },
+      showLabel: "Show Courses",
+      resultsLabel: `Results: ${rows.length.toLocaleString()}`,
+      perPageOptions: [
+        { label: "50", value: "50" },
+        { label: "100", value: "100" },
+        { label: "250", value: "250" },
+        { label: "500", value: "500" },
+      ],
+      perPage: "250",
+      pageOptions: [
+        { label: "1", value: "1" },
+        { label: "2", value: "2" },
+      ],
+      page: "1",
+      columns: ["Course", "Location", "Instructor(s)", "Dates", "Enrolment"],
+      rows,
+    },
+    ...(courseDetail
+      ? {
+          courseDetail: {
+            ...courseDetail,
+            code: viewed?.code || courseDetail.code,
+            title: viewed?.title || courseDetail.title,
+            meta: viewed
+              ? `${viewed.location} · ${viewed.room || "Room Not Set"} · ${viewed.dates} · Enrolment ${viewed.enrolment}`
+              : courseDetail.meta,
+          },
+        }
+      : {}),
+  };
+}
+
+function buildCourseManagement(ctx: InstructorCtx): InstructorLivePayload {
+  const liveSections = ctx.sections.length;
+  return {
+    title: "Course Management",
+    subtitle: "Administrative tools for course setup and maintenance.",
+    courseMgmt: {
+      tools: [
+        {
+          title: "Courses & Sessions",
+          detail: "Browse course shells and section sessions.",
+          href: "/instructor/f/t54-courses-sessions",
+        },
+        {
+          title: "Active Courses",
+          detail: "Filter live offerings by campus, term, and faculty.",
+          href: "/instructor/f/t56-active-courses",
+          badge: `${liveSections} live`,
+        },
+        {
+          title: "Add Course",
+          detail: "Create a new course instance with tuition and schedule defaults.",
+          href: "/instructor/f/t55-add-course-form",
+        },
+        {
+          title: "Course Repository",
+          detail: "Browse master course definitions and archives.",
+          href: "/instructor/f/t37-course-repository",
+        },
+        {
+          title: "Course Backups",
+          detail: "Restore archived course content packages.",
+          href: "/instructor/f/t65-course-backups",
+          badge: "0",
+        },
+        {
+          title: "Course Textbooks",
+          detail: "Assign required and recommended course materials.",
+          href: "/instructor/f/t57-course-textbooks",
+        },
+        {
+          title: "Course Configurations",
+          detail: "Brand defaults for repository, privacy, and enrolment.",
+          href: "/instructor/f/t66-course-configurations",
+        },
+        {
+          title: "Course Categories",
+          detail: "Organize courses by academic category.",
+          href: "/instructor/f/t58-course-categories",
+        },
+        {
+          title: "Course Groups",
+          detail: "Group related courses for curriculum blocks.",
+          href: "/instructor/f/t59-course-groups-types",
+        },
+        {
+          title: "Course Types",
+          detail: "Lecture, online, and delivery type definitions.",
+          href: "/instructor/f/t67-course-types",
+        },
+        {
+          title: "Course Resources",
+          detail: "Upload and tag shared instructional resources.",
+          href: "/instructor/f/t60-course-resources-management",
+        },
+        {
+          title: "Badges & Accomplishments",
+          detail: "Define badges students can earn in courses.",
+          href: "/instructor/f/t34-accomplishments",
+        },
+        {
+          title: "Grading Schemes",
+          detail: "Manage letter scales, percentages, and grade points.",
+          href: "/instructor/f/t61-grading-schemes",
+        },
+      ],
+    },
+  };
+}
+
+async function hydrateFacultiesPrograms(ctx: InstructorCtx): Promise<InstructorLivePayload> {
+  const overlay = await loadScreenOverlay(ctx.user.institutionId, FACULTIES_PROGRAMS_PATH);
+  const faculties = mergeFacultyList(overlay);
+  const dbPrograms = ctx.programs.filter((p) => !p.id.startsWith("name:"));
+  const programs = mergeFacultyProgramList(overlay, dbPrograms, faculties);
+  const grouped = groupFacultiesPrograms(faculties, programs);
+  const extraFacultyIds = new Set(
+    Array.isArray(overlay?.extraFaculties)
+      ? (overlay!.extraFaculties as Array<{ id?: string }>).map((f) => f.id).filter((id): id is string => Boolean(id))
+      : [],
+  );
+  const visible = grouped.filter((f) => f.programs.length > 0 || extraFacultyIds.has(f.id));
+  return {
+    title: "MANAGE FACULTIES & PROGRAMS",
+    subtitle: "",
+    breadcrumbs: ["Home", "Faculties & Programs"],
+    primaryAction: "Create Faculty",
+    primaryActionHref: ADD_FACULTY_PATH,
+    secondaryAction: "Create Program",
+    secondaryActionHref: "/instructor/f/t74-add-program",
+    facultiesPrograms: {
+      createFacultyHref: ADD_FACULTY_PATH,
+      createProgramHref: "/instructor/f/t74-add-program",
+      faculties: visible.map((f) => ({
+        id: f.id,
+        name: f.name,
+        abbreviation: f.abbreviation,
+        active: f.active,
+        programs: f.programs.map((p) => ({
+          id: p.id,
+          name: p.name,
+          abbreviation: p.abbreviation,
+          active: p.active,
+          href: settingsHref(p.id),
+        })),
+      })),
+    },
+  };
+}
+
+async function buildAddProgramForm(ctx: InstructorCtx): Promise<InstructorLivePayload> {
+  const overlay = await loadScreenOverlay(ctx.user.institutionId, FACULTIES_PROGRAMS_PATH);
+  const faculties = mergeFacultyList(overlay);
+  const form = buildAddProgramScreenForm();
+  const facultyField = form.groups[0]?.fields.find((f) => f.label === "Program Faculty");
+  if (facultyField) {
+    facultyField.options = [
+      { label: "-- Select Faculty --", value: "" },
+      ...faculties.map((f) => ({ label: f.name, value: f.name })),
+    ];
+  }
+  return {
+    title: "ADD PROGRAM",
+    subtitle: "",
+    breadcrumbs: ["Home", "Faculties & Programs", "Add Program"],
+    primaryAction: "Save Program",
+    secondaryAction: "Cancel",
+    secondaryActionHref: FACULTIES_PROGRAMS_PATH,
+    form,
+  };
+}
+
+async function hydrateProgramSettings(ctx: InstructorCtx, path: string): Promise<InstructorLivePayload> {
+  const facultyOverlay = await loadScreenOverlay(ctx.user.institutionId, FACULTIES_PROGRAMS_PATH);
+  const settingsOverlay = await loadScreenOverlay(ctx.user.institutionId, PROGRAM_SETTINGS_PATH);
+  const facultyList = mergeFacultyList(facultyOverlay);
+  const dbPrograms = ctx.programs.filter((p) => !p.id.startsWith("name:"));
+  const programs = mergeFacultyProgramList(facultyOverlay, dbPrograms, facultyList);
+  return buildProgramSettingsPayload(programs, facultyList, settingsOverlay, path);
+}
+
+function facultyQueryId(path: string) {
+  return parseScreenQuery(path).query.get("facultyId")?.trim() || "";
+}
+
+async function buildAddFacultyForm(ctx: InstructorCtx, path: string): Promise<InstructorLivePayload> {
+  const facultyId = facultyQueryId(path);
+  const overlay = await loadScreenOverlay(ctx.user.institutionId, FACULTIES_PROGRAMS_PATH);
+  const existing = facultyId ? mergeFacultyList(overlay).find((f) => f.id === facultyId) : undefined;
+  const isEdit = Boolean(existing);
+  return {
+    title: isEdit ? `EDIT FACULTY: ${existing!.name.toUpperCase()}` : "ADD FACULTY",
+    subtitle: "",
+    breadcrumbs: ["Home", "Faculties & Programs", isEdit ? "Edit Faculty" : "Add Faculty"],
+    primaryAction: "Save Faculty",
+    secondaryActionHref: FACULTIES_PROGRAMS_PATH,
+    form: {
+      submitLabel: "Save Faculty",
+      groups: [
+        {
+          title: "FACULTY DETAILS",
+          fields: [
+            { label: "Faculty Name", value: existing?.name ?? "", type: "text", language: "English" },
+            { label: "Faculty Abbreviation", value: existing?.abbreviation ?? "", type: "text" },
+            {
+              label: "Active / Inactive",
+              value: existing?.active === false ? "Inactive" : "Active",
+              type: "select",
+              options: [
+                { label: "Active", value: "Active" },
+                { label: "Inactive", value: "Inactive" },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
+
+type ProgramTypeRecord = { id: string; name: string; abbreviation: string; active: boolean };
+
+const DEFAULT_PROGRAM_TYPES: ProgramTypeRecord[] = [
+  { id: "ptype-online", name: "Online study", abbreviation: "online", active: true },
+  { id: "ptype-visitor", name: "Visitor", abbreviation: "ND", active: true },
+  { id: "ptype-certificate", name: "Certificate", abbreviation: "C", active: true },
+  { id: "ptype-diploma", name: "Diploma", abbreviation: "D", active: true },
+  { id: "ptype-bachelor", name: "Bachelor", abbreviation: "B", active: true },
+  { id: "ptype-masters", name: "Masters", abbreviation: "M", active: true },
+  { id: "ptype-na", name: "Not Applicable", abbreviation: "NA", active: true },
+];
+
+const PROGRAM_TYPES_LIST_PATH = "/instructor/f/t50-program-types";
+
+function programTypeQueryId(path: string): string {
+  const query = path.includes("?") ? path.slice(path.indexOf("?") + 1) : "";
+  return new URLSearchParams(query).get("typeId")?.trim() || "";
+}
+
+function mergeProgramTypeList(
+  seed: ProgramTypeRecord[],
+  overlay?: Record<string, unknown> | null,
+): ProgramTypeRecord[] {
+  const deleted = new Set(
+    Array.isArray(overlay?.deletedProgramTypeIds)
+      ? (overlay!.deletedProgramTypeIds as unknown[]).filter((id): id is string => typeof id === "string")
+      : [],
+  );
+  const extras = Array.isArray(overlay?.extraProgramTypes)
+    ? (overlay!.extraProgramTypes as ProgramTypeRecord[]).filter((t) => t && typeof t.id === "string")
+    : [];
+  const extraIds = new Set(extras.map((t) => t.id));
+  const editsRaw =
+    overlay?.programTypeEdits && typeof overlay.programTypeEdits === "object"
+      ? (overlay.programTypeEdits as Record<string, Partial<ProgramTypeRecord>>)
+      : {};
+  const applyEdit = (t: ProgramTypeRecord): ProgramTypeRecord => {
+    const e = editsRaw[t.id];
+    if (!e) return { ...t };
+    return {
+      id: t.id,
+      name: typeof e.name === "string" && e.name.trim() ? e.name : t.name,
+      abbreviation: typeof e.abbreviation === "string" && e.abbreviation.trim() ? e.abbreviation : t.abbreviation,
+      active: typeof e.active === "boolean" ? e.active : t.active,
+    };
+  };
+  let types = [
+    ...extras.filter((t) => !deleted.has(t.id)).map(applyEdit),
+    ...seed.filter((t) => !deleted.has(t.id) && !extraIds.has(t.id)).map(applyEdit),
+  ];
+  const order = Array.isArray(overlay?.programTypeOrder)
+    ? (overlay!.programTypeOrder as unknown[]).filter((id): id is string => typeof id === "string")
+    : [];
+  if (order.length) {
+    const byId = new Map(types.map((t) => [t.id, t]));
+    const ordered: ProgramTypeRecord[] = [];
+    for (const id of order) {
+      const row = byId.get(id);
+      if (row) {
+        ordered.push(row);
+        byId.delete(id);
+      }
+    }
+    ordered.push(...byId.values());
+    types = ordered;
+  }
+  return types;
+}
+
+function buildProgramTypes(_ctx: InstructorCtx): InstructorLivePayload {
+  return {
+    title: "Manage Program Types",
+    subtitle: "SYS.PROGRAM_ADMIN // PROGRAM_TYPES",
+    primaryAction: "Create Program Type",
+    primaryActionHref: "/instructor/f/t75-add-program-type",
+    programTypes: {
+      searchPlaceholder: "Enter Search Filter Here",
+      types: DEFAULT_PROGRAM_TYPES.map((t) => ({ ...t })),
+    },
+  };
+}
+
+async function buildAddProgramTypeForm(ctx: InstructorCtx, path: string): Promise<InstructorLivePayload> {
+  const typeId = programTypeQueryId(path);
+  const state = await prisma.sisScreenState.findUnique({
+    where: { institutionId_path: { institutionId: ctx.user.institutionId, path: PROGRAM_TYPES_LIST_PATH } },
+  });
+  const overlay = state ? (JSON.parse(state.payloadJson) as Record<string, unknown>) : null;
+  const existing = typeId
+    ? mergeProgramTypeList(
+        DEFAULT_PROGRAM_TYPES.map((t) => ({ ...t })),
+        overlay,
+      ).find((t) => t.id === typeId)
+    : undefined;
+  const isEdit = Boolean(existing);
+  return {
+    title: isEdit ? "Edit Program Type" : "Add Program Type",
+    subtitle: isEdit ? "SYS.PROGRAM_ADMIN // PROGRAM_TYPE_EDIT" : "SYS.PROGRAM_ADMIN // PROGRAM_TYPE_CREATE",
+    primaryAction: "Save Program Type",
+    secondaryAction: "Cancel",
+    secondaryActionHref: PROGRAM_TYPES_LIST_PATH,
+    form: {
+      submitLabel: "Save Program Type",
+      groups: [
+        {
+          title: "Program Type Details",
+          fields: [
+            { label: "Program Type Name", value: existing?.name ?? "", type: "text", language: "English" },
+            { label: "Abbreviation", value: existing?.abbreviation ?? "", type: "text", language: "English" },
+            {
+              label: "Active / Inactive",
+              value: existing?.active === false ? "Inactive" : "Active",
+              type: "select",
+              options: [
+                { label: "Active", value: "Active" },
+                { label: "Inactive", value: "Inactive" },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
+
+const DEFAULT_TERM_CAMPUSES = [
+  "#110 Heritage College- Surrey",
+  "Heritage Community College - Distance",
+  "Heritage Community College - Victoria",
+] as const;
+
+const DEFAULT_MANAGE_TERMS = [
+  {
+    id: "term-tr3-2026",
+    name: "3rd Term-2026",
+    code: "TR3-2026",
+    dates: "Sep. 1, 2026 - Dec. 31, 2026",
+    campuses: [...DEFAULT_TERM_CAMPUSES],
+  },
+  {
+    id: "term-tr2-2026",
+    name: "2nd Term-2026",
+    code: "TR2-2026",
+    dates: "May. 1, 2026 - Aug. 31, 2026",
+    campuses: [...DEFAULT_TERM_CAMPUSES],
+  },
+  {
+    id: "term-tr1-2026",
+    name: "1st Term-2026",
+    code: "TR1-2026",
+    dates: "Jan. 1, 2026 - Apr. 30, 2026",
+    campuses: [...DEFAULT_TERM_CAMPUSES],
+  },
+  {
+    id: "term-tr3-2025",
+    name: "3rd Term-2025",
+    code: "TR3-2025",
+    dates: "Sep. 1, 2025 - Dec. 31, 2025",
+    campuses: [...DEFAULT_TERM_CAMPUSES],
+  },
+  {
+    id: "term-tr2-2025",
+    name: "2nd Term-2025",
+    code: "TR2-2025",
+    dates: "May. 1, 2025 - Aug. 31, 2025",
+    campuses: [...DEFAULT_TERM_CAMPUSES],
+  },
+  {
+    id: "term-tr1-2025",
+    name: "1st Term-2025",
+    code: "TR1-2025",
+    dates: "Jan. 1, 2025 - Apr. 30, 2025",
+    campuses: [...DEFAULT_TERM_CAMPUSES],
+  },
+  {
+    id: "term-hra-2024",
+    name: "2024-03-18",
+    code: "HRA-2024",
+    dates: "Mar. 18, 2024 - Dec. 31, 2024",
+    campuses: ["#110 Heritage College- Surrey"],
+  },
+  {
+    id: "term-dmm-2024",
+    name: "2024-02-05",
+    code: "DMM-2024",
+    dates: "Feb. 5, 2024 - Dec. 31, 2024",
+    campuses: ["Heritage Community College - Distance", "Heritage Community College - Victoria"],
+  },
+  {
+    id: "term-dap-2024",
+    name: "2024-02-05",
+    code: "DAP-2024",
+    dates: "Feb. 5, 2024 - Dec. 31, 2024",
+    campuses: ["#110 Heritage College- Surrey", "Heritage Community College - Victoria"],
+  },
+  {
+    id: "term-nsa-2024",
+    name: "2024-02-12",
+    code: "NSA-2024",
+    dates: "Feb. 12, 2024 - Dec. 31, 2024",
+    campuses: [...DEFAULT_TERM_CAMPUSES],
+  },
+  {
+    id: "term-nsa-2023",
+    name: "2023-12-04",
+    code: "NSA-2023",
+    dates: "Dec. 4, 2023 - Dec. 31, 2023",
+    campuses: ["Heritage Community College - Distance"],
+  },
+] as const;
+
+const MANAGE_TERMS_LIST_PATH = "/instructor/f/t51-manage-terms";
+const MASTER_SCHEDULING_LIST_PATH = "/instructor/f/t53-master-scheduling";
+
+type TermEventRecord = { id: string; name: string; date: string };
+type TermRecord = {
+  id: string;
+  name: string;
+  code: string;
+  dates: string;
+  campuses: string[];
+  startsOn?: string;
+  endsOn?: string;
+  midterm?: string;
+  lastInstruction?: string;
+  examStart?: string;
+  examEnd?: string;
+  census?: string;
+  customEvents?: TermEventRecord[];
+};
+
+function formatTermDates(startsOn: string, endsOn: string): string {
+  const fmt = (raw: string) => {
+    const d = new Date(`${raw}T00:00:00`);
+    if (Number.isNaN(d.getTime())) return raw;
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  };
+  return `${fmt(startsOn)} - ${fmt(endsOn)}`;
+}
+
+function isoFromDisplayDate(raw: string): string {
+  const value = raw.replace(/\./g, "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const match = value.match(/^([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})$/);
+  if (!match) return "";
+  const months: Record<string, string> = {
+    jan: "01",
+    feb: "02",
+    mar: "03",
+    apr: "04",
+    may: "05",
+    jun: "06",
+    jul: "07",
+    aug: "08",
+    sep: "09",
+    oct: "10",
+    nov: "11",
+    dec: "12",
+  };
+  const month = months[match[1].slice(0, 3).toLowerCase()];
+  if (!month) return "";
+  return `${match[3]}-${month}-${match[2].padStart(2, "0")}`;
+}
+
+function splitTermDateRange(dates: string): { startsOn: string; endsOn: string } {
+  const [startRaw = "", endRaw = ""] = dates.split(" - ");
+  return { startsOn: isoFromDisplayDate(startRaw), endsOn: isoFromDisplayDate(endRaw) };
+}
+
+function termQueryId(path: string): string {
+  const query = path.includes("?") ? path.slice(path.indexOf("?") + 1) : "";
+  return new URLSearchParams(query).get("termId")?.trim() || "";
+}
+
+function asTermEvents(value: unknown): TermEventRecord[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((row, index) => {
+      if (!row || typeof row !== "object") return null;
+      const rec = row as Record<string, unknown>;
+      const name = typeof rec.name === "string" ? rec.name : "";
+      const date = typeof rec.date === "string" ? rec.date : "";
+      const id = typeof rec.id === "string" && rec.id ? rec.id : `evt-${index}`;
+      if (!name && !date) return null;
+      return { id, name, date };
+    })
+    .filter((row): row is TermEventRecord => Boolean(row));
+}
+
+function mergeTermList(seed: TermRecord[], overlay?: Record<string, unknown> | null): TermRecord[] {
+  const deleted = new Set(
+    Array.isArray(overlay?.deletedTermIds)
+      ? (overlay!.deletedTermIds as unknown[]).filter((id): id is string => typeof id === "string")
+      : [],
+  );
+  const extras = Array.isArray(overlay?.extraTerms)
+    ? (overlay!.extraTerms as TermRecord[]).filter((t) => t && typeof t.id === "string")
+    : [];
+  const extraIds = new Set(extras.map((t) => t.id));
+  const editsRaw =
+    overlay?.termEdits && typeof overlay.termEdits === "object"
+      ? (overlay.termEdits as Record<string, Partial<TermRecord>>)
+      : {};
+  const applyEdit = (t: TermRecord): TermRecord => {
+    const e = editsRaw[t.id];
+    if (!e) return { ...t, campuses: [...(t.campuses ?? [])] };
+    return {
+      ...t,
+      ...e,
+      id: t.id,
+      campuses: Array.isArray(e.campuses) ? [...e.campuses] : [...(t.campuses ?? [])],
+      customEvents: e.customEvents ? asTermEvents(e.customEvents) : t.customEvents,
+    };
+  };
+  return [
+    ...extras.filter((t) => !deleted.has(t.id)).map(applyEdit),
+    ...seed.filter((t) => !deleted.has(t.id) && !extraIds.has(t.id)).map(applyEdit),
+  ];
+}
+
+function buildManageTerms(ctx: InstructorCtx): InstructorLivePayload {
+  const fromDb = ctx.terms.map((t) => ({
+    id: t.id,
+    name: t.name,
+    code: t.code,
+    dates: formatTermDates(t.startsOn, t.endsOn),
+    campuses: [...DEFAULT_TERM_CAMPUSES],
+    startsOn: t.startsOn,
+    endsOn: t.endsOn,
+  }));
+  const seen = new Set(fromDb.map((t) => t.code.toUpperCase()));
+  const seeded = DEFAULT_MANAGE_TERMS.filter((t) => !seen.has(t.code.toUpperCase())).map((t) => {
+    const range = splitTermDateRange(t.dates);
+    return {
+      ...t,
+      campuses: [...t.campuses],
+      startsOn: range.startsOn,
+      endsOn: range.endsOn,
+    };
+  });
+  return {
+    title: "Manage Terms",
+    subtitle: "SYS.PROGRAM_ADMIN // TERM_SCHEDULER",
+    primaryAction: "Create Term",
+    primaryActionHref: "/instructor/f/t76-add-term",
+    manageTerms: {
+      campusFilterLabel: "Filter Campus",
+      campusOptions: [
+        { label: "ALL CAMPUSES", value: "" },
+        ...DEFAULT_TERM_CAMPUSES.map((c) => ({ label: c, value: c })),
+      ],
+      terms: [...fromDb, ...seeded],
+    },
+  };
+}
+
+async function buildAddTermForm(ctx: InstructorCtx, path: string): Promise<InstructorLivePayload> {
+  const termId = termQueryId(path);
+  const state = await prisma.sisScreenState.findUnique({
+    where: { institutionId_path: { institutionId: ctx.user.institutionId, path: MANAGE_TERMS_LIST_PATH } },
+  });
+  const overlay = state ? (JSON.parse(state.payloadJson) as Record<string, unknown>) : null;
+  const seed = [
+    ...ctx.terms.map((t) => ({
+      id: t.id,
+      name: t.name,
+      code: t.code,
+      dates: formatTermDates(t.startsOn, t.endsOn),
+      campuses: [...DEFAULT_TERM_CAMPUSES],
+      startsOn: t.startsOn,
+      endsOn: t.endsOn,
+    })),
+    ...DEFAULT_MANAGE_TERMS.map((t) => {
+      const range = splitTermDateRange(t.dates);
+      return {
+        ...t,
+        campuses: [...t.campuses],
+        startsOn: range.startsOn,
+        endsOn: range.endsOn,
+      };
+    }),
+  ];
+  const existing = termId ? mergeTermList(seed, overlay).find((t) => t.id === termId) : undefined;
+  const isEdit = Boolean(existing);
+  const range = existing
+    ? {
+        startsOn: existing.startsOn || splitTermDateRange(existing.dates).startsOn,
+        endsOn: existing.endsOn || splitTermDateRange(existing.dates).endsOn,
+      }
+    : { startsOn: "", endsOn: "" };
+  return {
+    title: isEdit ? `Edit Term: ${existing?.name || "Term"}` : "Add Term",
+    subtitle: isEdit ? "SYS.PROGRAM_ADMIN // TERM_EDIT" : "SYS.PROGRAM_ADMIN // TERM_CREATE",
+    breadcrumbs: isEdit
+      ? ["Home", "Manage Terms", "Edit Term"]
+      : ["Home", "Manage Terms", "Add Term"],
+    primaryAction: "Save Term",
+    secondaryAction: "Cancel",
+    secondaryActionHref: MANAGE_TERMS_LIST_PATH,
+    form: {
+      submitLabel: "Save Term",
+      groups: [
+        {
+          title: "Term Details",
+          fields: [
+            { label: "Term Name", value: existing?.name ?? "", type: "text", language: "English" },
+            { label: "Term Abbreviation", value: existing?.code ?? "", type: "text", language: "English" },
+            {
+              label: "Campuses",
+              value: (existing?.campuses ?? []).join("|"),
+              type: "checkboxes",
+              options: DEFAULT_TERM_CAMPUSES.map((c) => ({ label: c, value: c })),
+            },
+          ],
+        },
+        {
+          title: "Term Dates",
+          fields: [
+            { label: "Start Date", value: range.startsOn, type: "date", sublabel: "Primary Dates" },
+            { label: "End Date", value: range.endsOn, type: "date" },
+            {
+              label: "Midterm Date",
+              value: existing?.midterm ?? "",
+              type: "date",
+              optional: true,
+              sublabel: "Other Dates (Optional)",
+            },
+            { label: "Last Instruction Date", value: existing?.lastInstruction ?? "", type: "date", optional: true },
+            { label: "Exam Start Date", value: existing?.examStart ?? "", type: "date", optional: true },
+            { label: "Exam End Date", value: existing?.examEnd ?? "", type: "date", optional: true },
+            { label: "Census Date", value: existing?.census ?? "", type: "date", optional: true },
+          ],
+        },
+      ],
+      customEventDates: {
+        title: "Custom Event Dates",
+        addLabel: "+ Add Event Date",
+        events: existing?.customEvents ?? [],
+      },
+      enrolmentConditions: {
+        title: "Enrolment Conditions",
+        addLabel: "Add Enrolment Condition",
+        emptyMessage: "No enrolment conditions exist for this term.",
+        disabledNote: "Self-enrolment is currently disabled.",
+        columns: ["Enrolment Dates", "Programs", "Completion Conditions", "Standing Conditions"],
+        rows: [],
+      },
+      deadlines: {
+        title: "Deadlines",
+        addLabel: "Add Deadline",
+        emptyMessage: "No deadlines exist for this term.",
+        columns: ["Condition", "Type", "Penalty"],
+        rows: [],
+      },
+    },
+  };
+}
+
+async function buildReviewTerm(ctx: InstructorCtx, path: string): Promise<InstructorLivePayload> {
+  const termId = termQueryId(path);
+  const state = await prisma.sisScreenState.findUnique({
+    where: { institutionId_path: { institutionId: ctx.user.institutionId, path: MANAGE_TERMS_LIST_PATH } },
+  });
+  const overlay = state ? (JSON.parse(state.payloadJson) as Record<string, unknown>) : null;
+  const seed = [
+    ...ctx.terms.map((t) => ({
+      id: t.id,
+      name: t.name,
+      code: t.code,
+      dates: formatTermDates(t.startsOn, t.endsOn),
+      campuses: [...DEFAULT_TERM_CAMPUSES],
+      startsOn: t.startsOn,
+      endsOn: t.endsOn,
+    })),
+    ...DEFAULT_MANAGE_TERMS.map((t) => {
+      const range = splitTermDateRange(t.dates);
+      return {
+        ...t,
+        campuses: [...t.campuses],
+        startsOn: range.startsOn,
+        endsOn: range.endsOn,
+      };
+    }),
+  ];
+  const list = mergeTermList(seed, overlay);
+  const existing = termId ? list.find((t) => t.id === termId) : list[0];
+  const startsOn = existing?.startsOn || (existing ? splitTermDateRange(existing.dates).startsOn : "");
+  const endsOn = existing?.endsOn || (existing ? splitTermDateRange(existing.dates).endsOn : "");
+  const name = existing?.name || "Term";
+  const code = existing?.code || "";
+  return {
+    title: `Review Term: ${name}${code ? ` (${code})` : ""}`,
+    subtitle: "SYS.PROGRAM_ADMIN // TERM_REVIEW",
+    breadcrumbs: ["Home", "Manage Terms", "Review Term"],
+    reviewTerm: {
+      id: existing?.id || termId || "",
+      name,
+      code,
+      startsOn,
+      endsOn,
+      campuses: existing?.campuses?.length ? [...existing.campuses] : [...DEFAULT_TERM_CAMPUSES],
+    },
+  };
+}
+
+async function buildManageScheduleScreen(ctx: InstructorCtx, path: string): Promise<InstructorLivePayload> {
+  const query = path.includes("?") ? path.slice(path.indexOf("?") + 1) : "";
+  const scheduleId = new URLSearchParams(query).get("scheduleId")?.trim() || "ms-dib-nov-2026";
+  const base = buildScheduleManagePayload(scheduleId);
+  const state = await prisma.sisScreenState.findUnique({
+    where: {
+      institutionId_path: {
+        institutionId: ctx.user.institutionId,
+        path: "/instructor/f/t85-manage-schedule",
+      },
+    },
+  });
+  const overlay = state ? (JSON.parse(state.payloadJson) as Record<string, unknown>) : null;
+  const scheduleOverlay =
+    overlay?.schedules && typeof overlay.schedules === "object"
+      ? ((overlay.schedules as Record<string, Record<string, unknown>>)[scheduleId] ?? null)
+      : null;
+  const ledgers = mergeScheduleFeesOverlay(base.scheduleManage.fees.ledgers, scheduleOverlay);
+  const deletedSessions = new Set(
+    Array.isArray(scheduleOverlay?.deletedSessionIds)
+      ? (scheduleOverlay!.deletedSessionIds as unknown[]).filter((id): id is string => typeof id === "string")
+      : [],
+  );
+  const sessions = (base.scheduleManage.sessions || []).filter((s) => !deletedSessions.has(s.id));
+  return {
+    ...base,
+    title: base.scheduleManage.programTitle,
+    scheduleManage: {
+      ...base.scheduleManage,
+      sessions,
+      totals: {
+        ...base.scheduleManage.totals,
+        courses: sessions.length,
+        sessions: sessions.length,
+      },
+      fees: {
+        ...base.scheduleManage.fees,
+        ledgers,
+      },
+    },
+  };
+}
+
+const DEFAULT_MASTER_SCHEDULE_ROWS = [
+  {
+    id: "ms-dib-nov-2026",
+    dateRange: "Nov. 2, 2026 (Mon.) - Apr. 3, 2028 (Mon.)",
+    session: "DIB: Session NOV-2026",
+    duration: "72 Weeks",
+    program: "DIB: Diploma in International Business",
+    canDelete: true,
+  },
+  {
+    id: "ms-hca-vic-nov-2026",
+    dateRange: "Nov. 2, 2026 (Mon.) - Apr. 23, 2027 (Fri.)",
+    session: "HCA-Victoria: Session NOV-2026",
+    duration: "25 Weeks",
+    program: "HCA: Health Care Assistant",
+    canDelete: true,
+  },
+  {
+    id: "ms-dib-oct-2025",
+    dateRange: "Oct. 5, 2026 (Mon.) - Apr. 11, 2028 (Tue.)",
+    session: "DIB: Session OCT-2025",
+    duration: "18 months",
+    program: "DIB: Diploma in International Business",
+    canDelete: false,
+  },
+  {
+    id: "ms-dib-oct-2026",
+    dateRange: "Oct. 5, 2026 (Mon.) - Mar. 6, 2028 (Mon.)",
+    session: "DIB: Session OCT-2026",
+    duration: "72 Weeks",
+    program: "DIB: Diploma in International Business",
+    canDelete: true,
+  },
+  {
+    id: "ms-moa-oct-2026",
+    dateRange: "Oct. 5, 2026 (Mon.) - Jun. 30, 2027 (Wed.)",
+    session: "MOA: Session OCT 2026",
+    duration: "36 Weeks",
+    program: "MOA: Medical Office Assistant",
+    canDelete: true,
+  },
+  {
+    id: "ms-hca-sep-2026",
+    dateRange: "Sep. 21, 2026 (Mon.) - Mar. 5, 2027 (Fri.)",
+    session: "HCA: Session SEP-2026",
+    duration: "25 Weeks",
+    program: "HCA: Health Care Assistant",
+    canDelete: true,
+  },
+  {
+    id: "ms-dib-sep-2026",
+    dateRange: "Sep. 8, 2026 (Tue.) - Feb. 8, 2028 (Tue.)",
+    session: "DIB: Session SEP-2026",
+    duration: "72 Weeks",
+    program: "DIB: Diploma in International Business",
+    canDelete: false,
+  },
+  {
+    id: "ms-dap-sep-2026",
+    dateRange: "Sep. 8, 2026 (Tue.) - May. 25, 2027 (Tue.)",
+    session: "DAP: Session SEP-2026",
+    duration: "35 Weeks",
+    program: "DAP: Diploma in Accounting and Payroll administrator",
+    canDelete: true,
+  },
+];
+
+function buildMasterSchedulingList(): InstructorLivePayload {
+  return {
+    title: "Master Scheduling",
+    subtitle: "SYS.PROGRAM_MGMT // MASTER_SCHEDULING",
+    primaryAction: "Create Master Schedule",
+    primaryActionHref: "/instructor/f/t71-create-master-schedule",
+    secondaryAction: "Create Term Schedule",
+    secondaryActionHref: "/instructor/f/t72-create-term-schedule",
+    masterScheduling: {
+      programFilterLabel: "Filter Program",
+      programFilterValue: "",
+      rows: DEFAULT_MASTER_SCHEDULE_ROWS.map((r) => ({ ...r })),
+    },
+  };
+}
+
+function buildAcademicCalendarsList(): InstructorLivePayload {
+  return {
+    title: "Manage Academic Calendars",
+    subtitle: "SYS.PROGRAM_MGMT // ACADEMIC_CALENDARS",
+    primaryAction: "Create Academic Calendar",
+    primaryActionHref: "/instructor/f/t73-create-academic-calendar",
+    academicCalendars: {
+      emptyMessage: "No academic calendars were found.",
+      rows: [],
+    },
+  };
+}
+
+function buildCreateMasterScheduleForm(): InstructorLivePayload {
+  return {
+    title: "Create Master Schedule",
+    subtitle: "STEP 1 OF 3",
+    primaryAction: "Continue",
+    secondaryAction: "Cancel",
+    secondaryActionHref: "/instructor/f/t53-master-scheduling",
+  };
+}
+
+const TERM_SCHEDULE_TERM_OPTIONS = [
+  { label: "-- Select Term --", value: "" },
+  { label: "3rd Term-2026: Sep. 1, 2026 - Dec. 31, 2026", value: "3rd-2026" },
+  { label: "2nd Term-2026: May. 1, 2026 - Aug. 31, 2026", value: "2nd-2026" },
+  { label: "1st Term-2026: Jan. 1, 2026 - Apr. 30, 2026", value: "1st-2026" },
+  { label: "3rd Term-2025: Sep. 1, 2025 - Dec. 31, 2025", value: "3rd-2025" },
+  { label: "2nd Term-2025: May. 1, 2025 - Aug. 31, 2025", value: "2nd-2025" },
+  { label: "1st Term-2025: Jan. 1, 2025 - Apr. 30, 2025", value: "1st-2025" },
+  { label: "2024-03-18: Mar. 18, 2024 - Dec. 31, 2024", value: "2024-03-18" },
+  { label: "2024-03-16: Mar. 18, 2024 - Oct. 6, 2024", value: "2024-03-16" },
+  { label: "2024-02-12: Feb. 12, 2024 - Oct. 11, 2024", value: "2024-02-12" },
+  { label: "2024-02-05: Feb. 5, 2024 - Dec. 31, 2024", value: "2024-02-05a" },
+  { label: "2024-02-05: Feb. 5, 2024 - Nov. 1, 2024", value: "2024-02-05b" },
+  { label: "2024-02-05: Feb. 5, 2024 - Oct. 10, 2024", value: "2024-02-05c" },
+  { label: "2024-02-05: Feb. 5, 2024 - Oct. 9, 2024", value: "2024-02-05d" },
+  { label: "2023-12-04: Dec. 4, 2023 - Oct. 11, 2024", value: "2023-12-04" },
+  { label: "2023-11-06: Nov. 6, 2023 - Aug. 30, 2024", value: "2023-11-06a" },
+  { label: "2023-11-06: Nov. 6, 2023 - May. 23, 2024", value: "2023-11-06b" },
+  {
+    label: "Bank Teller Program - September 13 to September 21: Sep. 12, 2023 - Sep. 23, 2023",
+    value: "btt-2023-09",
+  },
+];
+
+function daysBeforeCourseOptions(includeAlways: boolean) {
+  const options: Array<{ label: string; value: string }> = [];
+  if (includeAlways) options.push({ label: "Always Available", value: "Always Available" });
+  options.push({ label: "First day of class", value: "First day of class" });
+  for (let i = 1; i <= 30; i++) {
+    const label = `${i} day${i === 1 ? "" : "s"} before start date`;
+    options.push({ label, value: label });
+  }
+  return options;
+}
+
+function termScheduleLabelParts(label: string): { session: string; dateRange: string } {
+  const idx = label.indexOf(": ");
+  if (idx < 0) return { session: label || "Term schedule", dateRange: "—" };
+  return { session: label.slice(0, idx).trim() || "Term schedule", dateRange: label.slice(idx + 2).trim() || "—" };
+}
+
+async function buildCreateTermScheduleForm(ctx: InstructorCtx): Promise<InstructorLivePayload> {
+  const state = await prisma.sisScreenState.findUnique({
+    where: { institutionId_path: { institutionId: ctx.user.institutionId, path: MANAGE_TERMS_LIST_PATH } },
+  });
+  const overlay = state ? (JSON.parse(state.payloadJson) as Record<string, unknown>) : null;
+  const extraTerms = mergeTermList([], overlay);
+  const known = new Set(TERM_SCHEDULE_TERM_OPTIONS.map((o) => o.value));
+  const extraOptions = extraTerms
+    .filter((t) => t.id && !known.has(t.id))
+    .map((t) => ({ label: `${t.name}: ${t.dates}`, value: t.id }));
+  const termOptions = [TERM_SCHEDULE_TERM_OPTIONS[0], ...extraOptions, ...TERM_SCHEDULE_TERM_OPTIONS.slice(1)];
+  return {
+    title: "Create Term Schedule",
+    subtitle: "STEP 1 OF 3",
+    primaryAction: "Continue",
+    secondaryAction: "Cancel",
+    secondaryActionHref: MASTER_SCHEDULING_LIST_PATH,
+    form: {
+      stepLabel: "STEP 1 OF 3",
+      submitLabel: "Continue",
+      groups: [
+        {
+          title: "Master Schedule Details",
+          fields: [
+            { label: "Term", value: "", type: "select", options: termOptions },
+            {
+              label: "Schedule Description",
+              value: "",
+              type: "textarea",
+              optional: true,
+              hint: "Optional",
+            },
+          ],
+        },
+        {
+          title: "Course Delivery Settings",
+          fields: [
+            {
+              label: "Enable LMS",
+              value: "Disabled",
+              type: "select",
+              options: [
+                { label: "Disabled", value: "Disabled" },
+                { label: "Moodle", value: "Moodle" },
+              ],
+            },
+            {
+              label: "Student Course Availability",
+              value: "First day of class",
+              type: "select",
+              options: daysBeforeCourseOptions(false),
+            },
+            {
+              label: "Faculty Course Availability",
+              value: "7 days before start date",
+              type: "select",
+              options: daysBeforeCourseOptions(true),
+            },
+            {
+              label: "Automate Attendance Grading",
+              value: "Disabled",
+              type: "select",
+              options: [
+                { label: "Disabled", value: "Disabled" },
+                { label: "Enabled", value: "Enabled" },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
+
+function buildCreateAcademicCalendarForm(): InstructorLivePayload {
+  return {
+    title: "Create Academic Calendar",
+    subtitle: "SYS.PROGRAM_MGMT // CALENDAR_CREATE",
+    primaryAction: "Save Academic Calendar",
+    secondaryAction: "Cancel",
+    secondaryActionHref: "/instructor/f/t52-academic-calendars",
+  };
+}
+
+function courseConfigQueryId(path: string) {
+  return parseScreenQuery(path).query.get("courseId")?.trim() || "";
+}
+
+async function hydrateCourseConfigurations(ctx: InstructorCtx, path: string): Promise<InstructorLivePayload> {
+  const overlay = await loadScreenOverlay(ctx.user.institutionId, COURSE_CONFIG_PATH);
+  const seen = new Map<string, { id: string; code: string; title: string }>();
+  for (const section of ctx.sections) {
+    if (!seen.has(section.courseId)) {
+      seen.set(section.courseId, {
+        id: section.courseId,
+        code: section.courseCode,
+        title: section.courseTitle,
+      });
+    }
+  }
+  const courses = mergeCourseConfigList(overlay, [...seen.values()]);
+  const courseId = courseConfigQueryId(path);
+  const existing = courseId ? courses.find((c) => c.id === courseId) : undefined;
+  if (courseId) {
+    const row = existing ?? {
+      id: courseId,
+      name: "",
+      abbreviation: "",
+      enrollmentPermission: "No permission required",
+      syllabusPrivacy: "Private",
+      repositorySettings: "Use brand settings",
+      textbookOptOut: "System Default",
+      active: true,
+    };
+    return {
+      title: existing ? "Edit Course Configuration" : "Add Course Configuration",
+      subtitle: "",
+      breadcrumbs: ["Home", "Course Management", "Course Configurations", existing ? "Edit" : "Add"],
+      primaryAction: "Save Configuration",
+      secondaryAction: "Cancel",
+      secondaryActionHref: COURSE_CONFIG_PATH,
+      form: {
+        submitLabel: "Save Configuration",
+        groups: [
+          {
+            title: "Course Configuration",
+            fields: [
+              { label: "Course Name", value: row.name, type: "text" },
+              { label: "Abbreviation", value: row.abbreviation, type: "text" },
+              {
+                label: "Course Enrollment Permission",
+                value: row.enrollmentPermission,
+                type: "select",
+                options: selectOptions(ENROLLMENT_PERMISSION_OPTIONS),
+              },
+              {
+                label: "Course Syllabus Privacy",
+                value: row.syllabusPrivacy,
+                type: "select",
+                options: selectOptions(SYLLABUS_PRIVACY_OPTIONS),
+              },
+              {
+                label: "Repository Settings",
+                value: row.repositorySettings,
+                type: "select",
+                options: selectOptions(REPOSITORY_SETTING_OPTIONS),
+              },
+              {
+                label: "Textbook Opt-Out",
+                value: row.textbookOptOut,
+                type: "select",
+                options: selectOptions(TEXTBOOK_OPT_OUT_OPTIONS),
+              },
+              {
+                label: "Active / Inactive",
+                value: row.active ? "Active" : "Inactive",
+                type: "select",
+                options: [
+                  { label: "Active", value: "Active" },
+                  { label: "Inactive", value: "Inactive" },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    };
+  }
+  return {
+    title: "Course Configurations",
+    subtitle: "",
+    breadcrumbs: ["Home", "Course Management", "Course Configurations"],
+    primaryAction: "Create Configuration",
+    primaryActionHref: `${COURSE_CONFIG_PATH}?courseId=new`,
+    searchPlaceholder: "Enter Search Filter Here",
+    courseConfigurations: {
+      searchPlaceholder: "Enter Search Filter Here",
+      courses: courses.map((c) => ({
+        ...c,
+        href: `${COURSE_CONFIG_PATH}?courseId=${encodeURIComponent(c.id)}`,
+      })),
+    },
+  };
+}
+
+function buildCourseCategories(ctx: InstructorCtx): InstructorLivePayload {
+  const byCode = new Map<string, { name: string; code: string; courses: number }>();
+  for (const section of ctx.sections) {
+    const code = section.courseCode.replace(/\d+.*/, "") || section.courseCode.slice(0, 3);
+    const key = code.toUpperCase();
+    const prior = byCode.get(key);
+    if (prior) prior.courses += 1;
+    else byCode.set(key, { name: key, code: key, courses: 1 });
+  }
+  const rows = [...byCode.values()].map((c) => ({
+    cells: [c.name, c.code, `Courses tagged ${c.code}`, String(c.courses), "None (Root)", "ACTIVE"],
+    badge: "ACTIVE",
+    badgeTone: "active" as const,
+  }));
+  return {
+    title: "Course Categories",
+    subtitle: "SYS.COURSE_MGMT // CATEGORIES_EDITOR",
+    columns: ["Category Name", "Code", "Description", "Courses", "Parent", "Status"],
+    columnTemplate:
+      "minmax(120px,1fr) minmax(70px,0.5fr) minmax(180px,1.4fr) minmax(70px,0.5fr) minmax(90px,0.7fr) minmax(80px,0.5fr)",
+    rows,
+    countLabel: `${rows.length} categor${rows.length === 1 ? "y" : "ies"}`,
+  };
+}
+
+const DEFAULT_GRADING_SCHEMES = [
+  { id: "scheme-dib-dap", name: "DIB and DAP", active: true },
+  { id: "scheme-hcc", name: "HCC Grading", active: true },
+  { id: "scheme-hca", name: "Health Care Assistant", active: true },
+  { id: "scheme-pass-fail", name: "Pass / Fail", active: true },
+] as const;
+
+const COURSE_TYPES_LIST_PATH = "/instructor/f/t67-course-types";
+const DEFAULT_COURSE_TYPES = [
+  { id: "ctype-lecture", name: "Lecture", abbreviation: "LEC", active: true },
+  { id: "ctype-online", name: "Online", abbreviation: "ON", active: true },
+] as const;
+
+function buildCourseTypesList(): InstructorLivePayload {
+  return {
+    title: "Manage Course Types",
+    subtitle: "SYS.COURSE_MGMT // COURSE_TYPES",
+    primaryAction: "Create Course Type",
+    primaryActionHref: "/instructor/f/t69-add-course-type",
+    courseTypes: {
+      searchPlaceholder: "Enter Search Filter Here",
+      types: DEFAULT_COURSE_TYPES.map((t) => ({ ...t })),
+    },
+  };
+}
+
+function buildAddCourseGroupForm(): InstructorLivePayload {
+  return {
+    title: "Add Course Group",
+    subtitle: "SYS.COURSE_MGMT // GROUP_CREATE",
+    primaryAction: "Save Course Group",
+    secondaryAction: "Cancel",
+    secondaryActionHref: "/instructor/f/t59-course-groups-types",
+    form: {
+      submitLabel: "Save Course Group",
+      groups: [
+        {
+          title: "Course Group Details",
+          fields: [
+            { label: "Course Group Name", value: "", type: "text", language: "English" },
+            { label: "Abbreviation", value: "", type: "text", language: "English" },
+          ],
+        },
+      ],
+    },
+  };
+}
+
+function buildAddCourseTypeForm(path: string): InstructorLivePayload {
+  const typeId = path.match(/[?&]typeId=([^&]+)/)?.[1]
+    ? decodeURIComponent(path.match(/[?&]typeId=([^&]+)/)![1]!)
+    : "";
+  const existing = DEFAULT_COURSE_TYPES.find((t) => t.id === typeId);
+  return {
+    title: existing ? "Edit Course Type" : "Add Course Type",
+    subtitle: existing ? "SYS.COURSE_MGMT // TYPE_EDIT" : "SYS.COURSE_MGMT // TYPE_CREATE",
+    primaryAction: "Save Course Type",
+    secondaryAction: "Cancel",
+    secondaryActionHref: COURSE_TYPES_LIST_PATH,
+    form: {
+      submitLabel: "Save Course Type",
+      groups: [
+        {
+          title: "Course Type Details",
+          fields: [
+            { label: "Course Type Name", value: existing?.name ?? "", type: "text", language: "English" },
+            { label: "Abbreviation", value: existing?.abbreviation ?? "", type: "text", language: "English" },
+            {
+              label: "Active / Inactive",
+              value: existing && !existing.active ? "Inactive" : "Active",
+              type: "select",
+              options: [
+                { label: "Active", value: "Active" },
+                { label: "Inactive", value: "Inactive" },
+              ],
+            },
+            {
+              label: "Learning Style",
+              value: "Face to Face",
+              type: "select",
+              options: [
+                { label: "Face to Face", value: "Face to Face" },
+                { label: "Online", value: "Online" },
+                { label: "Hybrid", value: "Hybrid" },
+              ],
+            },
+            {
+              label: "Asynchronous",
+              value: "No",
+              type: "select",
+              options: [
+                { label: "No", value: "No" },
+                { label: "Yes", value: "Yes" },
+              ],
+            },
+            {
+              label: "Customize enrolment permissions",
+              value: "false",
+              type: "checkbox",
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
+
+async function buildCourseTextbooksScreen(ctx: InstructorCtx): Promise<InstructorLivePayload> {
+  const overlay = await loadScreenOverlay(ctx.user.institutionId, TEXTBOOKS_LIST_PATH);
+  return buildCourseTextbooksList(overlay);
+}
+
+async function buildAddTextbookScreen(ctx: InstructorCtx, path: string): Promise<InstructorLivePayload> {
+  const overlay = await loadScreenOverlay(ctx.user.institutionId, TEXTBOOKS_LIST_PATH);
+  return buildAddTextbookForm(overlay, path);
+}
+
+async function buildContentRepositoryScreen(ctx: InstructorCtx): Promise<InstructorLivePayload> {
+  const overlay = await loadScreenOverlay(ctx.user.institutionId, REPOSITORY_LIST_PATH);
+  return buildContentRepositoryList(overlay);
+}
+
+async function buildCreateContentCourseScreen(ctx: InstructorCtx, path: string): Promise<InstructorLivePayload> {
+  const overlay = await loadScreenOverlay(ctx.user.institutionId, REPOSITORY_LIST_PATH);
+  return buildCreateContentCourseForm(overlay, path);
+}
+
+async function bumpRepositoryCount(
+  institutionId: string,
+  courseId: string,
+  kind: "push" | "pull" | "history",
+) {
+  if (!courseId) return;
+  const catalog = buildRepositoryCatalog();
+  await patchScreenOverlay(institutionId, REPOSITORY_LIST_PATH, (prev) => {
+    const current = mergeRepositoryList(catalog, prev);
+    const row = current.find((c) => c.id === courseId);
+    const counts =
+      prev.repositoryActionCounts && typeof prev.repositoryActionCounts === "object"
+        ? { ...(prev.repositoryActionCounts as Record<string, { push?: number; pull?: number; history?: number }>) }
+        : {};
+    const prevCount = counts[courseId] ?? {
+      push: row?.push ?? 0,
+      pull: row?.pull ?? 0,
+      history: row?.history,
+    };
+    counts[courseId] = {
+      ...prevCount,
+      [kind]: (typeof prevCount[kind] === "number" ? prevCount[kind] : 0) + 1,
+    };
+    return { ...prev, repositoryActionCounts: counts };
+  });
+}
+
+function buildGradingSchemesList(): InstructorLivePayload {
+  return {
+    title: "MANAGE GRADING SCHEMES",
+    breadcrumbs: ["Home", "Grading Schemes"],
+    subtitle: "SYS.COURSE_MGMT // GRADING_SCHEMES",
+    primaryAction: "Create Grading Scheme",
+    primaryActionHref: ADD_GRADING_SCHEME_PATH,
+    gradingSchemes: {
+      searchPlaceholder: "Enter Search Filter Here",
+      schemes: DEFAULT_GRADING_SCHEMES.map((s) => ({ ...s })),
+    },
+  };
+}
+
+function buildAddGradingSchemeForm(
+  path = "",
+  overlay?: Record<string, unknown> | null,
+): InstructorLivePayload {
+  const schemeId = path.match(/[?&]schemeId=([^&]+)/)?.[1]
+    ? decodeURIComponent(path.match(/[?&]schemeId=([^&]+)/)![1]!)
+    : "";
+  const defaults = DEFAULT_GRADING_SCHEMES.find((s) => s.id === schemeId);
+  const extras = Array.isArray(overlay?.extraSchemes)
+    ? (overlay!.extraSchemes as Array<{ id: string; name: string; active: boolean }>)
+    : [];
+  const fromExtra = extras.find((s) => s.id === schemeId);
+  const schemeName = fromExtra?.name || defaults?.name || "";
+  const editing = Boolean(schemeId && (defaults || fromExtra));
+  const schemeMeta =
+    (overlay?.schemeMeta as Record<string, Record<string, string>> | undefined)?.[schemeId] || {};
+  const entries = gradeEntriesFromScheme(schemeId, overlay).map((e) => ({
+    letter: e.letter,
+    percent: e.percent,
+    percentUp: "0.00",
+    gradePoint: e.gradePoint,
+    credit: e.credit,
+    condition: e.condition,
+  }));
+
+  return {
+    title: editing ? `EDIT GRADING SCHEME: ${schemeName.toUpperCase()}` : "ADD GRADING SCHEME",
+    breadcrumbs: editing
+      ? ["Home", "Grading Schemes", "Edit Grading Scheme"]
+      : ["Home", "Grading Schemes", "Add Grading Schemes"],
+    subtitle: editing ? "SYS.COURSE_MGMT // GRADING_SCHEME_EDIT" : "SYS.COURSE_MGMT // GRADING_SCHEME_CREATE",
+    primaryAction: "Save Grading Scheme",
+    secondaryAction: "Cancel",
+    secondaryActionHref: GRADING_SCHEMES_PATH,
+    form: {
+      submitLabel: "Save Grading Scheme",
+      groups: [
+        {
+          title: "Grading Scheme Details",
+          fields: [
+            { label: "Grading Scheme Name", value: schemeName, type: "text" },
+            {
+              label: "This is the default grading scheme",
+              value: schemeMeta.defaultScheme || "false",
+              type: "checkbox",
+            },
+            {
+              label: "Use Letter Grades",
+              value: schemeMeta.useLetterGrades || "Yes",
+              type: "select",
+              options: [
+                { label: "Yes", value: "Yes" },
+                { label: "No", value: "No" },
+              ],
+            },
+            {
+              label: "Use Percentages",
+              value: schemeMeta.usePercentages || "Yes",
+              type: "select",
+              options: [
+                { label: "Yes", value: "Yes" },
+                { label: "No", value: "No" },
+              ],
+            },
+            {
+              label: "Enable round-up options for marginal letter grades in final standings",
+              value: schemeMeta.roundUp || "false",
+              type: "checkbox",
+            },
+            {
+              label: "Use Grade Points",
+              value: schemeMeta.useGradePoints || "Yes",
+              type: "select",
+              options: [
+                { label: "Yes", value: "Yes" },
+                { label: "No", value: "No" },
+              ],
+            },
+            {
+              label: "Active / Inactive",
+              value:
+                fromExtra?.active === false || (defaults && !defaults.active)
+                  ? "Inactive"
+                  : schemeMeta.active || "Active",
+              type: "select",
+              options: [
+                { label: "Active", value: "Active" },
+                { label: "Inactive", value: "Inactive" },
+              ],
+            },
+          ],
+        },
+      ],
+      gradeEntries: {
+        addLabel: "Add",
+        creditOptions: [
+          { label: "Yes", value: "Yes" },
+          { label: "No", value: "No" },
+        ],
+        conditionOptions: [
+          { label: "None", value: "None" },
+          { label: "Pass", value: "Pass" },
+          { label: "Fail", value: "Fail" },
+          { label: "Incomplete", value: "Incomplete" },
+          { label: "Withdraw", value: "Withdraw" },
+        ],
+        draft: {
+          letter: "",
+          percent: "",
+          percentUp: "0.00",
+          gradePoint: "",
+          credit: "Yes",
+          condition: "None",
+        },
+        entries,
+      },
+    },
+  };
 }
 
 async function createAssignmentForInstructor(
@@ -1486,6 +6378,299 @@ async function createAssignmentForInstructor(
     });
   }
   return { assignment, section: sec };
+}
+
+function buildAssessmentList(ctx: InstructorCtx): InstructorLivePayload {
+  const dated: Array<{ title: string; due: string; at: number }> = [];
+  const groups = ctx.sections
+    .map((sec) => ({
+      courseCode: sec.courseCode,
+      sectionCode: sec.code,
+      courseTitle: sec.courseTitle,
+      count: sec.assignments.length,
+      items: sec.assignments.map((a) => {
+        const due = a.dueAt
+          ? a.dueAt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+          : "No due date";
+        if (a.dueAt) dated.push({ title: a.title, due, at: a.dueAt.getTime() });
+        return {
+          id: a.id,
+          title: a.title,
+          weight: `${a.weightPercent}%`,
+          due,
+          status: "Published",
+          statusTone: "active" as const,
+          href: "/instructor/gradebook",
+        };
+      }),
+    }))
+    .filter((g) => g.items.length > 0);
+
+  const total = groups.reduce((n, g) => n + g.count, 0);
+  const nextDue = dated.sort((a, b) => a.at - b.at)[0];
+
+  return {
+    title: "Assessments",
+    subtitle:
+      total > 0
+        ? `${total} assessment(s) across ${groups.length} section(s)`
+        : "Create your first assessment for a teaching section",
+    primaryAction: "Create Assessment",
+    primaryActionHref: "/instructor/f/t19-create-edit-assessment",
+    secondaryAction: "Open Gradebook",
+    secondaryActionHref: "/instructor/gradebook",
+    assessmentHub: {
+      kpis: [
+        { label: "Assessments", value: String(total), hint: "Across your sections" },
+        { label: "Sections", value: String(groups.length), hint: "With graded work" },
+        {
+          label: "Next due",
+          value: nextDue ? nextDue.due : "—",
+          hint: nextDue ? nextDue.title : "Nothing scheduled",
+        },
+      ],
+      groups,
+    },
+  };
+}
+
+type AssessmentBuilderFields = {
+  title?: string;
+  type?: string;
+  weight?: string;
+  openDate?: string;
+  dueDate?: string;
+  rubricRows?: Array<{ criterion: string; excellent: string; good: string; poor: string }>;
+};
+
+function parseAssessmentPayload(rowKey?: string): AssessmentBuilderFields | null {
+  if (!rowKey?.trim().startsWith("{")) return null;
+  try {
+    return JSON.parse(rowKey) as AssessmentBuilderFields;
+  } catch {
+    return null;
+  }
+}
+
+function parseWeightPercent(weight?: string): number {
+  const n = Number(String(weight ?? "20").replace(/%/g, "").trim());
+  return Number.isFinite(n) && n > 0 ? n : 20;
+}
+
+function parseDateOrOffset(value: string | undefined, fallbackDays: number): Date {
+  if (value?.trim()) {
+    const d = new Date(value.includes("T") ? value : `${value.trim()}T12:00:00`);
+    if (!Number.isNaN(d.getTime())) return d;
+  }
+  const d = new Date();
+  d.setDate(d.getDate() + fallbackDays);
+  return d;
+}
+
+function formatPreviewDate(d: Date): string {
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function buildAssessmentBuilder(
+  ctx: InstructorCtx,
+  overlay?: Record<string, unknown> | null,
+): InstructorLivePayload {
+  const sec = primarySection(ctx);
+  const draft = (overlay?.assessmentDraft as AssessmentBuilderFields | undefined) || null;
+  const open = parseDateOrOffset(draft?.openDate, 7);
+  const due = parseDateOrOffset(draft?.dueDate, 14);
+  const title = (draft?.title || (sec ? `${sec.courseCode} Midterm Examination` : "New Assessment")).trim();
+  const type = (draft?.type || "Written Exam").trim();
+  const weightNum = parseWeightPercent(draft?.weight || "20%");
+  const weight = `${weightNum}%`;
+  const rubricRows =
+    Array.isArray(draft?.rubricRows) && draft!.rubricRows!.length
+      ? draft!.rubricRows!
+      : [
+          {
+            criterion: "Content Accuracy",
+            excellent: "Complete mastery",
+            good: "Minor gaps",
+            poor: "Major gaps",
+          },
+        ];
+  const sectionLabel = sec ? `${sec.courseCode} ${sec.code}` : "—";
+
+  return {
+    title: "Create Assessment",
+    subtitle: sec
+      ? `SYS.STUDIO_WRITER // ${sec.courseCode} // ${ctx.displayName.toUpperCase().replace(/\s+/g, "_")}`
+      : "No teaching section assigned — assign a section before publishing",
+    breadcrumbs: ["My Courses", sectionLabel, "New Assessment"],
+    assessmentBuilder: {
+      crumb: ["My Courses", sectionLabel, "New Assessment"],
+      heading: "Design New Assessment",
+      description: "Create grade matching rubrics and publish a live assessment for enrolled students.",
+      title,
+      type,
+      weight,
+      openDate: open.toISOString().slice(0, 10),
+      dueDate: due.toISOString().slice(0, 10),
+      types: ["Written Exam", "Quiz", "Project", "Lab Practical", "Oral Exam"],
+      rubricHeaders: ["Criterion", "Excellent (5pts)", "Good (4pts)", "Poor (2pts)"],
+      rubricRows,
+      uploadHint: "Drag & drop syllabus outline or rubric files",
+      uploadFormats: "Supported formats: PDF, DOCX up to 16MB",
+      preview: {
+        badge: sec ? `${sec.courseCode} ${sec.code} • ${type.toUpperCase()}` : type.toUpperCase(),
+        title,
+        weight: `Weight: ${weightNum}% of final grade`,
+        openDate: `Open Date: ${formatPreviewDate(open)}`,
+        dueDate: `Due Date: ${formatPreviewDate(due)}`,
+      },
+    },
+  };
+}
+
+async function upsertAssessmentDraftState(
+  institutionId: string,
+  path: string,
+  draft: AssessmentBuilderFields | null,
+) {
+  const existing = await prisma.sisScreenState.findUnique({
+    where: { institutionId_path: { institutionId, path } },
+  });
+  const prev = existing ? (JSON.parse(existing.payloadJson) as Record<string, unknown>) : {};
+  const next = { ...prev };
+  if (draft) next.assessmentDraft = draft;
+  else delete next.assessmentDraft;
+  await prisma.sisScreenState.upsert({
+    where: { institutionId_path: { institutionId, path } },
+    create: { institutionId, path, payloadJson: JSON.stringify(next) },
+    update: { payloadJson: JSON.stringify(next) },
+  });
+  return next;
+}
+
+async function createOrSaveAssessment(
+  ctx: InstructorCtx,
+  path: string,
+  rowKey: string | undefined,
+  publish: boolean,
+) {
+  const sec = primarySection(ctx);
+  if (!sec) throw Object.assign(new Error("No teaching section assigned"), { status: 400 });
+
+  const fields = parseAssessmentPayload(rowKey) || {};
+  const title = (fields.title || `Assessment · ${new Date().toLocaleDateString()}`).trim();
+  const type = (fields.type || "Written Exam").trim();
+  const weightPercent = parseWeightPercent(fields.weight);
+  const opensAt = parseDateOrOffset(fields.openDate, 0);
+  const closesAt = parseDateOrOffset(fields.dueDate, 14);
+  if (closesAt.getTime() <= opensAt.getTime()) {
+    closesAt.setTime(opensAt.getTime() + 3 * 24 * 60 * 60 * 1000);
+  }
+  const rubricRows =
+    Array.isArray(fields.rubricRows) && fields.rubricRows.length
+      ? fields.rubricRows.map((r) => ({
+          criterion: (r.criterion || "Criterion").trim() || "Criterion",
+          excellent: (r.excellent || "").trim() || "—",
+          good: (r.good || "").trim() || "—",
+          poor: (r.poor || "").trim() || "—",
+        }))
+      : [
+          {
+            criterion: "Overall Quality",
+            excellent: "Excellent",
+            good: "Good",
+            poor: "Needs work",
+          },
+        ];
+
+  const draftPayload: AssessmentBuilderFields = {
+    title,
+    type,
+    weight: `${weightPercent}%`,
+    openDate: opensAt.toISOString().slice(0, 10),
+    dueDate: closesAt.toISOString().slice(0, 10),
+    rubricRows,
+  };
+
+  if (!publish) {
+    await upsertAssessmentDraftState(ctx.user.institutionId, path, draftPayload);
+    return { draft: true as const, title, sectionId: sec.id, sectionCode: sec.code };
+  }
+
+  const rubric = await prisma.rubric.create({
+    data: {
+      id: randomUUID(),
+      institutionId: ctx.user.institutionId,
+      title: `${title} Rubric`,
+      description: type,
+      maxScore: 100,
+      status: "published",
+      criteria: {
+        create: rubricRows.map((r, i) => ({
+          id: randomUUID(),
+          institutionId: ctx.user.institutionId,
+          label: r.criterion,
+          description: `Excellent: ${r.excellent}; Good: ${r.good}; Poor: ${r.poor}`,
+          maxPoints: 5,
+          sortOrder: i,
+        })),
+      },
+    },
+  });
+
+  const assignment = await prisma.assignment.create({
+    data: {
+      id: randomUUID(),
+      institutionId: ctx.user.institutionId,
+      sectionId: sec.id,
+      title,
+      maxScore: 100,
+      weightPercent,
+      dueAt: closesAt,
+      rubricId: rubric.id,
+    },
+  });
+
+  for (const e of sec.enrolments.filter((x) => x.status === "enrolled")) {
+    await prisma.gradeItem.create({
+      data: {
+        id: randomUUID(),
+        institutionId: ctx.user.institutionId,
+        assignmentId: assignment.id,
+        studentId: e.studentId,
+        enrolmentId: e.id,
+        maxScore: 100,
+        status: "draft",
+      },
+    });
+  }
+
+  const assessment = await prisma.assessment.create({
+    data: {
+      id: randomUUID(),
+      institutionId: ctx.user.institutionId,
+      sectionId: sec.id,
+      title,
+      opensAt,
+      closesAt,
+      durationMinutes: 60,
+      maxAttempts: 1,
+      status: "published",
+    },
+  });
+
+  await upsertAssessmentDraftState(ctx.user.institutionId, path, null);
+
+  return {
+    draft: false as const,
+    title,
+    type,
+    weightPercent,
+    assessmentId: assessment.id,
+    assignmentId: assignment.id,
+    rubricId: rubric.id,
+    sectionId: sec.id,
+    sectionCode: sec.code,
+  };
 }
 
 async function postAnnouncement(ctx: InstructorCtx, title: string, body: string) {
@@ -1563,8 +6748,8 @@ async function publishDraftGrades(ctx: InstructorCtx) {
   return { count: drafts.length, approvals };
 }
 
-async function saveAttendanceSession(ctx: InstructorCtx, path: string, finalize: boolean) {
-  const sec = primarySection(ctx);
+async function saveAttendanceSession(ctx: InstructorCtx, path: string, finalize: boolean, rowKey?: string) {
+  const sec = attendanceSection(ctx) || primarySection(ctx);
   if (!sec) throw Object.assign(new Error("No teaching section for attendance"), { status: 400 });
   const existing = await prisma.sisScreenState.findUnique({
     where: { institutionId_path: { institutionId: ctx.user.institutionId, path } },
@@ -1583,18 +6768,62 @@ async function saveAttendanceSession(ctx: InstructorCtx, path: string, finalize:
   if (existingAttendance?.finalized === true && finalize === true) {
     return existingAttendance;
   }
-  const roster = sec.enrolments
-    .filter((e) => e.status === "enrolled")
-    .map((e) => ({
+
+  let rosterFromClient: Array<{ studentId?: string; id?: string; studentNumber?: string; name: string; status: string }> | null =
+    null;
+  if (rowKey?.trim().startsWith("{") || rowKey?.trim().startsWith("[")) {
+    try {
+      const parsed = JSON.parse(rowKey) as
+        | { roster?: Array<{ studentId?: string; id?: string; studentNumber?: string; name: string; status: string }> }
+        | Array<{ studentId?: string; id?: string; studentNumber?: string; name: string; status: string }>;
+      rosterFromClient = Array.isArray(parsed) ? parsed : parsed.roster ?? null;
+    } catch {
+      rosterFromClient = null;
+    }
+  }
+
+  const activeEnrolments = (() => {
+    const enrolments = enrolledAcrossSections(ctx);
+    return { section: sec, enrolments };
+  })();
+
+  const roster = activeEnrolments.enrolments.map((e) => {
+    const fromClient = rosterFromClient?.find(
+      (r) =>
+        r.studentId === e.studentId ||
+        r.studentNumber === e.studentNumber ||
+        r.id === e.studentNumber ||
+        r.name === e.studentName,
+    );
+    const prior = existingAttendance?.roster?.find((r) => r.studentId === e.studentId);
+    return {
       studentId: e.studentId,
       studentNumber: e.studentNumber,
       name: e.studentName,
-      status: "Present",
-    }));
+      status: fromClient?.status || prior?.status || "Present",
+    };
+  });
+
+  if (finalize && roster.length) {
+    const meetingLabel = new Date().toISOString().slice(0, 10);
+    for (const row of roster) {
+      await prisma.attendanceRecord.create({
+        data: {
+          id: randomUUID(),
+          institutionId: ctx.user.institutionId,
+          studentId: row.studentId,
+          sectionId: activeEnrolments.section.id,
+          meetingLabel,
+          status: row.status.toLowerCase(),
+        },
+      });
+    }
+  }
+
   const attendance = {
-    sectionId: sec.id,
-    sectionCode: sec.code,
-    courseCode: sec.courseCode,
+    sectionId: activeEnrolments.section.id,
+    sectionCode: activeEnrolments.section.code,
+    courseCode: activeEnrolments.section.courseCode,
     finalized: finalize,
     savedAt: new Date().toISOString(),
     roster,
@@ -1620,16 +6849,24 @@ async function createCourseAndSection(ctx: InstructorCtx, titleHint?: string) {
     orderBy: { startsOn: "desc" },
   });
   if (!term) throw Object.assign(new Error("No academic term configured"), { status: 400 });
+  const fields = parseActionFields(titleHint) || {};
   const n = ctx.sections.length + 1;
-  const code = `INS${String(n).padStart(3, "0")}`;
-  const title = titleHint?.trim() || `Instructor Course ${n}`;
+  const rawCode =
+    (fields["Course Number"] || fields.code || "").trim() || `INS${String(n).padStart(3, "0")}`;
+  const code = rawCode.toUpperCase().replace(/\s+/g, "-").slice(0, 32);
+  const title =
+    (fields["Course Name"] || fields.title || "").trim() ||
+    (titleHint && !titleHint.trim().startsWith("{") ? titleHint.trim() : "") ||
+    `Instructor Course ${n}`;
+  const creditsRaw = (fields["Course Credit Value"] || fields.credits || "3").replace(/[^\d.]/g, "");
+  const credits = Number(creditsRaw) || 3;
   const course = await prisma.course.create({
     data: {
       id: randomUUID(),
       institutionId: ctx.user.institutionId,
       code,
       title,
-      credits: 3,
+      credits,
     },
   });
   const section = await prisma.section.create({
@@ -1638,11 +6875,277 @@ async function createCourseAndSection(ctx: InstructorCtx, titleHint?: string) {
       institutionId: ctx.user.institutionId,
       courseId: course.id,
       termId: term.id,
-      code: `${code}-01`,
+      code: `${code}-01`.slice(0, 32),
       instructorPersonId: ctx.user.personId,
     },
   });
   return { course, section };
+}
+
+function sessionCodeFrom(name: string, n: number) {
+  const base = name.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").toUpperCase().slice(0, 24);
+  return `${base || "SESS"}-${String(n).padStart(2, "0")}`.slice(0, 32);
+}
+
+async function resolveCourseForSession(ctx: InstructorCtx, courseIdParam: string) {
+  const fromSection = ctx.sections.find(
+    (s) =>
+      s.id === courseIdParam ||
+      s.courseId === courseIdParam ||
+      courseAdminIdFor(s.courseCode) === courseIdParam ||
+      s.courseCode === courseIdParam,
+  );
+  if (fromSection) {
+    return { courseId: fromSection.courseId, code: fromSection.courseCode, title: fromSection.courseTitle };
+  }
+  const seeded = DEFAULT_MANAGE_COURSES.find((c) => c.id === courseIdParam || c.number === courseIdParam);
+  const code = (seeded?.number || courseIdParam.replace(/^course-/i, "").replace(/-/g, " ")).trim().toUpperCase().slice(0, 32);
+  const title = seeded?.name || code;
+  let course = await prisma.course.findFirst({
+    where: { institutionId: ctx.user.institutionId, code },
+  });
+  if (!course) {
+    course = await prisma.course.create({
+      data: {
+        id: randomUUID(),
+        institutionId: ctx.user.institutionId,
+        code: code || `CRS-${Date.now().toString(36).slice(-6).toUpperCase()}`,
+        title,
+        credits: Number(seeded?.creditValue) || 3,
+      },
+    });
+  }
+  return { courseId: course.id, code: course.code, title: course.title };
+}
+
+async function createSessionOffering(ctx: InstructorCtx, path: string, fields: Record<string, string>) {
+  const courseIdParam = parseScreenQuery(path).query.get("courseId") || fields.courseId || "";
+  const termId = ctx.terms[0]?.id;
+  if (!termId) throw Object.assign(new Error("No academic term configured"), { status: 400 });
+  const resolved = await resolveCourseForSession(ctx, courseIdParam);
+  const sessionName = (fields["Session Name"] || fields["Session Type"] || `${resolved.code} session`).trim();
+  const location = [fields["Campus / Location"], fields.Classroom].filter(Boolean).join(" · ") || "—";
+  const instructors = (fields["Instructor(s)"] || ctx.displayName).trim() || ctx.displayName;
+  const start = (fields["Start Date"] || "").trim();
+  const end = (fields["End Date"] || "").trim();
+  const schedule =
+    start && end ? `${start} – ${end}` : (fields["Schedule Type"] || "Simple Weekly Schedule").trim();
+  let code = sessionCodeFrom(sessionName, ctx.sections.length + 1);
+  const clash = await prisma.section.findFirst({
+    where: { institutionId: ctx.user.institutionId, courseId: resolved.courseId, code },
+  });
+  if (clash) code = `${code}-${Date.now().toString(36).slice(-3).toUpperCase()}`.slice(0, 32);
+  const section = await prisma.section.create({
+    data: {
+      id: randomUUID(),
+      institutionId: ctx.user.institutionId,
+      courseId: resolved.courseId,
+      termId,
+      code,
+      instructorPersonId: ctx.user.personId,
+    },
+  });
+  return {
+    id: section.id,
+    courseId: courseIdParam || courseAdminIdFor(resolved.code),
+    course: sessionName || `${resolved.code}: ${resolved.title}`,
+    location,
+    instructors,
+    schedule,
+    enrolled: 0,
+    reserved: 0,
+    waitList: 0,
+    status: "Not Started",
+  };
+}
+
+async function createProgramRecord(ctx: InstructorCtx, rowKey?: string) {
+  const fields = (parseActionFields(rowKey) || {}) as Record<string, unknown>;
+  const name = String(fields["Program Name"] || "").trim();
+  if (!name) throw Object.assign(new Error("Program Name is required"), { status: 400 });
+  const abbr = String(fields.Abbreviation || name.slice(0, 8))
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "-")
+    .slice(0, 32);
+  const type = String(fields["Program Type"] || "Diploma").trim().toLowerCase();
+  const awardLevel =
+    /bachelor/i.test(type)
+      ? "bachelor"
+      : /master/i.test(type)
+        ? "masters"
+        : /certificate/i.test(type)
+          ? "certificate"
+          : /visitor|online|not applicable/i.test(type)
+            ? "other"
+            : "diploma";
+  let code = abbr || `PRG-${Date.now().toString(36).slice(-6).toUpperCase()}`;
+  const existing = await prisma.program.findFirst({
+    where: { institutionId: ctx.user.institutionId, code },
+  });
+  if (existing) code = `${code}-${Date.now().toString(36).slice(-4).toUpperCase()}`.slice(0, 32);
+  const program = await prisma.program.create({
+    data: {
+      id: randomUUID(),
+      institutionId: ctx.user.institutionId,
+      code,
+      name,
+      awardLevel,
+    },
+  });
+  return {
+    program,
+    faculty: String(fields["Program Faculty"] || ""),
+    legalName: String(fields["Legal Program Name"] || name),
+    designations: fields.__designations ?? [],
+  };
+}
+
+async function createStudentProfile(ctx: InstructorCtx, fields: Record<string, string>) {
+  const givenName = (fields["Given Name"] || fields.givenName || "").trim();
+  const familyName = (fields["Family Name"] || fields.familyName || "").trim();
+  const email = (fields.Email || fields.email || "").trim().toLowerCase();
+  const programName = (fields.Program || fields.programName || ctx.programs[0]?.name || "General Studies").trim();
+  const standing = (fields["Student Status"] || fields.standing || "good").trim() || "good";
+  const courseCode = (fields["Course Name"] || fields.courseCode || "").trim();
+  const sectionValue = (fields.Section || fields.sectionId || "").trim();
+
+  if (!givenName || !familyName) {
+    throw Object.assign(new Error("Given Name and Family Name are required"), { status: 400 });
+  }
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw Object.assign(new Error("A valid Email is required"), { status: 400 });
+  }
+  if (!sectionValue) {
+    throw Object.assign(new Error("Section is required"), { status: 400 });
+  }
+
+  const section =
+    ctx.sections.find((s) => s.id === sectionValue) ||
+    ctx.sections.find((s) => s.code === sectionValue && (!courseCode || s.courseCode === courseCode)) ||
+    ctx.sections.find((s) => s.code === sectionValue);
+  if (!section) {
+    throw Object.assign(new Error("Section must be one of your assigned teaching sections"), { status: 400 });
+  }
+  if (courseCode && section.courseCode !== courseCode) {
+    throw Object.assign(new Error("Section does not match the selected Course Name"), { status: 400 });
+  }
+
+  const institutionId = ctx.user.institutionId;
+  let person = await prisma.person.findFirst({
+    where: { institutionId, email },
+  });
+  if (!person) {
+    person = await prisma.person.create({
+      data: {
+        id: randomUUID(),
+        institutionId,
+        givenName,
+        familyName,
+        email,
+      },
+    });
+  } else {
+    person = await prisma.person.update({
+      where: { id: person.id },
+      data: { givenName, familyName },
+    });
+  }
+
+  let account = await prisma.account.findFirst({
+    where: { institutionId, email },
+  });
+  if (!account) {
+    account = await prisma.account.create({
+      data: {
+        id: randomUUID(),
+        institutionId,
+        personId: person.id,
+        email,
+        passwordHash: await hashPassword("Heritage!2026"),
+        rolesJson: JSON.stringify(["student"]),
+      },
+    });
+  }
+
+  let student = await prisma.student.findFirst({
+    where: { institutionId, personId: person.id },
+  });
+  if (!student) {
+    const year = new Date().getFullYear();
+    const count = await prisma.student.count({ where: { institutionId } });
+    const studentNumber = `ST-${year}-${String(count + 1).padStart(3, "0")}`;
+    const programVersion = await prisma.programVersion.findFirst({
+      where: {
+        institutionId,
+        status: "active",
+        program: { name: programName },
+      },
+      orderBy: { effectiveOn: "desc" },
+    });
+    student = await prisma.student.create({
+      data: {
+        id: randomUUID(),
+        institutionId,
+        personId: person.id,
+        studentNumber,
+        programName,
+        programVersionId: programVersion?.id ?? null,
+        standing,
+      },
+    });
+  } else {
+    student = await prisma.student.update({
+      where: { id: student.id },
+      data: { programName, standing },
+    });
+  }
+
+  const existingEnrolment = await prisma.enrolment.findFirst({
+    where: { sectionId: section.id, studentId: student.id },
+  });
+  const enrolment =
+    existingEnrolment ??
+    (await prisma.enrolment.create({
+      data: {
+        id: randomUUID(),
+        institutionId,
+        sectionId: section.id,
+        studentId: student.id,
+        status: "enrolled",
+      },
+    }));
+
+  const assignments = await prisma.assignment.findMany({
+    where: { institutionId, sectionId: section.id },
+  });
+  for (const assignment of assignments) {
+    const existingGrade = await prisma.gradeItem.findFirst({
+      where: { assignmentId: assignment.id, studentId: student.id },
+    });
+    if (existingGrade) continue;
+    await prisma.gradeItem.create({
+      data: {
+        id: randomUUID(),
+        institutionId,
+        assignmentId: assignment.id,
+        studentId: student.id,
+        enrolmentId: enrolment.id,
+        maxScore: assignment.maxScore,
+        status: "draft",
+      },
+    });
+  }
+
+  return {
+    studentId: student.id,
+    studentNumber: student.studentNumber,
+    sectionId: section.id,
+    enrolmentId: enrolment.id,
+    accountId: account.id,
+    name: `${givenName} ${familyName}`.trim(),
+    alreadyEnrolled: Boolean(existingEnrolment),
+  };
 }
 
 /** Domain-backed CTA handler — every teacher button that is not a nav href hits this. */
@@ -1655,24 +7158,49 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
   let result: Record<string, unknown> = {};
 
   try {
-    if (
-      lower.includes("schedule") ||
-      lower.includes("lecture") ||
-      lower.includes("publish assessment") ||
-      (lower.includes("create") && lower.includes("assessment")) ||
-      lower.includes("add slot") ||
-      lower.includes("schedule event")
+    const isAssessmentBuilderPath =
+      path.includes("t19") || path.includes("create-edit-assessment");
+    const isProgramSettingsPath = path.includes("t83") || path.includes("program-settings");
+    if (isProgramSettingsPath) {
+      const handled = applyProgramSettingsPatch(action, input.rowKey, path);
+      if (handled) {
+        await patchScreenOverlay(user.institutionId, PROGRAM_SETTINGS_PATH, handled.patch);
+        if (lower.includes("save program")) {
+          const fields = parseActionFields(input.rowKey) || {};
+          const programId =
+            parseScreenQuery(path).query.get("programId") || fields.programId || "";
+          if (programId) {
+            await patchScreenOverlay(user.institutionId, FACULTIES_PROGRAMS_PATH, (prev) => {
+              const edits =
+                prev.facultyProgramEdits && typeof prev.facultyProgramEdits === "object"
+                  ? { ...(prev.facultyProgramEdits as Record<string, Partial<FacultyProgramRecord>>) }
+                  : {};
+              edits[programId] = {
+                ...(edits[programId] || {}),
+                name: fields["Program Name"] || edits[programId]?.name,
+                abbreviation: fields.Abbreviation || edits[programId]?.abbreviation,
+                active: !/inactive/i.test(fields["Active / Inactive"] || "Active"),
+              };
+              return { ...prev, facultyProgramEdits: edits };
+            });
+          }
+        }
+        message = handled.message;
+        result = handled.result;
+      }
+    } else if (
+      isAssessmentBuilderPath &&
+      (lower.includes("publish assessment") ||
+        lower.includes("save draft") ||
+        (lower.includes("create") && lower.includes("assessment")) ||
+        lower === "publish")
     ) {
-      const title =
-        input.rowKey ||
-        (lower.includes("lecture")
-          ? `Lecture · ${new Date().toLocaleDateString()}`
-          : lower.includes("event")
-            ? `Event · ${new Date().toLocaleDateString()}`
-            : `Assessment · ${new Date().toLocaleDateString()}`);
-      const created = await createAssignmentForInstructor(ctx, title);
-      message = `Scheduled “${created.assignment.title}” on ${created.section.code}`;
-      result = { assignmentId: created.assignment.id, sectionId: created.section.id };
+      const publish = !lower.includes("draft");
+      const saved = await createOrSaveAssessment(ctx, path, input.rowKey, publish);
+      message = publish
+        ? `Published “${saved.title}” on ${saved.sectionCode}`
+        : `Draft saved · ${saved.title}`;
+      result = saved;
     } else if (lower.includes("announcement") || lower.includes("share with class") || lower.includes("publish announcement")) {
       let title = input.rowKey || `Class update · ${new Date().toLocaleDateString()}`;
       let body = `${ctx.displayName} posted: ${title}`;
@@ -1684,10 +7212,90 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
         } catch {
           /* keep defaults */
         }
+      } else if (path.includes("lecture-review") || path.includes("in-09")) {
+        const review = buildLectureReview(ctx, path).lectureReview as
+          | { title?: string; meta?: string; transcript?: string; highlights?: string[]; aiNotes?: string }
+          | undefined;
+        if (review?.title) {
+          title = `Lecture notes · ${review.title}`;
+          const highlights = (review.highlights ?? []).map((h) => `• ${h}`).join("\n");
+          body = [review.meta, review.transcript, highlights, review.aiNotes].filter(Boolean).join("\n\n");
+        }
       }
       const n = await postAnnouncement(ctx, title, body);
       message = `Announcement sent to ${n} student account(s)`;
       result = { recipients: n, title };
+    } else if (
+      lower.includes("save availability") ||
+      (lower.includes("availability") && lower.includes("save"))
+    ) {
+      const fields = parseActionFields(input.rowKey) || {};
+      const date = (fields.Date || "").trim();
+      if (!date) {
+        message = "Choose a date for this availability slot.";
+        result = { error: true };
+      } else {
+        const slot = await persistAvailabilitySlot(ctx, fields);
+        message = slot.date
+          ? `Availability saved · ${slot.date} ${slot.start}–${slot.end}`
+          : `Availability saved · ${slot.day} ${slot.start}–${slot.end}`;
+        result = slot;
+      }
+    } else if (lower.includes("save content") || lower === "save connect" || lower === "save education") {
+      const fields = parseActionFields(input.rowKey) || {};
+      const kind = (fields.__kind || fields.Kind || "").toLowerCase();
+      if (kind === "education" || lower.includes("education")) {
+        result = await persistEducation(ctx, fields);
+        message = "Education / accreditation saved";
+      } else if (kind === "general") {
+        result = await persistGeneralInfo(ctx, fields);
+        message = "General information saved";
+      } else {
+        result = await persistConnect(ctx, fields);
+        message = "Connect details saved";
+      }
+    } else if (lower.includes("save accomplishment") || lower.includes("add accomplishment")) {
+      const fields = parseActionFields(input.rowKey) || {};
+      const saved = await persistAccomplishment(ctx, fields);
+      if ("error" in saved && saved.error) {
+        message = saved.message;
+        result = saved;
+      } else {
+        message = `Accomplishment saved · ${saved.title}`;
+        result = saved;
+      }
+    } else if (lower.includes("save time zone") || (lower.includes("time zone") && lower.includes("save"))) {
+      const fields = parseActionFields(input.rowKey) || {};
+      result = await persistTimezone(ctx, fields);
+      message = result.timezone ? `Time zone updated · ${result.timezone}` : "Choose a time zone";
+    } else if (
+      (lower.includes("schedule") ||
+        lower.includes("lecture") ||
+        lower.includes("add slot") ||
+        lower.includes("schedule event")) &&
+      !path.includes("availability") &&
+      !path.includes("t04") &&
+      !path.includes("t25")
+    ) {
+      const title =
+        (input.rowKey && !input.rowKey.trim().startsWith("{") ? input.rowKey : null) ||
+        (lower.includes("lecture")
+          ? `Lecture · ${new Date().toLocaleDateString()}`
+          : lower.includes("event")
+            ? `Event · ${new Date().toLocaleDateString()}`
+            : `Scheduled item · ${new Date().toLocaleDateString()}`);
+      const created = await createAssignmentForInstructor(ctx, title);
+      message = `Scheduled “${created.assignment.title}” on ${created.section.code}`;
+      result = { assignmentId: created.assignment.id, sectionId: created.section.id };
+    } else if (
+      lower === "send" ||
+      lower.includes("send message") ||
+      lower.includes("send reply") ||
+      ((path.includes("message") || path.includes("t16")) && lower.includes("send"))
+    ) {
+      const sent = await sendInstructorMessage(ctx, input.rowKey);
+      message = `Message sent${sent.recipients ? ` · ${sent.recipients} recipient(s)` : ""}`;
+      result = sent;
     } else if (
       lower.includes("publish final") ||
       lower.includes("publish marks") ||
@@ -1707,35 +7315,1481 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
       (lower.includes("attendance") && lower.includes("submit")) ||
       lower.includes("mark all present")
     ) {
-      const att = await saveAttendanceSession(ctx, path, true);
+      const att = await saveAttendanceSession(ctx, path, true, input.rowKey);
       message = `Attendance finalized for ${att.courseCode} · ${att.roster.length} student(s)`;
       result = att;
-    } else if (lower.includes("save draft") || (lower.includes("attendance") && lower.includes("save"))) {
-      const att = await saveAttendanceSession(ctx, path, false);
+    } else if (
+      path.includes("t42") ||
+      path.includes("new-workshop-enrollment") ||
+      path.includes("new-workshop-enrolment")
+    ) {
+      const fields = parseActionFields(input.rowKey) || {};
+      const saved = await saveWorkshopEnrolment(user.institutionId, fields);
+      message = saved.message;
+      result = { ...saved, error: !saved.ok };
+    } else if (
+      (path.includes("t40") || path.includes("workshop-enrollment-status")) &&
+      (lower.includes("approve") || lower.includes("decline") || lower.includes("drop"))
+    ) {
+      const status: WorkshopEnrolmentStatus = lower.includes("approve")
+        ? "approved"
+        : lower.includes("drop")
+          ? "dropped"
+          : "declined";
+      const saved = await updateWorkshopEnrolmentStatus(user.institutionId, input.rowKey || "", status);
+      message = saved.message;
+      result = { ...saved, error: !saved.ok };
+    } else if (
+      (path.includes("t41") || path.includes("workshop-attendance")) &&
+      lower.includes("save attendance")
+    ) {
+      let roster: Array<{ studentId: string; workshopId: string; status: string; note?: string }> = [];
+      let date = "";
+      try {
+        const parsed = JSON.parse(input.rowKey || "{}") as {
+          date?: string;
+          roster?: Array<{ studentId: string; workshopId: string; status: string; note?: string }>;
+        };
+        date = parsed.date || "";
+        roster = Array.isArray(parsed.roster) ? parsed.roster : [];
+      } catch {
+        roster = [];
+      }
+      const saved = await saveWorkshopAttendance(user.institutionId, date, roster);
+      message = saved.message;
+      result = { ...saved, error: !saved.ok };
+    } else if (
+      lower.includes("save student") ||
+      lower.includes("create student") ||
+      lower.includes("create profile") ||
+      (path.includes("t43") &&
+        (lower.includes("save") ||
+          lower.includes("create") ||
+          lower.includes("profile") ||
+          lower.includes("draft")))
+    ) {
+      const fields = parseActionFields(input.rowKey) || {};
+      const created = await createStudentProfile(ctx, fields);
+      message = created.alreadyEnrolled
+        ? `Student already on roster · ${created.name} (${created.studentNumber})`
+        : `Student created · ${created.name} (${created.studentNumber}) enrolled in section`;
+      result = created;
+    } else if (
+      (lower.includes("save draft") || (lower.includes("attendance") && lower.includes("save"))) &&
+      !isAssessmentBuilderPath
+    ) {
+      const att = await saveAttendanceSession(ctx, path, false, input.rowKey);
       message = `Attendance draft saved · ${att.roster.length} student(s)`;
       result = att;
-    } else if (lower.includes("create course") || lower.includes("save course")) {
+    } else if (lower.includes("save session") || lower.includes("create session") || lower.includes("add session")) {
+      const fields = parseActionFields(input.rowKey) || {};
+      const created = await createSessionOffering(ctx, path, fields);
+      const listPath = "/instructor/f/t77-course-admin";
+      await patchScreenOverlay(user.institutionId, listPath, (prev) => {
+        const extras = Array.isArray(prev.extraSessions)
+          ? [
+              ...(prev.extraSessions as Array<{
+                id: string;
+                course: string;
+                courseId?: string;
+                location: string;
+                instructors: string;
+                schedule: string;
+                enrolled: number;
+                reserved: number;
+                waitList: number;
+                status: string;
+              }>),
+            ]
+          : [];
+        extras.unshift(created);
+        return {
+          ...prev,
+          extraSessions: extras.slice(0, 100),
+          _lastSessionMeta: {
+            fields,
+            weeklyTimings: fields.__weeklyTimings ?? null,
+            exams: fields.__exams ?? null,
+            at: new Date().toISOString(),
+          },
+        };
+      });
+      message = `Session saved · ${created.course}`;
+      result = { id: created.id, sessionName: created.course, courseId: created.courseId };
+    } else if (lower.includes("delete session")) {
+      const sessionId = (input.rowKey || "").trim();
+      if (!sessionId) {
+        message = "Delete failed · missing session id";
+        result = { error: true };
+      } else {
+        await patchScreenOverlay(user.institutionId, "/instructor/f/t77-course-admin", (prev) => {
+          const deleted = Array.isArray(prev.deletedSessionIds)
+            ? [...(prev.deletedSessionIds as string[])]
+            : [];
+          if (!deleted.includes(sessionId)) deleted.push(sessionId);
+          const extras = Array.isArray(prev.extraSessions)
+            ? (
+                prev.extraSessions as Array<{
+                  id: string;
+                  course: string;
+                  location: string;
+                  instructors: string;
+                  schedule: string;
+                  enrolled: number;
+                  reserved: number;
+                  waitList: number;
+                  status: string;
+                }>
+              ).filter((s) => s.id !== sessionId)
+            : [];
+          return { ...prev, deletedSessionIds: deleted, extraSessions: extras };
+        });
+        message = "Session deleted";
+        result = { id: sessionId };
+      }
+    } else if (lower.includes("delete course")) {
+      const courseId = (input.rowKey || "").trim();
+      if (!courseId) {
+        message = "Delete failed · missing course id";
+        result = { error: true };
+      } else {
+        await patchScreenOverlay(user.institutionId, "/instructor/f/t54-courses-sessions", (prev) => {
+          const deleted = Array.isArray(prev.deletedCourseIds)
+            ? [...(prev.deletedCourseIds as string[])]
+            : [];
+          if (!deleted.includes(courseId)) deleted.push(courseId);
+          const extras = Array.isArray(prev.extraCourses)
+            ? (
+                prev.extraCourses as Array<{
+                  id: string;
+                  name: string;
+                  number: string;
+                  creditValue: string;
+                  notStarted: number;
+                  inProgress: number;
+                  completed: number;
+                }>
+              ).filter((c) => c.id !== courseId)
+            : [];
+          return { ...prev, deletedCourseIds: deleted, extraCourses: extras };
+        });
+        message = "Course deleted";
+        result = { id: courseId };
+      }
+    } else if (lower.includes("bulk actions")) {
+      message = "Bulk actions · select courses then choose an action";
+      result = { bulk: true };
+    } else if (lower.includes("search courses")) {
+      message = `Course filter applied${input.rowKey ? ` · ${input.rowKey}` : ""}`;
+      result = { query: input.rowKey || "" };
+    } else if (lower.includes("save textbook") || lower.includes("create textbook")) {
+      const fields = (parseActionFields(input.rowKey) || {}) as Record<string, unknown>;
+      const existingId = String(fields.__textbookId || fields.textbookId || "").trim();
+      const row = textbookFromFields(fields, existingId || undefined);
+      const defaultIds = new Set(DEFAULT_TEXTBOOKS.map((t) => t.id));
+      await patchScreenOverlay(user.institutionId, TEXTBOOKS_LIST_PATH, (prev) => {
+        const extras = Array.isArray(prev.extraTextbooks)
+          ? [...(prev.extraTextbooks as TextbookRecord[])]
+          : [];
+        const edits =
+          prev.textbookEdits && typeof prev.textbookEdits === "object"
+            ? { ...(prev.textbookEdits as Record<string, Partial<TextbookRecord>>) }
+            : {};
+        const extraIdx = extras.findIndex((t) => t.id === row.id);
+        if (extraIdx >= 0) extras[extraIdx] = row;
+        else if (existingId && defaultIds.has(existingId)) edits[existingId] = row;
+        else extras.unshift(row);
+        return { ...prev, extraTextbooks: extras.slice(0, 100), textbookEdits: edits };
+      });
+      message = `Textbook saved · ${row.name}`;
+      result = { id: row.id, name: row.name };
+    } else if (lower.includes("delete textbook")) {
+      const textbookId = (input.rowKey || "").trim();
+      if (!textbookId) {
+        message = "Delete failed · missing textbook id";
+        result = { error: true };
+      } else {
+        await patchScreenOverlay(user.institutionId, TEXTBOOKS_LIST_PATH, (prev) => {
+          const deleted = Array.isArray(prev.deletedTextbookIds)
+            ? [...(prev.deletedTextbookIds as string[])]
+            : [];
+          if (!deleted.includes(textbookId)) deleted.push(textbookId);
+          const extras = Array.isArray(prev.extraTextbooks)
+            ? (prev.extraTextbooks as TextbookRecord[]).filter((t) => t.id !== textbookId)
+            : [];
+          return { ...prev, deletedTextbookIds: deleted, extraTextbooks: extras };
+        });
+        message = "Textbook deleted";
+        result = { id: textbookId };
+      }
+    } else if (lower.includes("create content course") || lower.includes("save content course")) {
+      const fields = (parseActionFields(input.rowKey) || {}) as Record<string, unknown>;
+      const existingId = String(fields.__contentCourseId || "").trim();
+      const catalog = mergeRepositoryList(
+        buildRepositoryCatalog(),
+        await loadScreenOverlay(user.institutionId, REPOSITORY_LIST_PATH),
+      );
+      const row = repositoryCourseFromFields(fields, catalog, existingId || undefined);
+      const selectedId = String(fields.Course || "").trim();
+      const defaultIds = new Set(buildRepositoryCatalog().map((c) => c.id));
+      await patchScreenOverlay(user.institutionId, REPOSITORY_LIST_PATH, (prev) => {
+        const extras = Array.isArray(prev.extraRepositoryCourses)
+          ? [...(prev.extraRepositoryCourses as RepositoryCourseRecord[])]
+          : [];
+        const edits =
+          prev.repositoryEdits && typeof prev.repositoryEdits === "object"
+            ? { ...(prev.repositoryEdits as Record<string, Partial<RepositoryCourseRecord>>) }
+            : {};
+        const extraIdx = extras.findIndex((c) => c.id === row.id);
+        if (extraIdx >= 0) extras[extraIdx] = row;
+        else if (existingId && defaultIds.has(existingId)) edits[existingId] = row;
+        else extras.unshift(row);
+        if (!existingId && selectedId && selectedId !== row.id) {
+          const selectedExtra = extras.findIndex((c) => c.id === selectedId);
+          if (selectedExtra >= 0) extras[selectedExtra] = { ...extras[selectedExtra], status: "Inactive" };
+          else if (defaultIds.has(selectedId)) {
+            edits[selectedId] = { ...(edits[selectedId] ?? {}), status: "Inactive" };
+          }
+        }
+        return { ...prev, extraRepositoryCourses: extras.slice(0, 200), repositoryEdits: edits };
+      });
+      message = `Content course saved · ${row.number}: ${row.name}`;
+      result = { id: row.id, name: row.name };
+    } else if (lower.includes("delete content course")) {
+      const courseId = (input.rowKey || "").trim();
+      if (!courseId) {
+        message = "Delete failed · missing content course id";
+        result = { error: true };
+      } else {
+        await patchScreenOverlay(user.institutionId, REPOSITORY_LIST_PATH, (prev) => {
+          const deleted = Array.isArray(prev.deletedRepositoryIds)
+            ? [...(prev.deletedRepositoryIds as string[])]
+            : [];
+          if (!deleted.includes(courseId)) deleted.push(courseId);
+          const extras = Array.isArray(prev.extraRepositoryCourses)
+            ? (prev.extraRepositoryCourses as RepositoryCourseRecord[]).filter((c) => c.id !== courseId)
+            : [];
+          return { ...prev, deletedRepositoryIds: deleted, extraRepositoryCourses: extras };
+        });
+        message = "Content course deleted";
+        result = { id: courseId };
+      }
+    } else if (lower.includes("search repository")) {
+      message = `Repository filter applied${input.rowKey ? ` · ${input.rowKey}` : ""}`;
+      result = { query: input.rowKey || "" };
+    } else if (lower.startsWith("push") || lower.includes("push content")) {
+      const courseId = (input.rowKey || "").trim();
+      await bumpRepositoryCount(user.institutionId, courseId, "push");
+      message = `Push recorded${courseId ? ` · ${courseId}` : ""}`;
+      result = { id: courseId, action: "push" };
+    } else if (lower.startsWith("pull") || lower.includes("pull content")) {
+      const courseId = (input.rowKey || "").trim();
+      await bumpRepositoryCount(user.institutionId, courseId, "pull");
+      message = `Pull recorded${courseId ? ` · ${courseId}` : ""}`;
+      result = { id: courseId, action: "pull" };
+    } else if (lower.startsWith("history") || lower.includes("content history")) {
+      const courseId = (input.rowKey || "").trim();
+      await bumpRepositoryCount(user.institutionId, courseId, "history");
+      message = `History opened${courseId ? ` · ${courseId}` : ""}`;
+      result = { id: courseId, action: "history" };
+    } else if (lower.includes("manage content")) {
+      message = `Opening manage${input.rowKey ? ` · ${input.rowKey}` : ""}`;
+      result = { id: input.rowKey || "", manage: true };
+    } else if (
+      (lower.includes("create course") || lower.includes("save course")) &&
+      !lower.includes("configuration") &&
+      !lower.includes("content course")
+    ) {
       const created = await createCourseAndSection(ctx, input.rowKey);
       message = `Created ${created.course.code} · ${created.section.code}`;
       result = { courseId: created.course.id, sectionId: created.section.id };
-    } else if (lower.includes("create alert") || lower.includes("create flag") || lower.includes("create academic")) {
-      const focus = ctx.sections[0]?.enrolments.find((e) => e.standing !== "good") || ctx.sections[0]?.enrolments[0];
-      const title = `Academic alert · ${focus?.studentName ?? "student"}`;
-      await prisma.notification.create({
-        data: {
-          institutionId: user.institutionId,
-          recipientAccountId: user.accountId,
-          channel: "in_app",
-          title,
-          body: `${action} recorded for ${focus?.studentNumber ?? "roster"} (${focus?.standing ?? "n/a"}).`,
-          templateKey: "instructor.alert",
-        },
+    } else if (lower.includes("save program type") || lower.includes("create program type")) {
+      const fields = parseActionFields(input.rowKey) || {};
+      const name = (fields["Program Type Name"] || fields["Type Name"] || fields.Name || "New Program Type").trim();
+      const abbreviation = (fields.Abbreviation || fields.Code || name.slice(0, 4)).trim();
+      const active = !/inactive/i.test(fields["Active / Inactive"] || "Active");
+      const existingId = (fields.__typeId || fields.typeId || "").trim();
+      const defaultIds = new Set(DEFAULT_PROGRAM_TYPES.map((t) => t.id));
+      let savedId = existingId || `ptype-${Date.now().toString(36)}`;
+      await patchScreenOverlay(user.institutionId, PROGRAM_TYPES_LIST_PATH, (prev) => {
+        const extras = Array.isArray(prev.extraProgramTypes)
+          ? [
+              ...(prev.extraProgramTypes as ProgramTypeRecord[]),
+            ]
+          : [];
+        const edits =
+          prev.programTypeEdits && typeof prev.programTypeEdits === "object"
+            ? { ...(prev.programTypeEdits as Record<string, Partial<ProgramTypeRecord>>) }
+            : {};
+        const extraIdx = extras.findIndex((t) => t.id === savedId);
+        const row: ProgramTypeRecord = { id: savedId, name, abbreviation, active };
+        if (extraIdx >= 0) {
+          extras[extraIdx] = row;
+        } else if (existingId && defaultIds.has(existingId)) {
+          edits[existingId] = { name, abbreviation, active };
+        } else {
+          if (!existingId) savedId = row.id;
+          extras.unshift(row);
+        }
+        return {
+          ...prev,
+          extraProgramTypes: extras.slice(0, 100),
+          programTypeEdits: edits,
+        };
       });
-      message = `Alert logged · ${focus?.studentName ?? "roster"}`;
-      result = { studentId: focus?.studentId ?? null };
+      message = `Program type saved · ${name}`;
+      result = { id: savedId, name, abbreviation, active };
+    } else if (lower.includes("delete program type")) {
+      const typeId = (input.rowKey || "").trim();
+      if (!typeId) {
+        message = "Delete failed · missing program type id";
+        result = { error: true };
+      } else {
+        await patchScreenOverlay(user.institutionId, "/instructor/f/t50-program-types", (prev) => {
+          const deleted = Array.isArray(prev.deletedProgramTypeIds)
+            ? [...(prev.deletedProgramTypeIds as string[])]
+            : [];
+          if (!deleted.includes(typeId)) deleted.push(typeId);
+          const extras = Array.isArray(prev.extraProgramTypes)
+            ? (
+                prev.extraProgramTypes as Array<{
+                  id: string;
+                  name: string;
+                  abbreviation: string;
+                  active: boolean;
+                }>
+              ).filter((t) => t.id !== typeId)
+            : [];
+          return { ...prev, deletedProgramTypeIds: deleted, extraProgramTypes: extras };
+        });
+        message = "Program type deleted";
+        result = { id: typeId };
+      }
+    } else if (lower.includes("reorder program types")) {
+      let order: string[] = [];
+      try {
+        const parsed = JSON.parse(input.rowKey || "[]");
+        if (Array.isArray(parsed)) order = parsed.filter((id): id is string => typeof id === "string");
+      } catch {
+        order = [];
+      }
+      await patchScreenOverlay(user.institutionId, "/instructor/f/t50-program-types", (prev) => ({
+        ...prev,
+        programTypeOrder: order,
+      }));
+      message = "Program types reordered";
+      result = { order };
+    } else if (
+      lower.includes("save configuration") ||
+      lower.includes("save course configuration") ||
+      lower.includes("create configuration")
+    ) {
+      const fields = parseActionFields(input.rowKey) || {};
+      const name = (fields["Course Name"] || fields.Name || "").trim();
+      if (!name) throw Object.assign(new Error("Course Name is required"), { status: 400 });
+      const abbreviation = (fields.Abbreviation || fields.Code || name.slice(0, 8)).trim();
+      const overlay = await loadScreenOverlay(user.institutionId, COURSE_CONFIG_PATH);
+      const current = mergeCourseConfigList(overlay, []);
+      const existingIdRaw = courseConfigQueryId(path) || (fields.courseId || "").trim();
+      const existingId = existingIdRaw && existingIdRaw !== "new" ? existingIdRaw : "";
+      const existing = existingId ? current.find((c) => c.id === existingId) : undefined;
+      const id = existing?.id || `cfg-${Date.now().toString(36)}`;
+      const row: CourseConfigRecord = {
+        id,
+        name,
+        abbreviation,
+        enrollmentPermission: fields["Course Enrollment Permission"] || "No permission required",
+        syllabusPrivacy: fields["Course Syllabus Privacy"] || "Private",
+        repositorySettings: fields["Repository Settings"] || "Use brand settings",
+        textbookOptOut: fields["Textbook Opt-Out"] || "System Default",
+        active: !/inactive/i.test(fields["Active / Inactive"] || "Active"),
+      };
+      await patchScreenOverlay(user.institutionId, COURSE_CONFIG_PATH, (prev) => {
+        const extras = Array.isArray(prev.extraCourseConfigs)
+          ? [...(prev.extraCourseConfigs as CourseConfigRecord[])]
+          : [];
+        const edits =
+          prev.courseConfigEdits && typeof prev.courseConfigEdits === "object"
+            ? { ...(prev.courseConfigEdits as Record<string, Partial<CourseConfigRecord>>) }
+            : {};
+        if (existing && extras.some((c) => c.id === id)) {
+          return {
+            ...prev,
+            extraCourseConfigs: extras.map((c) => (c.id === id ? row : c)),
+            courseConfigEdits: { ...edits, [id]: row },
+          };
+        }
+        if (existing && DEFAULT_COURSE_CONFIGS.some((c) => c.id === id)) {
+          return { ...prev, courseConfigEdits: { ...edits, [id]: row } };
+        }
+        extras.unshift(row);
+        return { ...prev, extraCourseConfigs: extras.slice(0, 200), courseConfigEdits: { ...edits, [id]: row } };
+      });
+      message = `Course configuration saved · ${name}`;
+      result = { id, name, abbreviation };
+    } else if (lower.includes("delete course configuration") || lower.includes("delete configuration")) {
+      const configId = (input.rowKey || "").trim();
+      if (!configId) {
+        message = "Delete failed · missing course id";
+        result = { error: true };
+      } else {
+        await patchScreenOverlay(user.institutionId, COURSE_CONFIG_PATH, (prev) => {
+          const deleted = Array.isArray(prev.deletedCourseConfigIds)
+            ? [...(prev.deletedCourseConfigIds as string[])]
+            : [];
+          if (!deleted.includes(configId)) deleted.push(configId);
+          const extras = Array.isArray(prev.extraCourseConfigs)
+            ? (prev.extraCourseConfigs as CourseConfigRecord[]).filter((c) => c.id !== configId)
+            : [];
+          return { ...prev, deletedCourseConfigIds: deleted, extraCourseConfigs: extras };
+        });
+        message = "Course configuration deleted";
+        result = { id: configId };
+      }
+    } else if (lower.includes("save faculty") || lower.includes("create faculty")) {
+      const fields = parseActionFields(input.rowKey) || {};
+      const name = (fields["Faculty Name"] || fields.Name || "").trim();
+      if (!name) throw Object.assign(new Error("Faculty Name is required"), { status: 400 });
+      const abbreviation = (fields["Faculty Abbreviation"] ?? fields.Abbreviation ?? "").trim();
+      const active = !/inactive/i.test(fields["Active / Inactive"] || "Active");
+      const overlay = await loadScreenOverlay(user.institutionId, FACULTIES_PROGRAMS_PATH);
+      const current = mergeFacultyList(overlay);
+      const existingId = facultyQueryId(path) || (fields.facultyId || "").trim();
+      const existing = existingId ? current.find((f) => f.id === existingId) : undefined;
+      const id = existing?.id || facultySlug(name);
+      await patchScreenOverlay(user.institutionId, FACULTIES_PROGRAMS_PATH, (prev) => {
+        const extras = Array.isArray(prev.extraFaculties)
+          ? [...(prev.extraFaculties as FacultyRecord[])]
+          : [];
+        const edits =
+          prev.facultyEdits && typeof prev.facultyEdits === "object"
+            ? { ...(prev.facultyEdits as Record<string, Partial<FacultyRecord>>) }
+            : {};
+        const row: FacultyRecord = { id, name, abbreviation, active };
+        if (existing && extras.some((f) => f.id === id)) {
+          return {
+            ...prev,
+            extraFaculties: extras.map((f) => (f.id === id ? row : f)),
+            facultyEdits: { ...edits, [id]: row },
+          };
+        }
+        if (existing && DEFAULT_FACULTIES.some((f) => f.id === id)) {
+          return { ...prev, facultyEdits: { ...edits, [id]: row } };
+        }
+        extras.unshift(row);
+        return { ...prev, extraFaculties: extras.slice(0, 100), facultyEdits: { ...edits, [id]: row } };
+      });
+      message = `Faculty saved · ${name}`;
+      result = { id, name, abbreviation, active };
+    } else if (lower.includes("delete faculty")) {
+      const facultyId = (input.rowKey || "").trim();
+      if (!facultyId) {
+        message = "Delete failed · missing faculty id";
+        result = { error: true };
+      } else {
+        await patchScreenOverlay(user.institutionId, FACULTIES_PROGRAMS_PATH, (prev) => {
+          const deleted = Array.isArray(prev.deletedFacultyIds) ? [...(prev.deletedFacultyIds as string[])] : [];
+          if (!deleted.includes(facultyId)) deleted.push(facultyId);
+          const extras = Array.isArray(prev.extraFaculties)
+            ? (prev.extraFaculties as FacultyRecord[]).filter((f) => f.id !== facultyId)
+            : [];
+          return { ...prev, deletedFacultyIds: deleted, extraFaculties: extras };
+        });
+        message = "Faculty deleted";
+        result = { id: facultyId };
+      }
+    } else if (lower.includes("delete program") && !lower.includes("program type")) {
+      const programId = (input.rowKey || "").trim();
+      if (!programId) {
+        message = "Delete failed · missing program id";
+        result = { error: true };
+      } else {
+        await patchScreenOverlay(user.institutionId, FACULTIES_PROGRAMS_PATH, (prev) => {
+          const deleted = Array.isArray(prev.deletedFacultyProgramIds)
+            ? [...(prev.deletedFacultyProgramIds as string[])]
+            : [];
+          if (!deleted.includes(programId)) deleted.push(programId);
+          const extras = Array.isArray(prev.extraFacultyPrograms)
+            ? (prev.extraFacultyPrograms as FacultyProgramRecord[]).filter((p) => p.id !== programId)
+            : [];
+          return { ...prev, deletedFacultyProgramIds: deleted, extraFacultyPrograms: extras };
+        });
+        message = "Program deleted";
+        result = { id: programId };
+      }
+    } else if (
+      (lower.includes("create program") || lower.includes("save program")) &&
+      !lower.includes("program type") &&
+      !lower.includes("program settings") &&
+      !path.includes("program-settings") &&
+      !path.includes("t83")
+    ) {
+      const created = await createProgramRecord(ctx, input.rowKey);
+      const overlay = await loadScreenOverlay(user.institutionId, FACULTIES_PROGRAMS_PATH);
+      const faculties = mergeFacultyList(overlay);
+      const facultyId = facultyIdFromName(created.faculty, faculties);
+      const fields = (parseActionFields(input.rowKey) || {}) as Record<string, string>;
+      const active = !/inactive/i.test(fields["Active / Inactive"] || "Active");
+      await patchScreenOverlay(user.institutionId, FACULTIES_PROGRAMS_PATH, (prev) => {
+        const extras = Array.isArray(prev.extraFacultyPrograms)
+          ? [...(prev.extraFacultyPrograms as FacultyProgramRecord[])]
+          : [];
+        extras.unshift({
+          id: created.program.id,
+          facultyId: facultyId || faculties[0]?.id || facultySlug(created.faculty || "Unassigned"),
+          name: created.program.name,
+          abbreviation: created.program.code,
+          active,
+        });
+        const programFaculty =
+          prev.programFaculty && typeof prev.programFaculty === "object"
+            ? { ...(prev.programFaculty as Record<string, string>) }
+            : {};
+        programFaculty[created.program.id] = facultyId || faculties[0]?.id || "";
+        return { ...prev, extraFacultyPrograms: extras.slice(0, 200), programFaculty };
+      });
+      message = `Program saved · ${created.program.code} · ${created.program.name}`;
+      result = { programId: created.program.id, code: created.program.code, facultyId };
+    } else if (lower === "continue" && (path.includes("create-master-schedule") || path.includes("create-term-schedule") || path.includes("t71") || path.includes("t72"))) {
+      const fields = parseActionFields(input.rowKey) || {};
+      const kind = path.includes("term") || path.includes("t72") ? "term" : "master";
+      const termValue = (fields.Term || "").trim();
+      const option = TERM_SCHEDULE_TERM_OPTIONS.find((o) => o.value === termValue);
+      let termLabel = option?.label || termValue;
+      if (kind === "term" && termValue && !option) {
+        const termState = await prisma.sisScreenState.findUnique({
+          where: { institutionId_path: { institutionId: user.institutionId, path: MANAGE_TERMS_LIST_PATH } },
+        });
+        const termOverlay = termState ? (JSON.parse(termState.payloadJson) as Record<string, unknown>) : null;
+        const extra = mergeTermList([], termOverlay).find((t) => t.id === termValue);
+        if (extra) termLabel = `${extra.name}: ${extra.dates}`;
+      }
+      const label = (
+        kind === "term"
+          ? termLabel
+          : fields.Program || fields["Schedule Abbreviation"] || "Schedule draft"
+      ).trim();
+      await appendInstructorActivity(user.institutionId, MASTER_SCHEDULING_LIST_PATH, {
+        action,
+        kind,
+        label,
+        fields,
+        at: new Date().toISOString(),
+      });
+      if (kind === "term") {
+        const parts = termScheduleLabelParts(termLabel);
+        const description = (fields["Schedule Description"] || "").trim();
+        const id = `ts-${Date.now().toString(36)}`;
+        await patchScreenOverlay(user.institutionId, MASTER_SCHEDULING_LIST_PATH, (prev) => {
+          const extras = Array.isArray(prev.extraSchedules)
+            ? [
+                ...(prev.extraSchedules as Array<{
+                  id: string;
+                  dateRange: string;
+                  session: string;
+                  duration: string;
+                  program: string;
+                  canDelete?: boolean;
+                }>),
+              ]
+            : [];
+          extras.unshift({
+            id,
+            dateRange: parts.dateRange,
+            session: parts.session,
+            duration: "Term",
+            program: description || "Term schedule",
+            canDelete: true,
+          });
+          return { ...prev, extraSchedules: extras.slice(0, 100) };
+        });
+        result = { kind, label, id };
+      } else {
+        result = { kind, label };
+      }
+      message = `Step 1 saved · ${label} · continue to step 2`;
+    } else if (lower.includes("save academic calendar") || lower.includes("create academic calendar")) {
+      const fields = parseActionFields(input.rowKey) || {};
+      const name = (fields.Name || "Untitled calendar").trim();
+      const start = (fields["Start Date"] || "—").trim();
+      const end = (fields["End Date"] || "—").trim();
+      const status = (fields.Status || "Inactive").trim();
+      const id = `cal-${Date.now().toString(36)}`;
+      const listPath = "/instructor/f/t52-academic-calendars";
+      await patchScreenOverlay(user.institutionId, listPath, (prev) => {
+        const extras = Array.isArray(prev.extraCalendars)
+          ? [...(prev.extraCalendars as Array<{ id: string; name: string; dates: string; status: string }>)]
+          : [];
+        extras.unshift({ id, name, dates: `${start} – ${end}`, status });
+        return { ...prev, extraCalendars: extras.slice(0, 100) };
+      });
+      message = `Academic calendar saved · ${name}`;
+      result = { id, name, status };
+    } else if (lower.includes("delete master schedule")) {
+      const scheduleId = (input.rowKey || "").trim();
+      if (!scheduleId) {
+        message = "Delete failed · missing schedule id";
+        result = { error: true };
+      } else {
+        await patchScreenOverlay(user.institutionId, "/instructor/f/t53-master-scheduling", (prev) => {
+          const deleted = Array.isArray(prev.deletedScheduleIds) ? [...(prev.deletedScheduleIds as string[])] : [];
+          if (!deleted.includes(scheduleId)) deleted.push(scheduleId);
+          return { ...prev, deletedScheduleIds: deleted };
+        });
+        message = "Master schedule deleted";
+        result = { id: scheduleId };
+      }
+    } else if (lower.includes("copy master schedule")) {
+      const scheduleId = (input.rowKey || "").trim();
+      await appendInstructorActivity(user.institutionId, "/instructor/f/t53-master-scheduling", {
+        action,
+        scheduleId,
+        at: new Date().toISOString(),
+      });
+      message = `Schedule copied · ${scheduleId || "selection"}`;
+      result = { id: scheduleId, copied: true };
+    } else if (lower.includes("manage master schedule")) {
+      const scheduleId = (input.rowKey || "").trim();
+      message = `Opening manage · ${scheduleId || "schedule"}`;
+      result = {
+        id: scheduleId,
+        manage: true,
+        href: `/instructor/f/t85-manage-schedule?scheduleId=${encodeURIComponent(scheduleId || "ms-dib-nov-2026")}`,
+      };
+    } else if (lower.includes("save ledger") || lower.includes("add ledger")) {
+      const fields = parseActionFields(input.rowKey) || {};
+      const scheduleId = String(fields.__scheduleId || "ms-dib-nov-2026").trim();
+      const ledgerId = String(fields.__ledgerId || "").trim() || `led-${Date.now().toString(36)}`;
+      const type = (fields["Tuition / Ledger Type"] || "Tuition Fee").trim();
+      const domestic = (fields.Domestic || "0.00").trim();
+      const international = (fields.International || "0.00").trim();
+      await patchScreenOverlay(user.institutionId, "/instructor/f/t85-manage-schedule", (prev) => {
+        const schedules = {
+          ...((prev.schedules as Record<string, Record<string, unknown>>) || {}),
+        };
+        const cur = { ...(schedules[scheduleId] || {}) };
+        if (fields.__ledgerId) {
+          const edits = { ...((cur.ledgerEdits as Record<string, unknown>) || {}) };
+          edits[ledgerId] = { type, domestic, international };
+          cur.ledgerEdits = edits;
+        } else {
+          const extras = Array.isArray(cur.extraLedgers)
+            ? [
+                ...(cur.extraLedgers as Array<{
+                  id: string;
+                  type: string;
+                  domestic: string;
+                  international: string;
+                }>),
+              ]
+            : [];
+          extras.unshift({ id: ledgerId, type, domestic, international });
+          cur.extraLedgers = extras.slice(0, 50);
+        }
+        schedules[scheduleId] = cur;
+        return { ...prev, schedules };
+      });
+      message = `Ledger saved · ${type}`;
+      result = { id: ledgerId, type };
+    } else if (lower.includes("delete ledger")) {
+      const ledgerId = (input.rowKey || "").trim();
+      await patchScreenOverlay(user.institutionId, "/instructor/f/t85-manage-schedule", (prev) => {
+        const schedules = {
+          ...((prev.schedules as Record<string, Record<string, unknown>>) || {}),
+        };
+        const scheduleId = "ms-dib-nov-2026";
+        const cur = { ...(schedules[scheduleId] || {}) };
+        const deleted = Array.isArray(cur.deletedLedgerIds) ? [...(cur.deletedLedgerIds as string[])] : [];
+        if (ledgerId && !deleted.includes(ledgerId)) deleted.push(ledgerId);
+        cur.deletedLedgerIds = deleted;
+        schedules[scheduleId] = cur;
+        return { ...prev, schedules };
+      });
+      message = "Ledger deleted";
+      result = { id: ledgerId };
+    } else if (lower.includes("delete schedule session")) {
+      const sessionId = (input.rowKey || "").trim();
+      await patchScreenOverlay(user.institutionId, "/instructor/f/t85-manage-schedule", (prev) => {
+        const schedules = {
+          ...((prev.schedules as Record<string, Record<string, unknown>>) || {}),
+        };
+        const scheduleId = "ms-dib-nov-2026";
+        const cur = { ...(schedules[scheduleId] || {}) };
+        const deleted = Array.isArray(cur.deletedSessionIds) ? [...(cur.deletedSessionIds as string[])] : [];
+        if (sessionId && !deleted.includes(sessionId)) deleted.push(sessionId);
+        cur.deletedSessionIds = deleted;
+        schedules[scheduleId] = cur;
+        return { ...prev, schedules };
+      });
+      message = "Session removed from schedule";
+      result = { id: sessionId };
+    } else if (lower.includes("update schedule") && !lower.includes("master")) {
+      const fields = parseActionFields(input.rowKey) || {};
+      const scheduleId = String(fields.__scheduleId || "ms-dib-nov-2026").trim();
+      await appendInstructorActivity(user.institutionId, "/instructor/f/t85-manage-schedule", {
+        action,
+        scheduleId,
+        fields,
+        at: new Date().toISOString(),
+      });
+      message = "Schedule settings updated";
+      result = { id: scheduleId, updated: true };
+    } else if (lower.includes("save schedule term")) {
+      const fields = parseActionFields(input.rowKey) || {};
+      const name = (fields["Term Name"] || "Untitled term").trim();
+      await appendInstructorActivity(user.institutionId, "/instructor/f/t85-manage-schedule", {
+        action,
+        term: name,
+        at: new Date().toISOString(),
+      });
+      message = `Schedule term saved · ${name}`;
+      result = { name };
+    } else if (
+      lower.includes("save linked course") ||
+      lower.includes("add linked course") ||
+      lower.includes("add cross-listed")
+    ) {
+      const fields = parseActionFields(input.rowKey) || {};
+      const courseId = String(fields.__courseId || fields["Select Linked Course"] || "").trim();
+      const condition = (fields["Linking Condition"] || "Optional Enrolment").trim();
+      await appendInstructorActivity(user.institutionId, "/instructor/f/t77-course-admin", {
+        action,
+        courseId,
+        condition,
+        at: new Date().toISOString(),
+      });
+      message = `Linked course saved · ${courseId || "selection"}`;
+      result = { courseId, condition };
+    } else if (lower.includes("add textbook to course")) {
+      const fields = parseActionFields(input.rowKey) || {};
+      const textbook = (fields["Select Textbook"] || "").trim();
+      await appendInstructorActivity(user.institutionId, "/instructor/f/t77-course-admin", {
+        action,
+        textbook,
+        at: new Date().toISOString(),
+      });
+      message = `Textbook added · ${textbook || "selection"}`;
+      result = { textbook };
+    } else if (lower.includes("save transfer course") || lower.includes("add transfer course")) {
+      const fields = parseActionFields(input.rowKey) || {};
+      const institution = (fields["Transfer Institution"] || "").trim();
+      const courseName = (fields["Transfer Course Name"] || "").trim();
+      await appendInstructorActivity(user.institutionId, "/instructor/f/t77-course-admin", {
+        action,
+        institution,
+        courseName,
+        at: new Date().toISOString(),
+      });
+      message = `Transfer course saved · ${courseName || institution || "selection"}`;
+      result = { institution, courseName };
+    } else if (
+      lower.includes("bulk schedule action") ||
+      lower.includes("bulk course action") ||
+      lower === "bulk actions"
+    ) {
+      const bulk = (input.rowKey || "").trim();
+      message = bulk ? `Bulk action queued · ${bulk}` : "Select a bulk action";
+      result = { bulk: bulk || null };
+    } else if (lower.includes("save grading scheme") || lower.includes("create grading scheme")) {
+      const fields = parseActionFields(input.rowKey) || {};
+      const name = (fields["Grading Scheme Name"] || fields.Name || "Untitled scheme").trim();
+      const active = !/inactive/i.test(fields["Active / Inactive"] || "Active");
+      const existingId = String(fields.__schemeId || "").trim();
+      const id = existingId || `scheme-${Date.now().toString(36)}`;
+      const listPath = GRADING_SCHEMES_PATH;
+      const gradeEntries = Array.isArray(fields.__gradeEntries)
+        ? (fields.__gradeEntries as Array<Record<string, string>>)
+        : [];
+      await patchScreenOverlay(user.institutionId, listPath, (prev) => {
+        const extras = Array.isArray(prev.extraSchemes)
+          ? [...(prev.extraSchemes as Array<{ id: string; name: string; active: boolean }>)]
+          : [];
+        const idx = extras.findIndex((s) => s.id === id);
+        if (idx >= 0) extras[idx] = { id, name, active };
+        else if (!DEFAULT_GRADING_SCHEMES.some((s) => s.id === id)) extras.unshift({ id, name, active });
+        const schemeGrades = {
+          ...((prev.schemeGrades as Record<string, unknown>) || {}),
+          [id]: gradeEntries.map((e) => ({
+            letter: String(e.letter || ""),
+            percent: String(e.percent || ""),
+            gradePoint: String(e.gradePoint || ""),
+            credit: String(e.credit || "Yes"),
+            condition: String(e.condition || "None"),
+          })),
+        };
+        const schemeMeta = {
+          ...((prev.schemeMeta as Record<string, unknown>) || {}),
+          [id]: {
+            defaultScheme: String(fields["This is the default grading scheme"] || "false"),
+            useLetterGrades: String(fields["Use Letter Grades"] || "Yes"),
+            usePercentages: String(fields["Use Percentages"] || "Yes"),
+            roundUp: String(
+              fields["Enable round-up options for marginal letter grades in final standings"] || "false",
+            ),
+            useGradePoints: String(fields["Use Grade Points"] || "Yes"),
+            active: active ? "Active" : "Inactive",
+            name,
+          },
+        };
+        // When editing a default scheme, store name override in meta only
+        const renamedDefaults = {
+          ...((prev.renamedSchemes as Record<string, { name: string; active: boolean }>) || {}),
+        };
+        if (DEFAULT_GRADING_SCHEMES.some((s) => s.id === id)) {
+          renamedDefaults[id] = { name, active };
+        }
+        return {
+          ...prev,
+          extraSchemes: extras.slice(0, 100),
+          schemeGrades,
+          schemeMeta,
+          renamedSchemes: renamedDefaults,
+          _lastAction: {
+            action,
+            name,
+            id,
+            entries: gradeEntries,
+            at: new Date().toISOString(),
+          },
+        };
+      });
+      message = `Grading scheme saved · ${name}`;
+      result = { id, name, active };
+    } else if (lower.includes("delete grading scheme")) {
+      const schemeId = (input.rowKey || "").trim();
+      if (!schemeId) {
+        message = "Delete failed · missing scheme id";
+        result = { error: true };
+      } else {
+        const listPath = GRADING_SCHEMES_PATH;
+        await patchScreenOverlay(user.institutionId, listPath, (prev) => {
+          const deleted = Array.isArray(prev.deletedSchemeIds)
+            ? [...(prev.deletedSchemeIds as string[])]
+            : [];
+          if (!deleted.includes(schemeId)) deleted.push(schemeId);
+          const extras = Array.isArray(prev.extraSchemes)
+            ? (prev.extraSchemes as Array<{ id: string; name: string; active: boolean }>).filter(
+                (s) => s.id !== schemeId,
+              )
+            : [];
+          return { ...prev, deletedSchemeIds: deleted, extraSchemes: extras };
+        });
+        message = `Grading scheme deleted`;
+        result = { id: schemeId };
+      }
+    } else if (lower.includes("save resource category")) {
+      const fields = parseActionFields(input.rowKey) || {};
+      const name = (fields["Category Name"] || fields.Name || "").trim();
+      const row = await createResourceCategory(user.institutionId, name);
+      message = `Resource category saved · ${row.name}`;
+      result = { id: row.id, name: row.name };
+    } else if (lower.includes("save resource") && !lower.includes("category")) {
+      const fields = parseActionFields(input.rowKey) || {};
+      const name = (fields["Resource Name"] || fields.Name || "").trim();
+      const courseId = (fields.Course || "").trim();
+      const allowQuantities = /yes/i.test(fields["Allow Resource Quantities"] || "No");
+      const row = await createCourseResource(user.institutionId, {
+        courseId: courseId || undefined,
+        name,
+        allowQuantities,
+      });
+      message = `Resource saved · ${row.name}`;
+      result = { id: row.id, name: row.name };
+    } else if (lower.includes("save badge") || lower.includes("badge / accomplishment")) {
+      const fields = parseActionFields(input.rowKey) || {};
+      const row = await createBadgeDefinition(user.institutionId, fields);
+      message = `Badge saved · ${row.name}`;
+      result = { id: row.id, name: row.name };
+    } else if (
+      (lower.includes("save term") || lower.includes("add term") || lower.includes("create term")) &&
+      !lower.includes("schedule") &&
+      !path.includes("create-term-schedule") &&
+      !path.includes("t72") &&
+      !path.includes("program-settings") &&
+      !path.includes("t83")
+    ) {
+      const raw = (() => {
+        try {
+          return JSON.parse(input.rowKey || "{}") as Record<string, unknown>;
+        } catch {
+          return {} as Record<string, unknown>;
+        }
+      })();
+      const fields = parseActionFields(input.rowKey) || {};
+      const code = (
+        fields["Term Abbreviation"] ||
+        fields.Code ||
+        fields["Term Code"] ||
+        `T${Date.now().toString().slice(-4)}`
+      )
+        .trim()
+        .toUpperCase();
+      const name = (fields["Term Name"] || fields.Name || code).trim();
+      const startsOn = (fields["Start Date"] || new Date().toISOString().slice(0, 10)).trim();
+      const endsOn = (fields["End Date"] || startsOn).trim();
+      const campuses = String(fields.Campuses || "")
+        .split("|")
+        .map((c) => c.trim())
+        .filter(Boolean);
+      const existingId = String(raw.__termId || fields.__termId || fields.termId || "").trim();
+      const customEvents = asTermEvents(raw.__customEvents);
+      const row: TermRecord = {
+        id: existingId || `term-${Date.now().toString(36)}`,
+        name,
+        code,
+        dates: formatTermDates(startsOn, endsOn),
+        campuses: campuses.length ? campuses : [...DEFAULT_TERM_CAMPUSES],
+        startsOn,
+        endsOn,
+        midterm: fields["Midterm Date"] || "",
+        lastInstruction: fields["Last Instruction Date"] || "",
+        examStart: fields["Exam Start Date"] || "",
+        examEnd: fields["Exam End Date"] || "",
+        census: fields["Census Date"] || "",
+        customEvents,
+      };
+      if (!existingId) {
+        try {
+          const term = await prisma.term.create({
+            data: {
+              id: randomUUID(),
+              institutionId: user.institutionId,
+              code,
+              name,
+              startsOn,
+              endsOn,
+            },
+          });
+          row.id = term.id;
+        } catch {
+          /* overlay-only fallback id already set */
+        }
+      } else {
+        try {
+          await prisma.term.updateMany({
+            where: { id: existingId, institutionId: user.institutionId },
+            data: { code, name, startsOn, endsOn },
+          });
+        } catch {
+          /* seeded overlay-only ids */
+        }
+      }
+      const defaultIds = new Set<string>(DEFAULT_MANAGE_TERMS.map((t) => t.id));
+      await patchScreenOverlay(user.institutionId, MANAGE_TERMS_LIST_PATH, (prev) => {
+        const extras = Array.isArray(prev.extraTerms) ? [...(prev.extraTerms as TermRecord[])] : [];
+        const edits =
+          prev.termEdits && typeof prev.termEdits === "object"
+            ? { ...(prev.termEdits as Record<string, Partial<TermRecord>>) }
+            : {};
+        const extraIdx = extras.findIndex((t) => t.id === row.id);
+        if (extraIdx >= 0) {
+          extras[extraIdx] = row;
+        } else if (existingId && defaultIds.has(existingId)) {
+          edits[existingId] = row;
+        } else {
+          extras.unshift(row);
+        }
+        return {
+          ...prev,
+          extraTerms: extras.slice(0, 100),
+          termEdits: edits,
+        };
+      });
+      message = `Term saved · ${name} (${code})`;
+      result = { termId: row.id, code };
+    } else if (lower.includes("delete term")) {
+      const termId = (input.rowKey || "").trim();
+      if (!termId) {
+        message = "Delete failed · missing term id";
+        result = { error: true };
+      } else {
+        await patchScreenOverlay(user.institutionId, "/instructor/f/t51-manage-terms", (prev) => {
+          const deleted = Array.isArray(prev.deletedTermIds) ? [...(prev.deletedTermIds as string[])] : [];
+          if (!deleted.includes(termId)) deleted.push(termId);
+          const extras = Array.isArray(prev.extraTerms)
+            ? (
+                prev.extraTerms as Array<{
+                  id: string;
+                  name: string;
+                  code: string;
+                  dates: string;
+                  campuses: string[];
+                }>
+              ).filter((t) => t.id !== termId)
+            : [];
+          return { ...prev, deletedTermIds: deleted, extraTerms: extras };
+        });
+        try {
+          await prisma.term.deleteMany({ where: { id: termId, institutionId: user.institutionId } });
+        } catch {
+          /* seeded overlay-only ids */
+        }
+        message = "Term deleted";
+        result = { id: termId };
+      }
+    } else if (lower.includes("category")) {
+      const fields = parseActionFields(input.rowKey) || {};
+      const name = (fields["Category Name"] || fields.Name || "New Category").trim();
+      const code = (fields.Code || name.slice(0, 4).toUpperCase()).trim();
+      const description = (fields.Description || "—").trim();
+      const courses = (fields.Courses || "0").trim();
+      const parent = (fields.Parent || "None (Root)").trim();
+      const status = (fields.Status || "ACTIVE").trim();
+      await appendExtraRow(user.institutionId, path, {
+        cells: [name, code, description, courses, parent, status],
+        badge: status,
+        badgeTone: /inactive/i.test(status) ? "muted" : "active",
+      });
+      message = `Category created · ${name}`;
+      result = { name, code };
+    } else if (lower.includes("create alert") || lower.includes("create flag") || lower.includes("create academic")) {
+      let focus =
+        ctx.sections[0]?.enrolments.find((e) => e.standing !== "good") || ctx.sections[0]?.enrolments[0];
+      let courseCode =
+        ctx.sections.find((s) => s.enrolments.some((e) => e.studentId === focus?.studentId))?.courseCode ??
+        ctx.sections[0]?.courseCode ??
+        "";
+      let flagType = "ACADEMIC RISK";
+      let description = "";
+      let priority = "High";
+      const fields = parseActionFields(input.rowKey);
+      if (fields) {
+        const studentLabel = fields["Student Name"] || fields.studentName || "";
+        const match = ctx.sections
+          .flatMap((s) => s.enrolments.map((e) => ({ ...e, courseCode: s.courseCode })))
+          .find(
+            (e) =>
+              studentLabel.includes(e.studentName) ||
+              studentLabel.includes(e.studentNumber) ||
+              studentLabel.includes(e.studentId),
+          );
+        if (match) {
+          focus = match;
+          courseCode = match.courseCode;
+        }
+        flagType = fields["Alert Type"] || fields["Flag Type"] || fields.flagType || flagType;
+        description = fields.Description || fields.description || "";
+        priority = fields.Priority || fields.priority || priority;
+        if (fields.Course || fields["Course Name"]) {
+          courseCode = (fields.Course || fields["Course Name"] || courseCode).trim();
+        }
+      } else if (input.rowKey) {
+        const match = ctx.sections
+          .flatMap((s) => s.enrolments.map((e) => ({ ...e, courseCode: s.courseCode })))
+          .find((e) => input.rowKey!.includes(e.studentName) || input.rowKey!.includes(e.studentNumber));
+        if (match) {
+          focus = match;
+          courseCode = match.courseCode;
+        }
+      }
+
+      const body =
+        description ||
+        `${action} recorded for ${focus?.studentNumber ?? "roster"} (${focus?.standing ?? "n/a"}) · priority ${priority}.`;
+
+      const isFlagPath = path.includes("flag") || path.includes("t45");
+      const isAlertPath =
+        path.includes("t44") ||
+        path.includes("academic-alert") ||
+        path.includes("t22") ||
+        path.includes("student-detail") ||
+        lower.includes("alert");
+
+      if (isAlertPath || !isFlagPath) {
+        await persistAcademicAlert(ctx, {
+          studentName: focus?.studentName ?? fields?.["Student Name"] ?? "Student",
+          studentNumber: focus?.studentNumber ?? null,
+          studentId: focus?.studentId ?? null,
+          course: courseCode,
+          tag: flagType,
+          body,
+          priority,
+        });
+      } else {
+        await prisma.notification.create({
+          data: {
+            institutionId: user.institutionId,
+            recipientAccountId: user.accountId,
+            channel: "in_app",
+            title: `${flagType} · ${focus?.studentName ?? "student"}`,
+            body,
+            templateKey: "instructor.alert",
+          },
+        });
+      }
+
+      if (isFlagPath) {
+        await appendExtraRow(user.institutionId, path.includes("create") ? "/instructor/f/t45-student-flags" : path, {
+          cells: [
+            `${focus?.studentName ?? "Student"} · ${focus?.studentNumber ?? "—"}`,
+            flagType,
+            description || "Flag recorded from instructor workspace.",
+            priority,
+            "Active",
+          ],
+          badge: priority,
+          badgeTone: /high/i.test(priority) ? "danger" : /medium/i.test(priority) ? "warning" : "info",
+        });
+      }
+      message = `Alert created · ${focus?.studentName ?? "roster"} · ${flagType}`;
+      result = { studentId: focus?.studentId ?? null, flagType, priority, courseCode };
+    } else if (
+      path.includes("t33") ||
+      path.includes("help-support") ||
+      lower.includes("submit ticket") ||
+      lower.includes("consult ai")
+    ) {
+      const fields = parseActionFields(input.rowKey) || {};
+      if (lower.includes("consult")) {
+        const query = (fields.query || fields.Query || input.rowKey || "").trim();
+        if (!query) {
+          message = "Ask a question first";
+          result = { error: true };
+        } else {
+          const answer = consultHelpAnswer(query, ctx);
+          await patchScreenOverlay(user.institutionId, path, (prev) => ({
+            ...prev,
+            aiConsult: { query, answer, at: new Date().toISOString() },
+          }));
+          message = "AI consult ready";
+          result = { query, answer };
+        }
+      } else {
+        const category = (fields.Category || fields.category || "General").trim();
+        const subject = (fields.Subject || fields.subject || "Support request").trim();
+        const details = (fields.Details || fields.details || "").trim();
+        if (!subject || !details) {
+          message = "Subject and details are required";
+          result = { error: true };
+        } else {
+          const id = `TKT-${Date.now().toString(36).toUpperCase()}`;
+          await patchScreenOverlay(user.institutionId, path, (prev) => {
+            const extraTickets = Array.isArray(prev.extraTickets)
+              ? [...(prev.extraTickets as unknown[])]
+              : [];
+            extraTickets.unshift({
+              id,
+              subject: `${category}: ${subject}`,
+              status: "Open",
+              tone: "info",
+              updated: "Just now",
+              details,
+            });
+            return { ...prev, extraTickets: extraTickets.slice(0, 50) };
+          });
+          await prisma.notification.create({
+            data: {
+              institutionId: user.institutionId,
+              recipientAccountId: user.accountId,
+              channel: "in_app",
+              title: `Ticket ${id} submitted`,
+              body: `${category}: ${subject}`,
+              templateKey: "instructor.support",
+            },
+          });
+          message = `Ticket ${id} submitted`;
+          result = { id, category, subject };
+        }
+      }
     } else if (lower.includes("auto-resolve") || lower.includes("resolve conflict")) {
       message = `Conflicts reviewed against ${ctx.sections.length} section(s) — no blocking overlaps`;
       result = { sections: ctx.sections.length };
+    } else if (
+      lower.includes("upload") ||
+      lower.includes("create folder") ||
+      (path.includes("t32") && lower.includes("folder"))
+    ) {
+      if (lower.includes("folder")) {
+        const fields = parseActionFields(input.rowKey) || {};
+        const name = (fields.name || fields.Name || fields.Folder || "New folder").trim() || "New folder";
+        await patchScreenOverlay(user.institutionId, path, (prev) => {
+          const folders = Array.isArray(prev.extraFolders) ? [...(prev.extraFolders as string[])] : [];
+          if (!folders.some((f) => f.toLowerCase() === name.toLowerCase())) folders.unshift(name);
+          return { ...prev, extraFolders: folders.slice(0, 50) };
+        });
+        message = `Folder created · ${name}`;
+        result = { name };
+      } else {
+        const parsed = parseActionFields(input.rowKey);
+        const file = asOverlayFile(parsed) || asOverlayFile({ name: input.rowKey || `Upload-${Date.now()}.pdf` });
+        if (!file) {
+          message = "Upload failed · missing file name";
+          result = { error: true };
+        } else {
+          await patchScreenOverlay(user.institutionId, path, (prev) => {
+            const files = Array.isArray(prev.extraFiles) ? [...(prev.extraFiles as unknown[])] : [];
+            files.unshift(file);
+            return { ...prev, extraFiles: files.slice(0, 100) };
+          });
+          await appendExtraRow(user.institutionId, path, {
+            cells: [file.name, "Course", file.folder || "Uploads", file.size, "Download"],
+            badge: file.type,
+            badgeTone: "info",
+          });
+          message = `Uploaded · ${file.name}`;
+          result = file;
+        }
+      }
+    } else if (lower.includes("add new book") || (path.includes("t57") && lower.startsWith("add ") && !lower.includes("textbook"))) {
+      const fields = parseActionFields(input.rowKey) || {};
+      const title = (fields["Book Title & Publisher"] || fields.Title || fields.Name || "Untitled textbook").trim();
+      const isbn = (fields["ISBN / ISBN-13"] || fields.ISBN || "—").trim();
+      const adoption = (fields.Adoption || "Required").trim();
+      const required = (fields["Required/Optional"] || (/optional/i.test(adoption) ? "Optional" : "Required")).trim();
+      const optOut = (fields["Opt-Out Rate"] || "0% Opt-Out").trim();
+      await appendExtraRow(user.institutionId, path, {
+        cells: [title, isbn, `${required}${adoption && !/required|optional/i.test(adoption) ? ` (${adoption})` : ""}`.trim(), optOut, "Edit"],
+        badge: required,
+        badgeTone: /optional/i.test(required) ? "info" : "active",
+      });
+      message = `Textbook added · ${title}`;
+      result = { title, isbn, required };
+    } else if (lower.includes("create badge") && !lower.includes("accomplishment")) {
+      const fields = parseActionFields(input.rowKey) || {};
+      const name = (fields.Name || "").trim();
+      if (!name) {
+        message = "Create badge failed · Name is required";
+        result = { error: true };
+      } else {
+        const badge = badgeFromFields(fields);
+        await patchScreenOverlay(user.institutionId, path, (prev) => {
+          const extras = Array.isArray(prev.extraCourseBadges)
+            ? [...(prev.extraCourseBadges as Array<Record<string, unknown>>)]
+            : [];
+          extras.unshift(badge);
+          return { ...prev, extraCourseBadges: extras.slice(0, 50) };
+        });
+        message = `Badge created · ${badge.name}`;
+        result = badge;
+      }
+    } else if (lower.includes("create group") && !lower.includes("course group") && !lower.includes("course type")) {
+      const fields = parseActionFields(input.rowKey) || { Name: input.rowKey || "New group" };
+      const group = groupFromFields(fields);
+      await patchScreenOverlay(user.institutionId, path, (prev) => {
+        const extras = Array.isArray(prev.extraGroups) ? [...(prev.extraGroups as Array<Record<string, unknown>>)] : [];
+        extras.unshift(group);
+        return { ...prev, extraGroups: extras.slice(0, 50) };
+      });
+      message = `Group created · ${group.name}`;
+      result = group;
+    } else if (lower.includes("delete selected group")) {
+      const groupId = (input.rowKey || "").trim();
+      if (!groupId) {
+        message = "Delete failed · select a group";
+        result = { error: true };
+      } else {
+        await patchScreenOverlay(user.institutionId, path, (prev) => {
+          const deleted = Array.isArray(prev.deletedGroupIds) ? [...(prev.deletedGroupIds as string[])] : [];
+          if (!deleted.includes(groupId)) deleted.push(groupId);
+          const extras = Array.isArray(prev.extraGroups)
+            ? (prev.extraGroups as Array<{ id: string }>).filter((g) => g.id !== groupId)
+            : [];
+          return { ...prev, deletedGroupIds: deleted, extraGroups: extras };
+        });
+        message = "Group deleted";
+        result = { id: groupId };
+      }
+    } else if (lower.includes("add/remove users") || lower.includes("add/remove user")) {
+      const raw = (() => {
+        try {
+          return JSON.parse(input.rowKey || "{}") as {
+            groupId?: string;
+            members?: Array<{ id: string; name: string }>;
+          };
+        } catch {
+          return {} as { groupId?: string; members?: Array<{ id: string; name: string }> };
+        }
+      })();
+      if (!raw.groupId) {
+        message = "Select a group first";
+        result = { error: true };
+      } else {
+        await patchScreenOverlay(user.institutionId, path, (prev) => {
+          const members = {
+            ...((prev.groupMembers as Record<string, Array<{ id: string; name: string }>>) || {}),
+            [raw.groupId!]: raw.members || [],
+          };
+          return { ...prev, groupMembers: members };
+        });
+        message = "Group members updated";
+        result = raw;
+      }
+    } else if (
+      lower.includes("save question") ||
+      lower.includes("edit question") ||
+      lower.includes("create a new question") ||
+      lower.includes("create question")
+    ) {
+      const fields = parseActionFields(input.rowKey) || { Type: input.rowKey || "Multiple choice" };
+      const question = questionFromFields(fields, fields.Course || "Course", ctx.displayName);
+      const editing = Boolean((fields.Id || fields.id || "").trim());
+      await patchScreenOverlay(user.institutionId, path, (prev) => {
+        const extras = Array.isArray(prev.extraQuestions)
+          ? [...(prev.extraQuestions as Array<Record<string, unknown>>)]
+          : [];
+        if (editing) {
+          const idx = extras.findIndex((row) => String(row.id || "") === question.id);
+          if (idx >= 0) {
+            extras[idx] = { ...extras[idx], ...question };
+            return { ...prev, extraQuestions: extras.slice(0, 80) };
+          }
+          const edits = {
+            ...((prev.questionEdits as Record<string, unknown>) || {}),
+            [question.id]: question,
+          };
+          return { ...prev, extraQuestions: extras, questionEdits: edits };
+        }
+        extras.unshift(question);
+        return { ...prev, extraQuestions: extras.slice(0, 80) };
+      });
+      message = editing ? `Question updated · ${question.name}` : `Question created · ${question.name}`;
+      result = question;
+    } else if (lower.includes("add topic")) {
+      const fields = parseActionFields(input.rowKey) || {};
+      const title = (fields.Title || fields.Name || `Topic ${Date.now().toString(36).slice(-4)}`).trim();
+      const topic = { id: `topic-${Date.now().toString(36)}`, title, activities: [] as Array<{ type: string; name: string }> };
+      await patchScreenOverlay(user.institutionId, path, (prev) => {
+        const extras = Array.isArray(prev.extraTopics)
+          ? [...(prev.extraTopics as Array<Record<string, unknown>>)]
+          : [];
+        extras.push(topic);
+        return { ...prev, extraTopics: extras.slice(0, 40) };
+      });
+      message = `Topic added · ${title}`;
+      result = topic;
+    } else if (lower.includes("add an activity or resource") || lower.includes("add activity") || lower.includes("add resource")) {
+      const fields = parseActionFields(input.rowKey) || {};
+      const topicId = (fields.TopicId || fields.topicId || "").trim();
+      const type = (fields.Type || fields.type || "Page").trim().toUpperCase();
+      const name = (fields.Name || fields.name || `New ${type}`).trim();
+      if (!topicId) {
+        message = "Select a topic first";
+        result = { error: true };
+      } else {
+        const activity = {
+          id: `act-${Date.now().toString(36)}`,
+          type,
+          name,
+        };
+        await patchScreenOverlay(user.institutionId, path, (prev) => {
+          const topicActivities = {
+            ...((prev.topicActivities as Record<string, Array<{ type: string; name: string }>>) || {}),
+          };
+          topicActivities[topicId] = [...(topicActivities[topicId] || []), activity];
+          return { ...prev, topicActivities };
+        });
+        message = `Added ${type} · ${name}`;
+        result = { topicId, activity };
+      }
+    } else if (lower.includes("hide activity") || lower.includes("show activity")) {
+      const activityId = (input.rowKey || "").trim();
+      if (!activityId) {
+        message = "Select an activity first";
+        result = { error: true };
+      } else {
+        const hide = lower.includes("hide activity");
+        await patchScreenOverlay(user.institutionId, path, (prev) => {
+          const hidden = Array.isArray(prev.hiddenActivityIds) ? [...(prev.hiddenActivityIds as string[])] : [];
+          const next = hide
+            ? hidden.includes(activityId)
+              ? hidden
+              : [...hidden, activityId]
+            : hidden.filter((id) => id !== activityId);
+          return { ...prev, hiddenActivityIds: next };
+        });
+        message = hide ? "Activity hidden from students" : "Activity shown";
+        result = { id: activityId, hidden: hide };
+      }
+    } else if (lower.includes("duplicate activity")) {
+      const fields = parseActionFields(input.rowKey) || {};
+      const topicId = (fields.TopicId || "").trim();
+      const type = (fields.Type || "PAGE").trim().toUpperCase();
+      const name = `${(fields.Name || "Activity").trim()} (copy)`;
+      if (!topicId) {
+        message = "Select a topic first";
+        result = { error: true };
+      } else {
+        const activity = { id: `act-${Date.now().toString(36)}`, type, name };
+        await patchScreenOverlay(user.institutionId, path, (prev) => {
+          const topicActivities = {
+            ...((prev.topicActivities as Record<string, Array<{ type: string; name: string }>>) || {}),
+          };
+          topicActivities[topicId] = [...(topicActivities[topicId] || []), activity];
+          return { ...prev, topicActivities };
+        });
+        message = `Duplicated · ${name}`;
+        result = { topicId, activity };
+      }
+    } else if (lower.includes("delete activity")) {
+      const activityId = (input.rowKey || "").trim();
+      if (!activityId) {
+        message = "Select an activity first";
+        result = { error: true };
+      } else {
+        await patchScreenOverlay(user.institutionId, path, (prev) => {
+          const deleted = Array.isArray(prev.deletedActivityIds) ? [...(prev.deletedActivityIds as string[])] : [];
+          if (!deleted.includes(activityId)) deleted.push(activityId);
+          const topicActivities = {
+            ...((prev.topicActivities as Record<string, Array<{ id?: string }>>) || {}),
+          };
+          for (const key of Object.keys(topicActivities)) {
+            topicActivities[key] = (topicActivities[key] || []).filter((row) => row.id !== activityId);
+          }
+          return { ...prev, deletedActivityIds: deleted, topicActivities };
+        });
+        message = "Activity deleted";
+        result = { id: activityId };
+      }
+    } else if (lower.includes("save section") || lower.includes("edit section")) {
+      const fields = parseActionFields(input.rowKey) || {};
+      const topicId = (fields.TopicId || "").trim();
+      const title = (fields.Title || fields.Name || "").trim();
+      if (!topicId || !title) {
+        message = "Section name is required";
+        result = { error: true };
+      } else {
+        await patchScreenOverlay(user.institutionId, path, (prev) => {
+          const topicTitles = { ...((prev.topicTitles as Record<string, string>) || {}), [topicId]: title };
+          const topicSummaries = {
+            ...((prev.topicSummaries as Record<string, string>) || {}),
+            [topicId]: fields.Summary || "",
+          };
+          return { ...prev, topicTitles, topicSummaries };
+        });
+        message = `Section updated · ${title}`;
+        result = { topicId, title };
+      }
+    } else if (lower.includes("add competencies to course")) {
+      const fields = parseActionFields(input.rowKey) || { Name: input.rowKey || "Course competency" };
+      const competency = competencyFromFields(fields);
+      await patchScreenOverlay(user.institutionId, path, (prev) => {
+        const extras = Array.isArray(prev.extraCompetencies)
+          ? [...(prev.extraCompetencies as Array<Record<string, unknown>>)]
+          : [];
+        extras.unshift(competency);
+        return { ...prev, extraCompetencies: extras.slice(0, 50) };
+      });
+      message = `Competency linked · ${competency.name}`;
+      result = competency;
+    } else if (
+      (lower.startsWith("add ") ||
+        lower.startsWith("create ") ||
+        lower.startsWith("quick-create") ||
+        lower.startsWith("new ") ||
+        lower.startsWith("submit new") ||
+        lower.includes("upload")) &&
+      parseActionFields(input.rowKey)
+    ) {
+      const fields = parseActionFields(input.rowKey)!;
+      const cells = cellsFromFields(fields);
+      const status = fields.Status || "Active";
+      await appendExtraRow(user.institutionId, path, {
+        cells,
+        badge: status,
+        badgeTone: /inactive|draft/i.test(status) ? "muted" : "active",
+      });
+      message = `Created · ${action}`;
+      result = { cells };
     } else {
       // Generic ack for remaining chrome CTAs (Save Changes, preferences, uploads, AI, etc.)
       message = `Recorded · ${action}`;

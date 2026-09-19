@@ -1,7 +1,6 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { AdminSisScreen } from "@/components/AdminSisScreen";
-
+/** Alias → live create-user flow (admin provisioning step 1). */
 export default function Page() {
-  return <AdminSisScreen path="/admin/f/ac-20-create-student" />;
+  redirect("/admin/users/create");
 }

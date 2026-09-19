@@ -8,20 +8,28 @@ import { api, loadSession } from "@/lib/api";
 type HomePayload = {
   standing?: string;
   programName?: string;
+  studentNumber?: string;
   enrolledCourses?: number;
   gpa?: number;
   attendanceRate?: number;
   nextDeadline?: { title: string; dueAt: string; courseCode: string };
   announcements?: Array<{ id: string; title: string; body: string }>;
+  pendingEvaluations?: Array<{
+    id: string;
+    courseCode: string;
+    courseTitle: string;
+    offeringCode?: string | null;
+    dueAt: string | null;
+    href: string;
+  }>;
 };
 
 type CourseItem = {
   sectionId: string;
   code: string;
   title: string;
+  sectionCode?: string;
   instructorName?: string;
-  credits?: number;
-  status?: string;
   progressPct?: number;
   progressPercent?: number | null;
   nextItem?: string;
@@ -35,37 +43,7 @@ type CalItem = {
   courseCode?: string | null;
   location?: string;
   type: string;
-  joinUrl?: string;
 };
-
-type GradeItem = {
-  id: string;
-  title: string;
-  courseCode: string;
-  score: number;
-  maxScore: number;
-  gradedAt?: string;
-};
-
-type GradesPayload = {
-  courses?: Array<{
-    code: string;
-    items: Array<{
-      id: string;
-      title: string;
-      score: number | null;
-      maxScore: number;
-      publishedAt?: string | null;
-    }>;
-  }>;
-};
-
-function greeting() {
-  const h = new Date().getHours();
-  if (h < 12) return "Good morning";
-  if (h < 17) return "Good afternoon";
-  return "Good evening";
-}
 
 function fmtTime(iso?: string) {
   if (!iso) return "—";
@@ -75,20 +53,20 @@ function fmtTime(iso?: string) {
 function fmtDue(iso?: string) {
   if (!iso) return "";
   const d = new Date(iso);
-  const now = new Date();
-  const diff = (d.getTime() - now.getTime()) / 86400000;
-  if (diff < 1.5 && diff >= 0) return `Due tomorrow at ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
-  return `Due ${d.toLocaleDateString(undefined, { weekday: "long" })}`;
+  const diff = (d.getTime() - Date.now()) / 86400000;
+  if (diff < 1.5 && diff >= 0) return `Due tomorrow`;
+  return `Due ${d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}`;
 }
 
 export default function StudentHomePage() {
   const router = useRouter();
   const [name, setName] = useState("Student");
+  const [studentNumber, setStudentNumber] = useState("");
   const [home, setHome] = useState<HomePayload | null>(null);
   const [courses, setCourses] = useState<CourseItem[]>([]);
   const [calendar, setCalendar] = useState<CalItem[]>([]);
-  const [grades, setGrades] = useState<GradeItem[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const s = loadSession();
@@ -104,67 +82,61 @@ export default function StudentHomePage() {
       else router.replace("/login");
       return;
     }
-    setName(s.givenName || "Student");
+    setName(`${s.givenName} ${s.familyName}`.trim() || s.givenName || "Student");
+    setLoading(true);
     Promise.all([
       api<HomePayload>("/me/home", {}, s.accessToken),
       api<{ items: CourseItem[] }>("/courses/me", {}, s.accessToken),
       api<{ items: CalItem[] }>("/calendar/me", {}, s.accessToken),
-      api<GradesPayload>("/grades/me", {}, s.accessToken).catch(() => ({ courses: [] as GradesPayload["courses"] })),
+      api<{ studentNumber?: string }>("/me/profile", {}, s.accessToken).catch(
+        (): { studentNumber?: string } => ({}),
+      ),
     ])
-      .then(([h, c, cal, g]) => {
+      .then(([h, c, cal, profile]) => {
         setHome(h);
+        setStudentNumber(h.studentNumber || profile.studentNumber || "");
         setCourses(
-          (c.items ?? []).map((course) => ({
-            ...course,
-            progressPct: course.progressPct ?? course.progressPercent ?? undefined,
-          })),
+          (c.items ?? [])
+            .map((course) => ({
+              ...course,
+              progressPct: course.progressPct ?? course.progressPercent ?? undefined,
+            }))
+            .sort((a, b) => {
+              const rank = (code: string) => (/^ACSW\s*500$/i.test(code) ? 0 : 1);
+              const diff = rank(a.code) - rank(b.code);
+              if (diff !== 0) return diff;
+              return a.code.localeCompare(b.code);
+            }),
         );
         setCalendar(cal.items ?? []);
-        const flat: GradeItem[] = [];
-        for (const course of g.courses ?? []) {
-          for (const item of course.items ?? []) {
-            if (item.score == null) continue;
-            flat.push({
-              id: item.id,
-              title: item.title,
-              courseCode: course.code,
-              score: item.score,
-              maxScore: item.maxScore,
-              gradedAt: item.publishedAt ?? undefined,
-            });
-          }
-        }
-        setGrades(flat);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load"));
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load"))
+      .finally(() => setLoading(false));
   }, [router]);
 
-  const nextClass = useMemo(() => {
-    const upcoming = [...calendar]
-      .filter((e) => new Date(e.startsAt).getTime() >= Date.now() - 3600000)
-      .sort((a, b) => +new Date(a.startsAt) - +new Date(b.startsAt));
-    return upcoming[0] ?? calendar[0];
-  }, [calendar]);
-
-  const dueThisWeek = useMemo(() => {
-    const week = Date.now() + 7 * 86400000;
-    return calendar.filter((e) => {
-      const t = +new Date(e.startsAt);
-      return t >= Date.now() && t <= week && (e.type === "deadline" || e.type === "assignment" || e.type === "quiz");
-    });
-  }, [calendar]);
-
-  const todos = useMemo(() => {
-    return calendar
-      .filter((e) => e.type === "deadline" || e.type === "assignment" || e.type === "quiz" || !e.type)
-      .slice(0, 5)
+  const reminders = useMemo(() => {
+    const fromCal = calendar
+      .filter((e) => e.type === "deadline" || e.type === "assignment" || e.type === "quiz")
+      .slice(0, 4)
       .map((e) => ({
         id: e.id,
         title: e.title,
-        dueLabel: fmtDue(e.startsAt),
-        urgent: +new Date(e.startsAt) - Date.now() < 2 * 86400000,
+        body: fmtDue(e.startsAt),
+        href: "/student/assignments",
       }));
-  }, [calendar]);
+    if (fromCal.length) return fromCal;
+    if (home?.nextDeadline) {
+      return [
+        {
+          id: "ndl",
+          title: home.nextDeadline.title,
+          body: `${home.nextDeadline.courseCode} · ${fmtDue(home.nextDeadline.dueAt)}`,
+          href: "/student/assignments",
+        },
+      ];
+    }
+    return [];
+  }, [calendar, home?.nextDeadline]);
 
   const todaySessions = useMemo(() => {
     const start = new Date();
@@ -179,213 +151,293 @@ export default function StudentHomePage() {
       .sort((a, b) => +new Date(a.startsAt) - +new Date(b.startsAt));
   }, [calendar]);
 
+  const evaluations = home?.pendingEvaluations ?? [];
+
   return (
-    <StudentSisShell
-      title="Dashboard"
-      subtitle="Student portal"
-      activeHref="/student"
-      userName={name}
-    >
-      <div className="mh-teacher-dash" data-node-id="17:60">
-        <section className="mh-teacher-dash__hero">
-          <div className="mh-teacher-dash__hero-left">
-            <div className="mh-teacher-dash__hero-avatar" aria-hidden>
-              {name.slice(0, 1)}
-            </div>
-            <div>
-              <h1 className="mh-teacher-dash__greeting">
-                {greeting()}, {name}
-              </h1>
-              <p className="mh-teacher-dash__role">
-                {home?.programName || "Heritage Community College"} · {home?.standing || "Student"}
-              </p>
+    <StudentSisShell title="" activeHref="/student" userName={name} studentNumber={studentNumber}>
+      <div className="mh-hcc-home" data-stu="STU-03">
+        <section className="mh-hcc-hero" aria-label="Campus home">
+          <div className="mh-hcc-hero__media" aria-hidden>
+            <img src="/brand/campus/hero.png" alt="" className="mh-hcc-hero__img" />
+          </div>
+          <div className="mh-hcc-hero__veil" aria-hidden />
+          <div className="mh-hcc-hero__content">
+            <p className="mh-hcc-hero__brand">Heritage Community College</p>
+            <h1 className="mh-hcc-hero__title">Welcome to campus</h1>
+            <p className="mh-hcc-hero__lead">
+              Every day is an opportunity to learn, grow, and take another step toward your goals.
+            </p>
+            <div className="mh-hcc-hero__cta">
+              <button type="button" className="mh-hcc-hero__btn" onClick={() => router.push("/student/courses")}>
+                Open my courses
+              </button>
+              <button
+                type="button"
+                className="mh-hcc-hero__btn mh-hcc-hero__btn--ghost"
+                onClick={() => router.push("/student/messages")}
+              >
+                Message Center
+              </button>
             </div>
           </div>
-          <span className="mh-teacher-dash__status">In session</span>
         </section>
 
-        {error ? <p style={{ color: "var(--mh-danger)", margin: 0 }}>{error}</p> : null}
-
-        <div className="mh-teacher-dash__quick">
-          <button type="button" className="mh-teacher-dash__quick-btn" onClick={() => router.push("/student/courses")}>
-            My courses
-          </button>
-          <button type="button" className="mh-teacher-dash__quick-btn" onClick={() => router.push("/student/assignments")}>
-            Assignments
-          </button>
-          <button type="button" className="mh-teacher-dash__quick-btn" onClick={() => router.push("/student/grades")}>
-            Grades
-          </button>
-          <button type="button" className="mh-teacher-dash__quick-btn is-ai" onClick={() => router.push("/student/ask")}>
-            Ask Heritage
-          </button>
-        </div>
-
-        <div className="mh-teacher-dash__kpis">
-          <button type="button" className="mh-teacher-dash__kpi" onClick={() => router.push("/student/calendar")}>
-            <div className="mh-teacher-dash__kpi-label">Next class</div>
-            <div className="mh-teacher-dash__kpi-value">{fmtTime(nextClass?.startsAt)}</div>
-            <div className="mh-teacher-dash__kpi-hint">
-              {[nextClass?.courseCode, nextClass?.location || nextClass?.title].filter(Boolean).join(" · ") || "No upcoming class"}
-            </div>
-          </button>
-          <button type="button" className="mh-teacher-dash__kpi" onClick={() => router.push("/student/assignments")}>
-            <div className="mh-teacher-dash__kpi-label">Due this week</div>
-            <div className="mh-teacher-dash__kpi-value">
-              {dueThisWeek.length || home?.nextDeadline ? `${Math.max(dueThisWeek.length, home?.nextDeadline ? 1 : 0)}` : "0"}
-            </div>
-            <div className="mh-teacher-dash__kpi-hint">Assignments and quizzes</div>
-          </button>
-          <button type="button" className="mh-teacher-dash__kpi" onClick={() => router.push("/student/attendance")}>
-            <div className="mh-teacher-dash__kpi-label">Attendance</div>
-            <div className="mh-teacher-dash__kpi-value">
-              {home?.attendanceRate != null ? `${home.attendanceRate}%` : home?.standing ? String(home.standing) : "—"}
-            </div>
-            <div className="mh-teacher-dash__kpi-hint">{home?.standing ? String(home.standing) : "Satisfactory record"}</div>
-          </button>
-        </div>
-
-        <div className="mh-teacher-dash__grid">
-          <div className="mh-teacher-dash__col-main">
-            <section className="mh-teacher-card">
-              <div className="mh-teacher-card__head">
-                <h2>Today&apos;s Sessions</h2>
-                <button type="button" className="mh-teacher-link" onClick={() => router.push("/student/calendar")}>
-                  Open calendar
-                </button>
-              </div>
-              <div className="mh-teacher-timetable">
-                {(todaySessions.length ? todaySessions : calendar.slice(0, 3)).map((ev) => {
-                  const online = /online|zoom|teams/i.test(`${ev.location ?? ""} ${ev.type ?? ""}`);
-                  return (
-                    <div key={ev.id} className="mh-teacher-timetable__row">
-                      <div className="mh-teacher-timetable__time">
-                        <strong>{fmtTime(ev.startsAt)}</strong>
-                        <span>{fmtTime(ev.endsAt)}</span>
-                      </div>
-                      <div className="mh-teacher-timetable__body">
-                        <strong>{ev.title}</strong>
-                        <span>{ev.location || (online ? "Online Session" : ev.courseCode) || "Scheduled"}</span>
-                      </div>
-                      {online || ev.joinUrl ? (
-                        <button
-                          type="button"
-                          className="mh-teacher-timetable__launch"
-                          onClick={() => {
-                            if (ev.joinUrl?.startsWith("https://")) {
-                              window.open(ev.joinUrl, "_blank", "noopener,noreferrer");
-                              return;
-                            }
-                            router.push(`/student/courses/${courses[0]?.sectionId ?? ""}`);
-                          }}
-                        >
-                          Join class
-                        </button>
-                      ) : (
-                        <span className="mh-teacher-badge is-muted">In person</span>
-                      )}
-                    </div>
-                  );
-                })}
-                {!calendar.length ? <p className="mh-teacher-muted">No sessions loaded yet.</p> : null}
-              </div>
-            </section>
-
-            <section className="mh-teacher-card">
-              <div className="mh-teacher-card__head">
-                <h2>My Courses</h2>
-                <button type="button" className="mh-teacher-link" onClick={() => router.push("/student/courses")}>
-                  View all
-                </button>
-              </div>
-              <div className="mh-student-course-grid">
-                {courses.map((c) => {
-                  const pct = c.progressPct ?? 50;
-                  return (
+        {evaluations.length ? (
+          <section className="mh-hcc-banner" role="status">
+            <div className="mh-hcc-banner__copy">
+              <strong>Course evaluation available. Please complete evaluations for finished courses.</strong>
+              <p>
+                {evaluations.map((e, i) => (
+                  <span key={e.id}>
+                    {i > 0 ? " · " : null}
                     <button
-                      key={c.sectionId}
                       type="button"
-                      className="mh-student-course-card"
-                      onClick={() => router.push(`/student/courses/${c.sectionId}`)}
+                      className="mh-hcc-banner__link"
+                      onClick={() => router.push(e.href)}
                     >
-                      <div className="mh-student-course-card__code">{c.code}</div>
-                      <strong>{c.title}</strong>
-                      <span>{c.instructorName || "Instructor"}</span>
-                      <div className="mh-student-course-card__progress">
-                        <div>
-                          <span>Progress</span>
-                          <b>{pct}%</b>
-                        </div>
-                        <div className="mh-student-course-card__track">
-                          <div style={{ width: `${pct}%` }} />
-                        </div>
-                      </div>
-                      <em>{c.nextItem || home?.nextDeadline?.title || "Open course workspace"}</em>
+                      {e.courseCode}
+                      {e.offeringCode ? ` / ${e.offeringCode}` : ""}
                     </button>
-                  );
-                })}
-                {!courses.length ? <p className="mh-teacher-muted">No enrolments yet.</p> : null}
-              </div>
-            </section>
-          </div>
-
-          <div className="mh-teacher-dash__col-side">
-            <section className="mh-teacher-card">
-              <div className="mh-teacher-card__head">
-                <h2>To-Do List</h2>
-                {todos.some((t) => t.urgent) ? (
-                  <span className="mh-teacher-badge is-warning">{todos.filter((t) => t.urgent).length} urgent</span>
-                ) : null}
-              </div>
-              <div className="mh-teacher-list">
-                {(todos.length
-                  ? todos
-                  : home?.nextDeadline
-                    ? [{ id: "ndl", title: home.nextDeadline.title, dueLabel: fmtDue(home.nextDeadline.dueAt), urgent: true }]
-                    : []
-                ).map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    className="mh-teacher-list__item"
-                    onClick={() => router.push("/student/assignments")}
-                  >
-                    <div>
-                      <strong>{t.title}</strong>
-                      <span className={t.urgent ? "is-danger" : ""}>{t.dueLabel}</span>
-                    </div>
-                  </button>
+                  </span>
                 ))}
-                {!todos.length && !home?.nextDeadline ? <p className="mh-teacher-muted">Nothing due right now.</p> : null}
-              </div>
-            </section>
+              </p>
+            </div>
+            <button
+              type="button"
+              className="mh-hcc-banner__action"
+              onClick={() => router.push(evaluations[0]!.href)}
+            >
+              Start evaluation
+            </button>
+          </section>
+        ) : null}
 
-            <section className="mh-teacher-card">
-              <div className="mh-teacher-card__head">
-                <h2>Recent Grades</h2>
-                <button type="button" className="mh-teacher-link" onClick={() => router.push("/student/grades")}>
-                  Open grades
+        <section className="mh-hcc-story">
+          <div className="mh-hcc-story__visual">
+            <img src="/brand/campus/learn.png" alt="Learning spaces at Heritage Community College" />
+          </div>
+          <div className="mh-hcc-story__copy">
+            <h2>Grow beyond the classroom</h2>
+            <p>
+              Explore, connect, and make the most of your time at Heritage. Check Moodle daily, review deadlines early,
+              and use campus email for important announcements.
+            </p>
+            <ul>
+              <li>Course names, dates, and class timings live in Program Plan</li>
+              <li>Review your schedule 5–7 days before a course begins</li>
+              <li>Seek support early if you need assistance</li>
+            </ul>
+          </div>
+        </section>
+
+        <section className="mh-hcc-instructor">
+          <header className="mh-hcc-instructor__head">
+            <div>
+              <h2>
+                Student · {name}
+              </h2>
+              <p className="mh-teacher-muted">
+                {[studentNumber, home?.programName, home?.standing].filter(Boolean).join(" · ") ||
+                  (loading ? "Loading…" : "Student portal")}
+              </p>
+            </div>
+            {home?.standing ? <span className="mh-teacher-dash__status">{home.standing}</span> : null}
+          </header>
+
+          {error ? <p className="mh-teacher-error">{error}</p> : null}
+
+          {courses.length ? (
+            <div className="mh-hcc-section-strip" aria-label="Enrolled courses">
+              {courses.slice(0, 8).map((c) => (
+                <button
+                  key={c.sectionId}
+                  type="button"
+                  className="mh-hcc-section-chip"
+                  onClick={() => router.push(`/student/courses/${c.sectionId}`)}
+                >
+                  <span className="mh-hcc-section-chip__code">{c.code}</span>
+                  <span className="mh-hcc-section-chip__meta">{c.sectionCode || c.instructorName || "Enrolled"}</span>
+                  <strong>{c.title}</strong>
                 </button>
-              </div>
-              <div className="mh-teacher-list">
-                {grades.slice(0, 5).map((g) => (
-                  <button key={g.id} type="button" className="mh-teacher-list__item" onClick={() => router.push("/student/grades")}>
-                    <div>
-                      <strong>
-                        {g.courseCode} · {g.title}
-                      </strong>
-                      <span>{g.gradedAt ? `Graded ${new Date(g.gradedAt).toLocaleDateString()}` : "Published"}</span>
-                    </div>
-                    <b>
-                      {g.score}/{g.maxScore}
-                    </b>
-                  </button>
-                ))}
-                {!grades.length ? <p className="mh-teacher-muted">No published grades yet.</p> : null}
-              </div>
-            </section>
+              ))}
+            </div>
+          ) : null}
+
+          <div className="mh-hcc-quick">
+            <button type="button" className="mh-hcc-quick__btn is-primary" onClick={() => router.push("/student/courses")}>
+              My Courses
+            </button>
+            <button type="button" className="mh-hcc-quick__btn" onClick={() => router.push("/student/f/st-23-program-plan")}>
+              Program Plan
+            </button>
+            <button type="button" className="mh-hcc-quick__btn" onClick={() => router.push("/student/grades")}>
+              Final Marks
+            </button>
+            <button type="button" className="mh-hcc-quick__btn is-ai" onClick={() => router.push("/student/ask")}>
+              Ask MyHeritage
+            </button>
           </div>
-        </div>
+
+          <div className="mh-hcc-workgrid">
+            <div className="mh-hcc-workgrid__main">
+              <section className="mh-hcc-panel">
+                <div className="mh-hcc-panel__head">
+                  <h2>Student Reminders</h2>
+                  <button type="button" className="mh-teacher-link" onClick={() => router.push("/student/assignments")}>
+                    View tasks
+                  </button>
+                </div>
+                <div className="mh-hcc-list">
+                  {reminders.length === 0 ? (
+                    <p className="mh-teacher-muted">No reminders right now. Check Program Plan for upcoming schedule updates.</p>
+                  ) : (
+                    reminders.map((r) => (
+                      <button
+                        key={r.id}
+                        type="button"
+                        className="mh-hcc-list__row mh-hcc-list__row--stack"
+                        onClick={() => router.push(r.href)}
+                      >
+                        <span className="mh-hcc-list__body">
+                          <strong>{r.title}</strong>
+                          <span className="mh-hcc-list__note">{r.body}</span>
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </section>
+
+              <section className="mh-hcc-panel">
+                <div className="mh-hcc-panel__head">
+                  <h2>My Courses</h2>
+                  <button type="button" className="mh-teacher-link" onClick={() => router.push("/student/courses")}>
+                    All courses
+                  </button>
+                </div>
+                <div className="mh-hcc-list">
+                  {loading ? <p className="mh-teacher-muted">Loading courses…</p> : null}
+                  {!loading && courses.length === 0 ? (
+                    <p className="mh-teacher-muted">No enrolments yet.</p>
+                  ) : (
+                    courses.map((c) => (
+                      <button
+                        key={c.sectionId}
+                        type="button"
+                        className="mh-hcc-list__row"
+                        onClick={() => router.push(`/student/courses/${c.sectionId}`)}
+                      >
+                        <span className="mh-hcc-list__time">{c.code}</span>
+                        <span className="mh-hcc-list__body">
+                          <strong>{c.title}</strong>
+                          <em>{c.instructorName || "Instructor TBA"}</em>
+                        </span>
+                        <span className="mh-teacher-badge is-success">
+                          {c.progressPct != null ? `${c.progressPct}%` : "Active"}
+                        </span>
+                        <span className="mh-hcc-list__go">Open</span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </section>
+
+              <section className="mh-hcc-panel">
+                <div className="mh-hcc-panel__head">
+                  <h2>Important Student Information</h2>
+                </div>
+                <div className="mh-hcc-list">
+                  <button
+                    type="button"
+                    className="mh-hcc-list__row mh-hcc-list__row--stack"
+                    onClick={() => router.push("/student/f/st-23-program-plan")}
+                  >
+                    <span className="mh-hcc-list__body">
+                      <strong>Programme Plan guidance</strong>
+                      <span className="mh-hcc-list__note">
+                        Schedule updates are pull-based — check Program Plan for course names, dates, and class timings.
+                      </span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="mh-hcc-list__row mh-hcc-list__row--stack"
+                    onClick={() => router.push("/student/f/st-24-course-evaluation")}
+                  >
+                    <span className="mh-hcc-list__body">
+                      <strong>Course evaluations</strong>
+                      <span className="mh-hcc-list__note">
+                        Evaluations become available after a course ends. Complete them from the home banner when prompted.
+                      </span>
+                    </span>
+                  </button>
+                  {(home?.announcements ?? []).slice(0, 3).map((a) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      className="mh-hcc-list__row mh-hcc-list__row--stack"
+                      onClick={() => router.push(`/student/announcements?id=${encodeURIComponent(a.id)}`)}
+                    >
+                      <span className="mh-hcc-list__body">
+                        <strong>{a.title}</strong>
+                        <span className="mh-hcc-list__note">{a.body}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            </div>
+
+            <div className="mh-hcc-workgrid__side">
+              <section className="mh-hcc-panel">
+                <div className="mh-hcc-panel__head">
+                  <h2>Today&apos;s schedule</h2>
+                  <button type="button" className="mh-teacher-link" onClick={() => router.push("/student/calendar")}>
+                    Calendar
+                  </button>
+                </div>
+                <div className="mh-hcc-list">
+                  {(todaySessions.length ? todaySessions : calendar.slice(0, 3)).map((ev) => (
+                    <button
+                      key={ev.id}
+                      type="button"
+                      className="mh-hcc-list__row"
+                      onClick={() => router.push("/student/calendar")}
+                    >
+                      <span className="mh-hcc-list__time">{fmtTime(ev.startsAt)}</span>
+                      <span className="mh-hcc-list__body">
+                        <strong>{ev.title}</strong>
+                        <em>{ev.location || ev.courseCode || "Scheduled"}</em>
+                      </span>
+                    </button>
+                  ))}
+                  {!calendar.length ? (
+                    <p className="mh-teacher-muted">No sessions loaded. Check Program Plan for upcoming dates.</p>
+                  ) : null}
+                </div>
+              </section>
+
+              <section className="mh-hcc-panel mh-hcc-panel--action">
+                <div className="mh-hcc-panel__head">
+                  <h2>Message Center</h2>
+                </div>
+                <p className="mh-hcc-panel__lead">Campus mail for instructors, classmates, and staff stays in Communication.</p>
+                <div className="mh-hcc-panel__actions">
+                  <button type="button" className="mh-hcc-hero__btn" onClick={() => router.push("/student/messages")}>
+                    Open inbox
+                  </button>
+                  <button
+                    type="button"
+                    className="mh-hcc-hero__btn mh-hcc-hero__btn--ghost mh-hcc-hero__btn--dark"
+                    onClick={() => router.push("/student/ask")}
+                  >
+                    Ask MyHeritage
+                  </button>
+                </div>
+              </section>
+            </div>
+          </div>
+        </section>
       </div>
     </StudentSisShell>
   );

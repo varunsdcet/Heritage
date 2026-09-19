@@ -1,10 +1,15 @@
 "use client";
 
-import { StudentCourseDetailView } from "@/components/StudentFunctionalViews";
+import { Suspense } from "react";
 import { useParams } from "next/navigation";
+import { StudentCourseDetailPremiumView } from "@/components/StudentCoursesPremium";
 
 export default function Page() {
   const params = useParams<{ sectionId: string }>();
   const sectionId = params?.sectionId ?? "demo";
-  return <StudentCourseDetailView sectionId={sectionId} />;
+  return (
+    <Suspense fallback={null}>
+      <StudentCourseDetailPremiumView sectionId={sectionId} />
+    </Suspense>
+  );
 }

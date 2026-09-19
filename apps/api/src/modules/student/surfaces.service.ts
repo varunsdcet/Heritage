@@ -1,23 +1,34 @@
 import type { SessionClaims } from "@myheritage/contracts";
 import {
+  CreateLeaveOfAbsenceRequest,
   CreateStudentServiceRequest,
   LogPracticumHoursRequest,
+  RegisterWorkshopRequest,
   StartAssessmentAttemptResponse,
   StudentAssessmentsResponse,
   StudentAttendanceResponse,
+  StudentBadgesResponse,
+  StudentCareerResponse,
   StudentCredentialsResponse,
   StudentFinanceResponse,
+  StudentFinanceStatementResponse,
   StudentLabNotebook,
   StudentLecturesResponse,
   StudentPracticumResponse,
   StudentResourcesResponse,
   StudentServiceRequestsResponse,
+  StudentWorkshopsResponse,
+  ExtracurricularResponse,
+  LeaveOfAbsenceListResponse,
+  RequiredTasksResponse,
+  TaxDocumentsResponse,
   SubmitAssessmentAttemptResponse,
   UpsertLabNotebookRequest,
 } from "@myheritage/contracts";
 import { requireApproval } from "@myheritage/auth";
 import { prisma } from "@myheritage/db";
 import { writeAuditAndOutbox } from "@myheritage/events";
+import { randomUUID } from "node:crypto";
 
 function httpError(message: string, code: string, status: number) {
   return Object.assign(new Error(message), { code, status });
@@ -59,11 +70,14 @@ export async function listStudentAssessments(user: SessionClaims) {
   const mapped = assessments.map((a) => {
     const openAttempt = a.attempts.find((t) => t.status === "open" && t.expiresAt > now);
     const submitted = a.attempts.some((t) => t.status === "submitted");
+    const attemptsRemaining = a.attempts.length < a.maxAttempts;
     let state: "upcoming" | "open" | "in_progress" | "submitted" | "closed" = "open";
     if (now < a.opensAt) state = "upcoming";
-    else if (now > a.closesAt && !openAttempt) state = submitted ? "submitted" : "closed";
     else if (openAttempt) state = "in_progress";
+    else if (now > a.closesAt) state = submitted ? "submitted" : "closed";
+    else if (attemptsRemaining) state = "open";
     else if (submitted) state = "submitted";
+    else state = "closed";
     return {
       id: a.id,
       sectionId: a.sectionId,
@@ -358,10 +372,10 @@ export async function listStudentServiceRequests(user: SessionClaims) {
   return StudentServiceRequestsResponse.parse({
     requests: rows.map((r) => ({
       id: r.id,
-      type: r.type as "official_transcript" | "enrollment_verification" | "advising_referral" | "general_inquiry",
+      type: r.type,
       subject: r.subject,
       details: r.details,
-      status: r.status as "open" | "pending_approval" | "resolved" | "rejected",
+      status: r.status,
       approvalRequestId: r.approvalRequestId,
       createdAt: r.createdAt.toISOString(),
     })),
@@ -376,7 +390,13 @@ export async function createStudentServiceRequest(
   const student = await requireStudent(user);
   const input = CreateStudentServiceRequest.parse(body);
   const needsApproval =
-    input.type === "official_transcript" || input.type === "enrollment_verification";
+    input.type === "official_transcript" ||
+    input.type === "enrollment_verification" ||
+    input.type === "course_withdrawal" ||
+    input.type === "course_change" ||
+    input.type === "transcript_request" ||
+    input.type === "academic_appeal" ||
+    input.type === "leave_of_absence";
 
   const created = await prisma.$transaction(async (tx) => {
     let approvalRequestId: string | null = null;
@@ -424,7 +444,7 @@ export async function createStudentServiceRequest(
     requests: [
       {
         id: created.id,
-        type: created.type as "official_transcript" | "enrollment_verification" | "advising_referral" | "general_inquiry",
+        type: created.type as typeof input.type,
         subject: created.subject,
         details: created.details,
         status: created.status as "open" | "pending_approval" | "resolved" | "rejected",
@@ -517,10 +537,28 @@ export async function logPracticumHours(user: SessionClaims, body: unknown, corr
   };
 }
 
-export async function listStudentFinance(user: SessionClaims) {
+export async function listStudentFinance(user: SessionClaims, financialTermId?: string | null) {
   const student = await requireStudent(user);
+  const terms = await prisma.financialTerm.findMany({
+    where: { institutionId: user.institutionId },
+    orderBy: { startsOn: "desc" },
+  });
+  const selectedId =
+    financialTermId && terms.some((t) => t.id === financialTermId)
+      ? financialTermId
+      : terms[0]?.id ?? null;
   const entries = await prisma.financeLedgerEntry.findMany({
+    where: {
+      institutionId: user.institutionId,
+      studentId: student.id,
+      ...(selectedId ? { financialTermId: selectedId } : {}),
+    },
+    include: { financialTerm: true },
+    orderBy: { postedAt: "desc" },
+  });
+  const allEntries = await prisma.financeLedgerEntry.findMany({
     where: { institutionId: user.institutionId, studentId: student.id },
+    include: { financialTerm: true },
     orderBy: { postedAt: "desc" },
   });
   const balance = entries.reduce((sum, e) => {
@@ -535,23 +573,151 @@ export async function listStudentFinance(user: SessionClaims) {
     .map((e) => e.dueAt!)
     .sort((a, b) => a.getTime() - b.getTime())[0];
 
+  const selectedTerm = terms.find((t) => t.id === selectedId) ?? null;
+  const charges = entries.filter((e) => e.kind === "charge");
+  const totalChargesCad = charges.reduce((sum, e) => sum + e.amountCad, 0);
+  const totalPaymentsCad = entries
+    .filter((e) => e.kind === "payment" || e.kind === "credit")
+    .reduce((sum, e) => sum + e.amountCad, 0);
+  const gstRatePercent = 0;
+  const pstRatePercent = 0;
+  const gstCad = Math.round(totalChargesCad * (gstRatePercent / 100) * 100) / 100;
+  const pstCad = Math.round(totalChargesCad * (pstRatePercent / 100) * 100) / 100;
+  const balanceCad = Math.round((totalChargesCad + gstCad + pstCad - totalPaymentsCad) * 100) / 100;
+
+  const mapEntry = (e: (typeof entries)[number]) => ({
+    id: e.id,
+    label: e.label,
+    amountCad: e.amountCad,
+    kind: e.kind as "charge" | "credit" | "payment",
+    status: e.status as "open" | "paid" | "waived",
+    source: e.source ?? null,
+    dueAt: e.dueAt?.toISOString() ?? null,
+    postedAt: e.postedAt.toISOString(),
+    financialTermId: e.financialTermId,
+    financialTermCode: e.financialTerm?.code ?? null,
+    financialTermName: e.financialTerm?.name ?? null,
+  });
+
+  const history = buildFinanceHistory(allEntries);
+
   return StudentFinanceResponse.parse({
     summary: {
-      balance: { amountCents: Math.round(balance * 100), currency: "CAD" },
+      balance: { amountCents: Math.round(balanceCad * 100), currency: "CAD" },
       pastDue: { amountCents: Math.round(pastDue * 100), currency: "CAD" },
       nextDueAt: nextDue?.toISOString() ?? null,
       paymentExecutionEnabled: false,
     },
-    entries: entries.map((e) => ({
-      id: e.id,
-      label: e.label,
-      amountCad: e.amountCad,
-      kind: e.kind as "charge" | "credit" | "payment",
-      status: e.status as "open" | "paid" | "waived",
-      dueAt: e.dueAt?.toISOString() ?? null,
-      postedAt: e.postedAt.toISOString(),
+    entries: entries.map(mapEntry),
+    financialTerms: terms.map((t) => ({
+      id: t.id,
+      code: t.code,
+      name: t.name,
+      startsOn: t.startsOn,
+      endsOn: t.endsOn,
     })),
+    selectedFinancialTermId: selectedId,
+    statement: selectedTerm
+      ? {
+          termCode: selectedTerm.code,
+          termName: selectedTerm.name,
+          charges: charges.map((c) => ({ id: c.id, label: c.label, amountCad: c.amountCad })),
+          totalChargesCad,
+          gstRatePercent,
+          gstCad,
+          pstRatePercent,
+          pstCad,
+          totalPaymentsCad,
+          balanceCad,
+        }
+      : null,
+    history,
   });
+}
+
+function buildFinanceHistory(
+  entries: Array<{
+    id: string;
+    label: string;
+    amountCad: number;
+    kind: string;
+    source: string | null;
+    postedAt: Date;
+  }>,
+) {
+  type Event = {
+    id: string;
+    date: string;
+    kind: "payment" | "accounts_receivable" | "credit";
+    title: string;
+    amountCad: number;
+    source: string | null;
+    receiptAvailable: boolean;
+    lines: Array<{ id: string; label: string; amountCad: number }>;
+    sortKey: number;
+  };
+
+  const events: Event[] = [];
+  const chargesByDay = new Map<string, typeof entries>();
+
+  for (const e of entries) {
+    if (e.kind === "charge") {
+      const day = e.postedAt.toISOString().slice(0, 10);
+      const bucket = chargesByDay.get(day) ?? [];
+      bucket.push(e);
+      chargesByDay.set(day, bucket);
+      continue;
+    }
+    if (e.kind === "payment" || e.kind === "credit") {
+      events.push({
+        id: e.id,
+        date: e.postedAt.toISOString(),
+        kind: e.kind === "payment" ? "payment" : "credit",
+        title: e.kind === "payment" ? `Payment Applied: $${e.amountCad.toFixed(2)}` : e.label,
+        amountCad: e.amountCad,
+        source: e.source,
+        receiptAvailable: e.kind === "payment",
+        lines: [],
+        sortKey: e.postedAt.getTime(),
+      });
+    }
+  }
+
+  for (const [, dayCharges] of chargesByDay) {
+    const total = dayCharges.reduce((sum, c) => sum + c.amountCad, 0);
+    const first = dayCharges[0]!;
+    events.push({
+      id: `ar-${first.id}`,
+      date: first.postedAt.toISOString(),
+      kind: "accounts_receivable",
+      title: `Accounts Receivable Added: $${total.toFixed(2)}`,
+      amountCad: total,
+      source: null,
+      receiptAvailable: false,
+      lines: dayCharges.map((c) => ({ id: c.id, label: c.label, amountCad: c.amountCad })),
+      sortKey: first.postedAt.getTime(),
+    });
+  }
+
+  events.sort((a, b) => b.sortKey - a.sortKey);
+
+  const months = new Map<string, { key: string; label: string; events: typeof events }>();
+  for (const event of events) {
+    const d = new Date(event.date);
+    const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+    const label = d
+      .toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" })
+      .toUpperCase();
+    const bucket = months.get(key) ?? { key, label, events: [] };
+    bucket.events.push(event);
+    months.set(key, bucket);
+  }
+
+  return [...months.values()].map((m) => ({
+    key: m.key,
+    label: m.label,
+    events: m.events.map(({ sortKey: _s, ...rest }) => rest),
+  }));
 }
 
 export async function listStudentCredentials(user: SessionClaims) {
@@ -675,4 +841,406 @@ export async function toPortalRowsFromPracticum(user: SessionClaims) {
       href: "/student/f/st-17-practicum",
     })),
   ]);
+}
+
+function mapWorkshop(
+  w: {
+    id: string;
+    code: string;
+    title: string;
+    description: string;
+    creditsCeu: number;
+    startsAt: Date;
+    endsAt: Date | null;
+    location: string | null;
+    capacity: number;
+    status: string;
+    registrations: Array<{ studentId: string; status: string }>;
+  },
+  studentId: string,
+) {
+  const mine = w.registrations.find((r) => r.studentId === studentId);
+  const seatStatuses = new Set(["registered", "approved", "pending", "completed"]);
+  const studentStatus =
+    !mine
+      ? "none"
+      : mine.status === "declined" || mine.status === "dropped" || mine.status === "cancelled"
+        ? "cancelled"
+        : mine.status === "completed" || w.status === "completed"
+          ? "completed"
+          : "registered";
+  return {
+    id: w.id,
+    code: w.code,
+    title: w.title,
+    description: w.description,
+    creditsCeu: w.creditsCeu,
+    startsAt: w.startsAt.toISOString(),
+    endsAt: w.endsAt?.toISOString() ?? null,
+    location: w.location,
+    capacity: w.capacity,
+    registeredCount: w.registrations.filter((r) => seatStatuses.has(r.status)).length,
+    status: w.status as "upcoming" | "active" | "completed" | "cancelled",
+    registrationStatus: studentStatus,
+  };
+}
+
+export async function listStudentWorkshops(user: SessionClaims) {
+  const student = await requireStudent(user);
+  const workshops = await prisma.workshop.findMany({
+    where: { institutionId: user.institutionId },
+    include: { registrations: true },
+    orderBy: { startsAt: "asc" },
+  });
+  const mapped = workshops.map((w) => mapWorkshop(w, student.id));
+  return StudentWorkshopsResponse.parse({
+    available: mapped.filter((w) => w.registrationStatus === "none" && (w.status === "upcoming" || w.status === "active")),
+    mine: mapped.filter((w) => w.registrationStatus === "registered"),
+    completed: mapped.filter((w) => w.registrationStatus === "completed" || w.status === "completed"),
+  });
+}
+
+export async function registerStudentWorkshop(user: SessionClaims, body: unknown, correlationId: string) {
+  const student = await requireStudent(user);
+  const input = RegisterWorkshopRequest.parse(body);
+  const workshop = await prisma.workshop.findFirst({
+    where: { id: input.workshopId, institutionId: user.institutionId },
+    include: { registrations: true },
+  });
+  if (!workshop) throw httpError("Workshop not found", "NOT_FOUND", 404);
+  if (workshop.status === "cancelled" || workshop.status === "completed") {
+    throw httpError("Workshop is not open for registration", "VALIDATION_ERROR", 400);
+  }
+  const existing = workshop.registrations.find((r) => r.studentId === student.id);
+  if (existing) return listStudentWorkshops(user);
+  const active = workshop.registrations.filter((r) =>
+    ["registered", "approved", "pending"].includes(r.status),
+  ).length;
+  if (active >= workshop.capacity) throw httpError("Workshop is full", "CONFLICT", 409);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.workshopRegistration.create({
+      data: {
+        institutionId: user.institutionId,
+        workshopId: workshop.id,
+        studentId: student.id,
+        status: "pending",
+      },
+    });
+    await writeAuditAndOutbox(tx, {
+      institutionId: user.institutionId,
+      actorId: user.accountId,
+      eventName: "Workshop.registered",
+      purpose: "student_services",
+      before: null,
+      after: { workshopId: workshop.id, studentId: student.id },
+      source: "student.workshops.register",
+      correlationId,
+    });
+  });
+  return listStudentWorkshops(user);
+}
+
+export async function listLeaveOfAbsence(user: SessionClaims) {
+  const student = await requireStudent(user);
+  const rows = await prisma.leaveOfAbsenceRequest.findMany({
+    where: { institutionId: user.institutionId, studentId: student.id },
+    orderBy: { createdAt: "desc" },
+  });
+  return LeaveOfAbsenceListResponse.parse({
+    requests: rows.map((r) => ({
+      id: r.id,
+      reason: r.reason,
+      startsOn: r.startsOn,
+      endsOn: r.endsOn,
+      status: r.status as "pending" | "approved" | "rejected" | "cancelled",
+      approvalRequestId: r.approvalRequestId,
+      decisionNote: r.decisionNote,
+      createdAt: r.createdAt.toISOString(),
+    })),
+  });
+}
+
+export async function createLeaveOfAbsence(user: SessionClaims, body: unknown, correlationId: string) {
+  const student = await requireStudent(user);
+  const input = CreateLeaveOfAbsenceRequest.parse(body);
+  if (input.endsOn < input.startsOn) {
+    throw httpError("End date must be on or after start date", "VALIDATION_ERROR", 400);
+  }
+  await prisma.$transaction(async (tx) => {
+    const approval = await requireApproval({
+      institutionId: user.institutionId,
+      type: "leave_of_absence",
+      subjectRef: `student:${student.id}`,
+      proposedDiff: input,
+      requestedBy: user.accountId,
+      requiredApproverRoles: ["registrar", "admin"],
+      requiredCount: 1,
+      correlationId,
+      tx,
+    });
+    await tx.leaveOfAbsenceRequest.create({
+      data: {
+        institutionId: user.institutionId,
+        studentId: student.id,
+        reason: input.reason,
+        startsOn: input.startsOn,
+        endsOn: input.endsOn,
+        status: "pending",
+        approvalRequestId: approval.id,
+      },
+    });
+    await writeAuditAndOutbox(tx, {
+      institutionId: user.institutionId,
+      actorId: user.accountId,
+      eventName: "LeaveOfAbsence.requested",
+      purpose: "student_services",
+      before: null,
+      after: input,
+      source: "student.leave.create",
+      correlationId,
+    });
+  });
+  return listLeaveOfAbsence(user);
+}
+
+export async function listRequiredTasks(user: SessionClaims) {
+  const student = await requireStudent(user);
+  const rows = await prisma.requiredTask.findMany({
+    where: { institutionId: user.institutionId, studentId: student.id },
+    orderBy: [{ status: "asc" }, { dueAt: "asc" }],
+  });
+  const map = (r: (typeof rows)[number]) => ({
+    id: r.id,
+    title: r.title,
+    detail: r.detail,
+    dueAt: r.dueAt?.toISOString() ?? null,
+    requestedAt: r.createdAt.toISOString(),
+    status: r.status as "pending" | "completed" | "waived",
+    href: r.href,
+    completedAt: r.completedAt?.toISOString() ?? null,
+  });
+  return RequiredTasksResponse.parse({
+    pending: rows.filter((r) => r.status === "pending").map(map),
+    completed: rows.filter((r) => r.status !== "pending").map(map),
+  });
+}
+
+export async function completeRequiredTask(user: SessionClaims, taskId: string, correlationId: string) {
+  const student = await requireStudent(user);
+  const task = await prisma.requiredTask.findFirst({
+    where: { id: taskId, institutionId: user.institutionId, studentId: student.id },
+  });
+  if (!task) throw httpError("Task not found", "NOT_FOUND", 404);
+  await prisma.requiredTask.update({
+    where: { id: task.id },
+    data: { status: "completed", completedAt: new Date() },
+  });
+  await writeAuditAndOutbox(prisma, {
+    institutionId: user.institutionId,
+    actorId: user.accountId,
+    eventName: "RequiredTask.completed",
+    purpose: "student_services",
+    before: { status: task.status },
+    after: { status: "completed" },
+    source: "student.tasks.complete",
+    correlationId: correlationId || randomUUID(),
+  });
+  return listRequiredTasks(user);
+}
+
+export function studentTaxPdfPath(id: string) {
+  return `/student/tax-documents/${id}/pdf`;
+}
+
+export async function listTaxDocuments(user: SessionClaims) {
+  const student = await requireStudent(user);
+  const rows = await prisma.taxDocument.findMany({
+    where: { institutionId: user.institutionId, studentId: student.id },
+    orderBy: { taxYear: "desc" },
+  });
+  const documents = rows.map((r) => ({
+    id: r.id,
+    docType: r.docType,
+    taxYear: r.taxYear,
+    title: r.title,
+    status: r.status as "available" | "pending" | "expired",
+    issuedAt: r.issuedAt?.toISOString() ?? null,
+    downloadUrl: studentTaxPdfPath(r.id),
+  }));
+  return TaxDocumentsResponse.parse({
+    documents,
+    formOptions: documents.map((d) => ({
+      value: d.id,
+      label: `${d.docType} — ${d.taxYear} · ${d.title}`,
+    })),
+    emptyNotice: documents.length
+      ? null
+      : "There are currently no tax documents or forms available.",
+  });
+}
+
+export async function getStudentTaxPdf(user: SessionClaims, documentId: string) {
+  const student = await requireStudent(user);
+  const row = await prisma.taxDocument.findFirst({
+    where: { id: documentId, institutionId: user.institutionId, studentId: student.id },
+    include: { student: { include: { person: true } } },
+  });
+  if (!row) throw httpError("Tax document not found", "NOT_FOUND", 404);
+  const { renderTaxCertificatePdf, taxPdfFilename } = await import("../../lib/taxPdf.js");
+  const inst = await prisma.institution.findFirst({ where: { id: user.institutionId } });
+  const pdf = renderTaxCertificatePdf({
+    institutionName: inst?.name ?? "Heritage College",
+    legalName: inst?.legalName,
+    addressLine1: inst?.addressLine1,
+    city: inst?.city,
+    region: inst?.region,
+    postalCode: inst?.postalCode,
+    country: inst?.country,
+    docType: row.docType,
+    title: row.title,
+    taxYear: row.taxYear,
+    recipientName: `${row.student.person.givenName} ${row.student.person.familyName}`.trim(),
+    recipientIdLabel: "Student number",
+    recipientId: row.student.studentNumber,
+    programName: row.student.programName,
+    eligibleTuitionCad: row.eligibleTuitionCad,
+    enrolmentMonths: row.enrolmentMonths,
+    sinLast4: row.sinLast4,
+    craStatus: row.craStatus,
+    status: row.status,
+    issuedAt: row.issuedAt,
+  });
+  return { pdf, filename: taxPdfFilename(row.docType, row.taxYear) };
+}
+
+export async function listExtracurricular(user: SessionClaims) {
+  const student = await requireStudent(user);
+  const rows = await prisma.extracurricularRecord.findMany({
+    where: { institutionId: user.institutionId, studentId: student.id },
+    orderBy: { createdAt: "desc" },
+  });
+  const categories = [...new Set(rows.map((r) => r.category))].sort((a, b) => a.localeCompare(b));
+  const terms = [...new Set(rows.map((r) => r.termCode).filter((t): t is string => Boolean(t)))].sort((a, b) =>
+    b.localeCompare(a),
+  );
+  return ExtracurricularResponse.parse({
+    records: rows.map((r) => ({
+      id: r.id,
+      termCode: r.termCode,
+      category: r.category,
+      title: r.title,
+      detail: r.detail,
+      status: r.status,
+    })),
+    categories,
+    terms,
+  });
+}
+
+export async function listStudentBadges(user: SessionClaims) {
+  const student = await requireStudent(user);
+  const rows = await prisma.studentBadge.findMany({
+    where: { institutionId: user.institutionId, studentId: student.id },
+    orderBy: { createdAt: "desc" },
+  });
+  return StudentBadgesResponse.parse({
+    badges: rows.map((r) => ({
+      id: r.id,
+      code: r.code,
+      title: r.title,
+      description: r.description,
+      status: r.status as "available" | "earned" | "revoked",
+      earnedAt: r.earnedAt?.toISOString() ?? null,
+    })),
+  });
+}
+
+function parseJsonStringArray(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function listStudentCareer(user: SessionClaims) {
+  await requireStudent(user);
+  const rows = await prisma.careerOpportunity.findMany({
+    where: { institutionId: user.institutionId },
+    orderBy: [{ status: "asc" }, { updatedAt: "desc" }],
+    take: 40,
+  });
+  return StudentCareerResponse.parse({
+    opportunities: rows.map((o) => {
+      const href =
+        o.href && (o.href.startsWith("https://") || o.href.startsWith("/")) && !o.href.includes("st-20-career") && o.href !== "/student/career"
+          ? o.href
+          : "/student/messages";
+      return {
+        id: o.id,
+        title: o.title,
+        employerName: o.employerName,
+        skills: parseJsonStringArray(o.skillsJson),
+        programCodes: parseJsonStringArray(o.programCodesJson),
+        status: (o.status === "open" || o.status === "closed" || o.status === "draft" ? o.status : "open") as
+          | "open"
+          | "closed"
+          | "draft",
+        href,
+        updatedAt: o.updatedAt.toISOString(),
+      };
+    }),
+    services: [
+      {
+        title: "Career coaching",
+        body: "Resume review, interview practice, and job-search planning with Career Services.",
+        href: "/student/messages",
+        cta: "Message Career Services",
+      },
+      {
+        title: "Work-integrated learning",
+        body: "Explore practicum placements, hours, and employer agreements tied to your program.",
+        href: "/student/f/st-17-practicum",
+        cta: "Open practicum",
+      },
+      {
+        title: "Ask Heritage",
+        body: "Get grounded answers about co-op timing, resume tips, and campus career resources.",
+        href: "/student/ask",
+        cta: "Ask a career question",
+      },
+    ],
+  });
+}
+
+export async function buildFinanceStatement(user: SessionClaims, financialTermId?: string | null) {
+  const student = await requireStudent(user);
+  const finance = await listStudentFinance(user, financialTermId);
+  const statement = finance.statement;
+  const lines = [
+    "MyHeritage · Financial Statement",
+    `Student: ${student.studentNumber} · ${student.programName}`,
+    statement ? `Term: ${statement.termName}` : "",
+    `Generated: ${new Date().toISOString()}`,
+    "",
+    "NEW FEES & CHARGES",
+    ...(statement?.charges.map((c) => `  ${c.label}: $${c.amountCad.toFixed(2)}`) ??
+      finance.entries.filter((e) => e.kind === "charge").map((e) => `  ${e.label}: $${e.amountCad.toFixed(2)}`)),
+    "",
+    `Total New Fees & Charges: ($${(statement?.totalChargesCad ?? 0).toFixed(2)})`,
+    `GST ${statement?.gstRatePercent ?? 0}%: ($${(statement?.gstCad ?? 0).toFixed(2)})`,
+    `PST ${statement?.pstRatePercent ?? 0}%: ($${(statement?.pstCad ?? 0).toFixed(2)})`,
+    `Total Payments: $${(statement?.totalPaymentsCad ?? 0).toFixed(2)}`,
+    `Statement Balance: ($${(statement?.balanceCad ?? finance.summary.balance.amountCents / 100).toFixed(2)})`,
+  ].filter((line) => line !== undefined);
+  return StudentFinanceStatementResponse.parse({
+    generatedAt: new Date().toISOString(),
+    studentNumber: student.studentNumber,
+    programName: student.programName,
+    summary: finance.summary,
+    entries: finance.entries,
+    statementText: lines.join("\n"),
+  });
 }

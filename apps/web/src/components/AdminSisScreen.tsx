@@ -66,7 +66,14 @@ function QueueView({ config }: { config: SisScreenConfig }) {
   const router = useRouter();
   const live = useSisLive();
   const [q, setQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState("All");
   const rows = (config.rows || []).filter((row) => {
+    if (statusFilter && statusFilter !== "All") {
+      const badge = (row.badge || "").toLowerCase();
+      const hayStatus = `${row.cells.join(" ")} ${row.badge || ""}`.toLowerCase();
+      const want = statusFilter.toLowerCase();
+      if (badge !== want && !hayStatus.includes(want)) return false;
+    }
     if (!q.trim()) return true;
     const hay = `${row.primary || ""} ${row.secondary || ""} ${row.cells.join(" ")}`.toLowerCase();
     return hay.includes(q.trim().toLowerCase());
@@ -157,11 +164,24 @@ function QueueView({ config }: { config: SisScreenConfig }) {
               />
             </div>
             {(config.filters || []).map((f) => (
-              <button key={f} type="button" className="mh-sis-filters__pill">
-                {f} ▾
+              <button
+                key={f}
+                type="button"
+                className={`mh-sis-filters__pill${statusFilter === f ? " is-active" : ""}`}
+                onClick={() => setStatusFilter(f)}
+                aria-pressed={statusFilter === f}
+              >
+                {f}
               </button>
             ))}
-            <button type="button" className="mh-sis-filters__reset" onClick={() => setQ("")}>
+            <button
+              type="button"
+              className="mh-sis-filters__reset"
+              onClick={() => {
+                setQ("");
+                setStatusFilter("All");
+              }}
+            >
               Clear all
             </button>
           </div>
@@ -3322,7 +3342,8 @@ function AdminSisBody({ path, chrome }: { path: string; chrome: SisScreenConfig 
 
 export function AdminSisScreen({ path }: { path: string }) {
   const router = useRouter();
-  const chrome = ADMIN_SIS_SCREENS[path];
+  const basePath = path.split("?")[0];
+  const chrome = ADMIN_SIS_SCREENS[basePath];
   const [userName, setUserName] = useState("Admin User");
   const [allowed, setAllowed] = useState(false);
 
@@ -3345,7 +3366,7 @@ export function AdminSisScreen({ path }: { path: string }) {
   }, [router]);
 
   if (!chrome) {
-    return <p style={{ padding: 32 }}>Unknown SIS screen: {path}</p>;
+    return <p style={{ padding: 32 }}>Unknown SIS screen: {basePath}</p>;
   }
   if (!allowed) return null;
 

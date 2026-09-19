@@ -3,9 +3,22 @@ import { Uuid } from "./base.js";
 import { GradeItem, ApprovalRequest, Message, RoleName } from "./entities.js";
 
 export const LoginRequest = z.object({
-  email: z.string().email(),
+  /** College email OR student number (e.g. ST-2024-001). */
+  email: z.string().min(3),
   password: z.string().min(8),
   deviceFingerprint: z.string().min(8),
+  /** When false, short-lived session (12h). Default / true = 30d. */
+  remember: z.boolean().optional(),
+});
+
+export const ChangePasswordRequest = z.object({
+  currentPassword: z.string().min(8),
+  newPassword: z.string().min(8),
+});
+
+export const ForgotPasswordRequest = z.object({
+  email: z.string().email(),
+  studentNumber: z.string().min(3).optional(),
 });
 
 export const LoginResponse = z.object({
@@ -120,6 +133,8 @@ export const AskAboutGradeResponse = z.object({
 
 export type LoginRequest = z.infer<typeof LoginRequest>;
 export type LoginResponse = z.infer<typeof LoginResponse>;
+export type ChangePasswordRequest = z.infer<typeof ChangePasswordRequest>;
+export type ForgotPasswordRequest = z.infer<typeof ForgotPasswordRequest>;
 export type SessionClaims = z.infer<typeof SessionClaims>;
 export type StudentGradesResponse = z.infer<typeof StudentGradesResponse>;
 export type GradebookResponse = z.infer<typeof GradebookResponse>;

@@ -1,118 +1,437 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { StudentAssessmentsResponse } from "@myheritage/contracts";
-import { Button, Panel, StatusPill } from "@myheritage/ui";
-import { StudentSisShell } from "@/components/StudentSisShell";
-import { api, loadSession, type Session } from "@/lib/api";
+import { Banner, Button, EmptyState, StatusPill } from "@myheritage/ui";
+import { StudentFrame } from "@/components/StudentSisShell";
+import { ApiError, api, loadSession, type Session } from "@/lib/api";
+
+type Assessment = StudentAssessmentsResponse["assessments"][number];
+type LoadState = "loading" | "ready" | "offline" | "forbidden" | "error";
+
+function formatDate(value: string | null | undefined) {
+  if (!value) return "No date set";
+  return new Date(value).toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function statusTone(state: Assessment["state"]): "neutral" | "success" | "warning" | "danger" {
+  if (state === "submitted") return "success";
+  if (state === "in_progress") return "warning";
+  if (state === "closed") return "danger";
+  if (state === "open") return "success";
+  return "neutral";
+}
 
 export default function StudentAssessmentsPage() {
+  return (
+    <Suspense fallback={<div style={{ padding: 24 }}>Loading assessments…</div>}>
+      <StudentAssessmentsInner />
+    </Suspense>
+  );
+}
+
+function StudentAssessmentsInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const urlId = searchParams.get("id");
+
   const [session, setSession] = useState<Session | null>(null);
   const [data, setData] = useState<StudentAssessmentsResponse | null>(null);
+  const [loadState, setLoadState] = useState<LoadState>("loading");
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-
-  async function refresh(s: Session) {
-    const res = await api<StudentAssessmentsResponse>("/student/assessments", {}, s.accessToken);
-    setData(res);
-  }
+  const [selectedId, setSelectedId] = useState<string | null>(urlId);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
-    const s = loadSession();
-    if (!s) {
+    setSelectedId(urlId);
+  }, [urlId]);
+
+  const refresh = useCallback(async (active: Session, opts?: { silent?: boolean }) => {
+    if (!opts?.silent) {
+      setLoadState("loading");
+      setError(null);
+    }
+    try {
+      setData(await api<StudentAssessmentsResponse>("/student/assessments", {}, active.accessToken));
+      setLoadState("ready");
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      if (caught instanceof ApiError && caught.status === 403) {
+        setLoadState("forbidden");
+        return;
+      }
+      if ((typeof navigator !== "undefined" && !navigator.onLine) || caught instanceof TypeError) {
+        setLoadState("offline");
+        return;
+      }
+      setError(caught instanceof Error ? caught.message : "Could not load assessments.");
+      setLoadState("error");
+    }
+  }, [router]);
+
+  useEffect(() => {
+    const active = loadSession();
+    if (!active) {
       router.replace("/login");
       return;
     }
-    setSession(s);
-    refresh(s).catch((err) => setError(err instanceof Error ? err.message : "Failed to load"));
-  }, [router]);
+    if (!active.roles.includes("student")) {
+      setLoadState("forbidden");
+      return;
+    }
+    setSession(active);
+    void refresh(active);
+  }, [refresh, router]);
 
-  if (!session) return null;
+  const assessments = data?.assessments ?? [];
+  const selected = useMemo(
+    () => assessments.find((row) => row.id === selectedId) ?? null,
+    [assessments, selectedId],
+  );
+
+  function openAssessment(id: string) {
+    setNotice(null);
+    setActionError(null);
+    setSelectedId(id);
+    router.replace(`/student/assessments?id=${encodeURIComponent(id)}`, { scroll: false });
+  }
+
+  function backToList() {
+    setNotice(null);
+    setActionError(null);
+    setSelectedId(null);
+    router.replace("/student/assessments", { scroll: false });
+  }
+
+  async function startAttempt(assessment: Assessment) {
+    if (!session) return;
+    setBusy(true);
+    setNotice(null);
+    setActionError(null);
+    try {
+      const result = await api<{ attemptId: string; expiresAt: string }>(
+        `/student/assessments/${assessment.id}/start`,
+        { method: "POST", body: "{}" },
+        session.accessToken,
+      );
+      await refresh(session, { silent: true });
+      setNotice(`Attempt started. Submit before ${formatDate(result.expiresAt)}.`);
+    } catch (caught) {
+      setActionError(caught instanceof Error ? caught.message : "Could not start attempt");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitAttempt(assessment: Assessment) {
+    if (!session || !assessment.openAttemptId) return;
+    setBusy(true);
+    setNotice(null);
+    setActionError(null);
+    try {
+      const result = await api<{ attemptId: string; status: string; submittedAt: string }>(
+        `/student/assessments/attempts/${assessment.openAttemptId}/submit`,
+        { method: "POST", body: "{}" },
+        session.accessToken,
+      );
+      await refresh(session, { silent: true });
+      setNotice(`Assessment submitted successfully at ${formatDate(result.submittedAt)}.`);
+    } catch (caught) {
+      setActionError(caught instanceof Error ? caught.message : "Could not submit attempt");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!session && loadState === "loading") return null;
 
   return (
-    <StudentSisShell title="Assessments" activeHref="/student/assessments">
-      <div style={{ padding: 24, maxWidth: 960 }}>
-        <h1 style={{ marginTop: 0 }}>Assessments</h1>
-        <p style={{ color: "var(--mh-text-muted)" }}>
-          Assigned assessments for your enrolled courses. AI Study Coach is blocked while an attempt is open.
-        </p>
-        {error ? <p style={{ color: "var(--mh-danger)" }}>{error}</p> : null}
-        {data?.assessmentAttemptOpen ? <StatusPill tone="warning">Attempt in progress — AI assistance paused</StatusPill> : null}
-        <Panel title="Assigned">
-          {(data?.assessments.length ?? 0) === 0 ? (
-            <p style={{ color: "var(--mh-text-muted)" }}>No published assessments yet.</p>
-          ) : (
-            <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 12 }}>
-              {data!.assessments.map((a) => (
-                <li
-                  key={a.id}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    gap: 12,
-                    flexWrap: "wrap",
-                    borderBottom: "1px solid var(--mh-border)",
-                    paddingBottom: 10,
-                  }}
-                >
-                  <div>
-                    <strong>{a.title}</strong>
-                    <div style={{ color: "var(--mh-text-muted)", fontSize: 13 }}>
-                      {a.courseCode} · {a.durationMinutes} min · closes {a.closesAt.slice(0, 10)}
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <StatusPill tone={a.state === "in_progress" ? "warning" : a.state === "submitted" ? "success" : "neutral"}>
-                      {a.state}
-                    </StatusPill>
-                    {a.state === "open" || a.state === "upcoming" ? (
-                      <Button
-                        type="button"
-                        disabled={a.state !== "open" || busy === a.id}
-                        onClick={() => {
-                          setBusy(a.id);
-                          api<{ attemptId: string }>(
-                            `/student/assessments/${a.id}/start`,
-                            { method: "POST", body: "{}" },
-                            session.accessToken,
-                          )
-                            .then(() => refresh(session))
-                            .catch((err) => setError(err instanceof Error ? err.message : "Start failed"))
-                            .finally(() => setBusy(null));
-                        }}
-                      >
-                        Start attempt
-                      </Button>
-                    ) : null}
-                    {a.openAttemptId ? (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        disabled={busy === a.openAttemptId}
-                        onClick={() => {
-                          setBusy(a.openAttemptId);
-                          api(
-                            `/student/assessments/attempts/${a.openAttemptId}/submit`,
-                            { method: "POST", body: "{}" },
-                            session.accessToken,
-                          )
-                            .then(() => refresh(session))
-                            .catch((err) => setError(err instanceof Error ? err.message : "Submit failed"))
-                            .finally(() => setBusy(null));
-                        }}
-                      >
-                        Submit attempt
-                      </Button>
-                    ) : null}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Panel>
+    <StudentFrame
+      role="student"
+      title="Assessments"
+      subtitle="Timed quizzes and exams for your enrolled courses"
+      breadcrumb={["Student", "Assessments"]}
+      activeHref="/student/assessments"
+    >
+      {actionError ? <Banner tone="danger">{actionError}</Banner> : null}
+      {notice ? <Banner tone="success">{notice}</Banner> : null}
+
+      {loadState !== "ready" && !data ? (
+        <section className="mh-teacher-card">
+          <EmptyState
+            title={
+              loadState === "loading"
+                ? "Loading"
+                : loadState === "offline"
+                  ? "You're offline"
+                  : loadState === "forbidden"
+                    ? "Permission denied"
+                    : "Something went wrong"
+            }
+            body={
+              loadState === "loading"
+                ? "Fetching your latest assessments."
+                : loadState === "offline"
+                  ? "Reconnect and try again."
+                  : loadState === "forbidden"
+                    ? "This page is available only to the signed-in student."
+                    : (error ?? "The page could not be loaded.")
+            }
+          />
+          {loadState === "offline" || loadState === "error" ? (
+            <Button type="button" onClick={() => session && void refresh(session)}>
+              Try again
+            </Button>
+          ) : null}
+        </section>
+      ) : selected ? (
+        <AssessmentDetail
+          assessment={selected}
+          attemptOpen={Boolean(data?.assessmentAttemptOpen)}
+          busy={busy}
+          onBack={backToList}
+          onStart={() => void startAttempt(selected)}
+          onSubmit={() => void submitAttempt(selected)}
+        />
+      ) : (
+        <AssessmentList assessments={assessments} onOpen={openAssessment} />
+      )}
+    </StudentFrame>
+  );
+}
+
+function AssessmentList({
+  assessments,
+  onOpen,
+}: {
+  assessments: Assessment[];
+  onOpen: (id: string) => void;
+}) {
+  if (!assessments.length) {
+    return (
+      <section className="mh-teacher-card">
+        <EmptyState title="No published assessments" body="When your instructor publishes a quiz or exam, it will appear here." />
+      </section>
+    );
+  }
+
+  return (
+    <section className="mh-teacher-card">
+      <div className="mh-teacher-card__head">
+        <h2>Assigned</h2>
+        <StatusPill tone="neutral">{assessments.length}</StatusPill>
       </div>
-    </StudentSisShell>
+      <div className="mh-teacher-list">
+        {assessments.map((row) => (
+          <button
+            key={row.id}
+            type="button"
+            className="mh-teacher-list__item mh-teacher-list__item--btn mh-student-assess-row"
+            onClick={() => onOpen(row.id)}
+          >
+            <div>
+              <strong>{row.title}</strong>
+              <span>
+                {row.courseCode} · {row.durationMinutes} min · closes {formatDate(row.closesAt)}
+              </span>
+            </div>
+            <div className="mh-student-assess-row__meta">
+              <StatusPill tone={statusTone(row.state)}>{row.state.replace("_", " ")}</StatusPill>
+              <span className="mh-student-assess-row__open">Open →</span>
+            </div>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function AssessmentDetail({
+  assessment,
+  attemptOpen,
+  busy,
+  onBack,
+  onStart,
+  onSubmit,
+}: {
+  assessment: Assessment;
+  attemptOpen: boolean;
+  busy: boolean;
+  onBack: () => void;
+  onStart: () => void;
+  onSubmit: () => void;
+}) {
+  const canStart = assessment.state === "open" && !assessment.openAttemptId;
+  const canSubmit = Boolean(assessment.openAttemptId);
+  const isSubmitted = assessment.state === "submitted";
+  const isClosed = assessment.state === "closed" || assessment.state === "upcoming";
+  const hasPriorSubmit = assessment.attemptCount > 0 && !canSubmit;
+
+  return (
+    <div className="mh-student-assign">
+      <div className="mh-student-assign__toolbar">
+        <button type="button" className="mh-teacher-link" onClick={onBack}>
+          ← All assessments
+        </button>
+      </div>
+
+      <div className="mh-teacher-dash__kpis">
+        <div className="mh-teacher-dash__kpi">
+          <div className="mh-teacher-dash__kpi-label">Status</div>
+          <div className="mh-teacher-dash__kpi-value" style={{ fontSize: 22, textTransform: "capitalize" }}>
+            {assessment.state.replace("_", " ")}
+          </div>
+          <div className="mh-teacher-dash__kpi-hint">{assessment.courseCode}</div>
+        </div>
+        <div className="mh-teacher-dash__kpi">
+          <div className="mh-teacher-dash__kpi-label">Duration</div>
+          <div className="mh-teacher-dash__kpi-value">{assessment.durationMinutes}</div>
+          <div className="mh-teacher-dash__kpi-hint">Minutes</div>
+        </div>
+        <div className="mh-teacher-dash__kpi">
+          <div className="mh-teacher-dash__kpi-label">Attempts</div>
+          <div className="mh-teacher-dash__kpi-value">
+            {assessment.attemptCount}/{assessment.maxAttempts}
+          </div>
+          <div className="mh-teacher-dash__kpi-hint">Used / allowed</div>
+        </div>
+        <div className="mh-teacher-dash__kpi">
+          <div className="mh-teacher-dash__kpi-label">Closes</div>
+          <div className="mh-teacher-dash__kpi-value" style={{ fontSize: 18 }}>
+            {formatDate(assessment.closesAt)}
+          </div>
+          <div className="mh-teacher-dash__kpi-hint">Opens {formatDate(assessment.opensAt)}</div>
+        </div>
+      </div>
+
+      <div className="mh-teacher-detail__grid">
+        <section className="mh-teacher-card">
+          <div className="mh-teacher-card__head">
+            <h2>Assessment</h2>
+            <StatusPill tone={statusTone(assessment.state)}>{assessment.state.replace("_", " ")}</StatusPill>
+          </div>
+          <div className="mh-teacher-section">
+            <div className="mh-teacher-section__label">OVERVIEW</div>
+            <div className="mh-teacher-fields">
+              <label>
+                <span>Course</span>
+                <div className="mh-teacher-field">{assessment.courseCode}</div>
+              </label>
+              <label>
+                <span>Title</span>
+                <div className="mh-teacher-field">{assessment.title}</div>
+              </label>
+              <label>
+                <span>Window</span>
+                <div className="mh-teacher-field">
+                  {formatDate(assessment.opensAt)} → {formatDate(assessment.closesAt)}
+                </div>
+              </label>
+              <label>
+                <span>Rules</span>
+                <div className="mh-teacher-field">
+                  {assessment.durationMinutes} minute timed attempt · max {assessment.maxAttempts} attempt
+                  {assessment.maxAttempts === 1 ? "" : "s"}
+                </div>
+              </label>
+            </div>
+          </div>
+          {isSubmitted ? (
+            <div
+              className="mh-teacher-banner"
+              style={{ background: "#e8f5ee", borderColor: "rgba(1,127,63,0.22)", color: "#017f3f" }}
+            >
+              This assessment has been submitted. Your instructor will publish results when grading is complete.
+            </div>
+          ) : null}
+          {hasPriorSubmit && canStart ? (
+            <div
+              className="mh-teacher-banner"
+              style={{ background: "#e8f5ee", borderColor: "rgba(1,127,63,0.22)", color: "#017f3f" }}
+            >
+              Previous attempt submitted. You still have {assessment.maxAttempts - assessment.attemptCount} attempt
+              {assessment.maxAttempts - assessment.attemptCount === 1 ? "" : "s"} remaining.
+            </div>
+          ) : null}
+          {attemptOpen && canSubmit ? (
+            <div
+              className="mh-teacher-banner"
+              style={{ background: "#fff8e6", borderColor: "rgba(180,130,20,0.28)", color: "#8a6a10" }}
+            >
+              Attempt in progress — AI Study Coach is paused until you submit.
+            </div>
+          ) : null}
+        </section>
+
+        <section className="mh-teacher-card mh-student-assign__submit">
+          <div className="mh-teacher-card__head">
+            <h2>Your attempt</h2>
+            <StatusPill tone={statusTone(assessment.state)}>{assessment.state.replace("_", " ")}</StatusPill>
+          </div>
+
+          {canStart ? (
+            <>
+              <p className="mh-teacher-muted" style={{ marginTop: 0 }}>
+                Starting begins a timed attempt. Submit before the timer expires.
+              </p>
+              <div className="mh-teacher-actions">
+                <button
+                  type="button"
+                  className="mh-teacher-btn mh-teacher-btn--primary"
+                  disabled={busy}
+                  onClick={onStart}
+                >
+                  {busy ? "Starting…" : "Start attempt"}
+                </button>
+              </div>
+            </>
+          ) : null}
+
+          {canSubmit ? (
+            <>
+              <p className="mh-teacher-muted" style={{ marginTop: 0 }}>
+                Your attempt is open. Submit when you are finished. This cannot be undone.
+              </p>
+              <div className="mh-teacher-actions">
+                <button
+                  type="button"
+                  className="mh-teacher-btn mh-teacher-btn--primary"
+                  disabled={busy}
+                  onClick={onSubmit}
+                >
+                  {busy ? "Submitting…" : "Submit attempt"}
+                </button>
+              </div>
+            </>
+          ) : null}
+
+          {isSubmitted ? (
+            <p className="mh-teacher-muted" style={{ margin: 0 }}>
+              Submission locked. Contact your instructor if a resubmission window is needed.
+            </p>
+          ) : null}
+
+          {isClosed && !isSubmitted && !canStart && !canSubmit ? (
+            <p className="mh-teacher-muted" style={{ margin: 0 }}>
+              {assessment.state === "upcoming"
+                ? `This assessment opens ${formatDate(assessment.opensAt)}.`
+                : "The assessment window is closed and no submission was recorded."}
+            </p>
+          ) : null}
+        </section>
+      </div>
+    </div>
   );
 }

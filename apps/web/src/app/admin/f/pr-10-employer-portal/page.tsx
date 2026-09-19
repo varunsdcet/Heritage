@@ -1,7 +1,6 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { AdminSisScreen } from "@/components/AdminSisScreen";
-
+/** Employer UX lives on /employer — not inside admin. */
 export default function Page() {
-  return <AdminSisScreen path="/admin/f/pr-10-employer-portal" />;
+  redirect("/employer");
 }

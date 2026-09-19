@@ -38,9 +38,9 @@ gradesRouter.get("/me", requireAuth, requireRoles("student"), async (req, res, n
     const enrolments = await prisma.enrolment.findMany({
       where: { institutionId: user.institutionId, studentId: student.id, status: "enrolled" },
       include: {
-        section: { include: { course: true } },
+        section: { include: { course: true, assignments: { orderBy: { dueAt: "asc" } } } },
         gradeItems: {
-          where: { institutionId: user.institutionId, status: "published" },
+          where: { institutionId: user.institutionId },
           include: { assignment: true },
         },
       },
@@ -53,22 +53,27 @@ gradesRouter.get("/me", requireAuth, requireRoles("student"), async (req, res, n
     const instructorMap = new Map(instructors.map((p) => [p.id, `${p.givenName} ${p.familyName}`]));
 
     const courses = enrolments.map((e) => {
-      // Keep a second application-layer guard so a future include/query change
-      // cannot expose a non-published grade to the student response.
-      const items = e.gradeItems.filter((g) => g.status === "published").map((g) => ({
-        id: g.id,
-        title: g.assignment.title,
-        weightPercent: g.assignment.weightPercent,
-        score: g.score,
-        maxScore: g.maxScore,
-        letter: g.letter,
-        status: g.status as "published",
-        publishedAt: g.publishedAt?.toISOString() ?? null,
-        underReview: false,
-      }));
+      // Published scores only; assignment shells still list so students see the gradebook structure.
+      const publishedByAssignment = new Map(
+        e.gradeItems.filter((g) => g.status === "published").map((g) => [g.assignmentId, g]),
+      );
+      const items = e.section.assignments.map((a) => {
+        const g = publishedByAssignment.get(a.id);
+        return {
+          id: g?.id ?? a.id,
+          title: a.title,
+          weightPercent: a.weightPercent,
+          score: g && g.status === "published" ? g.score : null,
+          maxScore: g?.maxScore ?? a.maxScore,
+          letter: g && g.status === "published" ? g.letter : null,
+          status: (g?.status === "published" ? "published" : "draft") as "draft" | "published",
+          publishedAt: g?.status === "published" ? (g.publishedAt?.toISOString() ?? null) : null,
+          underReview: false,
+        };
+      });
       const weighted = items.reduce(
         (acc, item) => {
-          if (item.score == null) return acc;
+          if (item.status !== "published" || item.score == null) return acc;
           return {
             w: acc.w + item.weightPercent,
             s: acc.s + (item.score / item.maxScore) * item.weightPercent,
@@ -124,6 +129,17 @@ gradesRouter.get("/me", requireAuth, requireRoles("student"), async (req, res, n
   }
 });
 
+const GRADE_STATUSES = new Set(["draft", "pending_publish", "published", "under_review"]);
+
+function normalizeGradeStatus(status: string | null | undefined) {
+  const raw = (status ?? "draft").trim().toLowerCase();
+  return (GRADE_STATUSES.has(raw) ? raw : "draft") as
+    | "draft"
+    | "pending_publish"
+    | "published"
+    | "under_review";
+}
+
 gradesRouter.get(
   "/:sectionId",
   requireAuth,
@@ -131,14 +147,30 @@ gradesRouter.get(
   async (req, res, next) => {
     try {
       const user = (req as AuthedRequest).user;
-      const sectionId = z.string().uuid().parse(req.params.sectionId);
+      const sectionIdRaw = String(req.params.sectionId ?? "");
+      const sectionIdParsed = z.string().uuid().safeParse(sectionIdRaw);
+      if (!sectionIdParsed.success) {
+        throw Object.assign(new Error("Invalid section id — open gradebook from My Courses or pick a section tab"), {
+          code: "VALIDATION_ERROR",
+          status: 400,
+        });
+      }
+      const sectionId = sectionIdParsed.data;
       const section = await prisma.section.findFirst({
         where: {
           id: sectionId,
           institutionId: user.institutionId,
           ...(user.roles.includes("admin") ? {} : { instructorPersonId: user.personId }),
         },
-        include: { course: true, assignments: true, enrolments: { include: { student: { include: { person: true } }, gradeItems: true } } },
+        include: {
+          course: true,
+          assignments: { orderBy: { createdAt: "asc" } },
+          enrolments: {
+            where: { status: "enrolled" },
+            include: { student: { include: { person: true } }, gradeItems: true },
+            orderBy: { student: { person: { familyName: "asc" } } },
+          },
+        },
       });
       if (!section) throw Object.assign(new Error("Section not found"), { code: "NOT_FOUND", status: 404 });
 
@@ -149,22 +181,22 @@ gradesRouter.get(
         assignments: section.assignments.map((a) => ({
           id: a.id,
           title: a.title,
-          maxScore: a.maxScore,
-          weightPercent: a.weightPercent,
+          maxScore: Number(a.maxScore),
+          weightPercent: Number(a.weightPercent),
         })),
         rows: section.enrolments.map((e) => ({
           studentId: e.studentId,
-          studentNumber: e.student.studentNumber,
-          name: `${e.student.person.givenName} ${e.student.person.familyName}`,
+          studentNumber: e.student.studentNumber || "—",
+          name: `${e.student.person?.givenName ?? ""} ${e.student.person?.familyName ?? ""}`.trim() || "Student",
           cells: section.assignments.map((a) => {
             const cell = e.gradeItems.find((g) => g.assignmentId === a.id);
             return {
               gradeItemId: cell?.id ?? "00000000-0000-4000-8000-000000000000",
               assignmentId: a.id,
-              score: cell?.score ?? null,
-              maxScore: a.maxScore,
-              status: (cell?.status ?? "draft") as "draft" | "pending_publish" | "published" | "under_review",
-              rowVersion: cell?.rowVersion ?? 1,
+              score: cell?.score == null ? null : Number(cell.score),
+              maxScore: Number(a.maxScore),
+              status: normalizeGradeStatus(cell?.status),
+              rowVersion: Number(cell?.rowVersion ?? 1) || 1,
             };
           }),
         })),
@@ -287,8 +319,9 @@ gradesRouter.patch("/:id", requireAuth, requireRoles("instructor", "admin"), asy
     if (existing.status === "published") {
       throw Object.assign(new Error("Published grades are read-only"), { code: "CONFLICT", status: 409 });
     }
+    // pending_publish can be recalled to draft when instructor edits before approval is applied
     if (existing.rowVersion !== body.rowVersion) {
-      throw Object.assign(new Error("Stale row_version"), { code: "CONFLICT", status: 409 });
+      throw Object.assign(new Error("Stale row_version — refresh and try again"), { code: "CONFLICT", status: 409 });
     }
     if (body.score > existing.maxScore) {
       throw Object.assign(new Error("Score cannot exceed the maximum score"), {

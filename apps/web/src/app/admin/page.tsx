@@ -13,11 +13,11 @@ const MODULE_DIRECTORY = [
   { label: "Registrar", href: "/admin/f/rg-00-registrar-dashboard", hint: "10 screens" },
   { label: "Student Success", href: "/admin/f/ss-01-success-dashboard", hint: "7 screens" },
   { label: "Academics", href: "/admin/f/ac-03-programs", hint: "20 screens" },
-  { label: "Labs", href: "/admin/f/lb-01-lab-dashboard", hint: "12 + XX" },
-  { label: "Practicum", href: "/admin/f/pr-01-practicum-dashboard", hint: "10 + XX" },
+  { label: "Labs", href: "/admin/f/lb-01-lab-dashboard", hint: "12 screens" },
+  { label: "Practicum", href: "/admin/f/pr-01-practicum-dashboard", hint: "9 screens" },
   { label: "Finance", href: "/admin/f/fn-01-finance-dashboard", hint: "8 screens" },
   { label: "AI Hub", href: "/admin/f/ai-01-ai-dashboard", hint: "12 screens" },
-  { label: "Compliance", href: "/admin/f/cp-01-compliance-dashboard", hint: "10 + XX" },
+  { label: "Compliance", href: "/admin/f/cp-01-compliance-dashboard", hint: "10 screens" },
   { label: "Platform", href: "/admin/f/pl-07-institution-settings", hint: "8 screens" },
   { label: "Forms", href: "/admin/f/fm-01-form-list", hint: "4 screens" },
   { label: "Rules", href: "/admin/f/rl-01-rule-sets", hint: "3 screens" },
@@ -27,26 +27,68 @@ const MODULE_DIRECTORY = [
   { label: "Approvals", href: "/admin/approvals", hint: "Global" },
   { label: "Security", href: "/admin/security", hint: "Global" },
   { label: "Audit", href: "/admin/audit", hint: "Global" },
-  { label: "Admin Login", href: "/admin/f/sh-01-login-admin", hint: "Auth" },
 ];
 
-type HomeStats = {
+type CampusOverview = {
+  institutionName: string;
+  termName: string;
+  termProgressPct: number;
   students: number;
+  teachers: number;
+  programs: number;
+  courses: number;
   sections: number;
-  users: number;
-  approvals: number;
+  enrolments: number;
+  accounts: number;
+  pendingApprovals: number;
+  pendingGrades: number;
+  publishedGrades: number;
+  atRisk: number;
+  pendingEvaluations: number;
+  pendingLoa: number;
+  pendingTasks: number;
+  feesPostedCad: number;
+  feesOpenCad: number;
+  feesPastDueCad: number;
   activity: Array<{ actor: string; detail: string; when: string }>;
   health: Array<{ label: string; value: string }>;
-  termName: string;
 };
 
-function AdminHomeBody({ stats }: { stats: HomeStats | null }) {
+function money(n: number) {
+  return `CAD ${n.toLocaleString()}`;
+}
+
+function KpiButton({
+  label,
+  value,
+  hint,
+  href,
+  danger,
+}: {
+  label: string;
+  value: string | number;
+  hint: string;
+  href: string;
+  danger?: boolean;
+}) {
+  const router = useRouter();
+  return (
+    <button
+      type="button"
+      className="mh-sis-dash__kpi mh-sis-dash__kpi--link"
+      onClick={() => router.push(href)}
+    >
+      <div className="mh-sis-dash__kpi-label">{label}</div>
+      <div className="mh-sis-dash__kpi-value">{value}</div>
+      <div className={`mh-sis-dash__kpi-hint${danger ? " is-danger" : " is-up"}`}>{hint}</div>
+    </button>
+  );
+}
+
+function AdminHomeBody({ stats }: { stats: CampusOverview | null }) {
   const router = useRouter();
   const live = useSisLive();
-  const students = stats?.students ?? "…";
-  const approvals = stats?.approvals ?? "…";
-  const users = stats?.users ?? "…";
-  const sections = stats?.sections ?? "…";
+  const loading = stats === null;
 
   return (
     <div className="mh-sis-dash" data-figma-id="168:10">
@@ -55,56 +97,109 @@ function AdminHomeBody({ stats }: { stats: HomeStats | null }) {
           <h1>Welcome back, Administrator</h1>
           <p>
             {stats
-              ? `Live campus data · ${approvals} pending approvals · ${users} directory accounts`
+              ? `${stats.institutionName} · ${stats.termName} · ${stats.pendingApprovals} pending approvals · ${stats.enrolments} enrolments`
               : "Loading live campus data…"}
           </p>
         </div>
         <div className="mh-sis-dash__banner-actions">
-          <SisActionBtn label="Backup System" tone="secondary" />
-          <SisActionBtn label="New System Notice" href="/admin/notifications" />
+          <SisActionBtn label="Student onboard" href="/admin/users/create?role=student" tone="secondary" />
+          <SisActionBtn label="Instructor onboard" href="/admin/users/create?role=instructor" tone="secondary" />
+          <SisActionBtn label="Enrol student" href="/admin/enrolments" />
         </div>
       </div>
       {live.toast ? (
         <p style={{ color: "#0f766e", fontSize: 13, marginBottom: 8 }}>{live.toast}</p>
       ) : null}
 
-      <div className="mh-sis-dash__kpis">
-        <button
-          type="button"
-          className="mh-sis-dash__kpi mh-sis-dash__kpi--link"
-          onClick={() => router.push("/admin/f/rg-00-registrar-dashboard")}
-        >
-          <div className="mh-sis-dash__kpi-label">Enrolled Students</div>
-          <div className="mh-sis-dash__kpi-value">{students}</div>
-          <div className="mh-sis-dash__kpi-hint is-up">Live roster</div>
-        </button>
-        <button
-          type="button"
-          className="mh-sis-dash__kpi mh-sis-dash__kpi--link"
-          onClick={() => router.push("/admin/f/ac-09-sections")}
-        >
-          <div className="mh-sis-dash__kpi-label">Active Sections</div>
-          <div className="mh-sis-dash__kpi-value">{sections}</div>
-          <div className="mh-sis-dash__kpi-hint">Current term</div>
-        </button>
-        <button
-          type="button"
-          className="mh-sis-dash__kpi mh-sis-dash__kpi--link"
-          onClick={() => router.push("/admin/f/pl-01-users-and-roles")}
-        >
-          <div className="mh-sis-dash__kpi-label">Directory Accounts</div>
-          <div className="mh-sis-dash__kpi-value">{users}</div>
-          <div className="mh-sis-dash__kpi-hint">Users & roles</div>
-        </button>
-        <button
-          type="button"
-          className="mh-sis-dash__kpi mh-sis-dash__kpi--link"
-          onClick={() => router.push("/admin/approvals")}
-        >
-          <div className="mh-sis-dash__kpi-label">Pending Approvals</div>
-          <div className="mh-sis-dash__kpi-value">{approvals}</div>
-          <div className="mh-sis-dash__kpi-hint is-danger">Action required</div>
-        </button>
+      <h2 className="mh-sis-dash__section-title">Campus scale</h2>
+      <div className="mh-sis-dash__kpis mh-sis-dash__kpis--wrap">
+        <KpiButton
+          label="Students"
+          value={loading ? "…" : stats.students}
+          hint="Live roster"
+          href="/admin/f/rg-01-student-360"
+        />
+        <KpiButton
+          label="Teachers"
+          value={loading ? "…" : stats.teachers}
+          hint="Instructor accounts"
+          href="/admin/f/ac-14-faculty-360"
+        />
+        <KpiButton
+          label="Programs"
+          value={loading ? "…" : stats.programs}
+          hint="Catalogue"
+          href="/admin/f/ac-03-programs"
+        />
+        <KpiButton
+          label="Courses"
+          value={loading ? "…" : stats.courses}
+          hint="Catalogue"
+          href="/admin/f/ac-06-course-catalogue"
+        />
+        <KpiButton
+          label="Sections"
+          value={loading ? "…" : stats.sections}
+          hint="Current offerings"
+          href="/admin/f/ac-09-sections"
+        />
+        <KpiButton
+          label="Enrolments"
+          value={loading ? "…" : stats.enrolments}
+          hint="Student ↔ section"
+          href="/admin/enrolments"
+        />
+      </div>
+
+      <h2 className="mh-sis-dash__section-title">Fees & queues</h2>
+      <div className="mh-sis-dash__kpis mh-sis-dash__kpis--wrap">
+        <KpiButton
+          label="Fees / AR open"
+          value={loading ? "…" : money(stats.feesOpenCad)}
+          hint={
+            loading
+              ? "Finance"
+              : stats.feesPastDueCad > 0
+                ? `${money(stats.feesPastDueCad)} past due`
+                : `${money(stats.feesPostedCad)} posted`
+          }
+          href="/admin/f/fn-01-finance-dashboard"
+          danger={!loading && stats.feesPastDueCad > 0}
+        />
+        <KpiButton
+          label="Pending approvals"
+          value={loading ? "…" : stats.pendingApprovals}
+          hint="Action required"
+          href="/admin/approvals"
+          danger
+        />
+        <KpiButton
+          label="Pending grades"
+          value={loading ? "…" : stats.pendingGrades}
+          hint={loading ? "Draft / publish" : `${stats.publishedGrades} published`}
+          href="/admin/f/ac-13-pending-grades"
+          danger={!loading && stats.pendingGrades > 0}
+        />
+        <KpiButton
+          label="At-risk students"
+          value={loading ? "…" : stats.atRisk}
+          hint="Standing alerts"
+          href="/admin/f/ss-02-alert-queue"
+          danger={!loading && stats.atRisk > 0}
+        />
+        <KpiButton
+          label="Pending evaluations"
+          value={loading ? "…" : stats.pendingEvaluations}
+          hint="Course evals"
+          href="/admin/f/ac-15-course-evaluations"
+        />
+        <KpiButton
+          label="Pending LOA"
+          value={loading ? "…" : stats.pendingLoa}
+          hint={loading ? "Leave requests" : `${stats.pendingTasks} open tasks`}
+          href="/admin/f/ac-18-loa-requests"
+          danger={!loading && stats.pendingLoa > 0}
+        />
       </div>
 
       <div className="mh-sis-dash__split">
@@ -142,11 +237,25 @@ function AdminHomeBody({ stats }: { stats: HomeStats | null }) {
             <div className="mh-sis-dash__term">
               <div className="mh-sis-dash__progress-label">
                 <strong>{stats?.termName || "Current term"}</strong>
-                <span>Live</span>
+                <span>{loading ? "…" : `${stats.termProgressPct}%`}</span>
               </div>
               <div className="mh-sis-dash__progress-track">
-                <div className="mh-sis-dash__progress-fill" style={{ width: "50%" }} />
+                <div
+                  className="mh-sis-dash__progress-fill"
+                  style={{ width: `${loading ? 50 : stats.termProgressPct}%` }}
+                />
               </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+              <button type="button" className="mh-sis-dash__link-btn" onClick={() => router.push("/admin/finance/posting")}>
+                AR posting
+              </button>
+              <button type="button" className="mh-sis-dash__link-btn" onClick={() => router.push("/admin/student-documents")}>
+                Documents
+              </button>
+              <button type="button" className="mh-sis-dash__link-btn" onClick={() => router.push("/admin/tax-documents")}>
+                Tax docs
+              </button>
             </div>
           </div>
         </section>
@@ -185,7 +294,7 @@ function AdminHomeBody({ stats }: { stats: HomeStats | null }) {
 export default function AdminHomePage() {
   const router = useRouter();
   const [userName, setUserName] = useState("Admin User");
-  const [stats, setStats] = useState<HomeStats | null>(null);
+  const [stats, setStats] = useState<CampusOverview | null>(null);
   const [allowed, setAllowed] = useState(false);
 
   useEffect(() => {
@@ -205,70 +314,32 @@ export default function AdminHomePage() {
     setUserName(`${s.givenName} ${s.familyName}`.trim() || "Admin User");
     setAllowed(true);
 
-    type OpsPayload = {
-      operations?: { health?: Array<{ label: string; value: string }> };
-      activity?: Array<{ action?: string; at?: string; by?: string }>;
-      kpis?: Array<{ label: string; value: string }>;
-    };
-    type RegistrarPayload = {
-      registrarDash?: { audits?: Array<{ text: string; when: string }> };
-      kpis?: Array<{ label: string; value: string }>;
-    };
-
-    Promise.all([
-      api<{ items: unknown[] }>("/admin/users", {}, s.accessToken),
-      api<{ items: unknown[] }>("/admin/sections", {}, s.accessToken),
-      api<{ items?: Array<{ status?: string }> }>("/approvals", {}, s.accessToken).catch(() => ({
-        items: [] as Array<{ status?: string }>,
-      })),
-      api<{ payload: OpsPayload }>(
-        `/admin/sis/screen?path=${encodeURIComponent("/admin/f/pl-06-operations")}`,
-        {},
-        s.accessToken,
-      ).catch(() => ({ payload: {} as OpsPayload })),
-      api<{ payload: RegistrarPayload }>(
-        `/admin/sis/screen?path=${encodeURIComponent("/admin/f/rg-00-registrar-dashboard")}`,
-        {},
-        s.accessToken,
-      ).catch(() => ({ payload: {} as RegistrarPayload })),
-    ])
-      .then(([users, sections, approvals, ops, registrar]) => {
-        const approvalItems = (approvals.items ?? []).filter((a) => a.status === "pending");
-        const studentKpi = registrar.payload.kpis?.find((k) => /student/i.test(k.label));
-        const audits = registrar.payload.registrarDash?.audits ?? [];
-        const activity =
-          audits.length > 0
-            ? audits.map((a) => ({ actor: "Registrar", detail: a.text, when: a.when }))
-            : (ops.payload.activity || []).slice(0, 6).map((a) => ({
-                actor: a.by?.slice(0, 8) || "Admin",
-                detail: a.action || "SIS action",
-                when: a.at ? a.at.slice(0, 16).replace("T", " ") : "Recently",
-              }));
-        setStats({
-          students: studentKpi ? Number(studentKpi.value) || 0 : 0,
-          sections: sections.items.length,
-          users: users.items.length,
-          approvals: approvalItems.length,
-          activity,
-          health: ops.payload.operations?.health?.length
-            ? ops.payload.operations.health.map((h) => ({ label: h.label, value: h.value }))
-            : [
-                { label: "API", value: "Healthy" },
-                { label: "SIS screens", value: "Live" },
-                { label: "Directory", value: `${users.items.length} accounts` },
-              ],
-          termName: "Fall 2026",
-        });
-      })
+    api<CampusOverview>("/admin/campus-overview", {}, s.accessToken)
+      .then(setStats)
       .catch(() => {
         setStats({
+          institutionName: "Heritage College",
+          termName: "Current term",
+          termProgressPct: 0,
           students: 0,
+          teachers: 0,
+          programs: 0,
+          courses: 0,
           sections: 0,
-          users: 0,
-          approvals: 0,
+          enrolments: 0,
+          accounts: 0,
+          pendingApprovals: 0,
+          pendingGrades: 0,
+          publishedGrades: 0,
+          atRisk: 0,
+          pendingEvaluations: 0,
+          pendingLoa: 0,
+          pendingTasks: 0,
+          feesPostedCad: 0,
+          feesOpenCad: 0,
+          feesPastDueCad: 0,
           activity: [],
           health: [{ label: "API", value: "Unavailable" }],
-          termName: "Current term",
         });
       });
   }, [router]);

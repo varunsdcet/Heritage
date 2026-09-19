@@ -55,6 +55,56 @@ describe("ai gateway", () => {
     expect(result.sources).toEqual([expect.objectContaining({ id: "assignment:a1" })]);
   });
 
+  it("answers program plan and finance questions from live DB-shaped facts", () => {
+    const plan = groundedCoachAnswer({
+      role: "student",
+      question: "What is my next course on the program plan?",
+      facts: [
+        {
+          id: "program-next:1",
+          title: "Next program plan course",
+          uri: "/student/program-plan",
+          text: "Your next plan item is ACSW200 (Practice Foundations), status not started.",
+          kind: "program",
+        },
+        {
+          id: "finance:balance:1",
+          title: "Financial balance",
+          uri: "/student/fees",
+          text: "Outstanding balance is CAD 1200.00 across 4 ledger entries.",
+          kind: "finance",
+        },
+      ],
+    });
+    expect(plan.text).toContain("ACSW200");
+    expect(plan.text).not.toContain("1200.00");
+
+    const finance = groundedCoachAnswer({
+      role: "student",
+      question: "What is my financial balance?",
+      facts: plan.sources.length
+        ? [
+            {
+              id: "finance:balance:1",
+              title: "Financial balance",
+              uri: "/student/fees",
+              text: "Outstanding balance is CAD 1200.00 across 4 ledger entries.",
+              kind: "finance" as const,
+            },
+            {
+              id: "program-next:1",
+              title: "Next program plan course",
+              uri: "/student/program-plan",
+              text: "Your next plan item is ACSW200 (Practice Foundations), status not started.",
+              kind: "program" as const,
+            },
+          ]
+        : [],
+    });
+    expect(finance.text).toContain("1200.00");
+    expect(finance.text).not.toContain("ACSW200");
+  });
+
   it("detects advisor intents and drop codes", () => {
     expect(isAdvisorQuestion("Can I graduate next summer?")).toBe(true);
     expect(isAdvisorQuestion("What happens if I drop MATH210?")).toBe(true);

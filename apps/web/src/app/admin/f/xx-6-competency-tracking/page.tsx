@@ -1,7 +1,6 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { AdminSisScreen } from "@/components/AdminSisScreen";
-
+/** XX placeholder retired — use numbered Practicum modules. */
 export default function Page() {
-  return <AdminSisScreen path="/admin/f/xx-6-competency-tracking" />;
+  redirect("/admin/f/pr-01-practicum-dashboard");
 }

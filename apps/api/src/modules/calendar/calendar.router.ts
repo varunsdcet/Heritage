@@ -71,12 +71,14 @@ calendarRouter.get("/me", requireAuth, async (req, res, next) => {
 
     const classEvents = sessions.map((session) => ({
       id: `session-${session.id}`,
+      classSessionId: session.id,
       title: session.title,
       startsAt: session.startsAt.toISOString(),
       endsAt: session.endsAt?.toISOString() ?? null,
       location: session.location,
       courseCode: session.section.course.code,
       type: "class" as const,
+      sessionKind: session.sessionKind === "lab" ? ("lab" as const) : ("lecture" as const),
       joinUrl: session.joinUrl?.startsWith("https://") ? session.joinUrl : null,
     }));
 
@@ -93,6 +95,8 @@ calendarRouter.get("/me", requireAuth, async (req, res, next) => {
           item.type === "class"
             ? sessions.find((session) => `session-${session.id}` === item.id)?.sectionId ?? null
             : assignments.find((assignment) => `asg-${assignment.id}` === item.id)?.sectionId ?? null,
+        classSessionId: "classSessionId" in item ? item.classSessionId : null,
+        sessionKind: "sessionKind" in item ? item.sessionKind : null,
         title: item.title,
         startsAt: item.startsAt,
         endsAt: item.endsAt,

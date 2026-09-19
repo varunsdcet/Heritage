@@ -2,7 +2,7 @@ import { Router } from "express";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@myheritage/db";
-import { hashPassword, loginWithPassword } from "@myheritage/auth";
+import { hashPassword, loginWithPassword, changePassword } from "@myheritage/auth";
 import { LoginRequest, LoginResponse } from "@myheritage/contracts";
 import { sendMailViaHumanitix, mailConfigured } from "../../lib/mailer.js";
 import { requireAuth, type AuthedRequest } from "../../middleware/auth.js";
@@ -25,11 +25,17 @@ authRouter.post("/login", async (req, res, next) => {
 
 const ForgotBody = z.object({
   email: z.string().email(),
+  studentNumber: z.string().min(3).optional(),
 });
 
 const ResetBody = z.object({
   token: z.string().min(20),
   password: z.string().min(8),
+});
+
+const ChangePasswordBody = z.object({
+  currentPassword: z.string().min(8),
+  newPassword: z.string().min(8),
 });
 
 function hashToken(token: string) {
@@ -42,13 +48,23 @@ authRouter.post("/forgot-password", async (req, res, next) => {
     const email = body.email.trim().toLowerCase();
     const account = await prisma.account.findFirst({
       where: { email, status: "active" },
-      include: { person: true },
+      include: { person: { include: { students: true } } },
     });
 
     // Always return ok to avoid account enumeration.
     if (!account) {
       res.json({ ok: true, mailed: false });
       return;
+    }
+
+    if (body.studentNumber) {
+      const match = account.person.students.some(
+        (s) => s.studentNumber.toLowerCase() === body.studentNumber!.trim().toLowerCase(),
+      );
+      if (!match) {
+        res.json({ ok: true, mailed: false });
+        return;
+      }
     }
 
     const rawToken = randomBytes(32).toString("hex");
@@ -91,12 +107,27 @@ authRouter.post("/forgot-password", async (req, res, next) => {
     res.json({
       ok: true,
       mailed,
-      // Dev convenience when mail is off — never in production responses ideally,
-      // but useful for local/VPS smoke when HUMANITIX_SEND_MAIL_URL=off.
       ...(process.env.NODE_ENV !== "production" || process.env.EXPOSE_RESET_TOKEN === "1"
         ? { resetToken: rawToken, resetUrl }
         : {}),
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+authRouter.post("/change-password", requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    const body = ChangePasswordBody.parse(req.body);
+    await changePassword({
+      accountId: user.accountId,
+      institutionId: user.institutionId,
+      currentPassword: body.currentPassword,
+      newPassword: body.newPassword,
+      keepSessionId: user.sessionId,
+    });
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }

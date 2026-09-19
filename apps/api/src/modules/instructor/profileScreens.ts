@@ -1,0 +1,867 @@
+import { randomUUID } from "crypto";
+import { prisma } from "@myheritage/db";
+
+export const PROFILE_BIO_PATH = "/instructor/f/t02-profile-biography";
+export const PROFILE_TOPICS_PATH = "/instructor/f/t03-profile-topics";
+export const AVAILABILITY_PATH = "/instructor/f/t04-profile-availability";
+export const PROFILE_SCHEDULE_PATH = "/instructor/f/t06-profile-schedule";
+export const ACCOMPLISHMENTS_PATH = "/instructor/f/t34-accomplishments";
+
+export const PROFILE_TABS = [
+  { label: "Biography", href: PROFILE_BIO_PATH },
+  { label: "Topics", href: PROFILE_TOPICS_PATH },
+  { label: "Availability", href: AVAILABILITY_PATH },
+  { label: "Compensation", href: "/instructor/f/t05-profile-compensation" },
+  { label: "Schedule", href: PROFILE_SCHEDULE_PATH },
+  { label: "Accomplishments", href: ACCOMPLISHMENTS_PATH },
+] as const;
+
+export const AVAILABILITY_TYPES = [
+  { label: "Available to Teach", value: "Available to Teach" },
+  { label: "Office Hours", value: "Office Hours" },
+];
+
+export type ProfileCtx = {
+  user: { institutionId: string; accountId: string; personId: string };
+  person: { givenName: string; familyName: string; email: string };
+  displayName: string;
+  sections: Array<{
+    id: string;
+    code: string;
+    courseCode: string;
+    courseTitle: string;
+    termCode: string;
+  }>;
+  classSessions: Array<{
+    id: string;
+    title: string;
+    startsAt: Date;
+    endsAt: Date | null;
+    location: string | null;
+    sectionCode: string;
+    courseCode: string;
+    joinUrl: string | null;
+  }>;
+  term?: { name: string; code: string } | null;
+  studentCount: number;
+};
+
+export type AvailabilitySlot = {
+  id?: string;
+  day: string;
+  start: string;
+  end: string;
+  mode: string;
+  location: string;
+  date?: string;
+  endDate?: string;
+  repeats?: string;
+  note?: string;
+  title?: string;
+};
+
+type ConnectPayload = { phone: string; email: string };
+type EducationPayload = {
+  background: string;
+  experience: string;
+  organizations: string;
+};
+
+export function profileTabs(activeHref: string) {
+  return PROFILE_TABS.map((t) => ({ ...t, active: t.href === activeHref }));
+}
+
+function weekdayFromIso(iso: string) {
+  const d = new Date(`${iso}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-US", { weekday: "long" });
+}
+
+function formatClock(d: Date) {
+  return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).toLowerCase().replace(" ", "");
+}
+
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
+}
+
+export function profileHeaderPayload(ctx: ProfileCtx) {
+  const topics = [...new Set(ctx.sections.map((s) => s.courseCode).filter(Boolean))].sort();
+  return {
+    name: ctx.displayName,
+    email: ctx.person.email,
+    status: "Active",
+    topics,
+    avatarUrl: "",
+  };
+}
+
+async function loadJsonRecord<T>(
+  ctx: ProfileCtx,
+  screenPath: string,
+  key: string,
+  fallback: T,
+): Promise<T> {
+  const row = await prisma.portalRecord.findFirst({
+    where: {
+      institutionId: ctx.user.institutionId,
+      screenPath,
+      role: "instructor",
+      audienceAccountId: ctx.user.accountId,
+      primaryText: key,
+    },
+    orderBy: { updatedAt: "desc" },
+  });
+  if (!row?.metaText) return fallback;
+  try {
+    return { ...fallback, ...(JSON.parse(row.metaText) as T) };
+  } catch {
+    return fallback;
+  }
+}
+
+async function upsertJsonRecord(ctx: ProfileCtx, screenPath: string, key: string, data: unknown) {
+  const existing = await prisma.portalRecord.findFirst({
+    where: {
+      institutionId: ctx.user.institutionId,
+      screenPath,
+      role: "instructor",
+      audienceAccountId: ctx.user.accountId,
+      primaryText: key,
+    },
+  });
+  const metaText = JSON.stringify(data);
+  if (existing) {
+    await prisma.portalRecord.update({
+      where: { id: existing.id },
+      data: { metaText, secondaryText: key },
+    });
+    return existing.id;
+  }
+  const id = randomUUID();
+  await prisma.portalRecord.create({
+    data: {
+      id,
+      institutionId: ctx.user.institutionId,
+      screenPath,
+      role: "instructor",
+      primaryText: key,
+      secondaryText: key,
+      metaText,
+      audienceAccountId: ctx.user.accountId,
+      sortOrder: 0,
+    },
+  });
+  return id;
+}
+
+export async function loadAvailabilitySlots(ctx: ProfileCtx): Promise<AvailabilitySlot[]> {
+  const rows = await prisma.portalRecord.findMany({
+    where: {
+      institutionId: ctx.user.institutionId,
+      screenPath: AVAILABILITY_PATH,
+      role: "instructor",
+      audienceAccountId: ctx.user.accountId,
+      NOT: { primaryText: { in: ["generalInfo", "officeHours"] } },
+    },
+    orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
+    take: 80,
+  });
+  return rows.map((r) => {
+    let meta: Partial<AvailabilitySlot> = {};
+    try {
+      meta = r.metaText ? (JSON.parse(r.metaText) as Partial<AvailabilitySlot>) : {};
+    } catch {
+      meta = {};
+    }
+    return {
+      id: r.id,
+      day: meta.day || r.primaryText || "Weekly",
+      start: meta.start || "09:00",
+      end: meta.end || "10:00",
+      mode: meta.mode || "Office Hours",
+      location: meta.location || r.secondaryText || "Campus",
+      date: meta.date || "",
+      endDate: meta.endDate || "",
+      repeats: meta.repeats || "",
+      note: meta.note || "",
+      title: meta.title || r.secondaryText || "",
+    };
+  });
+}
+
+export async function persistAvailabilitySlot(ctx: ProfileCtx, fields: Record<string, string>) {
+  const title = (fields["Title / Name (optional)"] || fields["Availability Name"] || fields.Name || "").trim();
+  const mode = (fields.Type || fields["Availability Type"] || "Available to Teach").trim();
+  const startHour = (fields["Start hour"] || "").trim();
+  const startMinute = (fields["Start minute"] || "00").trim();
+  const endHour = (fields["End hour"] || "").trim();
+  const endMinute = (fields["End minute"] || "00").trim();
+  const start =
+    (fields["Start Time"] || fields.Start || "").trim() ||
+    (startHour ? `${pad2(Number(startHour))}:${pad2(Number(startMinute || 0))}` : "09:00");
+  const end =
+    (fields["End Time"] || fields.End || "").trim() ||
+    (endHour ? `${pad2(Number(endHour))}:${pad2(Number(endMinute || 0))}` : "10:00");
+  const date = (fields.Date || "").trim();
+  const recurOn = Boolean(
+    (fields["Set availability recurrence timeframe"] || "").trim() &&
+      (fields["Set availability recurrence timeframe"] || "").trim() !== "0",
+  );
+  const endDate = recurOn ? (fields["End Date"] || "").trim() : "";
+  const repeats = recurOn
+    ? (fields["Days of the Week"] || fields["Repeat Weekly on"] || fields.Days || "").trim()
+    : "";
+  const note = (fields.Note || "").trim();
+  const location = (fields.Location || title || mode).trim();
+  const repeatLabel = repeats
+    .split(/[·,]/)
+    .map((d) => d.trim())
+    .filter(Boolean)
+    .join(" · ");
+  const day = repeatLabel || weekdayFromIso(date) || "Weekly";
+  const id = randomUUID();
+  await prisma.portalRecord.create({
+    data: {
+      id,
+      institutionId: ctx.user.institutionId,
+      screenPath: AVAILABILITY_PATH,
+      role: "instructor",
+      primaryText: date || day,
+      secondaryText: title || mode,
+      metaText: JSON.stringify({
+        day,
+        start,
+        end,
+        mode,
+        location,
+        date,
+        endDate,
+        repeats,
+        note,
+        title,
+      }),
+      audienceAccountId: ctx.user.accountId,
+      sortOrder: 0,
+    },
+  });
+  return { id, day, start, end, mode, location, date, endDate, repeats, note, title };
+}
+
+export async function persistConnect(ctx: ProfileCtx, fields: Record<string, string>) {
+  const data: ConnectPayload = {
+    phone: (fields.Phone || "").trim(),
+    email: (fields["E-mail"] || fields.Email || ctx.person.email).trim(),
+  };
+  await upsertJsonRecord(ctx, PROFILE_BIO_PATH, "connect", data);
+  return data;
+}
+
+export async function persistEducation(ctx: ProfileCtx, fields: Record<string, string>) {
+  const data: EducationPayload = {
+    background: (fields["Education background"] || fields.Education || "").trim(),
+    experience: (fields["Summary of professional experience"] || fields.Experience || "").trim(),
+    organizations: (fields["Membership in professional organizations"] || fields.Organizations || "").trim(),
+  };
+  await upsertJsonRecord(ctx, PROFILE_BIO_PATH, "education", data);
+  return data;
+}
+
+export async function persistGeneralInfo(ctx: ProfileCtx, fields: Record<string, string>) {
+  const html = (fields.Content || fields["General Information"] || fields.Body || "").trim();
+  await upsertJsonRecord(ctx, AVAILABILITY_PATH, "generalInfo", { html });
+  return { html };
+}
+
+export async function persistTimezone(ctx: ProfileCtx, fields: Record<string, string>) {
+  const zone = (fields["New Time Zone"] || fields.Timezone || "").trim();
+  if (!zone) return { timezone: null };
+  await prisma.account.update({
+    where: { id: ctx.user.accountId },
+    data: { timezone: zone },
+  });
+  return { timezone: zone };
+}
+
+export async function loadFacultyAccomplishments(ctx: ProfileCtx) {
+  const rows = await prisma.portalRecord.findMany({
+    where: {
+      institutionId: ctx.user.institutionId,
+      screenPath: ACCOMPLISHMENTS_PATH,
+      role: "instructor",
+      audienceAccountId: ctx.user.accountId,
+    },
+    orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
+  });
+  return rows.map((row) => {
+    let year = "";
+    let tone: "success" | "info" | "warning" = "success";
+    try {
+      const meta = row.metaText ? (JSON.parse(row.metaText) as { year?: string; tone?: string }) : {};
+      year = meta.year || "";
+      if (meta.tone === "info" || meta.tone === "warning") tone = meta.tone;
+    } catch {
+      year = "";
+    }
+    return {
+      title: row.primaryText,
+      detail: row.secondaryText || "",
+      year: year || (row.createdAt ? String(row.createdAt.getFullYear()) : "—"),
+      tone,
+      category: "faculty" as const,
+    };
+  });
+}
+
+export async function persistAccomplishment(ctx: ProfileCtx, fields: Record<string, string>) {
+  const title = (fields.Title || fields.Name || "").trim();
+  const detail = (fields.Detail || fields.Description || "").trim();
+  const year = (fields.Year || String(new Date().getFullYear())).trim();
+  if (!title) return { error: true as const, message: "Enter an accomplishment title." };
+  const id = randomUUID();
+  await prisma.portalRecord.create({
+    data: {
+      id,
+      institutionId: ctx.user.institutionId,
+      screenPath: ACCOMPLISHMENTS_PATH,
+      role: "instructor",
+      primaryText: title,
+      secondaryText: detail,
+      metaText: JSON.stringify({ year, tone: "success" }),
+      audienceAccountId: ctx.user.accountId,
+      href: ACCOMPLISHMENTS_PATH,
+      sortOrder: 0,
+    },
+  });
+  return { id, title, detail, year };
+}
+
+function buildTeachingRows(ctx: ProfileCtx) {
+  const byCourse = new Map<
+    string,
+    {
+      course: string;
+      code: string;
+      title: string;
+      delivery: string;
+      location: string;
+      schedule: string;
+      days: Set<number>;
+      start: Date;
+      end: Date;
+    }
+  >();
+
+  for (const s of ctx.classSessions) {
+    const key = `${s.courseCode}::${s.sectionCode}`;
+    const end = s.endsAt ?? new Date(s.startsAt.getTime() + 90 * 60 * 1000);
+    const existing = byCourse.get(key);
+    if (!existing) {
+      byCourse.set(key, {
+        course: s.courseCode,
+        code: s.sectionCode,
+        title: ctx.sections.find((x) => x.code === s.sectionCode)?.courseTitle || s.title,
+        delivery: "TBA",
+        location: s.location || "TBA",
+        schedule: "",
+        days: new Set([s.startsAt.getDay()]),
+        start: s.startsAt,
+        end,
+      });
+    } else {
+      existing.days.add(s.startsAt.getDay());
+      if (s.startsAt < existing.start) existing.start = s.startsAt;
+      if (end > existing.end) existing.end = end;
+      if (s.location && existing.location === "TBA") existing.location = s.location;
+    }
+  }
+
+  if (byCourse.size === 0) {
+    return ctx.sections.map((s) => ({
+      course: s.courseCode,
+      code: s.code,
+      title: s.courseTitle,
+      delivery: "TBA",
+      location: "TBA",
+      schedule: "TBA",
+    }));
+  }
+
+  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  return [...byCourse.values()].map((row) => {
+    const days = [...row.days].sort((a, b) => a - b);
+    const dayLabel =
+      days.length >= 4 && days[0] === 1 && days[days.length - 1] === 4
+        ? "Mon-Thu"
+        : days.length >= 5 && days[0] === 1 && days[days.length - 1] === 5
+          ? "Mon-Fri"
+          : days.map((d) => dayNames[d]).join(", ");
+    const startIso = row.start.toISOString().slice(0, 10);
+    const endIso = row.end.toISOString().slice(0, 10);
+    const range =
+      startIso === endIso
+        ? row.start.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+        : `${row.start.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} - ${row.end.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+    return {
+      course: row.course,
+      code: row.code,
+      title: row.title,
+      delivery: row.delivery,
+      location: row.location,
+      schedule: `${range}\n${dayLabel}, ${formatClock(row.start)} - ${formatClock(row.end)}`,
+    };
+  });
+}
+
+function buildTeachingByDay(ctx: ProfileCtx) {
+  const labels = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const buckets = labels.map((day) => ({ day, entries: [] as Array<{ course: string; section: string; time: string }> }));
+
+  const seen = new Set<string>();
+  for (const s of ctx.classSessions) {
+    const end = s.endsAt ?? new Date(s.startsAt.getTime() + 90 * 60 * 1000);
+    const time = `${formatClock(s.startsAt)} - ${formatClock(end)}`;
+    const key = `${s.startsAt.getDay()}::${s.courseCode}::${s.sectionCode}::${time}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    buckets[s.startsAt.getDay()]!.entries.push({
+      course: s.courseCode,
+      section: s.sectionCode,
+      time,
+    });
+  }
+
+  if (seen.size === 0) {
+    for (const s of ctx.sections) {
+      for (const day of [1, 2, 3, 4, 5]) {
+        buckets[day]!.entries.push({
+          course: s.courseCode,
+          section: s.code,
+          time: "TBA",
+        });
+      }
+    }
+  }
+
+  return buckets.filter((b) => b.entries.length > 0 || (b.day !== "Sunday" && b.day !== "Saturday"));
+}
+
+function weekBounds(anchor = new Date()) {
+  const start = new Date(anchor);
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - start.getDay());
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  end.setHours(23, 59, 59, 999);
+  return { start, end };
+}
+
+function buildWeekCalendar(ctx: ProfileCtx, slots: AvailabilitySlot[], weekStartIso?: string) {
+  const anchor = weekStartIso ? new Date(`${weekStartIso}T12:00:00`) : new Date("2026-09-15T12:00:00");
+  const { start, end } = weekBounds(Number.isNaN(anchor.getTime()) ? new Date("2026-09-15T12:00:00") : anchor);
+  const labels = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const weekDays = labels.map((label, i) => {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    const iso = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+    const dayStart = new Date(d);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(d);
+    dayEnd.setHours(23, 59, 59, 999);
+    const sessionEntries = ctx.classSessions
+      .filter((s) => s.startsAt >= dayStart && s.startsAt <= dayEnd)
+      .map((s) => {
+        const ends = s.endsAt ?? new Date(s.startsAt.getTime() + 90 * 60 * 1000);
+        return {
+          kind: "class" as const,
+          title: `${s.courseCode} [${s.sectionCode}]`,
+          time: `${formatClock(s.startsAt)} - ${formatClock(ends)}`,
+        };
+      });
+    const slotEntries = slots
+      .filter((slot) => {
+        if (slot.date === iso) return true;
+        if (!slot.repeats) return false;
+        if (slot.date && slot.endDate && (iso < slot.date || iso > slot.endDate)) return false;
+        const days = slot.repeats.split(/[·,]/).map((x) => x.trim().slice(0, 3).toLowerCase());
+        const short = label.slice(0, 3).toLowerCase();
+        return days.includes(short);
+      })
+      .map((slot) => ({
+        kind: "availability" as const,
+        title: slot.title || slot.mode,
+        time: `${slot.start}–${slot.end}`,
+      }));
+    return {
+      label,
+      date: iso,
+      dateLabel: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      entries: [...sessionEntries, ...slotEntries],
+    };
+  });
+
+  const weekLabel = `${start.toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  })} - ${end.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`;
+
+  return {
+    weekLabel: weekLabel.toUpperCase(),
+    weekStart: start.toISOString().slice(0, 10),
+    weekEnd: end.toISOString().slice(0, 10),
+    weekDays,
+  };
+}
+
+function isoLocal(d: Date) {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function buildMonthCalendar(slots: AvailabilitySlot[], year?: number, month?: number) {
+  const marked = new Set<string>();
+  for (const slot of slots) {
+    if (slot.date) marked.add(slot.date);
+    if (slot.date && slot.endDate && slot.repeats) {
+      const cur = new Date(`${slot.date}T12:00:00`);
+      const last = new Date(`${slot.endDate}T12:00:00`);
+      if (Number.isNaN(cur.getTime()) || Number.isNaN(last.getTime())) continue;
+      const days = slot.repeats
+        .split(/[·,]/)
+        .map((d) => d.trim().slice(0, 3).toLowerCase())
+        .filter(Boolean);
+      while (cur <= last) {
+        const short = cur.toLocaleDateString("en-US", { weekday: "short" }).toLowerCase();
+        if (days.includes(short)) marked.add(isoLocal(cur));
+        cur.setDate(cur.getDate() + 1);
+      }
+    }
+  }
+  const markedDates = [...marked].sort();
+  let focusYear = year;
+  let focusMonth = month;
+  if (focusYear == null || focusMonth == null) {
+    const focusIso = markedDates[0] || slots.find((s) => s.date)?.date || "2026-09-01";
+    const focus = new Date(`${focusIso}T12:00:00`);
+    focusYear = Number.isNaN(focus.getTime()) ? 2026 : focus.getFullYear();
+    focusMonth = Number.isNaN(focus.getTime()) ? 8 : focus.getMonth();
+  }
+  return {
+    year: focusYear,
+    month: focusMonth, // 0-based
+    monthLabel: new Date(focusYear, focusMonth, 1).toLocaleDateString("en-US", {
+      month: "long",
+      year: "numeric",
+    }),
+    markedDates,
+  };
+}
+
+export function buildAddAvailabilityForm(nameDefault = "") {
+  const hours = Array.from({ length: 24 }, (_, i) => ({
+    label: pad2(i),
+    value: pad2(i),
+  }));
+  const minutes = ["00", "15", "30", "45"].map((m) => ({ label: m, value: m }));
+  return {
+    submitLabel: "Save Availability",
+    groups: [
+      {
+        title: "AVAILABILITY",
+        fields: [
+          { label: "Title / Name (optional)", value: nameDefault, type: "text", optional: true },
+          {
+            label: "Type",
+            value: "Available to Teach",
+            type: "select",
+            options: AVAILABILITY_TYPES,
+          },
+          { label: "Start hour", value: "09", type: "select", options: hours },
+          { label: "Start minute", value: "00", type: "select", options: minutes },
+          { label: "End hour", value: "10", type: "select", options: hours },
+          { label: "End minute", value: "00", type: "select", options: minutes },
+          { label: "Date", value: "2026-09-18", type: "date" },
+          {
+            label: "Set availability recurrence timeframe",
+            value: "1",
+            type: "checkbox",
+            optional: true,
+          },
+          { label: "End Date", value: "2026-09-25", type: "date", optional: true },
+          {
+            label: "Days of the Week",
+            value: "Mon,Tue,Wed,Thu,Fri",
+            type: "weekdays",
+            optional: true,
+          },
+          { label: "Note", value: "", type: "textarea", optional: true },
+        ],
+      },
+    ],
+  };
+}
+
+export async function buildProfilePayload(
+  ctx: ProfileCtx,
+  path = "",
+  availabilitySlots: AvailabilitySlot[] = [],
+) {
+  const p = path.toLowerCase();
+  const name = ctx.displayName;
+  const staffId = ctx.user.personId.slice(0, 8).toUpperCase();
+  const initials = `${ctx.person.givenName[0] ?? ""}${ctx.person.familyName[0] ?? ""}`.toUpperCase();
+  const currentTermCode = ctx.term?.code;
+  const currentSections = currentTermCode
+    ? ctx.sections.filter((s) => s.termCode === currentTermCode)
+    : ctx.sections;
+  const pastSections = currentTermCode
+    ? ctx.sections.filter((s) => s.termCode !== currentTermCode)
+    : [];
+  const courseCodes = [...new Set(currentSections.map((s) => s.courseCode).filter(Boolean))].sort();
+  const pastCodes = [...new Set(pastSections.map((s) => s.courseCode).filter(Boolean))].sort();
+  const headerTopics = [
+    ...new Set([...courseCodes, ...pastCodes].filter(Boolean)),
+  ].sort();
+  const teachingRows = buildTeachingRows({
+    ...ctx,
+    sections: currentSections,
+    classSessions: ctx.classSessions.filter((s) => currentSections.some((x) => x.code === s.sectionCode)),
+  });
+  const teachingByDay = buildTeachingByDay({
+    ...ctx,
+    sections: currentSections,
+    classSessions: ctx.classSessions.filter((s) => currentSections.some((x) => x.code === s.sectionCode)),
+  });
+  const connect = await loadJsonRecord<ConnectPayload>(ctx, PROFILE_BIO_PATH, "connect", {
+    phone: "",
+    email: ctx.person.email,
+  });
+  const education = await loadJsonRecord<EducationPayload>(ctx, PROFILE_BIO_PATH, "education", {
+    background: "",
+    experience: "",
+    organizations: "",
+  });
+  const general = await loadJsonRecord<{ html: string }>(ctx, AVAILABILITY_PATH, "generalInfo", {
+    html: "",
+  });
+  const previousCourses = await loadJsonRecord<{ codes: string[] }>(
+    ctx,
+    PROFILE_TOPICS_PATH,
+    "previousCourses",
+    { codes: pastCodes },
+  );
+  const chair = await loadJsonRecord<{ codes: string[] }>(ctx, PROFILE_TOPICS_PATH, "academicChair", {
+    codes: headerTopics.length ? headerTopics : courseCodes,
+  });
+  const header = {
+    ...profileHeaderPayload(ctx),
+    topics: chair.codes.length ? chair.codes : profileHeaderPayload(ctx).topics,
+  };
+
+  if (p.includes("t25") || p.includes("add-availability")) {
+    return {
+      title: "Add Availability",
+      subtitle: "",
+      primaryAction: "Save Availability",
+      secondaryAction: "Cancel",
+      secondaryActionHref: AVAILABILITY_PATH,
+      form: buildAddAvailabilityForm(""),
+      profileHeader: header,
+    };
+  }
+
+  if (p.includes("t03") || p.includes("topics")) {
+    return {
+      title: "Manage My Profile",
+      subtitle: "",
+      profileHeader: header,
+      profileTopics: {
+        tabs: profileTabs(PROFILE_TOPICS_PATH),
+        teaching: courseCodes,
+        currentCourses: courseCodes,
+        previousCourses: [...new Set([...(previousCourses.codes || []), ...pastCodes])].sort(),
+        academicChair: chair.codes,
+        academicLead: "",
+        research: [],
+        certifications: [],
+        teachingSchedule: teachingRows,
+      },
+    };
+  }
+
+  if (p.includes("t04") || (p.includes("availability") && !p.includes("add-availability"))) {
+    const officeFromSlots = availabilitySlots
+      .filter((s) => /office/i.test(s.mode))
+      .map((s) => {
+        const when = s.repeats || s.day;
+        const range = s.endDate && s.date && s.date !== s.endDate ? `${s.date} → ${s.endDate}` : s.date || "";
+        return `${when}${range ? ` · ${range}` : ""} · ${s.start}–${s.end}`;
+      })
+      .join("\n");
+    return {
+      title: "Manage My Profile",
+      subtitle: "",
+      primaryAction: "Add",
+      primaryActionHref: "/instructor/f/t25-add-availability-modal",
+      profileHeader: header,
+      availability: {
+        tabs: profileTabs(AVAILABILITY_PATH),
+        slots: availabilitySlots,
+        officeHours: officeFromSlots,
+        generalInfo: general.html,
+        teachingByDay,
+        calendar: buildMonthCalendar(availabilitySlots),
+        note: availabilitySlots.length
+          ? `${availabilitySlots.length} availability window(s) published.`
+          : "No availability times were found.",
+      },
+    };
+  }
+
+  if (p.includes("t05") || p.includes("compensation")) {
+    return {
+      title: "Manage My Profile",
+      subtitle: "",
+      profileHeader: header,
+      compensation: {
+        tabs: profileTabs("/instructor/f/t05-profile-compensation"),
+        summary: [],
+        payPeriods: [],
+        contracts: [],
+      },
+    };
+  }
+
+  if (p.includes("t06") || (p.includes("schedule") && !p.includes("pending"))) {
+    const week = buildWeekCalendar(ctx, availabilitySlots);
+    return {
+      title: "Manage My Profile",
+      subtitle: "",
+      primaryAction: "Add",
+      primaryActionHref: "/instructor/f/t25-add-availability-modal",
+      profileHeader: header,
+      schedule: {
+        tabs: profileTabs(PROFILE_SCHEDULE_PATH),
+        teachingByDay,
+        ...week,
+        weeks: [
+          {
+            label: week.weekLabel,
+            entries: week.weekDays.flatMap((d) =>
+              d.entries.map((e) => ({
+                day: d.label.slice(0, 3),
+                time: e.time,
+                course: e.title,
+                room: "—",
+              })),
+            ),
+          },
+        ],
+        emptyMessage: "No availability times were found.",
+      },
+    };
+  }
+
+  if (p.includes("t34") || p.includes("accomplishment")) {
+    const facultyItems = await loadFacultyAccomplishments(ctx);
+    return {
+      title: "My Accomplishments & Badges",
+      subtitle: "",
+      ...profileHeaderPayload(ctx),
+      accomplishments: {
+        tabs: profileTabs(ACCOMPLISHMENTS_PATH),
+        stats: [
+          { label: "Current sections", value: String(ctx.sections.length) },
+          { label: "Students", value: String(ctx.studentCount) },
+          { label: "Faculty items", value: String(facultyItems.length) },
+        ],
+        items: facultyItems,
+      },
+    };
+  }
+
+  if (p.includes("t35") || p.includes("security")) {
+    return {
+      title: "Security Settings",
+      subtitle: ctx.person.email,
+      security: {
+        mfaEnabled: false,
+        sessions: [
+          {
+            device: "Current browser session",
+            location: "Campus network",
+            lastActive: "Active now",
+            current: true,
+          },
+        ],
+        recentActivity: [{ event: "Signed in", when: new Date().toLocaleString() }],
+      },
+    };
+  }
+
+  if (p.includes("t15") || (p.includes("settings") && !p.includes("security"))) {
+    const account = await prisma.account.findUnique({ where: { id: ctx.user.accountId } });
+    return {
+      title: "Change Your Time Zone",
+      subtitle: "",
+      primaryAction: "Save Time Zone",
+      settings: {
+        groups: [
+          {
+            title: "Change your time zone",
+            fields: [
+              {
+                label: "Current Time",
+                value: new Date().toLocaleString("en-US", {
+                  timeZone: account?.timezone?.includes("/") ? account.timezone : "America/Vancouver",
+                }),
+              },
+              {
+                label: "New Time Zone",
+                value: account?.timezone || "(UTC-08:00) Pacific Time (US & Canada)",
+              },
+            ],
+          },
+        ],
+      },
+    };
+  }
+
+  const educationParts = [education.background, education.experience, education.organizations].filter(Boolean);
+
+  return {
+    title: "Manage My Profile",
+    subtitle: "Keep your faculty biography and contact details current.",
+    primaryAction: "Save Changes",
+    secondaryAction: "Cancel",
+    profileHeader: header,
+    profileBio: {
+      name,
+      role: "Instructor",
+      department: "Faculty",
+      initials,
+      staffId,
+      tabs: profileTabs(PROFILE_BIO_PATH),
+      personal: [
+        { label: "Full Name", value: name },
+        { label: "Preferred Name", value: name },
+        { label: "Email", value: connect.email || ctx.person.email },
+        { label: "Phone", value: connect.phone || "—" },
+        { label: "Office", value: "—" },
+        { label: "Pronouns", value: "—" },
+      ],
+      academic: [
+        { label: "Highest Degree", value: education.background || "—" },
+        { label: "Years Teaching", value: "—" },
+        { label: "Department", value: "Faculty" },
+        { label: "Faculty Rank", value: "Instructor" },
+        { label: "Hire Date", value: "—" },
+        { label: "Staff ID", value: staffId },
+      ],
+      expertise: courseCodes,
+      bio: educationParts.join("\n\n") || "",
+      connect,
+      education,
+    },
+  };
+}

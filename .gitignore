@@ -24,3 +24,9 @@ packages/db/prisma/*.db-journal
 .codex/
 .github/copilot*
 AGENTS.local.md
+
+# Local package / build caches (never commit)
+.pnpm-store/
+.prisma-cache/
+.tmp-pdf-pages/
+.tmp/

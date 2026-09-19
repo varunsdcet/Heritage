@@ -1,6 +1,13 @@
 import { z } from "zod";
 
-export const Uuid = z.string().uuid();
+/** RFC UUID or demo seed ids (e.g. a1a1a1a1-s0s0-…). */
+export const Uuid = z
+  .string()
+  .min(8)
+  .refine((value) => {
+    if (z.string().uuid().safeParse(value).success) return true;
+    return /^[0-9a-zA-Z][0-9a-zA-Z-]{7,62}$/.test(value);
+  }, "Invalid uuid");
 export const InstitutionId = Uuid;
 export const IsoDateTime = z.string().datetime({ offset: true }).or(z.string().datetime());
 export const MoneyCad = z.object({

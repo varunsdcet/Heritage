@@ -11,6 +11,7 @@ export default function ResetPasswordInner() {
   const params = useSearchParams();
   const tokenFromUrl = params.get("token") || "";
   const [email, setEmail] = useState("marcus.vance@heritage.edu");
+  const [studentNumber, setStudentNumber] = useState("ST-2024-001");
   const [password, setPassword] = useState("");
   const [token, setToken] = useState(tokenFromUrl);
   const [sent, setSent] = useState(false);
@@ -28,7 +29,13 @@ export default function ResetPasswordInner() {
     try {
       const res = await api<{ ok: boolean; mailed?: boolean; resetToken?: string }>(
         "/auth/forgot-password",
-        { method: "POST", body: JSON.stringify({ email: email.trim().toLowerCase() }) },
+        {
+          method: "POST",
+          body: JSON.stringify({
+            email: email.trim().toLowerCase(),
+            studentNumber: studentNumber.trim() || undefined,
+          }),
+        },
       );
       setSent(true);
       setMailed(Boolean(res.mailed));
@@ -86,10 +93,21 @@ export default function ResetPasswordInner() {
         {done ? <Banner>Password updated. Redirecting to sign in…</Banner> : null}
 
         {mode === "forgot" && !token ? (
-          <label style={{ display: "grid", gap: "0.35rem", marginTop: "1rem" }}>
-            Email
-            <Input value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" />
-          </label>
+          <>
+            <label style={{ display: "grid", gap: "0.35rem", marginTop: "1rem" }}>
+              Student number
+              <Input
+                value={studentNumber}
+                onChange={(e) => setStudentNumber(e.target.value)}
+                autoComplete="username"
+                placeholder="ST-2024-001"
+              />
+            </label>
+            <label style={{ display: "grid", gap: "0.35rem", marginTop: "1rem" }}>
+              Registered email
+              <Input value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
+            </label>
+          </>
         ) : (
           <>
             {!tokenFromUrl ? (

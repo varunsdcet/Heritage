@@ -1,7 +1,7 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button, Input, Panel, StatusPill } from "@myheritage/ui";
 import { ScreenScaffold } from "@/components/ScreenScaffold";
 import { api, loadSession } from "@/lib/api";
@@ -16,8 +16,15 @@ type UserRow = {
   programName: string | null;
 };
 
-export default function CreateUserPage() {
+const ROLE_OPTIONS = ["instructor", "student", "applicant", "employer", "admin", "registrar"] as const;
+
+function CreateUserInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const roleParam = searchParams.get("role");
+  const initialRole =
+    roleParam && (ROLE_OPTIONS as readonly string[]).includes(roleParam) ? roleParam : "instructor";
+
   const [users, setUsers] = useState<UserRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -25,11 +32,48 @@ export default function CreateUserPage() {
     email: "",
     givenName: "",
     familyName: "",
-    role: "instructor",
+    role: initialRole,
     password: "Heritage!2026",
     studentNumber: "",
     programName: "Computer Science",
   });
+
+  const [lastLogin, setLastLogin] = useState<{
+    email: string;
+    role: string;
+    temporaryPassword: string;
+    portalHref: string;
+    studentNumber: string | null;
+    loginHint: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (roleParam && (ROLE_OPTIONS as readonly string[]).includes(roleParam) && roleParam !== form.role) {
+      setForm((f) => ({ ...f, role: roleParam }));
+    }
+  }, [roleParam, form.role]);
+
+  const heading = useMemo(() => {
+    if (form.role === "student") {
+      return {
+        title: "Student onboarding",
+        subtitle: "Create student account → then enrol into a section",
+        breadcrumb: ["Administration", "Registrar", "Student onboarding"],
+      };
+    }
+    if (form.role === "instructor") {
+      return {
+        title: "Instructor onboarding",
+        subtitle: "Create instructor account → then assign a section",
+        breadcrumb: ["Administration", "Academics", "Instructor onboarding"],
+      };
+    }
+    return {
+      title: "Create user",
+      subtitle: "Provision teachers, students, and admins · live API",
+      breadcrumb: ["Administration", "Users", "Create"],
+    };
+  }, [form.role]);
 
   async function refresh(token: string) {
     const res = await api<{ items: UserRow[] }>("/admin/users", {}, token);
@@ -52,7 +96,14 @@ export default function CreateUserPage() {
     setError(null);
     setNote(null);
     try {
-      const created = await api<{ email: string; role: string; temporaryPassword: string }>(
+      const created = await api<{
+        email: string;
+        role: string;
+        temporaryPassword: string;
+        portalHref?: string;
+        studentNumber?: string | null;
+        loginHint?: string;
+      }>(
         "/admin/users",
         {
           method: "POST",
@@ -68,6 +119,24 @@ export default function CreateUserPage() {
         },
         s.accessToken,
       );
+      const portalHref =
+        created.portalHref ||
+        (created.role === "instructor"
+          ? "/instructor"
+          : created.role === "student"
+            ? "/student"
+            : "/login");
+      const loginHint =
+        created.loginHint ||
+        `Login at /login with ${created.email} → ${portalHref}`;
+      setLastLogin({
+        email: created.email,
+        role: created.role,
+        temporaryPassword: created.temporaryPassword,
+        portalHref,
+        studentNumber: created.studentNumber ?? null,
+        loginHint,
+      });
       setNote(`Created ${created.role} ${created.email} · password ${created.temporaryPassword}`);
       setForm((f) => ({ ...f, email: "", givenName: "", familyName: "", studentNumber: "" }));
       await refresh(s.accessToken);
@@ -79,9 +148,9 @@ export default function CreateUserPage() {
   return (
     <ScreenScaffold
       role="admin"
-      title="Create user"
-      subtitle="Provision teachers, students, and admins · live API"
-      breadcrumb={["Administration", "Users", "Create"]}
+      title={heading.title}
+      subtitle={heading.subtitle}
+      breadcrumb={heading.breadcrumb}
       active="Users"
     >
       <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
@@ -91,6 +160,12 @@ export default function CreateUserPage() {
         <Button type="button" variant="secondary" onClick={() => router.push("/admin/enrolments")}>
           Enrol student
         </Button>
+        <Button type="button" variant="secondary" onClick={() => router.push("/admin/f/rg-01-student-360")}>
+          Student 360
+        </Button>
+        <Button type="button" variant="secondary" onClick={() => router.push("/admin/f/ac-14-faculty-360")}>
+          Instructor 360
+        </Button>
         <Button type="button" variant="secondary" onClick={() => router.push("/admin/users")}>
           Directory
         </Button>
@@ -98,6 +173,44 @@ export default function CreateUserPage() {
 
       {error ? <p style={{ color: "var(--mh-danger)" }}>{error}</p> : null}
       {note ? <StatusPill tone="success">{note}</StatusPill> : null}
+      {lastLogin ? (
+        <Panel title="Ready to sign in">
+          <div style={{ display: "grid", gap: 8, fontSize: 14, lineHeight: 1.45 }}>
+            <div>
+              <strong>{lastLogin.loginHint}</strong>
+            </div>
+            <div>
+              Email: <code>{lastLogin.email}</code>
+            </div>
+            {lastLogin.studentNumber ? (
+              <div>
+                Student number: <code>{lastLogin.studentNumber}</code>
+              </div>
+            ) : null}
+            <div>
+              Password: <code>{lastLogin.temporaryPassword}</code>
+            </div>
+            <div>
+              Portal after login: <code>{lastLogin.portalHref}</code>
+            </div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
+              <Button type="button" onClick={() => router.push("/login")}>
+                Open login
+              </Button>
+              {lastLogin.role === "student" ? (
+                <Button type="button" variant="secondary" onClick={() => router.push("/admin/enrolments")}>
+                  Enrol into section
+                </Button>
+              ) : null}
+              {lastLogin.role === "instructor" ? (
+                <Button type="button" variant="secondary" onClick={() => router.push("/admin/sections/create")}>
+                  Assign section
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        </Panel>
+      ) : null}
 
       <Panel title="New account">
         <form onSubmit={onSubmit} style={{ display: "grid", gap: 12, maxWidth: 520 }}>
@@ -204,5 +317,13 @@ export default function CreateUserPage() {
         </ul>
       </Panel>
     </ScreenScaffold>
+  );
+}
+
+export default function CreateUserPage() {
+  return (
+    <Suspense fallback={<p style={{ padding: 32 }}>Loading…</p>}>
+      <CreateUserInner />
+    </Suspense>
   );
 }

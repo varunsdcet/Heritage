@@ -2,9 +2,11 @@
 
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { AskHeritageFab } from "@/components/AskHeritageFab";
 
-type NavChild = { label: string; href: string; match?: string[] };
+type NavChild = { label: string; href: string; match?: string[]; section?: string; countKey?: string };
 type NavItem = {
   label: string;
   href: string;
@@ -14,25 +16,29 @@ type NavItem = {
 };
 
 const NAV: NavItem[] = [
-  { label: "Dashboard", href: "/instructor", icon: "bar-chart" },
   {
     label: "My Profile / Settings",
     href: "/instructor/f/t02-profile-biography",
     icon: "user",
     children: [
-      { label: "Manage My Profile", href: "/instructor/f/t02-profile-biography", match: ["/instructor/profile"] },
-      { label: "Teaching Topics", href: "/instructor/f/t03-profile-topics" },
-      { label: "Availability", href: "/instructor/f/t04-profile-availability", match: ["/instructor/f/in-18-availability"] },
-      { label: "Compensation", href: "/instructor/f/t05-profile-compensation", match: ["/instructor/f/in-19-compensation"] },
-      { label: "Teaching Schedule", href: "/instructor/f/t06-profile-schedule" },
+      {
+        label: "Manage My Profile",
+        href: "/instructor/f/t02-profile-biography",
+        match: [
+          "/instructor/profile",
+          "/instructor/f/t03-profile-topics",
+          "/instructor/f/t04-profile-availability",
+          "/instructor/f/t05-profile-compensation",
+          "/instructor/f/t06-profile-schedule",
+          "/instructor/f/t25-add-availability-modal",
+          "/instructor/f/in-18-availability",
+          "/instructor/f/in-19-compensation",
+        ],
+      },
       { label: "Accomplishments", href: "/instructor/f/t34-accomplishments" },
+      { label: "Tax Documents / Forms", href: "/instructor/f/tax-documents" },
       { label: "Security Settings", href: "/instructor/f/t35-security-settings" },
-      { label: "Settings", href: "/instructor/f/t15-settings" },
-      { label: "Add Availability", href: "/instructor/f/t25-add-availability-modal" },
-      { label: "Password Reset", href: "/instructor/f/t29-password-reset-flow" },
-      { label: "MFA Challenge", href: "/instructor/f/t30-mfa-challenge" },
-      { label: "Profile Setup", href: "/instructor/f/t31-first-login-profile-completion" },
-      { label: "Help & Support", href: "/instructor/f/t33-help-support" },
+      { label: "Change Time Zone", href: "/instructor/f/t15-settings" },
     ],
   },
   {
@@ -40,33 +46,28 @@ const NAV: NavItem[] = [
     href: "/instructor/sections",
     icon: "book",
     children: [
-      { label: "My courses", href: "/instructor/sections" },
-      { label: "Course detail", href: "/instructor/f/t08-my-courses-detail" },
-      { label: "Course workspace", href: "/instructor/f/in-03-course-detail" },
-      { label: "Modules", href: "/instructor/modules" },
-      { label: "Active courses", href: "/instructor/f/t56-active-courses" },
-      { label: "Sessions", href: "/instructor/f/t54-courses-sessions" },
-      { label: "Announcements", href: "/instructor/announcements", match: ["/instructor/f/t23-course-announcements"] },
-      { label: "Lectures", href: "/instructor/lectures", match: ["/instructor/f/in-08-lectures"] },
-      { label: "Lecture Review", href: "/instructor/f/in-09-lecture-review" },
-      { label: "Labs", href: "/instructor/labs", match: ["/instructor/f/in-10-lab-sessions"] },
-      { label: "Course history", href: "/instructor/f/t39-course-history" },
-      { label: "Textbooks", href: "/instructor/f/t57-course-textbooks" },
-      { label: "Repository", href: "/instructor/f/t37-course-repository" },
-      { label: "Resources", href: "/instructor/f/t60-course-resources-management" },
-      { label: "Resource Files", href: "/instructor/f/t32-resource-file-manager" },
+      { label: "All My Courses / Schedule", href: "/instructor/sections", match: ["/instructor/f/t08-my-courses-detail"] },
+      { label: "Course Evaluations", href: "/instructor/f/t36-course-evaluations" },
+      { label: "Course Attendance", href: "/instructor/attendance", match: ["/instructor/f/t21-attendance-correction-review"] },
+      { label: "Course Repository", href: "/instructor/f/t37-course-repository", match: ["/instructor/f/t80-create-content-course"] },
+      { label: "Pending Course Schedules", href: "/instructor/f/t38-pending-course-schedules" },
+      { label: "Grades Submission", href: "/instructor/f/t62-pending-grade-submissions?mode=submission", countKey: "grades" },
+      { label: "Course History", href: "/instructor/f/t39-course-history" },
     ],
   },
   {
     label: "Workshops",
-    href: "/instructor/f/t11-workshops",
+    href: "/instructor/f/t40-workshop-enrollment-status?status=pending",
     icon: "school",
     children: [
-      { label: "Workshops", href: "/instructor/f/t11-workshops", match: ["/instructor/f/in-20-workshops"] },
-      { label: "Workshop Detail", href: "/instructor/f/t24-workshop-detail" },
-      { label: "Enrollment", href: "/instructor/f/t40-workshop-enrollment-status" },
-      { label: "Attendance", href: "/instructor/f/t41-workshop-attendance" },
-      { label: "New enrollment", href: "/instructor/f/t42-new-workshop-enrollment" },
+      { section: "ENROLMENTS", label: "Pending", href: "/instructor/f/t40-workshop-enrollment-status?status=pending", countKey: "pending" },
+      { section: "ENROLMENTS", label: "Approved", href: "/instructor/f/t40-workshop-enrollment-status?status=approved", countKey: "approved" },
+      { section: "ENROLMENTS", label: "Declined", href: "/instructor/f/t40-workshop-enrollment-status?status=declined", countKey: "declined" },
+      { section: "MISCELLANEOUS", label: "My Workshops", href: "/instructor/f/t11-workshops?list=mine", match: ["/instructor/f/t24-workshop-detail", "/instructor/f/in-20-workshops"] },
+      { section: "MISCELLANEOUS", label: "Available Workshops", href: "/instructor/f/t11-workshops?list=available", countKey: "available" },
+      { section: "MISCELLANEOUS", label: "Completed Workshops", href: "/instructor/f/t11-workshops?list=completed", countKey: "completed" },
+      { section: "MISCELLANEOUS", label: "Workshop Attendance", href: "/instructor/f/t41-workshop-attendance" },
+      { section: "MISCELLANEOUS", label: "New Workshop Enrolment", href: "/instructor/f/t42-new-workshop-enrollment" },
     ],
   },
   {
@@ -74,32 +75,53 @@ const NAV: NavItem[] = [
     href: "/instructor/f/t12-students-view",
     icon: "users",
     children: [
-      { label: "Students", href: "/instructor/f/t12-students-view", match: ["/instructor/roster"] },
-      { label: "Roster", href: "/instructor/f/in-04-roster" },
-      { label: "Student detail", href: "/instructor/f/t22-student-detail-full-page", match: ["/instructor/f/in-11-student-detail"] },
-      { label: "Create Student", href: "/instructor/f/t43-create-student-profile" },
-      { label: "Academic alerts", href: "/instructor/f/t44-academic-alerts" },
-      { label: "Flags", href: "/instructor/f/t45-student-flags" },
-      { label: "Assessments", href: "/instructor/f/t46-student-assessments" },
-      { label: "Requirements", href: "/instructor/f/t47-student-requirements" },
-      { label: "Leave of absence", href: "/instructor/f/t48-leave-of-absence" },
-      { label: "Withdraw requests", href: "/instructor/f/t49-course-withdraw-requests" },
-      { label: "Status Filters", href: "/instructor/f/t63-students-by-status-filter" },
+      { section: "STUDENTS BY STATUS", label: "New Inquiry", href: "/instructor/f/t12-students-view?status=New%20Inquiry", countKey: "st_New Inquiry" },
+      { section: "STUDENTS BY STATUS", label: "Approved Application", href: "/instructor/f/t12-students-view?status=Approved%20Application", countKey: "st_Approved Application" },
+      { section: "STUDENTS BY STATUS", label: "Pre-enrolment Application", href: "/instructor/f/t12-students-view?status=Pre-enrolment%20Application", countKey: "st_Pre-enrolment Application" },
+      { section: "STUDENTS BY STATUS", label: "CLOA", href: "/instructor/f/t12-students-view?status=CLOA", countKey: "st_CLOA" },
+      { section: "STUDENTS BY STATUS", label: "LOA", href: "/instructor/f/t12-students-view?status=LOA", countKey: "st_LOA" },
+      { section: "STUDENTS BY STATUS", label: "Cancelled/ Did not proceed", href: "/instructor/f/t12-students-view?status=Cancelled%2F%20Did%20not%20proceed", countKey: "st_Cancelled/ Did not proceed" },
+      { section: "STUDENTS BY STATUS", label: "Follow Up", href: "/instructor/f/t12-students-view?status=Follow%20Up", countKey: "st_Follow Up" },
+      { section: "STUDENTS BY STATUS", label: "In-active Leads", href: "/instructor/f/t12-students-view?status=In-active%20Leads", countKey: "st_In-active Leads" },
+      { section: "STUDENTS BY STATUS", label: "Duplicate profiles", href: "/instructor/f/t12-students-view?status=Duplicate%20profiles", countKey: "st_Duplicate profiles" },
+      { section: "STUDENTS BY STATUS", label: "Declined Application", href: "/instructor/f/t12-students-view?status=Declined%20Application", countKey: "st_Declined Application" },
+      { section: "STUDENTS BY STATUS", label: "Registered Student", href: "/instructor/f/t12-students-view?status=Registered%20Student", countKey: "st_Registered Student" },
+      { section: "STUDENTS BY STATUS", label: "Active Student", href: "/instructor/f/t12-students-view?status=Active%20Student", countKey: "st_Active Student" },
+      { section: "STUDENTS BY STATUS", label: "On-Hold", href: "/instructor/f/t12-students-view?status=On-Hold", countKey: "st_On-Hold" },
+      { section: "STUDENTS BY STATUS", label: "Leave of Absence", href: "/instructor/f/t12-students-view?status=Leave%20of%20Absence", countKey: "st_Leave of Absence" },
+      { section: "STUDENTS BY STATUS", label: "Graduated", href: "/instructor/f/t12-students-view?status=Graduated", countKey: "st_Graduated" },
+      { section: "STUDENTS BY STATUS", label: "Incomplete", href: "/instructor/f/t12-students-view?status=Incomplete", countKey: "st_Incomplete" },
+      { section: "STUDENTS BY STATUS", label: "Withdrawn Students", href: "/instructor/f/t12-students-view?status=Withdrawn%20Students", countKey: "st_Withdrawn Students" },
+      { section: "STUDENTS BY STATUS", label: "Dismissed", href: "/instructor/f/t12-students-view?status=Dismissed", countKey: "st_Dismissed" },
+      { section: "STUDENTS BY STATUS", label: "Refused Visa", href: "/instructor/f/t12-students-view?status=Refused%20Visa", countKey: "st_Refused Visa" },
+      { section: "STUDENTS BY STATUS", label: "File not Logged (Offshore student)", href: "/instructor/f/t12-students-view?status=File%20not%20Logged%20(Offshore%20student)", countKey: "st_File not Logged (Offshore student)" },
+      { section: "STUDENTS BY STATUS", label: "Prospective Student (Marketing team)", href: "/instructor/f/t12-students-view?status=Prospective%20Student%20(Marketing%20team)", countKey: "st_Prospective Student (Marketing team)" },
+      { section: "STUDENT MANAGEMENT", label: "Browse All Students", href: "/instructor/f/t12-students-view" },
+      { section: "STUDENT MANAGEMENT", label: "Create Student Profile", href: "/instructor/f/t43-create-student-profile" },
+      { section: "STUDENT MANAGEMENT", label: "Academic Alerts", href: "/instructor/f/t44-academic-alerts", countKey: "alerts" },
+      { section: "STUDENT MANAGEMENT", label: "Student Flags", href: "/instructor/f/t45-student-flags", countKey: "flags" },
+      { section: "STUDENT MANAGEMENT", label: "Student Assessments", href: "/instructor/f/t46-student-assessments" },
+      { section: "STUDENT MANAGEMENT", label: "Student Requirements", href: "/instructor/f/t47-student-requirements" },
+      { section: "STUDENT MANAGEMENT", label: "Leave of Absence", href: "/instructor/f/t48-leave-of-absence" },
+      { section: "STUDENT MANAGEMENT", label: "Course Withdraw Requests", href: "/instructor/f/t49-course-withdraw-requests" },
+      { section: "STUDENT MANAGEMENT", label: "Pending Grade Submissions", href: "/instructor/f/t62-pending-grade-submissions", countKey: "grades" },
+      { section: "STUDENT MANAGEMENT", label: "Pending Transcript Changes (0)", href: "/instructor/f/t64-pending-transcript-changes" },
+      { section: "STUDENT MANAGEMENT", label: "Pending Entry / Progress Marks (0)", href: "/instructor/f/t62-pending-grade-submissions" },
+      { section: "STUDENT MANAGEMENT", label: "Badges / Accomplishments (0)", href: "/instructor/f/t82-badges-accomplishments" },
     ],
   },
   {
-    label: "Gradebook",
-    href: "/instructor/gradebook",
+    label: "Program Management",
+    href: "/instructor/f/t13-program-management",
     icon: "briefcase",
     children: [
-      { label: "Gradebook", href: "/instructor/gradebook", match: ["/instructor/f/in-07-gradebook"] },
-      { label: "Assessments", href: "/instructor/assessments", match: ["/instructor/f/t10-assessments-gradebook", "/instructor/f/in-06-assessment-manager"] },
-      { label: "Submissions", href: "/instructor/submissions" },
-      { label: "Create Assessment", href: "/instructor/f/t19-create-edit-assessment" },
-      { label: "Pending grades", href: "/instructor/f/t62-pending-grade-submissions" },
-      { label: "Grade correction", href: "/instructor/f/t20-grade-correction-workflow" },
-      { label: "Grading schemes", href: "/instructor/f/t61-grading-schemes" },
-      { label: "Attendance", href: "/instructor/attendance", match: ["/instructor/f/t21-attendance-correction-review"] },
+      { label: "Faculties & Programs", href: "/instructor/f/t13-program-management", match: ["/instructor/f/t81-add-faculty", "/instructor/f/t74-add-program", "/instructor/f/t83-program-settings"] },
+      { label: "Add Program", href: "/instructor/f/t74-add-program" },
+      { label: "Program Types", href: "/instructor/f/t50-program-types", match: ["/instructor/f/t75-add-program-type"] },
+      { label: "Manage Terms", href: "/instructor/f/t51-manage-terms", match: ["/instructor/f/t76-add-term", "/instructor/f/t84-review-term"] },
+      { label: "Academic Calendars", href: "/instructor/f/t52-academic-calendars", match: ["/instructor/f/t73-create-academic-calendar"] },
+      { label: "Master Scheduling", href: "/instructor/f/t53-master-scheduling", match: ["/instructor/f/t71-create-master-schedule", "/instructor/f/t72-create-term-schedule", "/instructor/f/t85-manage-schedule"] },
+      { label: "Program Change Request", href: "/instructor/f/t27-program-change-request" },
     ],
   },
   {
@@ -107,25 +129,57 @@ const NAV: NavItem[] = [
     href: "/instructor/f/t14-course-management",
     icon: "settings",
     children: [
-      { label: "Course management", href: "/instructor/f/t14-course-management" },
-      { label: "Program management", href: "/instructor/f/t13-program-management" },
-      { label: "Program Change Request", href: "/instructor/f/t27-program-change-request" },
-      { label: "Course Version Editor", href: "/instructor/f/t26-course-version-editor" },
-      { label: "Program Types", href: "/instructor/f/t50-program-types" },
-      { label: "Manage Terms", href: "/instructor/f/t51-manage-terms" },
-      { label: "Academic Calendars", href: "/instructor/f/t52-academic-calendars" },
-      { label: "Master Scheduling", href: "/instructor/f/t53-master-scheduling" },
-      { label: "Add Course", href: "/instructor/f/t55-add-course-form" },
-      { label: "Course Categories", href: "/instructor/f/t58-course-categories" },
-      { label: "Course Groups", href: "/instructor/f/t59-course-groups-types" },
-      { label: "Pending Schedules", href: "/instructor/f/t38-pending-course-schedules" },
-      { label: "Course studio", href: "/instructor/studio", match: ["/instructor/f/in-12-ai-course-studio"] },
-      { label: "Studio Generation", href: "/instructor/f/in-13-studio-generation" },
-      { label: "Outcomes", href: "/instructor/f/in-14-outcome-mapping" },
-      { label: "Question Generator", href: "/instructor/f/in-15-question-generator" },
-      { label: "Rubrics", href: "/instructor/f/in-16-rubric-generator" },
-      { label: "Approval", href: "/instructor/f/in-17-course-approval" },
-      { label: "Evaluations", href: "/instructor/f/t36-course-evaluations" },
+      {
+        section: "COURSE MANAGEMENT",
+        label: "Courses & Sessions",
+        href: "/instructor/f/t54-courses-sessions",
+        match: ["/instructor/f/t77-course-admin", "/instructor/f/t78-add-session-offering", "/instructor/f/t55-add-course-form"],
+      },
+      { section: "COURSE MANAGEMENT", label: "Active Courses", href: "/instructor/f/t56-active-courses" },
+      {
+        section: "COURSE MANAGEMENT",
+        label: "Course Repository",
+        href: "/instructor/f/t37-course-repository",
+        match: ["/instructor/f/t80-create-content-course"],
+      },
+      { section: "COURSE MANAGEMENT", label: "Course Backups (0)", href: "/instructor/f/t65-course-backups" },
+      {
+        section: "COURSE MANAGEMENT",
+        label: "Course Textbooks",
+        href: "/instructor/f/t57-course-textbooks",
+        match: ["/instructor/f/t79-add-textbook"],
+      },
+      {
+        section: "COURSE CONFIGURATIONS",
+        label: "Course Categories",
+        href: "/instructor/f/t58-course-categories",
+        match: ["/instructor/f/t66-course-configurations"],
+      },
+      {
+        section: "COURSE CONFIGURATIONS",
+        label: "Course Groups",
+        href: "/instructor/f/t59-course-groups-types",
+        match: ["/instructor/f/t68-add-course-group"],
+      },
+      {
+        section: "COURSE CONFIGURATIONS",
+        label: "Course Types",
+        href: "/instructor/f/t67-course-types",
+        match: ["/instructor/f/t69-add-course-type"],
+      },
+      { section: "COURSE CONFIGURATIONS", label: "Course Resources", href: "/instructor/f/t60-course-resources-management" },
+      {
+        section: "COURSE CONFIGURATIONS",
+        label: "Badges & Accomplishments",
+        href: "/instructor/f/t82-badges-accomplishments",
+        match: ["/instructor/f/t70-add-badge"],
+      },
+      {
+        section: "COURSE CONFIGURATIONS",
+        label: "Grading Schemes",
+        href: "/instructor/f/t61-grading-schemes",
+        match: ["/instructor/f/t64-add-grading-scheme"],
+      },
     ],
   },
   {
@@ -133,7 +187,7 @@ const NAV: NavItem[] = [
     href: "/instructor/messages",
     icon: "bell",
     children: [
-      { label: "Messages", href: "/instructor/messages", match: ["/instructor/f/t16-teacher-messages-chat"] },
+      { label: "Message Center", href: "/instructor/messages", match: ["/instructor/f/t16-teacher-messages-chat", "/instructor/mail"] },
       { label: "Notifications", href: "/instructor/notifications" },
       { label: "Search", href: "/instructor/search" },
       { label: "Ask MyHeritage", href: "/instructor/ask" },
@@ -221,19 +275,44 @@ function NavIcon({ name, active }: { name: string; active?: boolean }) {
   }
 }
 
+function splitHref(href: string) {
+  const i = href.indexOf("?");
+  if (i < 0) return { pathname: href, query: {} as Record<string, string> };
+  return { pathname: href.slice(0, i), query: Object.fromEntries(new URLSearchParams(href.slice(i + 1))) };
+}
+
 function pathMatches(pathname: string, href: string, extra: string[] = []) {
-  return [href, ...extra].some((target) => {
+  const targetPath = splitHref(href).pathname;
+  return [targetPath, ...extra].some((target) => {
     if (target === "/instructor") return pathname === "/instructor";
     return pathname === target || pathname.startsWith(`${target}/`);
   });
 }
 
-function childMatches(pathname: string, child: NavChild) {
-  return pathMatches(pathname, child.href, child.match);
+function childMatches(pathname: string, child: NavChild, search: URLSearchParams, siblings: NavChild[] = []) {
+  const { pathname: hrefPath, query } = splitHref(child.href);
+  const extraHit = (child.match || []).some((target) => pathname === target || pathname.startsWith(`${target}/`));
+  if (extraHit) return true;
+  if (!pathMatches(pathname, hrefPath)) return false;
+  const samePath = siblings.filter((s) => splitHref(s.href).pathname === hrefPath);
+  const keys = new Set(samePath.flatMap((s) => Object.keys(splitHref(s.href).query)));
+  if (!keys.size) return true;
+  for (const key of keys) {
+    const expected = query[key];
+    const fallback = key === "status" ? "pending" : key === "list" ? "mine" : "";
+    const actual = search.get(key) || fallback;
+    if (expected) {
+      if (actual !== expected) return false;
+    } else if (search.get(key)) {
+      const other = samePath.map((s) => splitHref(s.href).query[key]).filter(Boolean);
+      if (other.includes(search.get(key) || "")) return false;
+    }
+  }
+  return true;
 }
 
-function isActive(pathname: string, item: NavItem) {
-  if (item.children?.length) return item.children.some((child) => childMatches(pathname, child));
+function isActive(pathname: string, item: NavItem, search: URLSearchParams) {
+  if (item.children?.length) return item.children.some((child) => childMatches(pathname, child, search, item.children));
   return pathMatches(pathname, item.href);
 }
 
@@ -247,6 +326,12 @@ export function TeacherSisShell({
   userName = "Instructor",
   userRole = "INSTRUCTOR",
   studentCount,
+  hideSignOut = false,
+  workshopCounts,
+  draftGradeCount,
+  statusCounts,
+  flagCount,
+  alertCount,
 }: {
   children: ReactNode;
   activeHref?: string;
@@ -257,12 +342,31 @@ export function TeacherSisShell({
   userName?: string;
   userRole?: string;
   studentCount?: number;
+  hideSignOut?: boolean;
+  workshopCounts?: {
+    pending?: number;
+    approved?: number;
+    declined?: number;
+    available?: number;
+    completed?: number;
+  };
+  draftGradeCount?: number;
+  statusCounts?: Record<string, number>;
+  flagCount?: number;
+  alertCount?: number;
 }) {
   const router = useRouter();
   const pathname = usePathname() || "/instructor";
+  const searchParams = useSearchParams();
   const current = pathname || activeHref;
   const [openGroup, setOpenGroup] = useState<string | null>(null);
   const [searchQ, setSearchQ] = useState("");
+  const [navOpen, setNavOpen] = useState(false);
+
+  function submitHeaderSearch() {
+    const q = searchQ.trim();
+    router.push(q ? `/instructor/search?q=${encodeURIComponent(q)}` : "/instructor/search");
+  }
 
   const navItems = useMemo(
     () =>
@@ -285,21 +389,41 @@ export function TeacherSisShell({
     [userName],
   );
 
+  const userHandle = useMemo(() => {
+    const parts = userName.split(/\s+/).filter(Boolean);
+    if (parts.length < 2) return parts[0] || "Instructor";
+    return `${parts[0]}.${parts[parts.length - 1]}`;
+  }, [userName]);
+
   useEffect(() => {
-    const match = NAV.find((item) => isActive(current, item) && item.children);
+    const match = NAV.find((item) => isActive(current, item, searchParams) && item.children);
     setOpenGroup(match?.href ?? null);
-  }, [current]);
+  }, [current, searchParams]);
+
+  function countedLabel(child: NavChild) {
+    if (!child.countKey) return child.label;
+    if (child.countKey === "grades") return `${child.label} (${draftGradeCount ?? 0})`;
+    if (child.countKey === "flags") return `${child.label} (${flagCount ?? 0})`;
+    if (child.countKey === "alerts") return `${child.label} (${alertCount ?? 0})`;
+    if (child.countKey.startsWith("st_")) {
+      const label = child.countKey.slice(3);
+      const n = statusCounts?.[label] ?? statusCounts?.[child.label] ?? 0;
+      return `${child.label} (${n})`;
+    }
+    const n = workshopCounts?.[child.countKey as keyof NonNullable<typeof workshopCounts>];
+    return `${child.label} (${n ?? 0})`;
+  }
 
   if (shell === "studio") {
     return (
       <div className="mh-teacher mh-teacher--studio" data-figma="teacher-studio">
         <header className="mh-teacher-studio__nav">
           <div className="mh-teacher-studio__brand">
-            <span className="mh-teacher-studio__logo">H</span>
-            <span className="mh-teacher-studio__brand-copy">
-              <strong>Heritage</strong>
-              <span>Community College</span>
-            </span>
+            <img
+              src="/brand/login_logo.png"
+              alt="Heritage Community College"
+              className="mh-teacher-studio__brand-logo"
+            />
             <nav className="mh-teacher-studio__links" aria-label="Course studio">
               {STUDIO_NAV.map((item) => (
                 <button
@@ -323,10 +447,6 @@ export function TeacherSisShell({
                 aria-label="Search catalog"
               />
             </label>
-            <button type="button" className="mh-teacher__ask-ai" onClick={() => router.push("/instructor/ask")}>
-              <img src="/brand/icons/sparkle.svg" alt="" width={14} height={14} />
-              Ask AI
-            </button>
             <div className="mh-teacher__profile-chip">
               <span className="mh-teacher__avatar mh-teacher__avatar--sm" aria-hidden>
                 {initials}
@@ -336,25 +456,31 @@ export function TeacherSisShell({
           </div>
         </header>
         <div className="mh-teacher__scroll">{children}</div>
+        <AskHeritageFab role="instructor" />
       </div>
     );
   }
 
   return (
-    <div className="mh-teacher" data-figma="teacher-campus-os">
+    <div className={`mh-teacher${navOpen ? " is-nav-open" : ""}`} data-figma="teacher-campus-os">
       <aside className="mh-teacher__sidebar">
         <div className="mh-teacher__sidebar-top">
-          <div className="mh-teacher__brand">
-            <span className="mh-teacher__logo">MH</span>
-            <span className="mh-teacher__brand-copy">
-              <strong>Campus OS</strong>
-              <span>Heritage Community College</span>
-            </span>
-          </div>
+          <button
+            type="button"
+            className="mh-teacher__brand mh-teacher__brand--logo"
+            aria-label="Heritage Community College"
+            onClick={() => router.push("/instructor")}
+          >
+            <img
+              src="/brand/login_logo.png"
+              alt="Heritage Community College"
+              className="mh-teacher__brand-logo"
+            />
+          </button>
 
           <nav className="mh-teacher__nav" aria-label="Teacher">
             {navItems.map((item) => {
-              const active = isActive(current, item);
+              const active = isActive(current, item, searchParams);
               const expanded = Boolean(item.children) && openGroup === item.href;
               return (
                 <div key={item.href} className={`mh-teacher__nav-group${active ? " is-active" : ""}`}>
@@ -388,17 +514,23 @@ export function TeacherSisShell({
                   </button>
                   {item.children && expanded ? (
                     <div className="mh-teacher__nav-sub">
-                      {item.children.map((child) => (
-                        <button
-                          key={child.href}
-                          type="button"
-                          className={`mh-teacher__nav-subitem${childMatches(current, child) ? " is-active" : ""}`}
-                          onClick={() => router.push(child.href)}
-                        >
-                          <span className="mh-teacher__nav-dot" />
-                          {child.label}
-                        </button>
-                      ))}
+                      {item.children.map((child, index) => {
+                        const prev = item.children![index - 1];
+                        const showSection = Boolean(child.section && child.section !== prev?.section);
+                        return (
+                          <div key={child.href}>
+                            {showSection ? <p className="mh-teacher__nav-section">{child.section}</p> : null}
+                            <button
+                              type="button"
+                              className={`mh-teacher__nav-subitem${childMatches(current, child, searchParams, item.children) ? " is-active" : ""}`}
+                              onClick={() => router.push(child.href)}
+                            >
+                              <span className="mh-teacher__nav-dot" />
+                              {countedLabel(child)}
+                            </button>
+                          </div>
+                        );
+                      })}
                     </div>
                   ) : null}
                 </div>
@@ -414,11 +546,11 @@ export function TeacherSisShell({
             </span>
             <span>
               <strong>{userName}</strong>
-              <span>Instructor</span>
+              <span>{userHandle}</span>
             </span>
           </div>
           <div className="mh-teacher__foot-actions">
-            <button type="button" aria-label="Messages" onClick={() => router.push("/instructor/f/t16-teacher-messages-chat")}>
+            <button type="button" aria-label="Messages" onClick={() => router.push("/instructor/messages")}>
               <img src="/brand/icons/file-text.svg" alt="" width={16} height={16} />
             </button>
             <button type="button" aria-label="Home" onClick={() => router.push("/instructor")}>
@@ -427,20 +559,22 @@ export function TeacherSisShell({
             <button type="button" aria-label="Notifications" onClick={() => router.push("/instructor/notifications")}>
               <img src="/brand/icons/bell.svg" alt="" width={16} height={16} />
             </button>
-            <button
-              type="button"
-              aria-label="Sign out"
-              onClick={() => {
-                try {
-                  localStorage.removeItem("mh.session");
-                } catch {
-                  /* ignore */
-                }
-                router.push("/login");
-              }}
-            >
-              <img src="/brand/icons/chevron-right.svg" alt="" width={16} height={16} />
-            </button>
+            {hideSignOut ? null : (
+              <button
+                type="button"
+                aria-label="Sign out"
+                onClick={() => {
+                  try {
+                    localStorage.removeItem("mh.session");
+                  } catch {
+                    /* ignore */
+                  }
+                  router.push("/login");
+                }}
+              >
+                <img src="/brand/icons/chevron-right.svg" alt="" width={16} height={16} />
+              </button>
+            )}
           </div>
         </div>
       </aside>
@@ -448,28 +582,41 @@ export function TeacherSisShell({
       <div className="mh-teacher__main">
         <header className="mh-teacher__header">
           <div className="mh-teacher__title-group">
-            <h1>{title}</h1>
+            <button
+              type="button"
+              className="mh-teacher__nav-toggle"
+              aria-label={navOpen ? "Close sidebar" : "Open sidebar"}
+              aria-expanded={navOpen}
+              onClick={() => setNavOpen((v) => !v)}
+            >
+              <span />
+              <span />
+              <span />
+            </button>
+            {title ? <h1>{title}</h1> : null}
             {subtitle ? <p>{subtitle}</p> : null}
           </div>
           <div className="mh-teacher__header-actions">
             <label className="mh-teacher__search">
-              <img src="/brand/icons/search.svg" alt="" width={14} height={14} />
+              <button type="button" className="mh-teacher__search-icon" aria-label="Search" onClick={submitHeaderSearch}>
+                <img src="/brand/icons/search.svg" alt="" width={14} height={14} />
+              </button>
               <input
                 value={searchQ}
                 onChange={(e) => setSearchQ(e.target.value)}
-                placeholder="Search OS..."
-                aria-label="Search Campus OS"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    submitHeaderSearch();
+                  }
+                }}
+                placeholder="Student # or last name"
+                aria-label="Student # or last name"
               />
-              <kbd>⌘K</kbd>
             </label>
-            <button
-              type="button"
-              className="mh-teacher__ask-ai"
-              onClick={() => router.push("/instructor/ask")}
-            >
-              <img src="/brand/icons/sparkle.svg" alt="" width={14} height={14} />
-              Ask MyHeritage
-            </button>
+            <Link href="/instructor/search?advanced=1" className="mh-teacher__advanced-search">
+              Advanced Search
+            </Link>
             <button
               type="button"
               className="mh-teacher__bell"
@@ -484,12 +631,30 @@ export function TeacherSisShell({
               </span>
               <span className="mh-teacher__profile-meta">
                 <strong>{userName}</strong>
-                <span className="mh-teacher__role-pill">{userRole}</span>
+                {hideSignOut ? (
+                  <span className="mh-teacher__role-pill">{userRole}</span>
+                ) : (
+                  <button
+                    type="button"
+                    className="mh-teacher__logout-link"
+                    onClick={() => {
+                      try {
+                        localStorage.removeItem("mh.session");
+                      } catch {
+                        /* ignore */
+                      }
+                      router.push("/login");
+                    }}
+                  >
+                    Log Out
+                  </button>
+                )}
               </span>
             </div>
           </div>
         </header>
         <div className="mh-teacher__scroll">{children}</div>
+        <AskHeritageFab role="instructor" />
       </div>
     </div>
   );

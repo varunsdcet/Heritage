@@ -42,8 +42,47 @@ import { buildCoachFacts, resolveCoachRole } from "./ai.service.js";
 import { executeAiTool } from "./tool-executor.js";
 import { listKnowledgeDocuments } from "./knowledge.service.js";
 import { getExecutiveMetrics } from "./metrics.service.js";
+import { askHeritageAi } from "../../lib/ask.js";
 
 export const aiRouter: Router = Router();
+
+const LLM_CAPABILITIES = new Set<AiCapabilityId>([
+  "campus_coach",
+  "study_coach",
+  "faculty_assistant",
+  "student_success",
+  "career_assistant",
+  "student_services",
+  "admissions_assistant",
+  "admin_ask_data",
+]);
+
+function buildLlmSystemPrompt(input: {
+  role: string;
+  capability: AiCapabilityId;
+  groundedText: string;
+  sources: Array<{ title: string; uri?: string }>;
+}) {
+  const sourceLines = input.sources
+    .slice(0, 8)
+    .map((s, i) => `${i + 1}. ${s.title}${s.uri ? ` (${s.uri})` : ""}`)
+    .join("\n");
+  return `You are Ask Heritage, the campus AI assistant for MyHeritage Campus OS.
+You are helping a ${input.role} user via the ${input.capability} capability.
+
+Rules:
+- Answer the user's question directly in clear natural language.
+- Use ONLY the campus evidence below. Do not invent grades, balances, seats, or policies.
+- If evidence is incomplete, say what is missing and point the user to the right portal screen.
+- Never repeat the user's question back as the entire answer.
+- Keep the reply concise (about 4–10 short sentences or a short bullet list).
+
+Campus evidence:
+${input.groundedText}
+
+Cited screens:
+${sourceLines || "(none)"}`;
+}
 
 function validationError(message: string, issues?: unknown) {
   return Object.assign(new Error(message), { code: "VALIDATION_ERROR", status: 400, issues });
@@ -196,9 +235,11 @@ aiRouter.get("/history", async (req, res, next) => {
       orderBy: { createdAt: "desc" },
       take: 20,
     });
-    res.json(
-      CoachHistoryResponse.parse({
-        items: rows.map((row) => ({
+    const payload = {
+      items: rows.map((row) => {
+        const sources = parseStored<CoachSource[]>(row.sourcesJson, []);
+        const home = row.role === "registrar" ? "/admin" : `/${row.role || "student"}`;
+        return {
           interactionId: row.id,
           question: row.question,
           role: row.role,
@@ -206,14 +247,18 @@ aiRouter.get("/history", async (req, res, next) => {
           capability: row.capability
             ? capabilityFromProvider(row.capability)
             : capabilityFromProvider(row.provider),
-          answer: row.answer,
-          sources: parseStored<CoachSource[]>(row.sourcesJson, []),
+          answer: row.answer || "No answer stored.",
+          sources: sources.length
+            ? sources
+            : [{ id: `history:${row.id}`, title: "Campus records", uri: home.startsWith("/") ? home : "/student" }],
           suggestedActions: parseStored<CoachSuggestedAction[]>(row.suggestedActionsJson, []),
           claims: [],
           createdAt: row.createdAt.toISOString(),
-        })),
+        };
       }),
-    );
+    };
+    const parsed = CoachHistoryResponse.safeParse(payload);
+    res.json(parsed.success ? parsed.data : { items: [] });
   } catch (error) {
     next(error);
   }
@@ -632,6 +677,31 @@ aiRouter.post("/ask", async (req, res, next) => {
           })),
         };
         provider = capability === "admissions_assistant" ? "admissions_assistant_v1" : "student_services_v1";
+      }
+    }
+
+    if (LLM_CAPABILITIES.has(capability) && grounded.text.trim()) {
+      try {
+        const llm = await askHeritageAi({
+          question,
+          role,
+          systemPrompt: buildLlmSystemPrompt({
+            role,
+            capability,
+            groundedText: grounded.text,
+            sources: grounded.sources,
+          }),
+        });
+        if (
+          llm.source !== "fallback" &&
+          llm.answer.trim() &&
+          llm.answer.trim().toLowerCase() !== question.trim().toLowerCase()
+        ) {
+          grounded = { ...grounded, text: llm.answer.trim() };
+          provider = `${provider}+${llm.source}`;
+        }
+      } catch {
+        /* keep grounded template answer */
       }
     }
 

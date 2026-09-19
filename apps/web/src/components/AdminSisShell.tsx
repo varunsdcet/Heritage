@@ -4,6 +4,8 @@ import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { ADMIN_SIDEBAR, adminChildActive, adminGroupActive } from "@/lib/adminNav";
+import { AskHeritageFab } from "@/components/AskHeritageFab";
+import { clearSession } from "@/lib/api";
 
 const SEARCH_PALETTE = [
   {
@@ -230,6 +232,11 @@ export function AdminSisShell({
 
   const showPalette = searchOpen && searchQ.trim().length >= 2;
 
+  function signOut() {
+    clearSession();
+    router.replace("/login");
+  }
+
   return (
     <div className="mh-sis" data-figma="01-Admin-Dashboard">
       {showPalette ? (
@@ -428,13 +435,16 @@ export function AdminSisShell({
               </span>
               <span className="mh-sis__profile-meta">
                 <span className="mh-sis__profile-name">{userName}</span>
-                <span className="mh-sis__profile-role">{userRole}</span>
+                <button type="button" className="mh-sis__logout-link" onClick={signOut}>
+                  Log Out
+                </button>
               </span>
             </div>
           </div>
         </header>
 
         <div className="mh-sis__scroll">{children}</div>
+        <AskHeritageFab role="admin" />
       </div>
     </div>
   );

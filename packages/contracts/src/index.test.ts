@@ -22,6 +22,17 @@ describe("contracts", () => {
     expect(parsed.email).toContain("marcus");
   });
 
+  it("parses student-number login request", () => {
+    const parsed = LoginRequest.parse({
+      email: "ST-2024-001",
+      password: "Heritage!2026",
+      deviceFingerprint: "device-fingerprint-1",
+      remember: false,
+    });
+    expect(parsed.email).toBe("ST-2024-001");
+    expect(parsed.remember).toBe(false);
+  });
+
   it("rejects draft exposure shape without status", () => {
     expect(() =>
       GradeItem.parse({
@@ -65,12 +76,23 @@ describe("contracts", () => {
     ).toThrow();
   });
 
-  it("requires an official field in a profile change request", () => {
+  it("requires official profile fields on a profile change request", () => {
     expect(() =>
       RequestStudentProfileChange.parse({
         reason: "Please change the details on my student record.",
       }),
     ).toThrow();
+    expect(
+      RequestStudentProfileChange.parse({
+        givenName: "Marcus",
+        familyName: "Vance",
+        primaryEmail: "marcus.vance@heritage.edu",
+        phone: "604-555-0100",
+        emergencyContactName: "Jane Vance",
+        emergencyContactPhone: "604-555-0199",
+        reason: "Please update my contact details on file.",
+      }).givenName,
+    ).toBe("Marcus");
   });
 
   it("allows only HTTPS student join links", () => {

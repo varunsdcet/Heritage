@@ -1,14 +1,106 @@
 import { Router } from "express";
 import { prisma } from "@myheritage/db";
 import { requireAuth, type AuthedRequest } from "../../middleware/auth.js";
+import { lifecycleFromStudent } from "../../lib/lifecycle-status.js";
+import {
+  SEARCH_CAMPUS_OPTIONS,
+  SEARCH_DELIVERY_OPTIONS,
+  SEARCH_DOMESTIC_OPTIONS,
+  SEARCH_PROGRAM_CATALOG,
+  SEARCH_STATUS_OPTIONS,
+  MONTH_OPTIONS,
+  dayOptions,
+  yearOptions,
+  normalizeLifecycleLabel,
+} from "./searchMeta.js";
 
 export const searchRouter: Router = Router();
+
+type SearchItem = { id: string; label: string; sub?: string | null; href?: string | null };
+type SearchGroup = { type: string; items: SearchItem[] };
+
+function qstr(req: { query: Record<string, unknown> }, key: string) {
+  const raw = req.query[key];
+  return String(Array.isArray(raw) ? raw[0] : raw ?? "").trim();
+}
+
+searchRouter.get("/meta", requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    const programs = await prisma.program.findMany({
+      where: { institutionId: user.institutionId },
+      orderBy: [{ name: "asc" }],
+    });
+    const seen = new Set<string>();
+    const programOptions: Array<{ label: string; value: string; group?: string }> = [
+      { label: "All Programs", value: "" },
+    ];
+    for (const row of SEARCH_PROGRAM_CATALOG) {
+      const value = `${row.code}: ${row.label}`;
+      seen.add(row.code.toLowerCase());
+      seen.add(row.label.toLowerCase());
+      programOptions.push({
+        label: `${row.code}: ${row.label}`,
+        value,
+        group: row.group,
+      });
+    }
+    for (const p of programs) {
+      const key = p.code.toLowerCase();
+      const nameKey = p.name.toLowerCase();
+      if (seen.has(key) || seen.has(nameKey)) continue;
+      seen.add(key);
+      seen.add(nameKey);
+      programOptions.push({
+        label: `${p.code}: ${p.name}`,
+        value: `${p.code}: ${p.name}`,
+        group: (p.awardLevel || "PROGRAMS").toUpperCase(),
+      });
+    }
+    res.json({
+      statuses: SEARCH_STATUS_OPTIONS,
+      campuses: SEARCH_CAMPUS_OPTIONS,
+      deliveryMethods: SEARCH_DELIVERY_OPTIONS,
+      domesticInternational: SEARCH_DOMESTIC_OPTIONS,
+      programs: programOptions,
+      months: MONTH_OPTIONS,
+      days: dayOptions(),
+      years: yearOptions(),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 
 searchRouter.get("/", requireAuth, async (req, res, next) => {
   try {
     const user = (req as AuthedRequest).user;
-    const q = String(req.query.q ?? "").trim().toLowerCase();
-    if (!q) {
+    const q = qstr(req as never, "q").toLowerCase();
+    const advanced = {
+      status: qstr(req as never, "status"),
+      sisEmail: qstr(req as never, "sisEmail"),
+      lastName: qstr(req as never, "lastName"),
+      firstName: qstr(req as never, "firstName"),
+      middleName: qstr(req as never, "middleName"),
+      preferredName: qstr(req as never, "preferredName"),
+      dobMonth: qstr(req as never, "dobMonth"),
+      dobDay: qstr(req as never, "dobDay"),
+      dobYear: qstr(req as never, "dobYear"),
+      domesticInternational: qstr(req as never, "domesticInternational"),
+      streetAddress: qstr(req as never, "streetAddress"),
+      city: qstr(req as never, "city"),
+      postalCode: qstr(req as never, "postalCode"),
+      phoneNumber: qstr(req as never, "phoneNumber"),
+      email: qstr(req as never, "email"),
+      discountCode: qstr(req as never, "discountCode"),
+      campus: qstr(req as never, "campus"),
+      deliveryMethod: qstr(req as never, "deliveryMethod"),
+      program: qstr(req as never, "program"),
+      studentNumber: qstr(req as never, "studentNumber"),
+    };
+    const hasAdvanced = Object.values(advanced).some(Boolean);
+
+    if (!q && !hasAdvanced) {
       res.json({ groups: [] });
       return;
     }
@@ -63,10 +155,7 @@ searchRouter.get("/", requireAuth, async (req, res, next) => {
             institutionId: user.institutionId,
             role: "student",
             screenPath: { startsWith: "/student/" },
-            OR: [
-              { audienceAccountId: null },
-              { audienceAccountId: user.accountId },
-            ],
+            OR: [{ audienceAccountId: null }, { audienceAccountId: user.accountId }],
             AND: [
               {
                 OR: [
@@ -118,7 +207,7 @@ searchRouter.get("/", requireAuth, async (req, res, next) => {
         where: { institutionId: user.institutionId, accountId: user.accountId },
         include: { documents: true, offers: true, timeline: true },
       });
-      const groups: Array<{ type: string; items: Array<{ id: string; label: string; sub?: string; href?: string }> }> = [];
+      const groups: SearchGroup[] = [];
       if (app) {
         const hay = `${app.programName} ${app.status} ${app.intakeTerm}`.toLowerCase();
         if (hay.includes(q) || q.includes("application") || q.includes("nursing")) {
@@ -175,7 +264,7 @@ searchRouter.get("/", requireAuth, async (req, res, next) => {
           agreements: true,
         },
       });
-      const groups: Array<{ type: string; items: Array<{ id: string; label: string; sub?: string; href?: string }> }> = [];
+      const groups: SearchGroup[] = [];
       if (org) {
         const placements = org.placements.filter(
           (p) =>
@@ -226,13 +315,186 @@ searchRouter.get("/", requireAuth, async (req, res, next) => {
       return;
     }
 
+    if (user.roles.includes("instructor") && !user.roles.some((r) => r === "admin" || r === "registrar")) {
+      const institution = await prisma.institution.findFirst({
+        where: { institutionId: user.institutionId },
+      });
+      const sections = await prisma.section.findMany({
+        where: { institutionId: user.institutionId, instructorPersonId: user.personId },
+        include: {
+          course: true,
+          enrolments: {
+            where: { status: { in: ["enrolled", "completed", "withdrawn"] } },
+            include: { student: { include: { person: true } } },
+          },
+        },
+      });
+
+      const campusHay = [
+        institution?.name || "",
+        institution?.city || "",
+        institution?.addressLine1 || "",
+        "#110 Heritage College - Surrey",
+        "Heritage Community College",
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      const studentHits = sections.flatMap((s) =>
+        s.enrolments
+          .filter((e) => {
+            const given = e.student.person.givenName || "";
+            const family = e.student.person.familyName || "";
+            const name = `${given} ${family}`.toLowerCase();
+            const email = (e.student.person.email || "").toLowerCase();
+            const program = (e.student.programName || "").toLowerCase();
+            const standing = (e.student.standing || "").toLowerCase();
+            const status = e.status.toLowerCase();
+            const number = e.student.studentNumber.toLowerCase();
+            const dob = (e.student.person.dateOfBirth || "").trim();
+            const lifecycle = normalizeLifecycleLabel(
+              lifecycleFromStudent({
+                standing: e.student.standing,
+                enrolmentStatuses: [e.status],
+              }),
+            );
+            const hay = `${name} ${email} ${program} ${standing} ${status} ${number} ${dob} ${s.course.code} ${s.course.title} ${campusHay}`.toLowerCase();
+
+            if (q) {
+              const tokens = q.split(/\s+/).filter(Boolean);
+              if (!tokens.every((t) => hay.includes(t))) return false;
+            }
+            if (advanced.studentNumber && !number.includes(advanced.studentNumber.toLowerCase())) return false;
+            if (advanced.firstName && !given.toLowerCase().includes(advanced.firstName.toLowerCase())) return false;
+            if (advanced.lastName && !family.toLowerCase().includes(advanced.lastName.toLowerCase())) return false;
+            if (advanced.middleName && !hay.includes(advanced.middleName.toLowerCase())) return false;
+            if (advanced.preferredName && !hay.includes(advanced.preferredName.toLowerCase())) return false;
+            if (advanced.email && !email.includes(advanced.email.toLowerCase())) return false;
+            if (advanced.sisEmail && !email.includes(advanced.sisEmail.toLowerCase())) return false;
+            if (advanced.program) {
+              const p = advanced.program.toLowerCase();
+              if (!program.includes(p) && !hay.includes(p.split(":")[0]?.trim() || p)) return false;
+            }
+            if (advanced.status) {
+              const want = normalizeLifecycleLabel(advanced.status);
+              if (want && lifecycle !== want) return false;
+            }
+            if (advanced.dobYear || advanced.dobMonth || advanced.dobDay) {
+              if (!dob) return false;
+              const parts = dob.replace(/[./]/g, "-").split("-");
+              // accept YYYY-MM-DD or MM-DD-YYYY
+              let y = "";
+              let m = "";
+              let d = "";
+              if (parts[0]?.length === 4) {
+                y = parts[0];
+                m = parts[1] || "";
+                d = parts[2] || "";
+              } else {
+                m = parts[0] || "";
+                d = parts[1] || "";
+                y = parts[2] || "";
+              }
+              if (advanced.dobYear && y !== advanced.dobYear) return false;
+              if (advanced.dobMonth && m.padStart(2, "0") !== advanced.dobMonth) return false;
+              if (advanced.dobDay && d.padStart(2, "0") !== advanced.dobDay) return false;
+            }
+            if (advanced.city) {
+              const city = (institution?.city || "").toLowerCase();
+              if (!city.includes(advanced.city.toLowerCase()) && !hay.includes(advanced.city.toLowerCase())) return false;
+            }
+            if (advanced.postalCode) {
+              const postal = (institution?.postalCode || "").toLowerCase();
+              if (!postal.includes(advanced.postalCode.toLowerCase()) && !hay.includes(advanced.postalCode.toLowerCase())) {
+                return false;
+              }
+            }
+            if (advanced.streetAddress && !hay.includes(advanced.streetAddress.toLowerCase())) return false;
+            if (advanced.phoneNumber && !hay.includes(advanced.phoneNumber.toLowerCase())) return false;
+            if (advanced.discountCode && !hay.includes(advanced.discountCode.toLowerCase())) return false;
+            if (advanced.campus) {
+              const c = advanced.campus.toLowerCase();
+              if (!campusHay.includes(c) && !hay.includes(c)) {
+                // Surrey campus is default for seeded college
+                if (!(c.includes("surrey") && campusHay.includes("surrey"))) return false;
+              }
+            }
+            if (advanced.deliveryMethod) {
+              const dm = advanced.deliveryMethod.toLowerCase();
+              const campus = advanced.campus.toLowerCase();
+              if (
+                (dm === "online" || dm === "distance") &&
+                !campus.includes(dm) &&
+                !hay.includes(dm) &&
+                !campusHay.includes(dm)
+              ) {
+                return false;
+              }
+              if ((dm === "in-person" || dm === "hybrid") && /online|distance/i.test(advanced.campus)) {
+                return false;
+              }
+            }
+            if (advanced.domesticInternational) {
+              const di = advanced.domesticInternational.toLowerCase();
+              const intlHint = /intl|international|offshore|visa/i.test(`${standing} ${program} ${e.student.standing}`);
+              if (di === "international" && !intlHint) return false;
+              if (di === "domestic" && intlHint) return false;
+            }
+            return true;
+          })
+          .map((e) => {
+            const lifecycle = normalizeLifecycleLabel(
+              lifecycleFromStudent({
+                standing: e.student.standing,
+                enrolmentStatuses: [e.status],
+              }),
+            );
+            return {
+              id: e.studentId,
+              label: `${e.student.person.givenName} ${e.student.person.familyName}`.trim(),
+              sub: `${e.student.studentNumber} · ${lifecycle} · ${s.course.code} · ${e.student.programName || "—"}`,
+              href: `/instructor/f/t22-student-detail-full-page?studentId=${encodeURIComponent(e.studentId)}`,
+            };
+          }),
+      );
+      const seen = new Set<string>();
+      const students = studentHits.filter((item) => {
+        if (seen.has(item.id)) return false;
+        seen.add(item.id);
+        return true;
+      });
+      const courses = !hasAdvanced
+        ? sections
+            .filter(
+              (s) =>
+                !q ||
+                s.course.code.toLowerCase().includes(q) ||
+                s.course.title.toLowerCase().includes(q) ||
+                s.code.toLowerCase().includes(q),
+            )
+            .map((s) => ({
+              id: s.id,
+              label: `${s.course.code} · ${s.course.title}`,
+              sub: `${s.code} · ${s.enrolments.filter((e) => e.status === "enrolled").length} enrolled`,
+              href: `/instructor/sections/${s.id}`,
+            }))
+        : [];
+      res.json({
+        groups: [
+          { type: "students", items: students.slice(0, 40) },
+          { type: "courses", items: courses.slice(0, 8) },
+        ].filter((group) => group.items.length > 0),
+      });
+      return;
+    }
+
     const people = await prisma.person.findMany({
       where: {
         institutionId: user.institutionId,
         OR: [
-          { givenName: { contains: q, mode: "insensitive" } },
-          { familyName: { contains: q, mode: "insensitive" } },
-          { email: { contains: q, mode: "insensitive" } },
+          { givenName: { contains: q || advanced.firstName || " ", mode: "insensitive" } },
+          { familyName: { contains: q || advanced.lastName || " ", mode: "insensitive" } },
+          { email: { contains: q || advanced.email || advanced.sisEmail || " ", mode: "insensitive" } },
         ],
       },
       include: { students: true, accounts: true },

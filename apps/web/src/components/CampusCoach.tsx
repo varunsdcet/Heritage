@@ -5,7 +5,6 @@ import {
   type FormEvent,
   type KeyboardEvent,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -20,8 +19,10 @@ import type {
 import { Banner, Button, LogoMark, StatusPill } from "@myheritage/ui";
 import { api, loadSession } from "@/lib/api";
 import type { ShellRole } from "@/lib/nav";
+import { MarkdownMessage } from "@/components/MarkdownMessage";
 import { ScreenScaffold } from "@/components/ScreenScaffold";
 import { StudentSisShell } from "@/components/StudentSisShell";
+import { TeacherSisShell } from "@/components/TeacherSisShell";
 
 const suggestions: Record<ShellRole, string[]> = {
   student: [
@@ -52,6 +53,23 @@ const suggestions: Record<ShellRole, string[]> = {
     "What employer records are available to me?",
   ],
 };
+
+/** `crypto.randomUUID` is missing on non-secure origins (plain HTTP VPS). */
+function clientId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  const bytes = new Uint8Array(16);
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 
 function capabilityForPath(role: ShellRole, contextPath: string): string | undefined {
   if (contextPath.startsWith("/student/study")) return "study_coach";
@@ -105,6 +123,7 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
   const [historyLoading, setHistoryLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const bootstrappedQuery = useRef(false);
+  const sendingRef = useRef(false);
 
   useEffect(() => {
     const session = loadSession();
@@ -133,7 +152,10 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
     node.scrollTop = node.scrollHeight;
   }, [messages, loading, historyLoading]);
 
-  const canSend = useMemo(() => draft.trim().length > 0 && !loading, [draft, loading]);
+  useEffect(() => {
+    if (historyLoading) return;
+    inputRef.current?.focus();
+  }, [historyLoading]);
 
   function resizeDraft() {
     const el = inputRef.current;
@@ -142,22 +164,24 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   }
 
-  async function send(question: string) {
+  function readDraft(question?: string) {
+    return (question ?? inputRef.current?.value ?? draft).trim();
+  }
+
+  async function send(question?: string) {
     const session = loadSession();
     if (!session) {
       router.replace("/login");
       return;
     }
-    const trimmed = question.trim();
-    if (!trimmed || loading) return;
-    if (typeof navigator !== "undefined" && navigator.onLine === false) {
-      setError("You appear to be offline. Reconnect to ask Ask Heritage.");
-      return;
-    }
+    const trimmed = readDraft(question);
+    if (!trimmed || sendingRef.current) return;
+    sendingRef.current = true;
 
-    const pendingId = `local-${crypto.randomUUID()}`;
+    const pendingId = `local-${clientId()}`;
     setDraft("");
     if (inputRef.current) {
+      inputRef.current.value = "";
       inputRef.current.style.height = "auto";
     }
     setError(null);
@@ -169,7 +193,7 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
         "/ai/ask",
         {
           method: "POST",
-          headers: { "idempotency-key": crypto.randomUUID() },
+          headers: { "idempotency-key": clientId() },
           body: JSON.stringify({
             question: trimmed,
             contextPath,
@@ -192,8 +216,20 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
         },
       ]);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Ask Heritage could not answer this question");
+      const offline =
+        (typeof navigator !== "undefined" && navigator.onLine === false) ||
+        reason instanceof TypeError ||
+        (reason instanceof Error && /failed to fetch|networkerror|load failed/i.test(reason.message));
+      setError(
+        offline
+          ? "You appear to be offline. Reconnect to ask Ask Heritage."
+          : reason instanceof Error
+            ? reason.message
+            : "Ask Heritage could not answer this question",
+      );
+      setDraft((current) => current || trimmed);
     } finally {
+      sendingRef.current = false;
       setLoading(false);
       inputRef.current?.focus();
     }
@@ -201,13 +237,15 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
 
   function onSubmit(event: FormEvent) {
     event.preventDefault();
-    void send(draft);
+    event.stopPropagation();
+    void send();
   }
 
   function onDraftKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      void send(draft);
+      event.stopPropagation();
+      void send(event.currentTarget.value);
     }
   }
 
@@ -238,18 +276,22 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
             <div className="mh-ask-chat__welcome">
               <LogoMark size={44} />
               <h2>Ask Heritage</h2>
-              <p>Ask about admissions, courses, grades, fees, practicum, and policies. Replies stay in this chat.</p>
+              <p>
+                {role === "instructor"
+                  ? "Ask about roster risk, missing work, teaching load, and advising flags. Replies stay in this chat."
+                  : "Ask about admissions, courses, grades, fees, practicum, and policies. Replies stay in this chat."}
+              </p>
               <div className="mh-ask-chat__chips">
                 {suggestions[role].map((suggestion) => (
-                  <Button
+                  <button
                     key={suggestion}
                     type="button"
-                    variant="secondary"
+                    className="mh-ask-chat__chip"
+                    disabled={loading}
                     onClick={() => void send(suggestion)}
-                    style={{ padding: "0.45rem 0.75rem", fontSize: 13 }}
                   >
                     {suggestion}
-                  </Button>
+                  </button>
                 ))}
               </div>
             </div>
@@ -262,7 +304,11 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
               aria-label={message.role === "user" ? "You" : "Ask Heritage"}
             >
               <div className="mh-ask-chat__bubble">
-                <div style={{ whiteSpace: "pre-wrap" }}>{message.text}</div>
+                {message.role === "assistant" ? (
+                  <MarkdownMessage text={message.text} />
+                ) : (
+                  <div className="mh-ask-chat__plain">{message.text}</div>
+                )}
                 {message.role === "assistant" && message.analysis ? (
                   <div className="mh-ask-chat__meta">
                     <strong className="mh-ask-chat__meta-label">Degree snapshot</strong>
@@ -278,31 +324,33 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
                     <strong className="mh-ask-chat__meta-label">Sources</strong>
                     <div className="mh-ask-chat__chips">
                       {message.sources.map((source) => (
-                        <Button
+                        <button
                           key={source.id}
                           type="button"
-                          variant="secondary"
+                          className="mh-ask-chat__chip"
                           onClick={() => router.push(source.uri)}
-                          style={{ padding: "0.35rem 0.65rem", fontSize: 12 }}
                         >
                           {source.title}
-                        </Button>
+                        </button>
                       ))}
                     </div>
-                    {message.suggestedActions?.length ? (
-                      <div className="mh-ask-chat__chips">
-                        {message.suggestedActions.map((action) => (
-                          <Button
-                            key={action.href + action.label}
-                            type="button"
-                            onClick={() => router.push(action.href)}
-                            style={{ padding: "0.4rem 0.75rem", fontSize: 13 }}
-                          >
-                            {action.label}
-                          </Button>
-                        ))}
-                      </div>
-                    ) : null}
+                  </div>
+                ) : null}
+                {message.role === "assistant" && message.suggestedActions?.length ? (
+                  <div className="mh-ask-chat__meta">
+                    <strong className="mh-ask-chat__meta-label">Next steps</strong>
+                    <div className="mh-ask-chat__chips">
+                      {message.suggestedActions.map((action) => (
+                        <button
+                          key={action.href + action.label}
+                          type="button"
+                          className="mh-ask-chat__chip is-primary"
+                          onClick={() => router.push(action.href)}
+                        >
+                          {action.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 ) : null}
               </div>
@@ -338,10 +386,11 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
                 placeholder="Message Ask Heritage…"
                 aria-label="Message Ask Heritage"
                 disabled={loading}
+                autoFocus
                 className="mh-ask-chat__input"
               />
             </label>
-            <Button type="button" variant="ai" disabled={!canSend} onClick={() => void send(draft)}>
+            <Button type="submit" variant="ai" disabled={loading || !draft.trim()}>
               {loading ? "Sending…" : "Send"}
             </Button>
           </div>
@@ -359,6 +408,14 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
       <StudentSisShell title="Ask Heritage" subtitle="Grounded campus assistant" activeHref="/student/ask">
         {chat}
       </StudentSisShell>
+    );
+  }
+
+  if (role === "instructor") {
+    return (
+      <TeacherSisShell title="Ask Heritage" subtitle="Grounded campus assistant" activeHref="/instructor/ask">
+        {chat}
+      </TeacherSisShell>
     );
   }
 

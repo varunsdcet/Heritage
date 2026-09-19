@@ -225,8 +225,7 @@ async function calendarFor(user: SessionClaims): Promise<PortalRow[]> {
     meta: "Deadline",
     href: user.roles.includes("instructor") ? "/instructor/assessments" : "/student/assessments",
   }));
-  const extra = await portalRows(user.institutionId, "/calendar", user.accountId);
-  return [...rows, ...extra];
+  return rows;
 }
 
 async function notificationsFor(user: SessionClaims): Promise<PortalRow[]> {
@@ -385,10 +384,6 @@ export async function buildPortalView(user: SessionClaims, path: string): Promis
           ? [{ label: "Open gradebook", href: "/instructor/gradebook", variant: "secondary" as const }]
           : [{ label: "Approvals", href: "/admin/approvals", variant: "secondary" as const }]),
     ];
-    if (!rows.length) {
-      const fallback = await portalRows(user.institutionId, normalized, user.accountId);
-      base.sections = [{ title: "Catalogue", rows: fallback }];
-    }
     return base;
   }
 
@@ -481,10 +476,139 @@ export async function buildPortalView(user: SessionClaims, path: string): Promis
     return base;
   }
 
-  if (role === "student" && normalized.includes("st-17-practicum")) {
+  if (role === "student" && (normalized.includes("st-17-practicum") || normalized.endsWith("/practicum"))) {
     const rows = await toPortalRowsFromPracticum(user);
     base.sections = [{ title: "Practicum", rows }];
     base.actions = [{ label: "Practicum", href: "/student/f/st-17-practicum" }];
+    return base;
+  }
+
+  if (role === "student" && (normalized.includes("st-20-career") || normalized.endsWith("/career"))) {
+    const opportunities = await prisma.careerOpportunity.findMany({
+      where: { institutionId: user.institutionId, status: "open" },
+      orderBy: { updatedAt: "desc" },
+      take: 40,
+    });
+    const rows = opportunities.map((o) => {
+      let skills: string[] = [];
+      try {
+        const parsed = JSON.parse(o.skillsJson) as unknown;
+        skills = Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [];
+      } catch {
+        skills = [];
+      }
+      const href =
+        o.href &&
+        (o.href.startsWith("https://") || o.href.startsWith("/")) &&
+        !o.href.includes("st-20-career") &&
+        o.href !== "/student/career"
+          ? o.href
+          : "/student/messages";
+      return {
+        primary: o.title,
+        secondary: `${o.employerName}${skills.length ? ` · ${skills.join(", ")}` : ""}`,
+        meta: o.status,
+        href,
+      };
+    });
+    base.title = "Career services";
+    base.subtitle = "Coaching, co-op roles, and work-integrated learning";
+    base.metrics = [
+      { label: "Open roles", value: String(rows.length) },
+      { label: "Term", value: meta.termCode },
+      { label: "Campus", value: meta.campus },
+    ];
+    base.sections = [{ title: "Career opportunities", rows }];
+    base.actions = [
+      { label: "Open career hub", href: "/student/career", variant: "primary" },
+      { label: "Message Career Services", href: "/student/messages", variant: "secondary" },
+      { label: "Ask Heritage", href: "/student/ask", variant: "ai" },
+    ];
+    return base;
+  }
+
+  if (role === "student" && (normalized.endsWith("/holds") || normalized.includes("leave-of-absence"))) {
+    const student = await prisma.student.findFirst({
+      where: { institutionId: user.institutionId, personId: user.personId },
+    });
+    const pending = student
+      ? await prisma.approvalRequest.findMany({
+          where: {
+            institutionId: user.institutionId,
+            status: "pending",
+            OR: [{ subjectRef: student.id }, { requestedBy: user.accountId }],
+          },
+          orderBy: { createdAt: "desc" },
+          take: 20,
+        })
+      : [];
+    const rows: PortalRow[] =
+      pending.length > 0
+        ? pending.map((a) => ({
+            primary: a.type.replace(/_/g, " "),
+            secondary: `Status: ${a.status}`,
+            meta: new Date(a.createdAt).toLocaleDateString(),
+            href: "/student/holds",
+          }))
+        : [
+            {
+              primary: "No active holds",
+              secondary: student ? `Standing: ${student.standing}` : "Registration clear",
+              meta: "OK",
+            },
+          ];
+    base.sections = [{ title: "Registration holds", rows }];
+    base.actions = [
+      { label: "Student services", href: "/student/f/st-16-services", variant: "secondary" },
+      { label: "Profile", href: "/student/profile", variant: "secondary" },
+    ];
+    return base;
+  }
+
+  if (role === "student" && (normalized.endsWith("/documents") || normalized.includes("tax-document"))) {
+    const [credentials, taxDocs] = await Promise.all([
+      toPortalRowsFromCredentials(user),
+      (async () => {
+        const { listTaxDocuments } = await import("../student/surfaces.service.js");
+        const data = await listTaxDocuments(user);
+        return data.documents.map((d) => ({
+          primary: d.title,
+          secondary: `${d.docType} · ${d.taxYear}`,
+          meta: d.status,
+          href: "/student/f/st-26-tax-documents",
+        }));
+      })(),
+    ]);
+    base.sections = [
+      { title: "Credentials", rows: credentials },
+      { title: "Tax documents", rows: taxDocs },
+    ];
+    base.actions = [
+      { label: "Tax documents", href: "/student/f/st-26-tax-documents" },
+      { label: "Credentials", href: "/student/f/st-19-credentials", variant: "secondary" },
+    ];
+    return base;
+  }
+
+  if (role === "student" && normalized.endsWith("/advising")) {
+    const student = await prisma.student.findFirst({
+      where: { institutionId: user.institutionId, personId: user.personId },
+    });
+    const appointments = student
+      ? await prisma.advisingAppointment.findMany({
+          where: { institutionId: user.institutionId, studentId: student.id },
+          orderBy: { startsAt: "asc" },
+          take: 30,
+        })
+      : [];
+    const rows = appointments.map((a) => ({
+      primary: a.topic,
+      secondary: a.notes ?? a.status,
+      meta: a.startsAt ? new Date(a.startsAt).toLocaleString() : a.status,
+      href: "/student/advising",
+    }));
+    base.sections = [{ title: "Advising appointments", rows }];
+    base.actions = [{ label: "Open advising", href: "/student/advising" }];
     return base;
   }
 
@@ -495,15 +619,34 @@ export async function buildPortalView(user: SessionClaims, path: string): Promis
     return base;
   }
 
-  if (normalized.endsWith("/notifications")) {
+  if (normalized.endsWith("/notifications") || (role === "student" && normalized.endsWith("/announcements"))) {
     const rows = await notificationsFor(user);
+    base.title = normalized.endsWith("/announcements") ? "Announcements" : base.title;
     base.metrics = [
       { label: "Unread", value: String(rows.filter((r) => r.meta === "Unread").length) },
       { label: "Total", value: String(rows.length) },
       { label: "Term", value: meta.termCode },
     ];
-    base.sections = [{ title: "Inbox", rows }];
-    base.actions = [{ label: "Messages", href: role === "instructor" ? "/instructor/messages" : "/student/messages", variant: "secondary" }];
+    base.sections = [
+      {
+        title: normalized.endsWith("/announcements") ? "Campus announcements" : "Inbox",
+        rows: rows.map((row) => ({
+          ...row,
+          href: normalized.endsWith("/announcements") ? "/student/announcements" : row.href,
+        })),
+      },
+    ];
+    base.actions = [
+      {
+        label: normalized.endsWith("/announcements") ? "Open announcements" : "Messages",
+        href: normalized.endsWith("/announcements")
+          ? "/student/announcements"
+          : role === "instructor"
+            ? "/instructor/messages"
+            : "/student/messages",
+        variant: "secondary",
+      },
+    ];
     return base;
   }
 
@@ -584,23 +727,25 @@ export async function buildPortalView(user: SessionClaims, path: string): Promis
     return base;
   }
 
+  // Generic fallback — never serve seeded PortalRecord fixture rows to students.
+  if (role === "student") {
+    base.sections = [{ title: `${title} records`, rows: [] }];
+    base.actions = [{ label: "Home", href: "/student" }];
+    if (path.startsWith("/m/")) {
+      base.actions = [
+        { label: "Mobile home", href: "/m/student" },
+        { label: "Desktop", href: "/student", variant: "secondary" },
+      ];
+    }
+    return base;
+  }
+
   // Generic: DB portal records for this path (+ role-wide fallback)
   let rows = await portalRows(user.institutionId, normalized, user.accountId);
   if (!rows.length) {
     // Strip /f/ slug folders to role wildcards
     const roleWild = `/${role}/*`;
     rows = await portalRows(user.institutionId, roleWild, user.accountId);
-  }
-  if (!rows.length && normalized.includes("/f/")) {
-    rows = [
-      {
-        primary: title,
-        secondary: `Live Figma screen ${normalized}`,
-        meta: meta.termCode,
-        href: role === "admin" ? "/admin" : `/${role}`,
-      },
-    ];
-    // Still mark as API-composed from session/institution — not client fixtures.
   }
   base.sections = [{ title: `${title} records`, rows }];
   base.actions = [{ label: "Home", href: role === "admin" ? "/admin" : `/${role}` }];

@@ -1,7 +1,12 @@
 "use client";
 
-import { GlobalSearchView } from "@/components/GlobalSearchView";
+import { Suspense } from "react";
+import { InstructorSearchView } from "@/components/InstructorSearchView";
 
 export default function Page() {
-  return <GlobalSearchView role="instructor" />;
+  return (
+    <Suspense fallback={<div style={{ padding: 24 }}>Loading search…</div>}>
+      <InstructorSearchView />
+    </Suspense>
+  );
 }

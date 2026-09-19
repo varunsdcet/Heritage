@@ -15,6 +15,7 @@ import {
 } from "@myheritage/ui";
 import { clearSession, loadSession, type Session } from "@/lib/api";
 import { resolveNav, type ShellRole } from "@/lib/nav";
+import { AskHeritageFab } from "@/components/AskHeritageFab";
 
 type Props = {
   role: ShellRole;
@@ -204,6 +205,13 @@ export function ScreenScaffold({
         </>
       ) : null}
       {children}
+      {role === "instructor" ||
+      role === "student" ||
+      role === "admin" ||
+      role === "applicant" ||
+      role === "employer" ? (
+        <AskHeritageFab role={role} />
+      ) : null}
     </AppShell>
   );
 }

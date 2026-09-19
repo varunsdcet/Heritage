@@ -1,7 +1,12 @@
 "use client";
 
-import { LiveScreen } from "@/components/LiveScreen";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 
 export default function Page() {
-  return <LiveScreen path="/student/f/st-20-career" />;
+  const router = useRouter();
+  useEffect(() => {
+    router.replace("/student/career");
+  }, [router]);
+  return <p style={{ color: "var(--mh-text-muted)", padding: 24 }}>Opening career opportunities…</p>;
 }

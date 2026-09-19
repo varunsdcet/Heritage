@@ -1,7 +1,6 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { AdminSisScreen } from "@/components/AdminSisScreen";
-
+/** Real auth is /login — not a mock screen inside the admin shell. */
 export default function Page() {
-  return <AdminSisScreen path="/admin/f/sh-01-login-admin" />;
+  redirect("/login");
 }

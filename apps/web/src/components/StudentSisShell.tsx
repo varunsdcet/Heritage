@@ -1,11 +1,19 @@
 "use client";
 
 import type { FormEvent, ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
-import { clearSession, loadSession } from "@/lib/api";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { api, clearSession, loadSession } from "@/lib/api";
+import { AskHeritageFab } from "@/components/AskHeritageFab";
 
-type NavChild = { label: string; href: string; match?: string[] };
+type NavChild = {
+  label: string;
+  href: string;
+  match?: string[];
+  section?: string;
+  exact?: boolean;
+};
+
 type NavItem = {
   label: string;
   href: string;
@@ -13,89 +21,124 @@ type NavItem = {
   children?: NavChild[];
 };
 
-const NAV: NavItem[] = [
-  { label: "Dashboard", href: "/student", icon: "bar-chart" },
+type ActiveCourse = {
+  sectionId: string;
+  courseCode: string;
+  courseTitle: string;
+  sectionCode: string;
+  enrolmentStatus: "enrolled" | "completed";
+};
+
+const BASE_NAV: NavItem[] = [
+  {
+    label: "My Profile / Settings",
+    href: "/student/profile",
+    icon: "user",
+    children: [
+      { label: "Security Settings", href: "/student/security" },
+      { label: "Change Time Zone", href: "/student/timezone" },
+      { label: "Request to Update Personal Details", href: "/student/profile" },
+    ],
+  },
   {
     label: "My Courses",
     href: "/student/courses",
     icon: "book",
     children: [
-      { label: "My courses", href: "/student/courses", match: ["/student/courses"] },
-      { label: "Continue learning", href: "/student/continue" },
-      { label: "Modules", href: "/student/modules" },
       {
-        label: "Assignments",
-        href: "/student/assignments",
-        match: ["/student/assignments", "/student/f/st-04-assignments", "/student/f/st-05-assignment-detail"],
+        section: "MISCELLANEOUS",
+        label: "All My Courses / Schedule",
+        href: "/student/courses",
+        exact: true,
       },
-      {
-        label: "Assessments",
-        href: "/student/assessments",
-        match: ["/student/assessments", "/student/f/st-06-assessments"],
-      },
-      {
-        label: "Lectures",
-        href: "/student/lectures",
-        match: ["/student/lectures", "/student/f/st-11-lecture-detail"],
-      },
-      {
-        label: "Labs",
-        href: "/student/labs",
-        match: ["/student/labs", "/student/f/st-13-lab-detail"],
-      },
+      { section: "MISCELLANEOUS", label: "Course History", href: "/student/course-history" },
     ],
   },
   {
-    label: "Schedule",
-    href: "/student/calendar",
-    icon: "calendar",
-    children: [
-      { label: "Calendar", href: "/student/calendar" },
-      { label: "Attendance", href: "/student/attendance" },
-      { label: "Announcements", href: "/student/announcements" },
-    ],
-  },
-  { label: "Grades", href: "/student/grades", icon: "briefcase" },
-  {
-    label: "Services",
-    href: "/student/advising",
-    icon: "school",
-    children: [
-      { label: "Degree progress", href: "/student/degree" },
-      { label: "Study with AI", href: "/student/study" },
-      { label: "Career", href: "/student/career" },
-      { label: "Advising", href: "/student/advising" },
-      { label: "Campus services", href: "/student/f/st-16-services" },
-      { label: "Practicum", href: "/student/f/st-17-practicum" },
-      { label: "Career", href: "/student/f/st-20-career" },
-      { label: "Fees", href: "/student/fees" },
-      { label: "Documents", href: "/student/documents" },
-      { label: "Library", href: "/student/library" },
-      { label: "Credentials", href: "/student/f/st-19-credentials" },
-      { label: "Holds", href: "/student/holds" },
-      { label: "Success", href: "/student/success" },
-    ],
-  },
-  {
-    label: "Messages",
-    href: "/student/messages",
+    label: "Workshops",
+    href: "/student/workshops",
     icon: "users",
     children: [
-      { label: "Inbox", href: "/student/messages" },
-      { label: "Ask Heritage", href: "/student/ask" },
+      { label: "My Workshops", href: "/student/workshops" },
+      { label: "Available Workshops", href: "/student/workshops?tab=available" },
+      { label: "Completed Workshops", href: "/student/workshops?tab=completed" },
     ],
   },
   {
-    label: "Account",
-    href: "/student/profile",
-    icon: "user",
+    label: "My Records",
+    href: "/student/grades",
+    icon: "briefcase",
     children: [
-      { label: "Profile", href: "/student/profile" },
+      { label: "Final Marks / Grades", href: "/student/grades" },
+      { label: "My Accomplishments & Badges", href: "/student/accomplishments" },
+      { label: "Extracurricular Records", href: "/student/f/st-25-extracurricular" },
+      { label: "Program Plan", href: "/student/f/st-23-program-plan" },
+      { label: "Pending Required Tasks", href: "/student/f/st-27-required-tasks" },
+      { label: "My Documents", href: "/student/documents" },
+      { label: "Tax Documents / Forms", href: "/student/f/st-26-tax-documents" },
+      { label: "Financial Statements", href: "/student/fees" },
+    ],
+  },
+  {
+    label: "Request Forms",
+    href: "/student/leave-of-absence",
+    icon: "school",
+    children: [{ label: "Leave of Absence Application", href: "/student/leave-of-absence" }],
+  },
+  {
+    label: "Communication",
+    href: "/student/messages",
+    icon: "bell",
+    children: [
+      { label: "Message Center", href: "/student/messages" },
       { label: "Notifications", href: "/student/notifications" },
       { label: "Search", href: "/student/search" },
+      { label: "Ask MyHeritage", href: "/student/ask" },
     ],
   },
 ];
+
+function splitHref(href: string) {
+  const i = href.indexOf("?");
+  if (i < 0) return { pathname: href, query: {} as Record<string, string> };
+  return { pathname: href.slice(0, i), query: Object.fromEntries(new URLSearchParams(href.slice(i + 1))) };
+}
+
+function pathMatches(pathname: string, href: string, extra: string[] = [], exact = false) {
+  const targetPath = splitHref(href).pathname;
+  return [targetPath, ...extra].some((target) => {
+    if (target === "/student") return pathname === "/student";
+    if (exact) return pathname === target;
+    return pathname === target || pathname.startsWith(`${target}/`);
+  });
+}
+
+function childMatches(pathname: string, child: NavChild, search: URLSearchParams, siblings: NavChild[] = []) {
+  const { pathname: hrefPath, query } = splitHref(child.href);
+  const extraHit = (child.match || []).some((target) => pathname === target || pathname.startsWith(`${target}/`));
+  if (extraHit) return true;
+  if (!pathMatches(pathname, hrefPath, [], child.exact)) return false;
+  const samePath = siblings.filter((s) => splitHref(s.href).pathname === hrefPath);
+  const keys = new Set(samePath.flatMap((s) => Object.keys(splitHref(s.href).query)));
+  if (!keys.size) return true;
+  for (const key of keys) {
+    const expected = query[key];
+    const fallback = key === "tab" ? "" : "";
+    const actual = search.get(key) || fallback;
+    if (expected) {
+      if (actual !== expected) return false;
+    } else if (search.get(key)) {
+      const other = samePath.map((s) => splitHref(s.href).query[key]).filter(Boolean);
+      if (other.includes(search.get(key) || "")) return false;
+    }
+  }
+  return true;
+}
+
+function isActive(pathname: string, item: NavItem, search: URLSearchParams) {
+  if (item.children?.length) return item.children.some((child) => childMatches(pathname, child, search, item.children));
+  return pathMatches(pathname, item.href);
+}
 
 function NavIcon({ name, active }: { name: string; active?: boolean }) {
   const stroke = active ? "#F1F0F7" : "#A29FBA";
@@ -111,12 +154,6 @@ function NavIcon({ name, active }: { name: string; active?: boolean }) {
     "aria-hidden": true as const,
   };
   switch (name) {
-    case "bar-chart":
-      return (
-        <svg {...common}>
-          <path d="M4 20V10M12 20V4M20 20v-7" />
-        </svg>
-      );
     case "user":
       return (
         <svg {...common}>
@@ -138,6 +175,13 @@ function NavIcon({ name, active }: { name: string; active?: boolean }) {
           <path d="M5 10.5V17c0 1.5 3 3 7 3s7-1.5 7-3v-6.5" />
         </svg>
       );
+    case "bell":
+      return (
+        <svg {...common}>
+          <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+          <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+        </svg>
+      );
     case "users":
       return (
         <svg {...common}>
@@ -153,52 +197,62 @@ function NavIcon({ name, active }: { name: string; active?: boolean }) {
           <path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
         </svg>
       );
-    case "calendar":
-      return (
-        <svg {...common}>
-          <rect x="3" y="5" width="18" height="16" rx="2" />
-          <path d="M8 3v4M16 3v4M3 11h18" />
-        </svg>
-      );
     default:
       return <span style={{ width: 16, height: 16 }} />;
   }
 }
 
-function pathMatches(pathname: string, href: string, extra: string[] = []) {
-  return [href, ...extra].some((target) => {
-    if (target === "/student") return pathname === "/student";
-    return pathname === target || pathname.startsWith(`${target}/`);
+function buildNav(activeCourses: ActiveCourse[]): NavItem[] {
+  return BASE_NAV.map((item) => {
+    if (item.href !== "/student/courses") return item;
+    const courseLinks: NavChild[] = activeCourses.map((c) => ({
+      section: "ACTIVE COURSES",
+      label: `${c.courseCode} (${c.sectionCode})`,
+      href: `/student/courses/${c.sectionId}`,
+    }));
+    const misc = (item.children ?? []).filter((c) => c.section === "MISCELLANEOUS");
+    return {
+      ...item,
+      children: [...courseLinks, ...misc],
+    };
   });
 }
 
-function childMatches(pathname: string, child: NavChild) {
-  return pathMatches(pathname, child.href, child.match);
-}
-
-function isActive(pathname: string, item: NavItem) {
-  if (item.children?.length) return item.children.some((child) => childMatches(pathname, child));
-  return pathMatches(pathname, item.href);
-}
-
-export function StudentSisShell({
-  children,
-  title,
-  subtitle,
-  activeHref,
-  userName = "Student",
-}: {
+type ShellProps = {
   children: ReactNode;
   title: string;
   subtitle?: string;
   activeHref?: string;
   userName?: string;
-}) {
+  studentNumber?: string;
+};
+
+export function StudentSisShell(props: ShellProps) {
+  return (
+    <Suspense fallback={null}>
+      <StudentSisShellInner {...props} />
+    </Suspense>
+  );
+}
+
+function StudentSisShellInner({
+  children,
+  title,
+  subtitle,
+  activeHref,
+  userName = "Student",
+  studentNumber = "",
+}: ShellProps) {
   const router = useRouter();
   const pathname = usePathname() || "/student";
+  const searchParams = useSearchParams();
   const current = activeHref || pathname;
   const [openGroup, setOpenGroup] = useState<string | null>(null);
   const [searchQ, setSearchQ] = useState("");
+  const [resolvedNumber, setResolvedNumber] = useState(studentNumber);
+  const [activeCourses, setActiveCourses] = useState<ActiveCourse[]>([]);
+
+  const nav = useMemo(() => buildNav(activeCourses), [activeCourses]);
 
   const initials = useMemo(
     () =>
@@ -212,9 +266,79 @@ export function StudentSisShell({
   );
 
   useEffect(() => {
-    const match = NAV.find((item) => isActive(current, item) && item.children);
+    setResolvedNumber(studentNumber);
+  }, [studentNumber]);
+
+  useEffect(() => {
+    if (studentNumber) return;
+    const session = loadSession();
+    if (!session?.accessToken) return;
+    let cancelled = false;
+    api<{ studentNumber?: string }>("/me/profile", {}, session.accessToken)
+      .then((p) => {
+        if (!cancelled && p.studentNumber) setResolvedNumber(p.studentNumber);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [studentNumber]);
+
+  useEffect(() => {
+    const session = loadSession();
+    if (!session?.accessToken || !session.roles.includes("student")) return;
+    let cancelled = false;
+    api<{
+      courses?: ActiveCourse[];
+      items?: Array<{
+        sectionId: string;
+        code?: string;
+        courseCode?: string;
+        title?: string;
+        courseTitle?: string;
+        sectionCode?: string;
+        status?: string;
+        enrolmentStatus?: "enrolled" | "completed";
+      }>;
+    }>("/courses/me", {}, session.accessToken)
+      .then((payload) => {
+        if (cancelled) return;
+        const fromCourses = payload.courses ?? [];
+        const fromItems = (payload.items ?? []).map((row) => ({
+          sectionId: row.sectionId,
+          courseCode: row.courseCode || row.code || "",
+          courseTitle: row.courseTitle || row.title || "",
+          sectionCode: row.sectionCode || "",
+          enrolmentStatus: (row.enrolmentStatus ||
+            (row.status === "completed" ? "completed" : "enrolled")) as "enrolled" | "completed",
+        }));
+        const list = fromCourses.length ? fromCourses : fromItems;
+        const enrolled = list.filter((c) => c.enrolmentStatus === "enrolled");
+        enrolled.sort((a, b) => {
+          const rank = (code: string) => (/^ACSW\s*500$/i.test(code) ? 0 : 1);
+          const diff = rank(a.courseCode) - rank(b.courseCode);
+          if (diff !== 0) return diff;
+          return a.courseCode.localeCompare(b.courseCode);
+        });
+        setActiveCourses(enrolled);
+      })
+      .catch(() => {
+        if (!cancelled) setActiveCourses([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function signOut() {
+    clearSession();
+    router.replace("/login");
+  }
+
+  useEffect(() => {
+    const match = nav.find((item) => isActive(current, item, searchParams) && item.children);
     setOpenGroup(match?.href ?? null);
-  }, [current]);
+  }, [current, nav, searchParams]);
 
   function onSearch(event: FormEvent) {
     event.preventDefault();
@@ -226,13 +350,18 @@ export function StudentSisShell({
     <div className="mh-teacher mh-student-shell" data-portal="student">
       <aside className="mh-teacher__sidebar">
         <div className="mh-teacher__sidebar-top">
-          <button type="button" className="mh-teacher__brand mh-student-shell__brand" aria-label="Heritage Community College" onClick={() => router.push("/student")}>
+          <button
+            type="button"
+            className="mh-teacher__brand mh-student-shell__brand"
+            aria-label="Heritage Community College"
+            onClick={() => router.push("/student")}
+          >
             <img src="/brand/login_logo.png" alt="Heritage Community College" className="mh-student-shell__logo" />
           </button>
 
           <nav className="mh-teacher__nav" aria-label="Student">
-            {NAV.map((item) => {
-              const active = isActive(current, item);
+            {nav.map((item) => {
+              const active = isActive(current, item, searchParams);
               const expanded = Boolean(item.children) && openGroup === item.href;
               return (
                 <div key={item.href} className={`mh-teacher__nav-group${active ? " is-active" : ""}`}>
@@ -265,17 +394,25 @@ export function StudentSisShell({
                   </button>
                   {item.children && expanded ? (
                     <div className="mh-teacher__nav-sub">
-                      {item.children.map((child) => (
-                        <button
-                          key={child.href}
-                          type="button"
-                          className={`mh-teacher__nav-subitem${childMatches(current, child) ? " is-active" : ""}`}
-                          onClick={() => router.push(child.href)}
-                        >
-                          <span className="mh-teacher__nav-dot" />
-                          {child.label}
-                        </button>
-                      ))}
+                      {item.children.map((child, index) => {
+                        const prev = item.children![index - 1];
+                        const showSection = Boolean(child.section && child.section !== prev?.section);
+                        return (
+                          <div key={`${child.href}-${child.label}`}>
+                            {showSection ? <p className="mh-teacher__nav-section">{child.section}</p> : null}
+                            <button
+                              type="button"
+                              className={`mh-teacher__nav-subitem${
+                                childMatches(current, child, searchParams, item.children) ? " is-active" : ""
+                              }`}
+                              onClick={() => router.push(child.href)}
+                            >
+                              <span className="mh-teacher__nav-dot" />
+                              {child.label}
+                            </button>
+                          </div>
+                        );
+                      })}
                     </div>
                   ) : null}
                 </div>
@@ -304,15 +441,7 @@ export function StudentSisShell({
             <button type="button" aria-label="Notifications" onClick={() => router.push("/student/notifications")}>
               <img src="/brand/icons/bell.svg" alt="" width={16} height={16} />
             </button>
-            <button
-              type="button"
-              className="mh-student-shell__sign-out"
-              aria-label="Sign out"
-              onClick={() => {
-                clearSession();
-                router.replace("/login");
-              }}
-            >
+            <button type="button" className="mh-student-shell__sign-out" aria-label="Sign out" onClick={signOut}>
               <span>Sign out</span>
             </button>
           </div>
@@ -322,7 +451,7 @@ export function StudentSisShell({
       <div className="mh-teacher__main">
         <header className="mh-teacher__header">
           <div className="mh-teacher__title-group">
-            <h1>{title}</h1>
+            {title ? <h1>{title}</h1> : null}
             {subtitle ? <p>{subtitle}</p> : null}
           </div>
           <div className="mh-teacher__header-actions">
@@ -334,37 +463,49 @@ export function StudentSisShell({
                 placeholder="Search your portal…"
                 aria-label="Search student portal"
               />
-              <kbd>⌘K</kbd>
             </form>
-            <button type="button" className="mh-teacher__ask-ai" onClick={() => router.push("/student/ask")}>
-              <img src="/brand/icons/sparkle.svg" alt="" width={14} height={14} />
-              Ask Heritage
+            <button
+              type="button"
+              className="mh-teacher__bell"
+              aria-label="Mail"
+              title="Mail"
+              onClick={() => router.push("/student/messages")}
+            >
+              <img src="/brand/icons/file-text.svg" alt="" width={18} height={18} />
             </button>
             <button
               type="button"
               className="mh-teacher__bell"
-              aria-label="Notifications"
-              onClick={() => router.push("/student/notifications")}
+              aria-label="Home"
+              title="Home"
+              onClick={() => router.push("/student")}
             >
-              <img src="/brand/icons/bell.svg" alt="" width={18} height={18} />
+              <img src="/brand/icons/school.svg" alt="" width={18} height={18} />
             </button>
-            <button
-              type="button"
-              className="mh-teacher__profile"
-              onClick={() => router.push("/student/profile")}
-              aria-label="Profile"
-            >
-              <span className="mh-teacher__avatar mh-teacher__avatar--photo" aria-hidden>
+            <button type="button" className="mh-teacher__bell" aria-label="Log out" title="Log out" onClick={signOut}>
+              <img src="/brand/icons/chevron-right.svg" alt="" width={18} height={18} />
+            </button>
+            <div className="mh-teacher__profile">
+              <button
+                type="button"
+                className="mh-teacher__avatar mh-teacher__avatar--photo"
+                aria-label="Profile"
+                onClick={() => router.push("/student/profile")}
+              >
                 {initials}
-              </span>
+              </button>
               <span className="mh-teacher__profile-meta">
                 <strong>{userName}</strong>
-                <span className="mh-teacher__role-pill">STUDENT</span>
+                {resolvedNumber ? <span className="mh-student-shell__number">{resolvedNumber}</span> : null}
+                <button type="button" className="mh-teacher__logout-link" onClick={signOut}>
+                  Log Out
+                </button>
               </span>
-            </button>
+            </div>
           </div>
         </header>
         <div className="mh-teacher__scroll">{children}</div>
+        <AskHeritageFab role="student" />
       </div>
     </div>
   );

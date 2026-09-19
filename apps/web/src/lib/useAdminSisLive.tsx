@@ -52,8 +52,6 @@ const CHROME_KEYS = new Set([
   "complianceNav",
   "academicsNav",
   "searchPlaceholder",
-  "filters",
-  "columns",
   "columnTemplate",
   "hideRowAction",
   "rowHref",

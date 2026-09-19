@@ -21,14 +21,16 @@ export async function verifyPassword(password: string, hash: string) {
 }
 
 /** Access-token lifetime kept long for campus retest / day-to-day portal use. */
-const SESSION_TTL = "30d";
-const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const SESSION_TTL_LONG = "30d";
+const SESSION_TTL_LONG_MS = 30 * 24 * 60 * 60 * 1000;
+const SESSION_TTL_SHORT = "12h";
+const SESSION_TTL_SHORT_MS = 12 * 60 * 60 * 1000;
 
-export async function signSession(claims: SessionClaims) {
+export async function signSession(claims: SessionClaims, ttl: string = SESSION_TTL_LONG) {
   return new SignJWT(claims)
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime(SESSION_TTL)
+    .setExpirationTime(ttl)
     .sign(secretKey());
 }
 
@@ -62,11 +64,36 @@ export async function loginWithPassword(input: {
   deviceFingerprint: string;
   ipAddress: string;
   userAgent: string;
+  remember?: boolean;
 }) {
-  const account = await prisma.account.findFirst({
-    where: { email: input.email.toLowerCase() },
-    include: { person: true },
-  });
+  const identifier = input.email.trim();
+  const looksLikeEmail = identifier.includes("@");
+  let account = looksLikeEmail
+    ? await prisma.account.findFirst({
+        where: { email: identifier.toLowerCase() },
+        include: { person: true },
+      })
+    : null;
+
+  if (!account && !looksLikeEmail) {
+    const student = await prisma.student.findFirst({
+      where: { studentNumber: { equals: identifier, mode: "insensitive" } },
+      include: { person: { include: { accounts: true } } },
+    });
+    const linked = student?.person.accounts.find((a) => a.status === "active") ?? student?.person.accounts[0];
+    if (linked) {
+      account = await prisma.account.findFirst({
+        where: { id: linked.id },
+        include: { person: true },
+      });
+    }
+  }
+
+  // Fallback: some clients still send student number in email field with wrong casing via email path
+  if (!account && looksLikeEmail === false) {
+    // already tried student number above
+  }
+
   if (!account || account.status !== "active") {
     throw Object.assign(new Error("Invalid credentials"), { code: "UNAUTHORIZED", status: 401 });
   }
@@ -74,6 +101,10 @@ export async function loginWithPassword(input: {
   if (!ok) {
     throw Object.assign(new Error("Invalid credentials"), { code: "UNAUTHORIZED", status: 401 });
   }
+
+  const remember = input.remember !== false;
+  const ttl = remember ? SESSION_TTL_LONG : SESSION_TTL_SHORT;
+  const ttlMs = remember ? SESSION_TTL_LONG_MS : SESSION_TTL_SHORT_MS;
 
   const policy = await prisma.securityPolicy.findUnique({ where: { institutionId: account.institutionId } });
   const max = policy?.maxConcurrentSessions ?? 3;
@@ -99,7 +130,7 @@ export async function loginWithPassword(input: {
         ipAddress: input.ipAddress,
         userAgent: input.userAgent,
         geoLocation: "Surrey, BC",
-        expiresAt: new Date(Date.now() + SESSION_TTL_MS),
+        expiresAt: new Date(Date.now() + ttlMs),
       },
     });
     await writeAuditAndOutbox(tx, {
@@ -108,7 +139,7 @@ export async function loginWithPassword(input: {
       eventName: "Account.login",
       purpose: "authentication",
       before: null,
-      after: { sessionId: created.id, ip: input.ipAddress },
+      after: { sessionId: created.id, ip: input.ipAddress, remember },
       source: "auth.login",
       correlationId,
     });
@@ -124,7 +155,7 @@ export async function loginWithPassword(input: {
     sessionId: session.id,
   };
 
-  const accessToken = await signSession(claims);
+  const accessToken = await signSession(claims, ttl);
   return {
     accessToken,
     accountId: account.id,
@@ -135,6 +166,39 @@ export async function loginWithPassword(input: {
     familyName: account.person.familyName,
     requiresMfa: account.mfaEnabled,
   };
+}
+
+export async function changePassword(input: {
+  accountId: string;
+  institutionId: string;
+  currentPassword: string;
+  newPassword: string;
+  keepSessionId?: string;
+}) {
+  const account = await prisma.account.findFirst({
+    where: { id: input.accountId, institutionId: input.institutionId },
+  });
+  if (!account || account.status !== "active") {
+    throw Object.assign(new Error("Account not found"), { code: "NOT_FOUND", status: 404 });
+  }
+  const ok = await verifyPassword(input.currentPassword, account.passwordHash);
+  if (!ok) {
+    throw Object.assign(new Error("Current password is incorrect"), { code: "VALIDATION_ERROR", status: 400 });
+  }
+  if (input.currentPassword === input.newPassword) {
+    throw Object.assign(new Error("New password must be different"), { code: "VALIDATION_ERROR", status: 400 });
+  }
+  const passwordHash = await hashPassword(input.newPassword);
+  await prisma.$transaction([
+    prisma.account.update({ where: { id: account.id }, data: { passwordHash } }),
+    prisma.session.deleteMany({
+      where: {
+        accountId: account.id,
+        ...(input.keepSessionId ? { id: { not: input.keepSessionId } } : {}),
+      },
+    }),
+  ]);
+  return { ok: true as const };
 }
 
 export * from "./approvals.js";

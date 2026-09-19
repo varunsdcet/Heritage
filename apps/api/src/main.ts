@@ -20,6 +20,7 @@ import { academicRouter } from "./modules/academic/academic.router.js";
 import { aiRouter } from "./modules/ai/ai.router.js";
 import { applicantRouter } from "./modules/applicant/applicant.router.js";
 import { employerRouter } from "./modules/employer/employer.router.js";
+import { mailRouter } from "./modules/mail/mail.router.js";
 import { errorHandler } from "./middleware/error-handler.js";
 
 const app: Express = express();
@@ -87,6 +88,7 @@ app.get("/api/docs", (_req, res) => {
     <li>GET /portal/bootstrap</li>
     <li>GET /admin/users</li>
     <li>POST /admin/users</li>
+    <li>GET /admin/campus-overview</li>
     <li>GET /admin/sections</li>
     <li>POST /admin/sections</li>
     <li>POST /admin/enrolments</li>
@@ -114,6 +116,7 @@ app.use("/gradebooks", gradesRouter);
 app.use("/grade-items", gradesRouter);
 app.use("/approvals", approvalsRouter);
 app.use("/messages", messagesRouter);
+app.use("/mail", mailRouter);
 app.use("/search", searchRouter);
 app.use("/ai", aiRouter);
 app.use("/catalog", catalogRouter);

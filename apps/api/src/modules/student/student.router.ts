@@ -23,11 +23,36 @@ import {
   listStudentResources,
   listStudentServiceRequests,
   listStudentSessions,
+  listStudentWorkshops,
+  registerStudentWorkshop,
+  listLeaveOfAbsence,
+  createLeaveOfAbsence,
+  listRequiredTasks,
+  completeRequiredTask,
+  listTaxDocuments,
+  getStudentTaxPdf,
+  listExtracurricular,
+  listStudentBadges,
+  listStudentCareer,
+  buildFinanceStatement,
   logPracticumHours,
   startAssessmentAttempt,
   submitAssessmentAttempt,
   upsertLabNotebook,
 } from "./surfaces.service.js";
+import {
+  composeMail,
+  createCustomMailFolder,
+  getCourseEvaluation,
+  getMailboxSettings,
+  getStudentCourseLms,
+  listAudienceAccounts,
+  listMailbox,
+  listStudentCalendars,
+  replyMail,
+  submitCourseEvaluation,
+  updateMailboxSettings,
+} from "./wave3.service.js";
 
 export const studentRouter: Router = Router();
 
@@ -437,20 +462,28 @@ studentRouter.get("/courses/:sectionId/content", requireAuth, requireRoles("stud
       state ? ((JSON.parse(state.payloadJson) as { completed?: string[] }).completed ?? []) : [],
     );
     const items = [
-      ...enrolment.section.classSessions.map((session) => ({
-        id: `session:${session.id}`,
-        kind: "lecture" as const,
-        title: session.title,
-        detail: `${session.startsAt.toISOString()}${session.location ? ` · ${session.location}` : ""}`,
-        href: session.joinUrl,
-        completed: completed.has(`session:${session.id}`),
-      })),
+      ...enrolment.section.classSessions.map((session) => {
+        const isLab = session.sessionKind === "lab";
+        const detailHref = isLab
+          ? `/student/labs`
+          : `/student/f/st-11-lecture-detail?sessionId=${session.id}`;
+        return {
+          id: `session:${session.id}`,
+          kind: (isLab ? "lab" : "lecture") as "lecture" | "lab",
+          title: session.title,
+          detail: `${session.startsAt.toISOString()}${session.location ? ` · ${session.location}` : ""}`,
+          href: detailHref,
+          joinUrl: session.joinUrl?.startsWith("https://") ? session.joinUrl : null,
+          completed: completed.has(`session:${session.id}`),
+        };
+      }),
       ...enrolment.section.assignments.map((assignment) => ({
         id: `assignment:${assignment.id}`,
         kind: "resource" as const,
         title: assignment.title,
         detail: assignment.dueAt ? `Due ${assignment.dueAt.toISOString()}` : "Assignment resource",
         href: `/student/assignments/${assignment.id}`,
+        joinUrl: null as string | null,
         completed: completed.has(`assignment:${assignment.id}`),
       })),
     ];
@@ -646,7 +679,103 @@ studentRouter.post("/practicum/hours", requireAuth, requireRoles("student"), asy
 
 studentRouter.get("/finance", requireAuth, requireRoles("student"), async (req, res, next) => {
   try {
-    res.json(await listStudentFinance((req as AuthedRequest).user));
+    const termId = typeof req.query.financialTermId === "string" ? req.query.financialTermId : null;
+    res.json(await listStudentFinance((req as AuthedRequest).user, termId));
+  } catch (error) {
+    next(error);
+  }
+});
+
+studentRouter.get("/calendars", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    res.json(await listStudentCalendars((req as AuthedRequest).user));
+  } catch (error) {
+    next(error);
+  }
+});
+
+studentRouter.get("/courses/:sectionId/lms", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    res.json(await getStudentCourseLms((req as AuthedRequest).user, String(req.params.sectionId)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+studentRouter.get("/evaluations/:id", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    res.json({ evaluation: await getCourseEvaluation((req as AuthedRequest).user, String(req.params.id)) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+studentRouter.post("/evaluations/:id/submit", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    res.json(
+      await submitCourseEvaluation(user, String(req.params.id), req.body, (req as AuthedRequest).correlationId),
+    );
+  } catch (error) {
+    next(error);
+  }
+});
+
+studentRouter.get("/mail", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    const folderId = typeof req.query.folderId === "string" ? req.query.folderId : null;
+    res.json(await listMailbox((req as AuthedRequest).user, folderId));
+  } catch (error) {
+    next(error);
+  }
+});
+
+studentRouter.post("/mail/folders", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    res.status(201).json(await createCustomMailFolder((req as AuthedRequest).user, req.body));
+  } catch (error) {
+    next(error);
+  }
+});
+
+studentRouter.post("/mail/compose", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    res.status(201).json(await composeMail(user, req.body, (req as AuthedRequest).correlationId));
+  } catch (error) {
+    next(error);
+  }
+});
+
+studentRouter.post("/mail/threads/:threadId/reply", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    const threadId = String(req.params.threadId || "");
+    res.json(await replyMail(user, threadId, req.body, (req as AuthedRequest).correlationId));
+  } catch (error) {
+    next(error);
+  }
+});
+
+studentRouter.get("/mail/settings", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    res.json({ settings: await getMailboxSettings((req as AuthedRequest).user) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+studentRouter.patch("/mail/settings", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    res.json({ settings: await updateMailboxSettings((req as AuthedRequest).user, req.body) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+studentRouter.get("/mail/audience", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    res.json(await listAudienceAccounts((req as AuthedRequest).user));
   } catch (error) {
     next(error);
   }
@@ -663,6 +792,125 @@ studentRouter.get("/credentials", requireAuth, requireRoles("student"), async (r
 studentRouter.get("/resources", requireAuth, requireRoles("student"), async (req, res, next) => {
   try {
     res.json(await listStudentResources((req as AuthedRequest).user));
+  } catch (error) {
+    next(error);
+  }
+});
+
+studentRouter.get("/workshops", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    res.json(await listStudentWorkshops((req as AuthedRequest).user));
+  } catch (error) {
+    next(error);
+  }
+});
+
+studentRouter.post("/workshops/register", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    res.json(await registerStudentWorkshop(user, req.body, (req as AuthedRequest).correlationId));
+  } catch (error) {
+    next(error);
+  }
+});
+
+studentRouter.get("/leave-of-absence", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    res.json(await listLeaveOfAbsence((req as AuthedRequest).user));
+  } catch (error) {
+    next(error);
+  }
+});
+
+studentRouter.post("/leave-of-absence", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    res.status(201).json(await createLeaveOfAbsence(user, req.body, (req as AuthedRequest).correlationId));
+  } catch (error) {
+    next(error);
+  }
+});
+
+studentRouter.get("/required-tasks", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    res.json(await listRequiredTasks((req as AuthedRequest).user));
+  } catch (error) {
+    next(error);
+  }
+});
+
+studentRouter.post("/required-tasks/:taskId/complete", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    res.json(await completeRequiredTask(user, String(req.params.taskId), (req as AuthedRequest).correlationId));
+  } catch (error) {
+    next(error);
+  }
+});
+
+studentRouter.get("/tax-documents", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    res.json(await listTaxDocuments((req as AuthedRequest).user));
+  } catch (error) {
+    next(error);
+  }
+});
+
+studentRouter.get("/tax-documents/:id/pdf", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    const { sendPdf } = await import("../../lib/taxPdf.js");
+    const { pdf, filename } = await getStudentTaxPdf((req as unknown as AuthedRequest).user, String(req.params.id));
+    sendPdf(res, pdf, filename);
+  } catch (error) {
+    next(error);
+  }
+});
+
+studentRouter.get("/extracurricular", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    res.json(await listExtracurricular((req as AuthedRequest).user));
+  } catch (error) {
+    next(error);
+  }
+});
+
+studentRouter.get("/documents", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    const student = await prisma.student.findFirst({
+      where: { institutionId: user.institutionId, personId: user.personId },
+    });
+    if (!student) {
+      res.status(404).json({ error: { message: "Student not found" } });
+      return;
+    }
+    const { listStudentDocumentsForStudent } = await import("../admin/registrar-gaps.service.js");
+    res.json(await listStudentDocumentsForStudent(user.institutionId, student.id));
+  } catch (error) {
+    next(error);
+  }
+});
+
+studentRouter.get("/badges", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    res.json(await listStudentBadges((req as AuthedRequest).user));
+  } catch (error) {
+    next(error);
+  }
+});
+
+studentRouter.get("/career", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    res.json(await listStudentCareer((req as AuthedRequest).user));
+  } catch (error) {
+    next(error);
+  }
+});
+
+studentRouter.get("/finance/statement", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    const termId = typeof req.query.financialTermId === "string" ? req.query.financialTermId : null;
+    res.json(await buildFinanceStatement((req as AuthedRequest).user, termId));
   } catch (error) {
     next(error);
   }

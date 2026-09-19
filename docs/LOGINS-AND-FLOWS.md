@@ -25,6 +25,7 @@ Live campus OS map: every role, login, URL, and end-to-end flow.
 | Role | Name | Email | Lands on |
 |------|------|-------|----------|
 | **Admin** | Aisha Khan | `admin@heritage.edu` | `/admin` |
+| **Teacher** | Monica Dahiya | `monica.dahiya@myhccbc.com` | `/instructor` (My Profile) |
 | **Teacher** | Elena Vance | `vance.instructor@heritage.edu` | `/instructor` |
 | **Teacher** | James Pendelton | `pendelton@heritage.edu` | `/instructor` |
 | **Student** | Marcus Vance | `marcus.vance@heritage.edu` | `/student` |

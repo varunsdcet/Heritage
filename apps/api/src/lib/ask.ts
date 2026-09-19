@@ -1,4 +1,15 @@
 const DEFAULT_ASK_URL = "https://onlinemandiapp.com/Humanitix/api/ask";
+const ASK_TIMEOUT_MS = 8_000;
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = ASK_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export type AskResult = {
   answer: string;
@@ -13,7 +24,7 @@ function askConfigured() {
 
 async function callHumanitixAsk(systemPrompt: string, question: string): Promise<AskResult> {
   const url = process.env.HUMANITIX_ASK_URL || DEFAULT_ASK_URL;
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ system_prompt: systemPrompt, question }),
@@ -27,7 +38,7 @@ async function callHumanitixAsk(systemPrompt: string, question: string): Promise
     answer = JSON.stringify(answer);
   }
   return {
-    answer: String(answer),
+    answer: String(answer).trim(),
     model: body.model ? `humanitix:${body.model}` : "humanitix:ask",
     source: "humanitix",
   };
@@ -36,7 +47,7 @@ async function callHumanitixAsk(systemPrompt: string, question: string): Promise
 async function callOpenAi(systemPrompt: string, question: string): Promise<AskResult> {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("OPENAI_API_KEY missing");
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  const response = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -61,7 +72,7 @@ async function callOpenAi(systemPrompt: string, question: string): Promise<AskRe
 async function callAnthropic(systemPrompt: string, question: string): Promise<AskResult> {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) throw new Error("ANTHROPIC_API_KEY missing");
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+  const response = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -105,21 +116,33 @@ Never invent student grades or financial balances — tell the user to open the 
   const errors: string[] = [];
   if (askConfigured()) {
     try {
-      return await callHumanitixAsk(systemPrompt, question);
+      const result = await callHumanitixAsk(systemPrompt, question);
+      if (!result.answer || result.answer.trim().toLowerCase() === question.toLowerCase()) {
+        throw new Error("Humanitix returned empty or echoed question");
+      }
+      return result;
     } catch (err) {
       errors.push(err instanceof Error ? err.message : "humanitix failed");
     }
   }
   if (process.env.ANTHROPIC_API_KEY) {
     try {
-      return await callAnthropic(systemPrompt, question);
+      const result = await callAnthropic(systemPrompt, question);
+      if (!result.answer || result.answer.trim().toLowerCase() === question.toLowerCase()) {
+        throw new Error("Anthropic returned empty or echoed question");
+      }
+      return result;
     } catch (err) {
       errors.push(err instanceof Error ? err.message : "anthropic failed");
     }
   }
   if (process.env.OPENAI_API_KEY) {
     try {
-      return await callOpenAi(systemPrompt, question);
+      const result = await callOpenAi(systemPrompt, question);
+      if (!result.answer || result.answer.trim().toLowerCase() === question.toLowerCase()) {
+        throw new Error("OpenAI returned empty or echoed question");
+      }
+      return result;
     } catch (err) {
       errors.push(err instanceof Error ? err.message : "openai failed");
     }

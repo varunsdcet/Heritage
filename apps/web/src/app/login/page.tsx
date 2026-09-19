@@ -8,6 +8,14 @@ function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
+function isValidStudentNumber(value: string) {
+  return /^ST-?\d{4}-?\d{2,}$/i.test(value.replace(/\s/g, "")) || /^[A-Z0-9][A-Z0-9._-]{2,}$/i.test(value);
+}
+
+function isValidIdentifier(value: string) {
+  return isValidEmail(value) || isValidStudentNumber(value);
+}
+
 function homeForRoles(roles: string[]) {
   if (roles.includes("instructor")) return "/instructor";
   if (roles.includes("admin") || roles.includes("registrar")) return "/admin";
@@ -20,7 +28,7 @@ function homeForRoles(roles: string[]) {
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [email, setEmail] = useState("marcus.vance@heritage.edu");
+  const [email, setEmail] = useState("ST-2024-001");
   const [password, setPassword] = useState("Heritage!2026");
   const [showPassword, setShowPassword] = useState(false);
   const [remember, setRemember] = useState(true);
@@ -40,8 +48,8 @@ function LoginForm() {
   const emailTrimmed = email.trim();
   const emailError = useMemo(() => {
     if (!touchedEmail && !submitted) return null;
-    if (!emailTrimmed) return "Email is required.";
-    if (!isValidEmail(emailTrimmed)) return "Enter a valid email address.";
+    if (!emailTrimmed) return "Student number or email is required.";
+    if (!isValidIdentifier(emailTrimmed)) return "Enter a student number (e.g. ST-2024-001) or email.";
     return null;
   }, [emailTrimmed, touchedEmail, submitted]);
 
@@ -52,7 +60,7 @@ function LoginForm() {
     return null;
   }, [password, touchedPassword, submitted]);
 
-  const canSubmit = Boolean(emailTrimmed) && isValidEmail(emailTrimmed) && password.length >= 8 && !loading;
+  const canSubmit = Boolean(emailTrimmed) && isValidIdentifier(emailTrimmed) && password.length >= 8 && !loading;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -60,11 +68,11 @@ function LoginForm() {
     setTouchedEmail(true);
     setTouchedPassword(true);
     if (!emailTrimmed) {
-      setError("Email is required.");
+      setError("Student number or email is required.");
       return;
     }
-    if (!isValidEmail(emailTrimmed)) {
-      setError("Enter a valid email address.");
+    if (!isValidIdentifier(emailTrimmed)) {
+      setError("Enter a student number (e.g. ST-2024-001) or email.");
       return;
     }
     if (!password) {
@@ -78,12 +86,18 @@ function LoginForm() {
     setLoading(true);
     setError(null);
     try {
+      const identifier = isValidEmail(emailTrimmed) ? emailTrimmed.toLowerCase() : emailTrimmed;
+      const ua =
+        typeof navigator !== "undefined" && navigator.userAgent
+          ? navigator.userAgent.replace(/\s+/g, " ").slice(0, 48)
+          : "browser";
+      const deviceFingerprint = `web-${ua}-${remember ? "remember" : "session"}`.slice(0, 120);
       const session = await api<Session & { requiresMfa?: boolean }>("/auth/login", {
         method: "POST",
         body: JSON.stringify({
-          email: emailTrimmed.toLowerCase(),
+          email: identifier,
           password,
-          deviceFingerprint: `web-${typeof navigator !== "undefined" ? navigator.userAgent.slice(0, 48) : "device"}`,
+          deviceFingerprint: deviceFingerprint.length >= 8 ? deviceFingerprint : `web-device-${Date.now()}`,
           remember,
         }),
       });
@@ -91,7 +105,7 @@ function LoginForm() {
         setError("Multi-factor authentication is required for this account. Complete MFA with your institution before continuing.");
         return;
       }
-      saveSession(session);
+      saveSession(session, remember);
       const next = searchParams.get("next");
       router.push(next && next.startsWith("/") ? next : homeForRoles(session.roles));
     } catch (err) {
@@ -99,8 +113,12 @@ function LoginForm() {
       const friendly =
         /Can't reach database|ECONNREFUSED|database server/i.test(raw)
           ? "Campus services are temporarily unavailable. Start the database and try again."
+          : /Failed to fetch|NetworkError|Load failed|TypeError/i.test(raw)
+            ? "Cannot reach campus services. Hard-refresh the page and try again."
           : /Invalid credentials|unauthorized|401/i.test(raw)
-            ? "Email or password is incorrect."
+            ? "Email/student number or password is incorrect."
+            : /VALIDATION_ERROR|Invalid request|deviceFingerprint/i.test(raw)
+              ? "Sign-in request was rejected. Hard-refresh and try again."
             : raw.length > 180
               ? "Sign-in failed. Please try again."
               : raw;
@@ -163,7 +181,7 @@ function LoginForm() {
               Sign in to MyHeritage
             </h1>
             <p style={{ margin: 0, color: "#5C5F5A", fontSize: 15, lineHeight: 1.4 }}>
-              Access your student dashboard and academic services.
+              Students, instructors, and staff sign in with campus email or student number.
             </p>
           </div>
 
@@ -176,7 +194,7 @@ function LoginForm() {
 
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: "#1A1C19" }}>Student Email</span>
+              <span style={{ fontSize: 14, fontWeight: 600, color: "#1A1C19" }}>Student number or email</span>
               <input
                 value={email}
                 onChange={(e) => {
@@ -186,7 +204,7 @@ function LoginForm() {
                 }}
                 onBlur={() => setTouchedEmail(true)}
                 autoComplete="username"
-                placeholder="name@heritage.edu"
+                placeholder="ST-2024-001 or name@heritage.edu"
                 aria-invalid={Boolean(emailError)}
                 style={{
                   width: "100%",
@@ -321,6 +339,12 @@ function LoginForm() {
             >
               {loading ? "Signing in…" : "Sign in"}
             </button>
+            <p style={{ margin: 0, color: "#8D928A", fontSize: 12, lineHeight: 1.45 }}>
+              Demo: <code style={{ color: "#5C5F5A" }}>admin@heritage.edu</code> /{" "}
+              <code style={{ color: "#5C5F5A" }}>Heritage!2026</code>
+              {" · "}
+              student <code style={{ color: "#5C5F5A" }}>ST-2024-001</code>
+            </p>
           </div>
 
         </form>

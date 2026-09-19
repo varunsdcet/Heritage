@@ -20,7 +20,12 @@ export type GroundedCoachFact = Citation & {
     | "approval"
     | "portal"
     | "program"
-    | "requirement";
+    | "requirement"
+    | "finance"
+    | "attendance"
+    | "roster"
+    | "request"
+    | "mail";
 };
 
 export type CoachAction = { label: string; href: string };

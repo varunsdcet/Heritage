@@ -4,7 +4,41 @@ import { z } from "zod";
 import { prisma } from "@myheritage/db";
 import { hashPassword } from "@myheritage/auth";
 import { requireAuth, requireRoles, type AuthedRequest } from "../../middleware/auth.js";
-import { getSisScreen, runSisAction, seedAllSisScreens } from "./sis.service.js";
+import { getSisScreen, runSisAction, seedAllSisScreens, getCampusOverview } from "./sis.service.js";
+import {
+  UpsertCohortBody,
+  GeneratePlanBody,
+  LedgerPostBody,
+  LedgerAdjustBody,
+  GenerateTaxBody,
+  ExtracurricularBody,
+  StudentDocumentBody,
+  RetakeBody,
+  MailPolicyBody,
+  listCohorts,
+  upsertCohort,
+  generateProgramPlan,
+  listLedger,
+  postLedgerEntry,
+  adjustLedgerEntry,
+  listTaxDocumentsAdmin,
+  generateT2202,
+  getAdminTaxPdf,
+  listExtracurricularAdmin,
+  upsertExtracurricular,
+  deleteExtracurricular,
+  listStudentDocumentsAdmin,
+  upsertStudentDocument,
+  deleteStudentDocument,
+  listRetakes,
+  createRetake,
+  getMailPolicy,
+  updateMailPolicy,
+  listProgramsLite,
+  listStudentsLite,
+  listSectionsLite,
+  listFinancialTerms,
+} from "./registrar-gaps.service.js";
 
 export const adminRouter: Router = Router();
 
@@ -41,6 +75,15 @@ const CreateAssignment = z.object({
 });
 
 adminRouter.use(requireAuth, requireRoles("admin", "registrar"));
+
+adminRouter.get("/campus-overview", async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    res.json(await getCampusOverview(user.institutionId));
+  } catch (err) {
+    next(err);
+  }
+});
 
 adminRouter.get("/users", async (req, res, next) => {
   try {
@@ -86,122 +129,159 @@ adminRouter.post("/users", async (req, res, next) => {
     const personId = randomUUID();
     const accountId = randomUUID();
     const passwordHash = await hashPassword(body.password);
+    const role = body.role === "registrar" ? "registrar" : body.role;
+    const portalHref =
+      role === "instructor"
+        ? "/instructor"
+        : role === "student"
+          ? "/student"
+          : role === "applicant"
+            ? "/applicant"
+            : role === "employer"
+              ? "/employer"
+              : role === "admin" || role === "registrar"
+                ? "/admin"
+                : "/login";
 
-    await prisma.person.create({
-      data: {
-        id: personId,
-        institutionId: user.institutionId,
-        givenName: body.givenName,
-        familyName: body.familyName,
-        email,
-      },
-    });
-    await prisma.account.create({
-      data: {
-        id: accountId,
-        institutionId: user.institutionId,
-        personId,
-        email,
-        passwordHash,
-        rolesJson: JSON.stringify([body.role === "registrar" ? "registrar" : body.role]),
-      },
-    });
+    let studentNumber: string | null = null;
+    let studentId: string | null = null;
 
-    let student = null;
-    if (body.role === "student") {
-      const studentNumber =
-        body.studentNumber?.trim() ||
-        `ST-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 900) + 100)}`;
-      student = await prisma.student.create({
+    await prisma.$transaction(async (tx) => {
+      await tx.person.create({
         data: {
+          id: personId,
+          institutionId: user.institutionId,
+          givenName: body.givenName.trim(),
+          familyName: body.familyName.trim(),
+          email,
+        },
+      });
+      await tx.account.create({
+        data: {
+          id: accountId,
           institutionId: user.institutionId,
           personId,
-          studentNumber,
-          programName: body.programName?.trim() || "General Studies",
-          standing: "good",
+          email,
+          passwordHash,
+          status: "active",
+          rolesJson: JSON.stringify([role]),
         },
       });
-    }
 
-    if (body.role === "applicant") {
-      await prisma.admissionsApplication.create({
+      if (role === "student") {
+        studentNumber =
+          body.studentNumber?.trim() ||
+          `ST-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
+        const clash = await tx.student.findFirst({
+          where: { institutionId: user.institutionId, studentNumber },
+        });
+        if (clash) {
+          studentNumber = `ST-${new Date().getFullYear()}-${randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase()}`;
+        }
+        const student = await tx.student.create({
+          data: {
+            institutionId: user.institutionId,
+            personId,
+            studentNumber,
+            programName: body.programName?.trim() || "General Studies",
+            standing: "good",
+          },
+        });
+        studentId = student.id;
+      }
+
+      if (role === "applicant") {
+        await tx.admissionsApplication.create({
+          data: {
+            institutionId: user.institutionId,
+            accountId,
+            personId,
+            programName: body.programName?.trim() || "General Studies",
+            intakeTerm: "Fall 2026",
+            status: "draft",
+            progressPct: 10,
+            documents: {
+              create: [
+                { institutionId: user.institutionId, label: "Official transcript", status: "missing" },
+                { institutionId: user.institutionId, label: "Government ID", status: "missing" },
+              ],
+            },
+            timeline: {
+              create: [
+                {
+                  institutionId: user.institutionId,
+                  title: "Application started",
+                  detail: "Account provisioned by campus admin",
+                },
+              ],
+            },
+          },
+        });
+      }
+
+      if (role === "employer") {
+        await tx.employerOrg.create({
+          data: {
+            institutionId: user.institutionId,
+            accountId,
+            name: body.programName?.trim() || `${body.givenName} ${body.familyName} Org`,
+            siteName: "Primary practicum site",
+            contactEmail: email,
+          },
+        });
+      }
+
+      await tx.auditEvent.create({
         data: {
           institutionId: user.institutionId,
-          accountId,
-          personId,
-          programName: body.programName?.trim() || "General Studies",
-          intakeTerm: "Fall 2026",
-          status: "draft",
-          progressPct: 10,
-          documents: {
-            create: [
-              { institutionId: user.institutionId, label: "Official transcript", status: "missing" },
-              { institutionId: user.institutionId, label: "Government ID", status: "missing" },
-            ],
-          },
-          timeline: {
-            create: [
-              {
-                institutionId: user.institutionId,
-                title: "Application started",
-                detail: "Account provisioned by campus admin",
-              },
-            ],
-          },
+          actorId: user.accountId,
+          eventName: "admin.user.create",
+          purpose: "provision",
+          afterJson: JSON.stringify({ email, role, accountId, portalHref }),
+          source: "api",
+          correlationId: randomUUID(),
         },
       });
-    }
 
-    if (body.role === "employer") {
-      await prisma.employerOrg.create({
+      const loginHint =
+        role === "student" && studentNumber
+          ? `Sign in at /login with email ${email} or student number ${studentNumber}.`
+          : `Sign in at /login with email ${email}.`;
+
+      await tx.notification.create({
         data: {
           institutionId: user.institutionId,
-          accountId,
-          name: body.programName?.trim() || `${body.givenName} ${body.familyName} Org`,
-          siteName: "Primary practicum site",
-          contactEmail: email,
+          recipientAccountId: accountId,
+          channel: "in_app",
+          title: "Welcome to MyHeritage",
+          body: `${loginHint} Temporary password was set by your administrator. Portal: ${portalHref}`,
+          templateKey: "account.welcome",
         },
       });
-    }
-
-    await prisma.auditEvent.create({
-      data: {
-        institutionId: user.institutionId,
-        actorId: user.accountId,
-        eventName: "admin.user.create",
-        purpose: "provision",
-        afterJson: JSON.stringify({ email, role: body.role, accountId }),
-        source: "api",
-        correlationId: randomUUID(),
-      },
-    });
-
-    await prisma.notification.create({
-      data: {
-        institutionId: user.institutionId,
-        recipientAccountId: accountId,
-        channel: "in_app",
-        title: "Welcome to MyHeritage",
-        body: `Your ${body.role} account is ready. Sign in with your campus email.`,
-        templateKey: "account.welcome",
-      },
     });
 
     try {
       const { sendMailViaHumanitix, mailConfigured } = await import("../../lib/mailer.js");
       if (mailConfigured()) {
+        const web = (process.env.WEB_ORIGIN ?? "http://localhost:3000").split(",")[0];
         await sendMailViaHumanitix({
           email,
           title: "Welcome to MyHeritage",
           message: [
             `Hello ${body.givenName},`,
             "",
-            `Your ${body.role} account is ready on MyHeritage AI Campus OS.`,
-            `Sign in: ${(process.env.WEB_ORIGIN ?? "http://localhost:3000").split(",")[0]}`,
+            `Your ${role} account is ready.`,
+            `Sign in: ${web}/login`,
             `Email: ${email}`,
+            studentNumber ? `Student number: ${studentNumber}` : "",
+            `After sign-in you land on: ${web}${portalHref}`,
+            "",
+            "Use the temporary password your administrator shared with you.",
             "",
             "— MyHeritage",
-          ].join("\n"),
+          ]
+            .filter(Boolean)
+            .join("\n"),
         });
       }
     } catch (err) {
@@ -212,10 +292,15 @@ adminRouter.post("/users", async (req, res, next) => {
       accountId,
       personId,
       email,
-      role: body.role,
-      studentId: student?.id ?? null,
-      studentNumber: student?.studentNumber ?? null,
+      role,
+      studentId,
+      studentNumber,
       temporaryPassword: body.password,
+      portalHref,
+      loginHint:
+        role === "student" && studentNumber
+          ? `Login at /login with ${email} or ${studentNumber} → ${portalHref}`
+          : `Login at /login with ${email} → ${portalHref}`,
     });
   } catch (err) {
     next(err);
@@ -527,6 +612,217 @@ adminRouter.post("/sis/seed", async (req, res, next) => {
     const user = (req as AuthedRequest).user;
     const n = await seedAllSisScreens(user.institutionId);
     res.json({ ok: true, screens: n });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// --- PART D registrar / finance / records gaps (live writes, no hardcoding) ---
+
+adminRouter.get("/programs-lite", async (req, res, next) => {
+  try {
+    res.json(await listProgramsLite((req as AuthedRequest).user.institutionId));
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.get("/students-lite", async (req, res, next) => {
+  try {
+    res.json(await listStudentsLite((req as AuthedRequest).user.institutionId));
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.get("/sections-lite", async (req, res, next) => {
+  try {
+    res.json(await listSectionsLite((req as AuthedRequest).user.institutionId));
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.get("/financial-terms", async (req, res, next) => {
+  try {
+    res.json(await listFinancialTerms((req as AuthedRequest).user.institutionId));
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.get("/cohorts", async (req, res, next) => {
+  try {
+    res.json(await listCohorts((req as AuthedRequest).user.institutionId));
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.post("/cohorts", async (req, res, next) => {
+  try {
+    const body = UpsertCohortBody.parse(req.body);
+    const row = await upsertCohort((req as AuthedRequest).user, body);
+    res.status(body.id ? 200 : 201).json(row);
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.post("/cohorts/generate-plan", async (req, res, next) => {
+  try {
+    const body = GeneratePlanBody.parse(req.body);
+    res.json(await generateProgramPlan((req as AuthedRequest).user, body));
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.get("/finance/ledger", async (req, res, next) => {
+  try {
+    const studentId = typeof req.query.studentId === "string" ? req.query.studentId : undefined;
+    res.json(await listLedger((req as AuthedRequest).user.institutionId, studentId));
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.post("/finance/ledger", async (req, res, next) => {
+  try {
+    const body = LedgerPostBody.parse(req.body);
+    const row = await postLedgerEntry((req as AuthedRequest).user, body);
+    res.status(201).json(row);
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.post("/finance/ledger/adjust", async (req, res, next) => {
+  try {
+    const body = LedgerAdjustBody.parse(req.body);
+    res.json(await adjustLedgerEntry((req as AuthedRequest).user, body));
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.get("/tax-documents", async (req, res, next) => {
+  try {
+    res.json(await listTaxDocumentsAdmin((req as AuthedRequest).user.institutionId));
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.get("/tax-documents/:id/pdf", async (req, res, next) => {
+  try {
+    const id = z.string().uuid().parse(req.params.id);
+    const { sendPdf } = await import("../../lib/taxPdf.js");
+    const { pdf, filename } = await getAdminTaxPdf((req as unknown as AuthedRequest).user, id);
+    sendPdf(res, pdf, filename);
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.post("/tax-documents/generate", async (req, res, next) => {
+  try {
+    const body = GenerateTaxBody.parse(req.body);
+    const row = await generateT2202((req as AuthedRequest).user, body);
+    res.status(201).json(row);
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.get("/extracurricular", async (req, res, next) => {
+  try {
+    const studentId = typeof req.query.studentId === "string" ? req.query.studentId : undefined;
+    res.json(await listExtracurricularAdmin((req as AuthedRequest).user.institutionId, studentId));
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.post("/extracurricular", async (req, res, next) => {
+  try {
+    const body = ExtracurricularBody.parse(req.body);
+    const row = await upsertExtracurricular((req as AuthedRequest).user, body);
+    res.status(body.id ? 200 : 201).json(row);
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.delete("/extracurricular/:id", async (req, res, next) => {
+  try {
+    const user = (req as unknown as AuthedRequest).user;
+    const id = z.string().uuid().parse(req.params.id);
+    res.json(await deleteExtracurricular(user, id));
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.get("/student-documents", async (req, res, next) => {
+  try {
+    const studentId = typeof req.query.studentId === "string" ? req.query.studentId : undefined;
+    res.json(await listStudentDocumentsAdmin((req as AuthedRequest).user.institutionId, studentId));
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.post("/student-documents", async (req, res, next) => {
+  try {
+    const body = StudentDocumentBody.parse(req.body);
+    const row = await upsertStudentDocument((req as AuthedRequest).user, body);
+    res.status(body.id ? 200 : 201).json(row);
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.delete("/student-documents/:id", async (req, res, next) => {
+  try {
+    const user = (req as unknown as AuthedRequest).user;
+    const id = z.string().uuid().parse(req.params.id);
+    res.json(await deleteStudentDocument(user, id));
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.get("/retakes", async (req, res, next) => {
+  try {
+    res.json(await listRetakes((req as AuthedRequest).user.institutionId));
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.post("/retakes", async (req, res, next) => {
+  try {
+    const body = RetakeBody.parse(req.body);
+    const row = await createRetake((req as AuthedRequest).user, body);
+    res.status(201).json(row);
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.get("/mail-policy", async (req, res, next) => {
+  try {
+    res.json(await getMailPolicy((req as AuthedRequest).user.institutionId));
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.put("/mail-policy", async (req, res, next) => {
+  try {
+    const body = MailPolicyBody.parse(req.body);
+    res.json(await updateMailPolicy((req as AuthedRequest).user, body));
   } catch (err) {
     next(err);
   }

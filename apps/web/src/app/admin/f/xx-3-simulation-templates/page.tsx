@@ -1,7 +1,6 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { AdminSisScreen } from "@/components/AdminSisScreen";
-
+/** XX placeholder retired — use numbered Labs modules. */
 export default function Page() {
-  return <AdminSisScreen path="/admin/f/xx-3-simulation-templates" />;
+  redirect("/admin/f/lb-01-lab-dashboard");
 }

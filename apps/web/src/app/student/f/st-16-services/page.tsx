@@ -14,7 +14,17 @@ export default function StudentServicesPage() {
   const [error, setError] = useState<string | null>(null);
   const [subject, setSubject] = useState("");
   const [details, setDetails] = useState("");
-  const [type, setType] = useState<"general_inquiry" | "official_transcript" | "enrollment_verification" | "advising_referral">("general_inquiry");
+  const [type, setType] = useState<
+    | "general_inquiry"
+    | "official_transcript"
+    | "enrollment_verification"
+    | "advising_referral"
+    | "course_withdrawal"
+    | "course_change"
+    | "transcript_request"
+    | "academic_appeal"
+    | "leave_of_absence"
+  >("general_inquiry");
 
   async function refresh(s: Session) {
     setData(await api<StudentServiceRequestsResponse>("/student/services", {}, s.accessToken));
@@ -64,6 +74,11 @@ export default function StudentServicesPage() {
               <option value="advising_referral">Advising referral</option>
               <option value="official_transcript">Official transcript (approval)</option>
               <option value="enrollment_verification">Enrollment verification (approval)</option>
+              <option value="transcript_request">Transcript request (approval)</option>
+              <option value="course_withdrawal">Course withdrawal (approval)</option>
+              <option value="course_change">Course change (approval)</option>
+              <option value="academic_appeal">Academic appeal (approval)</option>
+              <option value="leave_of_absence">Leave of absence (approval)</option>
             </select>
             <input placeholder="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} required minLength={3} />
             <textarea placeholder="Details" value={details} onChange={(e) => setDetails(e.target.value)} required minLength={10} rows={4} />

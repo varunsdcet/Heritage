@@ -2,6 +2,12 @@ import { randomUUID } from "node:crypto";
 import { applyApproval, decideApproval } from "@myheritage/auth";
 import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
+import {
+  LIFECYCLE_STATUSES,
+  lifecycleFromApplicationStatus,
+  lifecycleFromStudent,
+  LMS_ACTIVITY_TYPES,
+} from "../../lib/lifecycle-status.js";
 
 export type SisLivePayload = Record<string, unknown>;
 
@@ -26,6 +32,15 @@ type Campus = {
     programName: string;
     standing: string;
   }>;
+  applications: Array<{
+    id: string;
+    name: string;
+    email: string;
+    programName: string;
+    intakeTerm: string;
+    status: string;
+    progressPct: number;
+  }>;
   courses: Array<{ id: string; code: string; title: string; credits: number }>;
   sections: Array<{
     id: string;
@@ -33,6 +48,7 @@ type Campus = {
     courseCode: string;
     courseTitle: string;
     credits: number;
+    instructorPersonId: string;
     instructorName: string;
     termCode: string;
     enrolled: number;
@@ -68,6 +84,15 @@ type Campus = {
   }>;
   notifications: Array<{ id: string; title: string; body: string; createdAt: string }>;
   audits: Array<{ id: string; eventName: string; actorId: string; createdAt: string }>;
+  badges: Array<{
+    id: string;
+    studentName: string;
+    studentNumber: string;
+    code: string;
+    title: string;
+    status: string;
+    earnedAt: string | null;
+  }>;
 };
 
 async function loadCampus(institutionId: string): Promise<Campus> {
@@ -77,6 +102,7 @@ async function loadCampus(institutionId: string): Promise<Campus> {
     people,
     accounts,
     students,
+    applications,
     courses,
     sections,
     enrolments,
@@ -84,6 +110,7 @@ async function loadCampus(institutionId: string): Promise<Campus> {
     approvals,
     notifications,
     audits,
+    badges,
   ] = await Promise.all([
     prisma.institution.findFirst({ where: { institutionId } }),
     prisma.term.findFirst({ where: { institutionId }, orderBy: { code: "desc" } }),
@@ -97,6 +124,11 @@ async function loadCampus(institutionId: string): Promise<Campus> {
       where: { institutionId },
       include: { person: true },
       orderBy: { studentNumber: "asc" },
+    }),
+    prisma.admissionsApplication.findMany({
+      where: { institutionId },
+      orderBy: { updatedAt: "desc" },
+      take: 80,
     }),
     prisma.course.findMany({ where: { institutionId }, orderBy: { code: "asc" } }),
     prisma.section.findMany({
@@ -135,9 +167,16 @@ async function loadCampus(institutionId: string): Promise<Campus> {
       orderBy: { createdAt: "desc" },
       take: 40,
     }),
+    prisma.studentBadge.findMany({
+      where: { institutionId },
+      include: { student: { include: { person: true } } },
+      orderBy: { updatedAt: "desc" },
+      take: 80,
+    }),
   ]);
 
   const personName = new Map(people.map((p) => [p.id, `${p.givenName} ${p.familyName}`.trim()]));
+  const personEmail = new Map(people.map((p) => [p.id, p.email]));
 
   return {
     institutionName: institution?.name ?? "Heritage College",
@@ -166,6 +205,15 @@ async function loadCampus(institutionId: string): Promise<Campus> {
       programName: s.programName,
       standing: s.standing,
     })),
+    applications: applications.map((a) => ({
+      id: a.id,
+      name: personName.get(a.personId) ?? "Applicant",
+      email: personEmail.get(a.personId) ?? "—",
+      programName: a.programName,
+      intakeTerm: a.intakeTerm,
+      status: a.status,
+      progressPct: a.progressPct,
+    })),
     courses: courses.map((c) => ({
       id: c.id,
       code: c.code,
@@ -178,6 +226,7 @@ async function loadCampus(institutionId: string): Promise<Campus> {
       courseCode: s.course.code,
       courseTitle: s.course.title,
       credits: s.course.credits,
+      instructorPersonId: s.instructorPersonId,
       instructorName: personName.get(s.instructorPersonId) ?? "TBA",
       termCode: s.term.code,
       enrolled: s._count.enrolments,
@@ -223,6 +272,15 @@ async function loadCampus(institutionId: string): Promise<Campus> {
       actorId: a.actorId,
       createdAt: a.createdAt.toISOString().slice(0, 16).replace("T", " "),
     })),
+    badges: badges.map((b) => ({
+      id: b.id,
+      studentName: `${b.student.person.givenName} ${b.student.person.familyName}`.trim(),
+      studentNumber: b.student.studentNumber,
+      code: b.code,
+      title: b.title,
+      status: b.status,
+      earnedAt: b.earnedAt ? b.earnedAt.toISOString().slice(0, 10) : null,
+    })),
   };
 }
 
@@ -235,14 +293,58 @@ function rowTone(status: string): string {
 }
 
 function studentRows(campus: Campus, href?: string) {
-  return campus.students.map((s) => ({
-    primary: s.name,
-    secondary: `${s.studentNumber} · ${s.email}`,
-    cells: [s.name, s.programName, campus.term?.code ?? "—", s.standing, s.studentNumber],
-    badge: s.standing === "good" ? "Active" : s.standing,
-    badgeTone: rowTone(s.standing),
-    href,
-  }));
+  return campus.students.map((s) => {
+    const enrolmentStatuses = campus.enrolments
+      .filter((e) => e.studentId === s.id)
+      .map((e) => e.status);
+    const lifecycle = lifecycleFromStudent({ standing: s.standing, enrolmentStatuses });
+    return {
+      primary: s.name,
+      secondary: `${s.studentNumber} · ${s.email}`,
+      cells: [s.name, s.programName, campus.term?.code ?? "—", lifecycle, s.studentNumber],
+      badge: lifecycle,
+      badgeTone: rowTone(lifecycle),
+      href,
+    };
+  });
+}
+
+function admissionsLifecycleRows(campus: Campus) {
+  const appRows = campus.applications.map((a) => {
+    const lifecycle = lifecycleFromApplicationStatus(a.status);
+    return {
+      primary: a.name,
+      secondary: a.email,
+      cells: [a.name, a.programName, a.intakeTerm, lifecycle, `${a.progressPct}%`, "Admissions", "—", "Open"],
+      badge: lifecycle,
+      badgeTone: rowTone(lifecycle),
+      href: "/admin/f/ad-03-application-detail",
+    };
+  });
+  const studentRowsLive = campus.students.map((s) => {
+    const enrolmentStatuses = campus.enrolments
+      .filter((e) => e.studentId === s.id)
+      .map((e) => e.status);
+    const lifecycle = lifecycleFromStudent({ standing: s.standing, enrolmentStatuses });
+    return {
+      primary: s.name,
+      secondary: `${s.studentNumber} · ${s.email}`,
+      cells: [
+        s.name,
+        s.programName,
+        campus.term?.code ?? "—",
+        lifecycle,
+        "—",
+        "Registrar",
+        "—",
+        "Open",
+      ],
+      badge: lifecycle,
+      badgeTone: rowTone(lifecycle),
+      href: "/admin/f/rg-01-student-360",
+    };
+  });
+  return [...appRows, ...studentRowsLive];
 }
 
 function accountRows(campus: Campus) {
@@ -393,7 +495,7 @@ export async function composeFromDomain(user: SessionClaims, path: string): Prom
     };
   }
 
-  if (path.includes("ac-06") || path.includes("course") || path.includes("ac-07") || path.includes("ac-08") || path.includes("catalogue")) {
+  if (path.includes("ac-06") || path.includes("ac-07") || path.includes("ac-08") || path.includes("catalogue") || (path.includes("course") && !path.includes("ac-16") && !path.includes("resource") && !path.includes("evaluation") && !path.includes("history"))) {
     return {
       rows: courseRows(campus),
       countLabel: `${campus.courses.length} courses`,
@@ -467,53 +569,79 @@ export async function composeFromDomain(user: SessionClaims, path: string): Prom
   }
 
   if (path.includes("/admin/f/ad-") || path.includes("admission") || path.includes("application") || path.includes("offer") || path.includes("interview") || path.includes("conversion") || path.includes("intake")) {
+    const rows = admissionsLifecycleRows(campus);
+    const statusCounts = Object.fromEntries(LIFECYCLE_STATUSES.map((s) => [s, 0])) as Record<string, number>;
+    for (const row of rows) {
+      const key = String(row.badge || "");
+      if (key in statusCounts) statusCounts[key] += 1;
+    }
     return {
-      rows: studentRows(campus, "/admin/f/ad-03-application-detail"),
-      countLabel: `${campus.students.length} roster records`,
+      rows,
+      countLabel: `${rows.length} applicants + students`,
+      filters: ["All", ...LIFECYCLE_STATUSES.filter((s) => statusCounts[s] > 0), ...LIFECYCLE_STATUSES.filter((s) => statusCounts[s] === 0).slice(0, 8)],
+      filterFacets: LIFECYCLE_STATUSES.map((s) => ({ label: s, count: statusCounts[s] ?? 0 })),
       kpis: [
-        { label: "Applicants / students", value: String(k.students), hint: "Live Person+Student", tone: "up" },
-        { label: "Programs", value: String(new Set(campus.students.map((s) => s.programName)).size), hint: "Distinct", tone: "muted" },
-        { label: "Alerts", value: String(k.atRisk), hint: "Standing ≠ good", tone: "danger" },
+        { label: "Pipeline rows", value: String(rows.length), hint: "Apps + roster", tone: "up" },
+        { label: "Applications", value: String(campus.applications.length), hint: "AdmissionsApplication", tone: "muted" },
+        { label: "Active students", value: String(statusCounts["Active Student"] ?? 0), hint: "Lifecycle", tone: "up" },
         { label: "Term", value: k.term, hint: "Active term", tone: "muted" },
       ],
-      detail: campus.students[0]
+      detail: campus.applications[0]
         ? {
-            name: campus.students[0].name,
-            meta: `${campus.students[0].studentNumber} · ${campus.students[0].programName}`,
+            name: campus.applications[0].name,
+            meta: `${campus.applications[0].programName} · ${lifecycleFromApplicationStatus(campus.applications[0].status)}`,
             steps: [
-              { label: "Applied", state: "done" },
+              { label: "Inquiry", state: "done" },
               { label: "Documents", state: "done" },
               { label: "Decision", state: "current" },
             ],
             tabs: ["Summary", "Requirements", "Documents", "Decision", "Timeline"],
             fields: [
-              { label: "Full Name", value: campus.students[0].name },
-              { label: "Email", value: campus.students[0].email },
-              { label: "Student No.", value: campus.students[0].studentNumber },
-              { label: "Program", value: campus.students[0].programName },
+              { label: "Full Name", value: campus.applications[0].name },
+              { label: "Email", value: campus.applications[0].email },
+              { label: "Program", value: campus.applications[0].programName },
+              { label: "Lifecycle", value: lifecycleFromApplicationStatus(campus.applications[0].status) },
             ],
-            checklist: campus.enrolments
-              .filter((e) => e.studentId === campus.students[0].id)
-              .map((e) => ({
-                label: `${e.courseCode} enrolment`,
-                status: e.status,
-                tone: "active",
-              })),
+            checklist: [],
           }
-        : undefined,
+        : campus.students[0]
+          ? {
+              name: campus.students[0].name,
+              meta: `${campus.students[0].studentNumber} · ${campus.students[0].programName}`,
+              steps: [
+                { label: "Applied", state: "done" },
+                { label: "Documents", state: "done" },
+                { label: "Enrolled", state: "current" },
+              ],
+              tabs: ["Summary", "Requirements", "Documents", "Decision", "Timeline"],
+              fields: [
+                { label: "Full Name", value: campus.students[0].name },
+                { label: "Email", value: campus.students[0].email },
+                { label: "Student No.", value: campus.students[0].studentNumber },
+                { label: "Program", value: campus.students[0].programName },
+              ],
+              checklist: campus.enrolments
+                .filter((e) => e.studentId === campus.students[0].id)
+                .map((e) => ({
+                  label: `${e.courseCode} enrolment`,
+                  status: e.status,
+                  tone: "active",
+                })),
+            }
+          : undefined,
       builder: {
         paletteTitle: "Offer fields",
         palette: ["Program", "Term", "Conditions", "Deadline"],
         canvasTitle: "Offer draft",
         canvasFields: [
-          { label: "Student", value: campus.students[0]?.name ?? "—" },
-          { label: "Program", value: campus.students[0]?.programName ?? "—" },
+          { label: "Student", value: campus.students[0]?.name ?? campus.applications[0]?.name ?? "—" },
+          { label: "Program", value: campus.students[0]?.programName ?? campus.applications[0]?.programName ?? "—" },
           { label: "Term", value: k.term },
         ],
         inspectorTitle: "Campus",
         inspector: [
           { label: "Institution", value: campus.institutionName },
-          { label: "Roster size", value: String(k.students) },
+          { label: "Lifecycle statuses", value: String(LIFECYCLE_STATUSES.length) },
         ],
       },
     };
@@ -567,12 +695,32 @@ export async function composeFromDomain(user: SessionClaims, path: string): Prom
   }
 
   if (path.includes("/admin/f/fn-") || path.includes("finance") || path.includes("payment") || path.includes("refund") || path.includes("reconcile") || path.includes("charge") || path.includes("hold") && path.includes("fn")) {
-    const tuition = tuitionFor(campus);
+    const ledgerRows = await prisma.financeLedgerEntry.findMany({
+      where: { institutionId: user.institutionId },
+      include: { student: { include: { person: true } } },
+      orderBy: { postedAt: "desc" },
+      take: 100,
+    });
+    const tuition =
+      ledgerRows.length > 0
+        ? ledgerRows.map((r) => ({
+            primary: `${r.student.person.givenName} ${r.student.person.familyName}`,
+            secondary: r.label,
+            amount: r.amountCad,
+            status: r.status,
+          }))
+        : tuitionFor(campus);
+    const postedTotal = tuition.reduce((n, t) => n + t.amount, 0);
     return {
       rows: tuition,
       countLabel: `${tuition.length} ledger lines`,
       kpis: [
-        { label: "Posted tuition", value: `CAD ${k.tuition.toLocaleString()}`, hint: `${k.enrolments} enrolments × credits`, tone: "up" },
+        {
+          label: "Posted ledger",
+          value: `CAD ${postedTotal.toLocaleString()}`,
+          hint: ledgerRows.length ? "FinanceLedgerEntry" : "Computed tuition",
+          tone: "up",
+        },
         { label: "Students billed", value: String(new Set(tuition.map((t) => t.primary)).size), hint: "Distinct", tone: "muted" },
         { label: "Pending approvals", value: String(k.pending), hint: "Finance gates", tone: "danger" },
         { label: "Term", value: k.term, hint: "Active", tone: "muted" },
@@ -586,8 +734,8 @@ export async function composeFromDomain(user: SessionClaims, path: string): Prom
               .reduce((n, t) => n + t.amount, 0)
               .toLocaleString()}`,
             dueNote: k.term,
-            planTitle: "Enrolment charges",
-            planBody: "Generated from live section credits",
+            planTitle: ledgerRows.length ? "Posted AR ledger" : "Enrolment charges",
+            planBody: ledgerRows.length ? "Live FinanceLedgerEntry rows" : "Generated from live section credits",
             tabs: ["Ledger Summary", "Outstanding Charges", "Payments Applied"],
             ledger: tuition
               .filter((t) => t.primary === campus.students[0].name)
@@ -602,7 +750,7 @@ export async function composeFromDomain(user: SessionClaims, path: string): Prom
         : undefined,
       financeDash: {
         months: [{ label: term, height: "70%", active: true }],
-        methods: [{ label: "Tuition (credits)", value: `CAD ${k.tuition.toLocaleString()}`, color: "#3d6b4f" }],
+        methods: [{ label: "Ledger total", value: `CAD ${postedTotal.toLocaleString()}`, color: "#3d6b4f" }],
         transactions: tuition.slice(0, 6).map((t, i) => ({
           id: `txn-${i}-${String(t.secondary)}`,
           name: String(t.primary),
@@ -779,7 +927,7 @@ export async function composeFromDomain(user: SessionClaims, path: string): Prom
     };
   }
 
-  if (path.includes("/admin/f/rg-") || path.includes("registrar") || path.includes("transcript") || path.includes("correction") || path.includes("export") && path.includes("rg")) {
+  if ((path.includes("/admin/f/rg-") && !path.includes("badge") && !path.includes("accomplishment")) || path.includes("registrar") || (path.includes("transcript") || path.includes("correction") || (path.includes("export") && path.includes("rg")))) {
     const focus = campus.students[0];
     const enrol = focus ? campus.enrolments.filter((e) => e.studentId === focus.id) : [];
     return {
@@ -1233,7 +1381,185 @@ export async function composeFromDomain(user: SessionClaims, path: string): Prom
     };
   }
 
-  if (path.includes("grade") || path.includes("ac-12") || path.includes("ac-13") || path.includes("ac-14") || path.includes("ac-15") || path.includes("ac-16") || path.includes("ac-17") || path.includes("ac-18") || path.includes("ac-19")) {
+  if (path.includes("badge") || path.includes("accomplishment") || path.includes("open-badge")) {
+    return {
+      title: "Badges & Accomplishments",
+      subtitle: `${campus.badges.length} badge record(s)`,
+      rows: campus.badges.map((b) => ({
+        primary: b.title,
+        secondary: `${b.studentName} · ${b.studentNumber}`,
+        cells: [b.title, b.code, b.studentName, b.status, b.earnedAt ?? "—"],
+        badge: b.status,
+        badgeTone: b.status === "earned" ? "active" : "review",
+        href: "/admin/f/rg-01-student-360",
+      })),
+      countLabel: `${campus.badges.length} badges`,
+      kpis: [
+        { label: "Earned", value: String(campus.badges.filter((b) => b.status === "earned").length), hint: "Awarded", tone: "up" },
+        { label: "Available", value: String(campus.badges.filter((b) => b.status === "available").length), hint: "In progress", tone: "muted" },
+        { label: "Students", value: String(new Set(campus.badges.map((b) => b.studentNumber)).size), hint: "With badges", tone: "muted" },
+        { label: "Catalog", value: String(campus.badges.length), hint: "Total rows", tone: "muted" },
+      ],
+      filters: ["All", "earned", "available"],
+    };
+  }
+
+  if (path.includes("ac-14") || path.includes("faculty") || path.includes("compensation") || path.includes("payroll")) {
+    const instructors = campus.accounts.filter((a) => a.roles.includes("instructor"));
+    const focus =
+      instructors.find((a) => path.includes(encodeURIComponent(a.email))) ??
+      instructors[0] ??
+      null;
+    const focusSections = focus
+      ? campus.sections.filter((s) => s.instructorName === focus.name || s.instructorPersonId === focus.personId)
+      : [];
+    // Prefer personId match — sections store instructorPersonId
+    const sectionsFor = (personId: string, name: string) =>
+      campus.sections.filter((s) => s.instructorPersonId === personId || s.instructorName === name);
+
+    const load = instructors.map((a) => {
+      const sections = sectionsFor(a.personId, a.name);
+      const contactHours = sections.length * 3;
+      const rate = 85;
+      const amount = contactHours * rate;
+      return {
+        primary: a.name,
+        secondary: a.email,
+        cells: [
+          a.name,
+          String(sections.length),
+          `${contactHours}h`,
+          `CAD ${rate}/h`,
+          `CAD ${amount.toLocaleString()}`,
+          a.status,
+        ],
+        badge: sections.length ? "Active contract" : "No load",
+        badgeTone: sections.length ? "active" : "review",
+        href: `/admin/f/ac-14-faculty-360?email=${encodeURIComponent(a.email)}`,
+      };
+    });
+
+    if (path.includes("faculty-360") || path.includes("instructor-360") || path.includes("ac-14-faculty-360")) {
+      const selected =
+        instructors.find((a) => {
+          const q = path.includes("?") ? path.slice(path.indexOf("?") + 1) : "";
+          const email = new URLSearchParams(q).get("email");
+          return email ? a.email === email : false;
+        }) ??
+        focus ??
+        instructors[0] ??
+        null;
+      const selectedSections = selected ? sectionsFor(selected.personId, selected.name) : [];
+      return {
+        title: "Instructor 360",
+        subtitle: "Faculty profile, teaching load, and section assignments.",
+        archetype: "profile360",
+        rows: load,
+        countLabel: `${instructors.length} faculty`,
+        kpis: [
+          { label: "Faculty", value: String(instructors.length), hint: "Instructor accounts", tone: "up" },
+          { label: "Sections", value: String(selectedSections.length), hint: "This instructor", tone: "muted" },
+          { label: "Campus sections", value: String(campus.sections.length), hint: "All", tone: "muted" },
+          { label: "Term", value: k.term, hint: "Current", tone: "muted" },
+        ],
+        profile360: selected
+          ? {
+              name: selected.name,
+              meta: `${selected.email} · Instructor`,
+              tabs: ["Overview", "Sections", "Timeline"],
+              badge: selectedSections.length ? "Active" : selected.status,
+              stats: [
+                { label: "Sections", value: String(selectedSections.length) },
+                { label: "Enrolments taught", value: String(selectedSections.reduce((n, s) => n + s.enrolled, 0)) },
+                { label: "Status", value: selected.status },
+                { label: "Load", value: `${selectedSections.length * 3}h` },
+              ],
+              courses: {
+                title: "Teaching assignments",
+                columns: ["Course", "Section", "Enrolled", "Status"],
+                rows: selectedSections.map((s) => ({
+                  course: `${s.courseCode} · ${s.courseTitle}`,
+                  midterm: s.code,
+                  attendance: String(s.enrolled),
+                  status: s.enrolled ? "Staffed" : "Open",
+                  statusTone: "active",
+                })),
+              },
+              timeline: selectedSections.map((s) => ({
+                title: `Assigned ${s.courseCode} ${s.code}`,
+                date: k.term,
+              })),
+            }
+          : undefined,
+      };
+    }
+
+    return {
+      title: "Faculty",
+      subtitle: "Faculty roster, credentials, and teaching assignments.",
+      rows: load,
+      countLabel: `${load.length} faculty`,
+      kpis: [
+        { label: "Faculty", value: String(instructors.length), hint: "Instructor accounts", tone: "up" },
+        {
+          label: "YTD estimate",
+          value: `CAD ${load.reduce((n, r) => n + Number(String(r.cells[4]).replace(/[^\d]/g, "") || 0), 0).toLocaleString()}`,
+          hint: "Sections × 3h × $85",
+          tone: "muted",
+        },
+        { label: "Sections staffed", value: String(campus.sections.length), hint: "Live", tone: "muted" },
+        { label: "Term", value: k.term, hint: "Pay period", tone: "muted" },
+      ],
+      filters: ["All", "Active contract", "No load"],
+      profile360: focus
+        ? {
+            name: focus.name,
+            meta: `${focus.email} · Instructor`,
+            tabs: ["Overview", "Sections"],
+            badge: focusSections.length ? "Active" : focus.status,
+            stats: [
+              { label: "Sections", value: String(focusSections.length) },
+              { label: "Status", value: focus.status },
+            ],
+            courses: {
+              title: "Teaching assignments",
+              columns: ["Course", "Section", "Enrolled", "Status"],
+              rows: focusSections.map((s) => ({
+                course: `${s.courseCode} · ${s.courseTitle}`,
+                midterm: s.code,
+                attendance: String(s.enrolled),
+                status: "Staffed",
+                statusTone: "active",
+              })),
+            },
+          }
+        : undefined,
+    };
+  }
+
+  if (path.includes("ac-16") || path.includes("course-resource") || path.includes("activity-type") || path.includes("lms-activit")) {
+    return {
+      title: "LMS activity & resource types",
+      subtitle: "Moodle-parity catalog for course builders",
+      rows: LMS_ACTIVITY_TYPES.map((t) => ({
+        primary: t.label,
+        secondary: t.code,
+        cells: [t.label, t.code, t.kind, t.kind === "activity" ? "Add activity" : "Add resource", "Available"],
+        badge: t.kind,
+        badgeTone: t.kind === "activity" ? "active" : "muted",
+      })),
+      countLabel: `${LMS_ACTIVITY_TYPES.length} types`,
+      kpis: [
+        { label: "Activities", value: String(LMS_ACTIVITY_TYPES.filter((t) => t.kind === "activity").length), hint: "Interactive", tone: "up" },
+        { label: "Resources", value: String(LMS_ACTIVITY_TYPES.filter((t) => t.kind === "resource").length), hint: "Content", tone: "muted" },
+        { label: "Courses", value: String(k.courses), hint: "Catalogue", tone: "muted" },
+        { label: "Create path", value: "Assignment", hint: "Wired today", tone: "muted" },
+      ],
+      filters: ["All", "activity", "resource"],
+    };
+  }
+
+  if (path.includes("grade") || path.includes("ac-12") || path.includes("ac-13") || path.includes("ac-15") || path.includes("ac-17") || path.includes("ac-18") || path.includes("ac-19")) {
     return {
       rows: gradeRows(campus),
       countLabel: `${campus.grades.length} grade items`,
@@ -1350,6 +1676,170 @@ async function savePayload(institutionId: string, path: string, payload: SisLive
       rowVersion: { increment: 1 },
     },
   });
+}
+
+export type CampusOverview = {
+  institutionName: string;
+  termName: string;
+  termProgressPct: number;
+  students: number;
+  teachers: number;
+  programs: number;
+  courses: number;
+  sections: number;
+  enrolments: number;
+  accounts: number;
+  pendingApprovals: number;
+  pendingGrades: number;
+  publishedGrades: number;
+  atRisk: number;
+  pendingEvaluations: number;
+  pendingLoa: number;
+  pendingTasks: number;
+  feesPostedCad: number;
+  feesOpenCad: number;
+  feesPastDueCad: number;
+  activity: Array<{ actor: string; detail: string; when: string }>;
+  health: Array<{ label: string; value: string }>;
+};
+
+function termProgressPct(startsOn: string | null | undefined, endsOn: string | null | undefined) {
+  if (!startsOn || !endsOn) return 50;
+  const start = Date.parse(startsOn);
+  const end = Date.parse(endsOn);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 50;
+  const now = Date.now();
+  if (now <= start) return 0;
+  if (now >= end) return 100;
+  return Math.round(((now - start) / (end - start)) * 100);
+}
+
+/** Campus-wide oversight counts for admin home (parity with student/teacher portals). */
+export async function getCampusOverview(institutionId: string): Promise<CampusOverview> {
+  const [
+    institution,
+    term,
+    students,
+    accounts,
+    programRows,
+    courses,
+    sections,
+    enrolments,
+    pendingApprovals,
+    pendingGrades,
+    publishedGrades,
+    atRisk,
+    pendingEvaluations,
+    pendingLoa,
+    pendingTasks,
+    ledger,
+    audits,
+  ] = await Promise.all([
+    prisma.institution.findFirst({ where: { institutionId }, select: { name: true } }),
+    prisma.term.findFirst({ where: { institutionId }, orderBy: { code: "desc" } }),
+    prisma.student.count({ where: { institutionId } }),
+    prisma.account.findMany({ where: { institutionId }, select: { rolesJson: true } }),
+    prisma.program.findMany({ where: { institutionId }, select: { id: true } }),
+    prisma.course.count({ where: { institutionId } }),
+    prisma.section.count({ where: { institutionId } }),
+    prisma.enrolment.count({ where: { institutionId } }),
+    prisma.approvalRequest.count({ where: { institutionId, status: "pending" } }),
+    prisma.gradeItem.count({
+      where: { institutionId, status: { in: ["draft", "pending_publish"] } },
+    }),
+    prisma.gradeItem.count({ where: { institutionId, status: "published" } }),
+    prisma.student.count({ where: { institutionId, NOT: { standing: "good" } } }),
+    prisma.courseEvaluation.count({ where: { institutionId, status: "pending" } }),
+    prisma.leaveOfAbsenceRequest.count({ where: { institutionId, status: "pending" } }),
+    prisma.requiredTask.count({ where: { institutionId, status: "pending" } }),
+    prisma.financeLedgerEntry.findMany({
+      where: { institutionId },
+      select: { amountCad: true, kind: true, status: true, dueAt: true },
+    }),
+    prisma.auditEvent.findMany({
+      where: { institutionId },
+      orderBy: { createdAt: "desc" },
+      take: 8,
+      select: { eventName: true, createdAt: true, actorId: true, source: true },
+    }),
+  ]);
+
+  let programs = programRows.length;
+  if (programs === 0) {
+    const distinct = await prisma.student.findMany({
+      where: { institutionId },
+      select: { programName: true },
+      distinct: ["programName"],
+    });
+    programs = distinct.filter((p) => p.programName?.trim()).length;
+  }
+
+  const teachers = accounts.filter((a) => {
+    try {
+      return (JSON.parse(a.rolesJson) as string[]).includes("instructor");
+    } catch {
+      return false;
+    }
+  }).length;
+
+  const now = Date.now();
+  let feesPostedCad = 0;
+  let feesOpenCad = 0;
+  let feesPastDueCad = 0;
+  for (const row of ledger) {
+    const signed =
+      row.kind === "payment" || row.kind === "credit" ? -Math.abs(row.amountCad) : Math.abs(row.amountCad);
+    feesPostedCad += Math.abs(row.amountCad);
+    if (row.status === "open" || row.status === "posted") {
+      feesOpenCad += signed;
+      if (row.dueAt && row.dueAt.getTime() < now && signed > 0) {
+        feesPastDueCad += signed;
+      }
+    }
+  }
+  // Fallback tuition estimate when ledger is empty (same rate as SIS finance compose)
+  if (ledger.length === 0 && enrolments > 0) {
+    const creditSum = await prisma.enrolment.findMany({
+      where: { institutionId },
+      select: { section: { select: { course: { select: { credits: true } } } } },
+    });
+    feesPostedCad = creditSum.reduce((n, e) => n + Math.round((e.section.course.credits || 3) * 425), 0);
+    feesOpenCad = feesPostedCad;
+  }
+
+  return {
+    institutionName: institution?.name ?? "Heritage College",
+    termName: term?.name ?? "Current term",
+    termProgressPct: termProgressPct(term?.startsOn, term?.endsOn),
+    students,
+    teachers,
+    programs,
+    courses,
+    sections,
+    enrolments,
+    accounts: accounts.length,
+    pendingApprovals,
+    pendingGrades,
+    publishedGrades,
+    atRisk,
+    pendingEvaluations,
+    pendingLoa,
+    pendingTasks,
+    feesPostedCad: Math.round(feesPostedCad),
+    feesOpenCad: Math.round(Math.max(0, feesOpenCad)),
+    feesPastDueCad: Math.round(feesPastDueCad),
+    activity: audits.map((a) => ({
+      actor: a.actorId?.slice(0, 8) || "Admin",
+      detail: a.eventName || a.source || "Audit event",
+      when: a.createdAt.toISOString().slice(0, 16).replace("T", " "),
+    })),
+    health: [
+      { label: "API", value: "Healthy" },
+      { label: "Directory", value: `${accounts.length} accounts` },
+      { label: "Enrolments", value: String(enrolments) },
+      { label: "Open AR", value: `CAD ${Math.round(Math.max(0, feesOpenCad)).toLocaleString()}` },
+    ],
+  };
 }
 
 export async function getSisScreen(user: SessionClaims, path: string) {
@@ -1521,21 +2011,55 @@ export async function runSisAction(
   }
 
   if (
-    (path.includes("fn-") || path.includes("finance") || path.includes("refund") || path.includes("payment")) &&
-    (lower.includes("refund") || lower.includes("reject") || lower.includes("approve"))
+    (path.includes("fn-") || path.includes("finance") || path.includes("refund") || path.includes("payment") || path.includes("charge")) &&
+    (lower.includes("post") ||
+      lower.includes("charge") ||
+      lower.includes("payment") ||
+      lower.includes("refund") ||
+      lower.includes("reject") ||
+      lower.includes("approve"))
   ) {
-    const decision = lower.includes("reject") ? "rejected" : "approved";
-    await prisma.auditEvent.create({
-      data: {
-        institutionId: user.institutionId,
-        actorId: user.accountId,
-        eventName: "admin.finance.decision",
-        purpose: "admin_mutation",
-        afterJson: JSON.stringify({ path, action, decision, rowKey: input.rowKey ?? null }),
-        source: "admin.sis",
-        correlationId: randomUUID(),
-      },
-    });
+    const decision = lower.includes("reject") ? "rejected" : lower.includes("refund") ? "refunded" : "posted";
+    // Prefer real ledger writes when student + amount are provided in note/rowKey JSON
+    let ledgerNote: Record<string, unknown> | null = null;
+    try {
+      ledgerNote = input.note ? (JSON.parse(input.note) as Record<string, unknown>) : null;
+    } catch {
+      ledgerNote = null;
+    }
+    if (
+      ledgerNote &&
+      typeof ledgerNote.studentId === "string" &&
+      typeof ledgerNote.amountCad === "number" &&
+      typeof ledgerNote.label === "string"
+    ) {
+      const { postLedgerEntry, adjustLedgerEntry } = await import("./registrar-gaps.service.js");
+      if (lower.includes("reverse") && typeof ledgerNote.entryId === "string") {
+        await adjustLedgerEntry(user, { entryId: ledgerNote.entryId, action: "reverse", note: "SIS screen reverse" });
+      } else {
+        await postLedgerEntry(user, {
+          studentId: ledgerNote.studentId,
+          label: ledgerNote.label,
+          amountCad: ledgerNote.amountCad,
+          kind: lower.includes("payment") ? "payment" : lower.includes("credit") ? "credit" : "charge",
+          source: "admin.sis.finance",
+          note: typeof ledgerNote.note === "string" ? ledgerNote.note : action,
+          financialTermId: typeof ledgerNote.financialTermId === "string" ? ledgerNote.financialTermId : null,
+        });
+      }
+    } else {
+      await prisma.auditEvent.create({
+        data: {
+          institutionId: user.institutionId,
+          actorId: user.accountId,
+          eventName: "admin.finance.decision",
+          purpose: "admin_mutation",
+          afterJson: JSON.stringify({ path, action, decision, rowKey: input.rowKey ?? null }),
+          source: "admin.sis",
+          correlationId: randomUUID(),
+        },
+      });
+    }
   }
 
   if (

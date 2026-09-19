@@ -1,6 +1,13 @@
 import { Router } from "express";
 import { prisma } from "@myheritage/db";
 import { requireAuth, type AuthedRequest } from "../../middleware/auth.js";
+import {
+  dateBoundsFromSessions,
+  deliveryFromSessions,
+  instructorDisplayName,
+  roomFromSessions,
+  scheduleTextFromSessions,
+} from "./sectionSchedule.js";
 
 export const coursesRouter: Router = Router();
 
@@ -72,42 +79,89 @@ coursesRouter.get("/me", requireAuth, async (req, res, next) => {
     }
 
     const enrolments = await prisma.enrolment.findMany({
-      where: { institutionId: user.institutionId, studentId: student.id, status: "enrolled" },
+      where: {
+        institutionId: user.institutionId,
+        studentId: student.id,
+        status: { in: ["enrolled", "completed"] },
+      },
       include: {
-        section: { include: { course: true, term: true } },
+        section: {
+          include: {
+            course: true,
+            term: true,
+            academicBlock: true,
+            classSessions: { orderBy: { startsAt: "asc" } },
+          },
+        },
         gradeItems: {
           where: { institutionId: user.institutionId, status: "published" },
           select: { score: true, maxScore: true },
         },
       },
+      orderBy: { createdAt: "desc" },
     });
 
     const instructorIds = [...new Set(enrolments.map((e) => e.section.instructorPersonId))];
     const instructors = await prisma.person.findMany({
       where: { id: { in: instructorIds }, institutionId: user.institutionId },
     });
-    const nameById = new Map(instructors.map((p) => [p.id, `${p.givenName} ${p.familyName}`]));
+    const personById = new Map(instructors.map((p) => [p.id, p]));
 
-    const courses = enrolments.map((e) => {
-      const scored = e.gradeItems.filter((grade) => grade.score != null && grade.maxScore > 0);
-      const progressPercent =
-        scored.length > 0
-          ? Number(
-              ((scored.reduce((sum, grade) => sum + (grade.score ?? 0) / grade.maxScore, 0) / scored.length) * 100).toFixed(1),
-            )
-          : null;
-      return {
-        sectionId: e.sectionId,
-        courseCode: e.section.course.code,
-        courseTitle: e.section.course.title,
-        sectionCode: e.section.code,
-        termName: e.section.term.name,
-        credits: e.section.course.credits,
-        instructorName: nameById.get(e.section.instructorPersonId) ?? "TBA",
-        enrolmentStatus: e.status as "enrolled" | "completed",
-        progressPercent,
-      };
+    const planItems = await prisma.programPlanItem.findMany({
+      where: {
+        institutionId: user.institutionId,
+        plan: { studentId: student.id, institutionId: user.institutionId },
+        OR: [
+          { sectionId: { in: enrolments.map((e) => e.sectionId) } },
+          { courseCode: { in: [...new Set(enrolments.map((e) => e.section.course.code))] } },
+        ],
+      },
     });
+    const planBySection = new Map(planItems.filter((i) => i.sectionId).map((i) => [i.sectionId!, i]));
+    const planByCode = new Map(planItems.map((i) => [i.courseCode, i]));
+
+    const courses = enrolments
+      .map((e) => {
+        const scored = e.gradeItems.filter((grade) => grade.score != null && grade.maxScore > 0);
+        const progressPercent =
+          scored.length > 0
+            ? Number(
+                (
+                  (scored.reduce((sum, grade) => sum + (grade.score ?? 0) / grade.maxScore, 0) / scored.length) *
+                  100
+                ).toFixed(1),
+              )
+            : null;
+        const sessions = e.section.classSessions;
+        const fromSessions = dateBoundsFromSessions(sessions);
+        const plan = planBySection.get(e.sectionId) ?? planByCode.get(e.section.course.code);
+        const startsOn =
+          plan?.startsOn || e.section.academicBlock?.startsOn || fromSessions.startsOn || e.section.term.startsOn;
+        const endsOn =
+          plan?.endsOn || e.section.academicBlock?.endsOn || fromSessions.endsOn || e.section.term.endsOn;
+        return {
+          sectionId: e.sectionId,
+          courseCode: e.section.course.code,
+          courseTitle: e.section.course.title,
+          sectionCode: e.section.code,
+          termName: e.section.term.name,
+          credits: e.section.course.credits,
+          instructorName: instructorDisplayName(personById.get(e.section.instructorPersonId)) ?? "TBA",
+          enrolmentStatus: e.status as "enrolled" | "completed",
+          progressPercent,
+          deliveryMethod: deliveryFromSessions(sessions),
+          location: roomFromSessions(sessions) || "TBD",
+          scheduleText: scheduleTextFromSessions(sessions) || plan?.scheduleText || null,
+          startsOn,
+          endsOn,
+        };
+      })
+      .sort((a, b) => {
+        const rank = (code: string) => (/^ACSW\s*500$/i.test(code) ? 0 : 1);
+        const diff = rank(a.courseCode) - rank(b.courseCode);
+        if (diff !== 0) return diff;
+        return a.courseCode.localeCompare(b.courseCode);
+      });
 
     res.json({
       courses,

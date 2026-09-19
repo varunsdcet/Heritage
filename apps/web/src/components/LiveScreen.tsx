@@ -5,9 +5,8 @@ import { useRouter } from "next/navigation";
 import { Button, Metric, Panel } from "@myheritage/ui";
 import { ScreenScaffold, ListPanel, MobileChrome } from "@/components/ScreenScaffold";
 import { StudentSisShell } from "@/components/StudentSisShell";
-import { AdminFigmaParityScreen } from "@/components/AdminFigmaParityScreen";
 import { TeacherSisScreen } from "@/components/TeacherSisScreen";
-import { TEACHER_SCREENS } from "@/lib/teacherCatalog";
+import { getTeacherScreen } from "@/lib/teacherCatalog";
 import { api, loadSession } from "@/lib/api";
 import type { ShellRole } from "@/lib/nav";
 
@@ -52,6 +51,7 @@ const STUDENT_ROUTE_META: Record<string, { title: string; subtitle: string }> = 
   "/student/f/st-17-practicum": { title: "Practicum", subtitle: "Placement, hours, agreements, and evaluations." },
   "/student/f/st-19-credentials": { title: "Credentials", subtitle: "Official credentials and completion records." },
   "/student/f/st-20-career": { title: "Career services", subtitle: "Career coaching, opportunities, and application support." },
+  "/student/career": { title: "Career services", subtitle: "Coaching, co-op roles, and work-integrated learning for your program." },
   "/student/holds": { title: "Holds", subtitle: "Registration and account holds affecting your studies." },
   "/student/success": { title: "Student success", subtitle: "Academic support, coaching, and success planning." },
 };
@@ -92,10 +92,7 @@ export function LiveScreen({
   mobileTitle?: string;
   mobileActive?: "Home" | "Courses" | "Schedule" | "Grades" | "More";
 }) {
-  if (!mobile && path.startsWith("/admin")) {
-    return <AdminFigmaParityScreen path={path} />;
-  }
-  if (!mobile && path.startsWith("/instructor") && TEACHER_SCREENS[path]) {
+  if (!mobile && path.startsWith("/instructor") && getTeacherScreen(path)) {
     return <TeacherSisScreen path={path} />;
   }
   if (!mobile && path.startsWith("/student")) {

@@ -11,7 +11,9 @@ export type StudyContentFact = {
 
 export function isStudyCoachQuestion(question: string) {
   const q = question.toLowerCase();
-  return /explain|help me understand|quiz me|flashcard|revise|revision|summarize|practi[cs]e|what is|how does|study|tutor|normalize|normalization|hint/.test(
+  // Do not treat "what is my GPA/grade" as tutoring — those belong to campus_coach / grades.
+  if (/\b(gpa|grade|score|mark|attendance|fee|tuition|balance)\b/.test(q)) return false;
+  return /explain|help me understand|quiz me|flashcard|revise|revision|summarize|practi[cs]e|how does|study|tutor|normalize|normalization|hint|teach me|walk me through/.test(
     q,
   );
 }

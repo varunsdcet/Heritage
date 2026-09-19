@@ -158,13 +158,38 @@ meRouter.get("/home", requireAuth, async (req, res, next) => {
       take: 5,
     });
 
+    const pendingEvaluations = student
+      ? await prisma.courseEvaluation.findMany({
+          where: { institutionId: user.institutionId, studentId: student.id, status: "pending" },
+          orderBy: { dueAt: "asc" },
+          take: 10,
+        })
+      : [];
+
+    const attendanceRecords = student
+      ? await prisma.attendanceRecord.findMany({
+          where: { institutionId: user.institutionId, studentId: student.id },
+          select: { status: true },
+        })
+      : [];
+    const attendanceRate =
+      attendanceRecords.length > 0
+        ? Math.round(
+            (attendanceRecords.filter((r) => r.status === "present" || r.status === "late").length /
+              attendanceRecords.length) *
+              100,
+          )
+        : null;
+
     res.json({
       role: "student",
       headline: "Your campus home",
       standing: student?.standing ?? "unknown",
       programName: student?.programName ?? "Undeclared",
+      studentNumber: student?.studentNumber ?? null,
       enrolledCourses: enrolmentCount,
       gpa,
+      attendanceRate,
       nextDeadline: nextAssignment
         ? {
             title: nextAssignment.title,
@@ -174,12 +199,25 @@ meRouter.get("/home", requireAuth, async (req, res, next) => {
         : null,
       shortcuts: [
         { label: "Grades", href: "/student/grades" },
+        { label: "Program plan", href: "/student/f/st-23-program-plan" },
         { label: "Calendar", href: "/student/calendar" },
         { label: "Student services", href: "/student/advising" },
       ],
       announcements: notifications.map((n) => ({ id: n.id, title: n.title, body: n.body })),
+      pendingEvaluations: pendingEvaluations.map((e) => ({
+        id: e.id,
+        courseCode: e.courseCode,
+        courseTitle: e.courseTitle,
+        offeringCode: e.sectionId ? e.courseCode : null,
+        dueAt: e.dueAt?.toISOString() ?? null,
+        href: `/student/f/st-24-course-evaluation?evaluationId=${e.id}`,
+      })),
       items: [
         ...notifications.map((n) => ({ label: n.title, sub: n.body })),
+        ...pendingEvaluations.map((e) => ({
+          label: `Evaluate ${e.courseCode}`,
+          sub: e.courseTitle,
+        })),
         ...(nextAssignment
           ? [
               {
@@ -217,8 +255,15 @@ meRouter.get("/profile", requireAuth, async (req, res, next) => {
         studentNumber: student.studentNumber,
         givenName: student.person.givenName,
         familyName: student.person.familyName,
+        middleName: student.person.middleName,
+        preferredName: student.person.preferredName,
         primaryEmail: student.person.email,
+        personalEmail: student.person.personalEmail,
+        phone: student.person.phone,
         dateOfBirth: student.person.dateOfBirth,
+        emergencyContactName: student.person.emergencyContactName,
+        emergencyContactPhone: student.person.emergencyContactPhone,
+        sinMasked: student.person.sinMasked,
         programName: student.programName,
         standing: student.standing,
         timezone: account.timezone,
@@ -237,13 +282,10 @@ meRouter.patch("/preferences", requireAuth, async (req, res, next) => {
     }
     const parsed = UpdateStudentPreferencesRequest.safeParse(req.body);
     if (!parsed.success) throw validationError(parsed.error.issues);
-    try {
-      new Intl.DateTimeFormat("en-CA", { timeZone: parsed.data.timezone }).format();
-    } catch {
-      throw validationError(
-        [{ path: ["timezone"], message: "Timezone must be a valid IANA timezone" }],
-        "Timezone must be a valid IANA timezone",
-      );
+    // Accept HCC / Windows-style labels (same as instructor) or IANA ids.
+    const zone = parsed.data.timezone.trim();
+    if (!zone) {
+      throw validationError([{ path: ["timezone"], message: "Choose a time zone" }], "Choose a time zone");
     }
     const account = await prisma.account.findFirst({
       where: { id: user.accountId, institutionId: user.institutionId, personId: user.personId },
@@ -253,7 +295,7 @@ meRouter.patch("/preferences", requireAuth, async (req, res, next) => {
     const updated = await prisma.$transaction(async (tx) => {
       const row = await tx.account.update({
         where: { id: account.id },
-        data: { timezone: parsed.data.timezone, rowVersion: { increment: 1 } },
+        data: { timezone: zone, rowVersion: { increment: 1 } },
       });
       await writeAuditAndOutbox(tx, {
         institutionId: user.institutionId,

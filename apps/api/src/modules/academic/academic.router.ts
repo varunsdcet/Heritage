@@ -8,7 +8,12 @@ import {
 import { prisma } from "@myheritage/db";
 import { writeAuditAndOutbox } from "@myheritage/events";
 import { requireAuth, requireRoles, type AuthedRequest } from "../../middleware/auth.js";
-import { computeDegreeProgress, impactIfDropCourse } from "../academic/degree-progress.service.js";
+import { computeDegreeProgress, impactIfDropCourse } from "./degree-progress.service.js";
+import {
+  getCourseHistory,
+  getProgramPlan,
+  getTranscriptSummary,
+} from "./program-plan.service.js";
 
 export const academicRouter: Router = Router();
 
@@ -33,6 +38,39 @@ academicRouter.get("/degree-progress", async (req, res, next) => {
       studentId: student.id,
     });
     res.json(DegreeProgressResponse.parse(progress));
+  } catch (error) {
+    next(error);
+  }
+});
+
+academicRouter.get("/program-plan", async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    const student = await ownStudent(user);
+    const plan = await getProgramPlan(user.institutionId, student.id);
+    res.json(plan);
+  } catch (error) {
+    next(error);
+  }
+});
+
+academicRouter.get("/course-history", async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    const student = await ownStudent(user);
+    const history = await getCourseHistory(user.institutionId, student.id);
+    res.json(history);
+  } catch (error) {
+    next(error);
+  }
+});
+
+academicRouter.get("/transcript-summary", async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    const student = await ownStudent(user);
+    const summary = await getTranscriptSummary(user.institutionId, student.id);
+    res.json(summary);
   } catch (error) {
     next(error);
   }

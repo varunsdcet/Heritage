@@ -12,9 +12,10 @@ export type AdminSidebarEntry = { type: "label"; label: string } | { type: "item
 export const PLATFORM_NAV: AdminNavChild[] = [
   { label: "Platform Home", href: "/admin/platform" },
   { label: "Users", href: "/admin/users" },
+  { label: "Student onboarding", href: "/admin/users/create?role=student" },
+  { label: "Instructor onboarding", href: "/admin/users/create?role=instructor" },
   { label: "Permissions", href: "/admin/permissions" },
   { label: "Integrations Home", href: "/admin/integrations" },
-  { label: "Admin Login", href: "/admin/f/sh-01-login-admin" },
   { label: "Users & Roles", href: "/admin/f/pl-01-users-and-roles" },
   { label: "Permission Matrix", href: "/admin/f/pl-02-permission-matrix" },
   { label: "Security Policy", href: "/admin/f/pl-03-security-policy" },
@@ -39,10 +40,6 @@ export const LABS_NAV: AdminNavChild[] = [
   { label: "Incidents", href: "/admin/f/lb-10-incident" },
   { label: "Virtual Labs", href: "/admin/f/lb-11-virtual-labs" },
   { label: "Environments", href: "/admin/f/lb-12-computer-environments" },
-  { label: "Booking Calendar", href: "/admin/f/xx-1-lab-booking-calendar" },
-  { label: "Usage Analytics", href: "/admin/f/xx-2-lab-usage-analytics" },
-  { label: "Simulation Templates", href: "/admin/f/xx-3-simulation-templates" },
-  { label: "Lab Compliance", href: "/admin/f/xx-4-lab-compliance" },
 ];
 
 export const COMPLIANCE_NAV: AdminNavChild[] = [
@@ -57,7 +54,6 @@ export const COMPLIANCE_NAV: AdminNavChild[] = [
   { label: "Inspection Pack", href: "/admin/f/cp-08-inspection-pack" },
   { label: "Disposal Review", href: "/admin/f/cp-09-disposal-review" },
   { label: "Privacy Requests", href: "/admin/f/cp-10-privacy-requests" },
-  { label: "Disposal Queue", href: "/admin/f/xx-9-disposal-review-queue" },
 ];
 
 export const AI_NAV: AdminNavChild[] = [
@@ -96,13 +92,15 @@ export const ACADEMICS_NAV: AdminNavChild[] = [
   { label: "Pending Schedules", href: "/admin/f/ac-11-pending-schedules" },
   { label: "Grading Schemes", href: "/admin/f/ac-12-grading-schemes" },
   { label: "Pending Grades", href: "/admin/f/ac-13-pending-grades" },
-  { label: "Faculty", href: "/admin/f/ac-14-faculty" },
+  { label: "Faculty roster", href: "/admin/f/ac-14-faculty" },
+  { label: "Instructor 360", href: "/admin/f/ac-14-faculty-360" },
+  { label: "Instructor onboarding", href: "/admin/users/create?role=instructor" },
   { label: "Evaluations", href: "/admin/f/ac-15-course-evaluations" },
   { label: "Resources", href: "/admin/f/ac-16-course-resources" },
   { label: "Requirements", href: "/admin/f/ac-17-student-requirements" },
   { label: "LOA Requests", href: "/admin/f/ac-18-loa-requests" },
   { label: "Withdrawals", href: "/admin/f/ac-19-withdraw-requests" },
-  { label: "Create Student", href: "/admin/f/ac-20-create-student" },
+  { label: "Create user", href: "/admin/users/create" },
 ];
 
 export const ADMISSIONS_NAV: AdminNavChild[] = [
@@ -132,20 +130,16 @@ export const PRACTICUM_NAV: AdminNavChild[] = [
   { label: "Logs", href: "/admin/f/pr-07-logs" },
   { label: "Evaluations", href: "/admin/f/pr-08-evaluations" },
   { label: "Incidents", href: "/admin/f/pr-09-incidents" },
-  { label: "Employer Portal", href: "/admin/f/pr-10-employer-portal" },
-  { label: "Preceptors", href: "/admin/f/xx-5-preceptor-management" },
-  { label: "Competency", href: "/admin/f/xx-6-competency-tracking" },
-  { label: "Clinical Compliance", href: "/admin/f/xx-7-clinical-compliance" },
-  { label: "Practicum Reports", href: "/admin/f/xx-8-practicum-reports" },
 ];
 
 export const REGISTRAR_NAV: AdminNavChild[] = [
   { label: "Students", href: "/admin/students" },
+  { label: "Student 360", href: "/admin/f/rg-01-student-360" },
+  { label: "Student onboarding", href: "/admin/users/create?role=student" },
   { label: "Enrolments", href: "/admin/enrolments" },
   { label: "Records", href: "/admin/records" },
   { label: "Transcripts", href: "/admin/transcripts" },
   { label: "Dashboard", href: "/admin/f/rg-00-registrar-dashboard" },
-  { label: "Student 360", href: "/admin/f/rg-01-student-360" },
   { label: "Academic History", href: "/admin/f/rg-02-academic-history" },
   { label: "Status History", href: "/admin/f/rg-03-status-history" },
   { label: "Transfer Credits", href: "/admin/f/rg-04-transfer-credits" },
@@ -154,6 +148,13 @@ export const REGISTRAR_NAV: AdminNavChild[] = [
   { label: "Transcript", href: "/admin/f/rg-07-transcript" },
   { label: "Corrections", href: "/admin/f/rg-08-registrar-correction" },
   { label: "Official Export", href: "/admin/f/rg-09-official-export" },
+  { label: "Approvals", href: "/admin/approvals" },
+  { label: "Cohorts", href: "/admin/cohorts" },
+  { label: "Retakes / Make-up", href: "/admin/retakes" },
+  { label: "Student Documents", href: "/admin/student-documents" },
+  { label: "Extracurricular", href: "/admin/extracurricular" },
+  { label: "Tax Documents", href: "/admin/tax-documents" },
+  { label: "Mail Policy", href: "/admin/mail-policy" },
 ];
 
 export const CRM_NAV: AdminNavChild[] = [
@@ -170,6 +171,7 @@ export const CRM_NAV: AdminNavChild[] = [
 
 export const FINANCE_NAV: AdminNavChild[] = [
   { label: "Finance Home", href: "/admin/finance" },
+  { label: "AR / Payment Posting", href: "/admin/finance/posting" },
   { label: "Payments", href: "/admin/payments" },
   { label: "Refunds", href: "/admin/refunds" },
   { label: "Dashboard", href: "/admin/f/fn-01-finance-dashboard" },
@@ -180,6 +182,7 @@ export const FINANCE_NAV: AdminNavChild[] = [
   { label: "Refund Queue", href: "/admin/f/fn-06-refund-queue" },
   { label: "Holds", href: "/admin/f/fn-07-holds" },
   { label: "Export", href: "/admin/f/fn-08-finance-export" },
+  { label: "Tax Documents", href: "/admin/tax-documents" },
 ];
 
 export const SUCCESS_NAV: AdminNavChild[] = [

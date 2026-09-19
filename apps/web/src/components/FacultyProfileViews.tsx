@@ -1,0 +1,1327 @@
+"use client";
+
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
+import type { TeacherScreenConfig } from "@/lib/teacherCatalog";
+import { useOptionalTeacherLive } from "@/lib/useTeacherSisLive";
+import { DEFAULT_HCC_TIME_ZONE, HCC_TIME_ZONES } from "@/lib/timeZones";
+
+function PencilButton({ onClick, label }: { onClick: () => void; label: string }) {
+  return (
+    <button type="button" className="mh-hcc-profile__pencil" onClick={onClick} aria-label={label} title={label}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+        <path
+          d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3zM13.5 6.5l3 3"
+          stroke="#2563eb"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </button>
+  );
+}
+
+function ModalShell({
+  title,
+  section,
+  onClose,
+  children,
+  footer,
+}: {
+  title: string;
+  section?: string;
+  onClose: () => void;
+  children: ReactNode;
+  footer?: ReactNode;
+}) {
+  return (
+    <div className="mh-hcc-modal" role="dialog" aria-modal="true" aria-label={title}>
+      <button type="button" className="mh-hcc-modal__backdrop" aria-label="Close" onClick={onClose} />
+      <div className="mh-hcc-modal__panel">
+        <header className="mh-hcc-modal__head">
+          <h2>{title}</h2>
+          <button type="button" className="mh-hcc-modal__x" onClick={onClose} aria-label="Close">
+            ×
+          </button>
+        </header>
+        {section ? <div className="mh-hcc-modal__section">{section}</div> : null}
+        <div className="mh-hcc-modal__body">{children}</div>
+        {footer ? <div className="mh-hcc-modal__foot">{footer}</div> : null}
+      </div>
+    </div>
+  );
+}
+
+function AvatarZoom({ open, onClose, name }: { open: boolean; onClose: () => void; name: string }) {
+  if (!open) return null;
+  return (
+    <div className="mh-hcc-avatar-zoom" role="dialog" aria-modal="true" aria-label={`${name} profile photo`}>
+      <button type="button" className="mh-hcc-avatar-zoom__backdrop" onClick={onClose} aria-label="Close" />
+      <div className="mh-hcc-avatar-zoom__card">
+        <button type="button" className="mh-hcc-modal__x" onClick={onClose} aria-label="Close">
+          ×
+        </button>
+        <div className="mh-hcc-avatar-zoom__img" aria-hidden>
+          <svg viewBox="0 0 160 160" width="220" height="220">
+            <circle cx="80" cy="80" r="80" fill="#e8eef2" />
+            <path
+              d="M80 28c18 0 32 18 18 36-16 4-20 14-18 22 18 2 36 14 40 32H40c4-18 22-30 40-32 2-8-2-18-18-22-14-18 0-36 18-36z"
+              fill="#9aa7b2"
+            />
+            <path d="M52 118c8-10 18-14 28-14s20 4 28 14" stroke="#9aa7b2" strokeWidth="6" fill="none" />
+          </svg>
+        </div>
+        <p>{name}</p>
+      </div>
+    </div>
+  );
+}
+
+export function FacultyProfileLayout({
+  config,
+  tabs,
+  children,
+}: {
+  config: TeacherScreenConfig;
+  tabs?: Array<{ label: string; href: string; active?: boolean }>;
+  children: ReactNode;
+}) {
+  const router = useRouter();
+  const live = useOptionalTeacherLive();
+  const header = config.profileHeader;
+  const bio = config.profileBio;
+  const name = header?.name || bio?.name || live?.bootstrap?.displayName || "Instructor";
+  const email =
+    header?.email ||
+    bio?.personal?.find((f) => f.label === "Email")?.value ||
+    live?.bootstrap?.email ||
+    "";
+  const status = header?.status || "Active";
+  const topics =
+    header?.topics?.length
+      ? header.topics
+      : bio?.expertise?.length
+        ? bio.expertise
+        : config.profileTopics?.teaching || [];
+  const tabItems = tabs?.length ? tabs : bio?.tabs || [];
+  const [zoom, setZoom] = useState(false);
+
+  return (
+    <div className="mh-hcc-profile" data-figma-id={config.figmaId}>
+      <p className="mh-hcc-profile__crumb">
+        Home <span>›</span> My Profile
+      </p>
+      <header className="mh-hcc-profile__head">
+        <button
+          type="button"
+          className="mh-hcc-profile__avatar"
+          onClick={() => setZoom(true)}
+          aria-label="Zoom profile photo"
+        >
+          <svg viewBox="0 0 64 64" width="88" height="88">
+            <circle cx="32" cy="32" r="32" fill="#e8eef2" />
+            <path
+              d="M32 12c8 0 14 8 8 16-7 2-9 6-8 10 8 1 16 6 18 14H14c2-8 10-13 18-14 1-4-1-8-8-10-6-8 0-16 8-16z"
+              fill="#9aa7b2"
+            />
+          </svg>
+        </button>
+        <div>
+          <h1>{name}</h1>
+          {email ? (
+            <p>
+              <span className="mh-hcc-profile__mail">✉</span> {email}
+            </p>
+          ) : null}
+          <p>
+            <strong>Status:</strong> <span className="mh-hcc-profile__status">{status}</span>
+          </p>
+          {topics.length ? (
+            <p className="mh-hcc-profile__topics">
+              <strong>Topics:</strong> {topics.join(", ")}
+            </p>
+          ) : null}
+        </div>
+      </header>
+      {tabItems.length ? (
+        <div className="mh-hcc-profile__tabs">
+          {tabItems.map((t) => (
+            <button
+              key={t.href}
+              type="button"
+              className={t.active ? "is-active" : ""}
+              onClick={() => router.push(t.href)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <div className="mh-hcc-profile__body">{children}</div>
+      <AvatarZoom open={zoom} onClose={() => setZoom(false)} name={name} />
+    </div>
+  );
+}
+
+export function ProfileBioView({ config }: { config: TeacherScreenConfig }) {
+  const live = useOptionalTeacherLive();
+  const p = config.profileBio;
+  const connect = p?.connect;
+  const education = p?.education;
+  const email = connect?.email || config.profileHeader?.email || p?.personal?.find((f) => f.label === "Email")?.value || "";
+  const phone = connect?.phone || p?.personal?.find((f) => f.label === "Phone")?.value || "";
+  const [modal, setModal] = useState<"connect" | "education" | null>(null);
+  const [phoneVal, setPhoneVal] = useState(phone === "—" ? "" : phone);
+  const [emailVal, setEmailVal] = useState(email);
+  const [eduBg, setEduBg] = useState(education?.background || "");
+  const [eduExp, setEduExp] = useState(education?.experience || "");
+  const [eduOrg, setEduOrg] = useState(education?.organizations || "");
+
+  useEffect(() => {
+    setPhoneVal(phone === "—" ? "" : phone);
+    setEmailVal(email);
+    setEduBg(education?.background || "");
+    setEduExp(education?.experience || "");
+    setEduOrg(education?.organizations || "");
+  }, [phone, email, education?.background, education?.experience, education?.organizations]);
+
+  async function saveConnect(e: FormEvent) {
+    e.preventDefault();
+    await live?.runAction(
+      "Save Content",
+      JSON.stringify({ __kind: "connect", Phone: phoneVal, "E-mail": emailVal }),
+    );
+    setModal(null);
+    await live?.refresh();
+  }
+
+  async function saveEducation(e: FormEvent) {
+    e.preventDefault();
+    await live?.runAction(
+      "Save Content",
+      JSON.stringify({
+        __kind: "education",
+        "Education background": eduBg,
+        "Summary of professional experience": eduExp,
+        "Membership in professional organizations": eduOrg,
+      }),
+    );
+    setModal(null);
+    await live?.refresh();
+  }
+
+  const eduBlocks = [education?.background, education?.experience, education?.organizations].filter(Boolean);
+
+  return (
+    <FacultyProfileLayout config={config} tabs={p?.tabs}>
+      <div className="mh-hcc-profile__split">
+        <section className="mh-hcc-profile__card">
+          <div className="mh-hcc-profile__card-head">
+            <h2>CONNECT</h2>
+            <PencilButton onClick={() => setModal("connect")} label="Edit connect" />
+          </div>
+          <p>
+            <strong>E-mail</strong>
+            <br />
+            {email || "—"}
+          </p>
+          {phone && phone !== "—" ? (
+            <p>
+              <strong>Phone</strong>
+              <br />
+              {phone}
+            </p>
+          ) : null}
+        </section>
+        <section className="mh-hcc-profile__card">
+          <div className="mh-hcc-profile__card-head">
+            <h2>EDUCATION / ACCREDITATION</h2>
+            <PencilButton onClick={() => setModal("education")} label="Edit education" />
+          </div>
+          {eduBlocks.length ? (
+            eduBlocks.map((block) => (
+              <p key={block!.slice(0, 24)} className="mh-hcc-profile__pre">
+                {block}
+              </p>
+            ))
+          ) : (
+            <p className="mh-teacher-muted">No content available.</p>
+          )}
+        </section>
+      </div>
+
+      {modal === "connect" ? (
+        <ModalShell
+          title="CONNECT"
+          section="CONTENT"
+          onClose={() => setModal(null)}
+          footer={
+            <button type="submit" form="connect-form" className="mh-hcc-modal__save">
+              Save Content
+            </button>
+          }
+        >
+          <form id="connect-form" className="mh-hcc-modal__form" onSubmit={saveConnect}>
+            <label>
+              <span>Phone</span>
+              <input value={phoneVal} onChange={(e) => setPhoneVal(e.target.value)} />
+            </label>
+            <label>
+              <span>E-mail</span>
+              <input value={emailVal} onChange={(e) => setEmailVal(e.target.value)} type="email" required />
+            </label>
+          </form>
+        </ModalShell>
+      ) : null}
+
+      {modal === "education" ? (
+        <ModalShell
+          title="EDUCATION / ACCREDITATION"
+          section="CONTENT"
+          onClose={() => setModal(null)}
+          footer={
+            <button type="submit" form="edu-form" className="mh-hcc-modal__save">
+              Save Content
+            </button>
+          }
+        >
+          <form id="edu-form" className="mh-hcc-modal__form" onSubmit={saveEducation}>
+            <label>
+              <span>Education background</span>
+              <textarea rows={4} value={eduBg} onChange={(e) => setEduBg(e.target.value)} />
+            </label>
+            <label>
+              <span>Summary of professional experience</span>
+              <textarea rows={4} value={eduExp} onChange={(e) => setEduExp(e.target.value)} />
+            </label>
+            <label>
+              <span>Membership in professional organizations</span>
+              <textarea rows={4} value={eduOrg} onChange={(e) => setEduOrg(e.target.value)} />
+            </label>
+          </form>
+        </ModalShell>
+      ) : null}
+    </FacultyProfileLayout>
+  );
+}
+
+export function ProfileTopicsView({ config }: { config: TeacherScreenConfig }) {
+  const p = config.profileTopics;
+  const current = p?.currentCourses?.length ? p.currentCourses : p?.teaching ?? [];
+  const previous = p?.previousCourses ?? [];
+  const chair = p?.academicChair ?? [];
+  const schedule = p?.teachingSchedule ?? [];
+
+  return (
+    <FacultyProfileLayout config={config} tabs={p?.tabs}>
+      <div className="mh-hcc-profile__split mh-hcc-profile__split--topics">
+        <aside>
+          <section>
+            <h2>CURRENT COURSES</h2>
+            {current.length ? (
+              <ul className="mh-hcc-profile__list">
+                {current.map((t) => (
+                  <li key={t}>{t}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mh-teacher-muted">No current courses.</p>
+            )}
+          </section>
+          <section>
+            <h2>PREVIOUS COURSES TAUGHT</h2>
+            {previous.length ? (
+              <ul className="mh-hcc-profile__list">
+                {previous.map((t) => (
+                  <li key={t}>{t}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mh-teacher-muted">No previous courses.</p>
+            )}
+          </section>
+        </aside>
+        <div>
+          <section>
+            <h2>ACADEMIC CHAIR</h2>
+            {chair.length ? (
+              <>
+                <p className="mh-hcc-profile__subhead">Topics</p>
+                <p className="mh-hcc-profile__topics-block">• {chair.join(", ")}</p>
+              </>
+            ) : (
+              <p className="mh-teacher-muted">No content available.</p>
+            )}
+          </section>
+          <section>
+            <h2>ACADEMIC LEAD</h2>
+            <p className="mh-teacher-muted">{p?.academicLead || "No content available."}</p>
+          </section>
+          <section>
+            <h2>CURRENT TEACHING SCHEDULE</h2>
+            <table className="mh-hcc-profile__table">
+              <thead>
+                <tr>
+                  <th>COURSE</th>
+                  <th>DELIVERY METHOD</th>
+                  <th>LOCATION</th>
+                  <th>SCHEDULE</th>
+                </tr>
+              </thead>
+              <tbody>
+                {schedule.length === 0 ? (
+                  <tr>
+                    <td colSpan={4}>No content available.</td>
+                  </tr>
+                ) : (
+                  schedule.map((row) => (
+                    <tr key={`${row.code}-${row.course}`}>
+                      <td>
+                        <strong>
+                          {row.course} ({row.code})
+                        </strong>
+                        <br />
+                        {row.title}
+                      </td>
+                      <td>{row.delivery}</td>
+                      <td>{row.location}</td>
+                      <td className="mh-hcc-profile__pre">{row.schedule}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </section>
+        </div>
+      </div>
+    </FacultyProfileLayout>
+  );
+}
+
+function formatClockLabel(hhmm: string) {
+  const [hRaw, mRaw] = hhmm.split(":");
+  const h = Number(hRaw);
+  const m = Number(mRaw || 0);
+  if (Number.isNaN(h)) return hhmm;
+  const d = new Date(2000, 0, 1, h, m);
+  return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).toLowerCase().replace(" ", "");
+}
+
+function expandAvailabilityMarks(
+  slots: Array<{
+    date?: string;
+    endDate?: string;
+    repeats?: string;
+  }>,
+): string[] {
+  const marked = new Set<string>();
+  for (const slot of slots) {
+    if (slot.date) marked.add(slot.date);
+    if (slot.date && slot.endDate && slot.repeats) {
+      const cur = new Date(`${slot.date}T12:00:00`);
+      const last = new Date(`${slot.endDate}T12:00:00`);
+      if (Number.isNaN(cur.getTime()) || Number.isNaN(last.getTime())) continue;
+      const days = slot.repeats
+        .split(/[·,]/)
+        .map((d) => d.trim().slice(0, 3).toLowerCase())
+        .filter(Boolean);
+      while (cur <= last) {
+        const short = cur.toLocaleDateString("en-US", { weekday: "short" }).toLowerCase();
+        if (days.includes(short)) {
+          marked.add(
+            `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, "0")}-${String(cur.getDate()).padStart(2, "0")}`,
+          );
+        }
+        cur.setDate(cur.getDate() + 1);
+      }
+    }
+  }
+  return [...marked].sort();
+}
+
+function MonthCalendar({
+  year,
+  month,
+  markedDates,
+  selectedIso,
+  onSelect,
+  onPrev,
+  onNext,
+}: {
+  year: number;
+  month: number;
+  markedDates: string[];
+  selectedIso?: string | null;
+  onSelect?: (iso: string) => void;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  const marked = new Set(markedDates);
+  const first = new Date(year, month, 1);
+  const startPad = first.getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const label = first.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  const prevLabel = new Date(year, month - 1, 1).toLocaleDateString("en-US", { month: "short" });
+  const nextLabel = new Date(year, month + 1, 1).toLocaleDateString("en-US", { month: "short" });
+  const cells: Array<{ day: number | null; iso: string }> = [];
+  for (let i = 0; i < startPad; i++) cells.push({ day: null, iso: "" });
+  for (let d = 1; d <= daysInMonth; d++) {
+    const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    cells.push({ day: d, iso });
+  }
+  while (cells.length % 7 !== 0) cells.push({ day: null, iso: "" });
+
+  return (
+    <div className="mh-hcc-cal">
+      <div className="mh-hcc-cal__nav">
+        <button type="button" onClick={onPrev} aria-label={`Previous month, ${prevLabel}`}>
+          ← {prevLabel}
+        </button>
+        <strong>{label}</strong>
+        <button type="button" onClick={onNext} aria-label={`Next month, ${nextLabel}`}>
+          {nextLabel} →
+        </button>
+      </div>
+      <div className="mh-hcc-cal__head">
+        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
+          <div key={d} className="mh-hcc-cal__dow">
+            {d}
+          </div>
+        ))}
+      </div>
+      <div className="mh-hcc-cal__grid">
+        {cells.map((c, idx) => {
+          const isMarked = Boolean(c.iso && marked.has(c.iso));
+          const isSelected = Boolean(c.iso && selectedIso === c.iso);
+          const className = [
+            "mh-hcc-cal__cell",
+            c.day ? "" : "is-empty",
+            isMarked ? "is-marked" : "",
+            isSelected ? "is-selected" : "",
+          ]
+            .filter(Boolean)
+            .join(" ");
+          if (!c.day) {
+            return <div key={idx} className={className} />;
+          }
+          return (
+            <button
+              key={idx}
+              type="button"
+              className={className}
+              onClick={() => onSelect?.(c.iso)}
+              aria-pressed={isSelected}
+              aria-label={`${label} ${c.day}${isMarked ? ", has availability" : ""}`}
+            >
+              <span>{c.day}</span>
+              {isMarked ? <i className="mh-hcc-cal__dot" aria-hidden /> : null}
+            </button>
+          );
+        })}
+      </div>
+      <p className="mh-hcc-cal__legend">
+        <i className="mh-hcc-cal__dot" aria-hidden /> Marked days have published availability
+      </p>
+    </div>
+  );
+}
+
+function AvailabilityModal({
+  open,
+  onClose,
+  onSaved,
+  defaultType = "Available to Teach",
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+  defaultType?: string;
+}) {
+  const live = useOptionalTeacherLive();
+  const [title, setTitle] = useState("");
+  const [type, setType] = useState(defaultType);
+  const [startH, setStartH] = useState("09");
+  const [startM, setStartM] = useState("00");
+  const [endH, setEndH] = useState("10");
+  const [endM, setEndM] = useState("00");
+  const [date, setDate] = useState("2026-09-18");
+  const [recur, setRecur] = useState(true);
+  const [endDate, setEndDate] = useState("2026-09-25");
+  const [days, setDays] = useState<string[]>(["Mon", "Tue", "Wed", "Thu", "Fri"]);
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (open) setType(defaultType);
+  }, [open, defaultType]);
+
+  if (!open) return null;
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await live?.runAction(
+        "Save Availability",
+        JSON.stringify({
+          "Title / Name (optional)": title,
+          Type: type,
+          "Start hour": startH,
+          "Start minute": startM,
+          "End hour": endH,
+          "End minute": endM,
+          Date: date,
+          "Set availability recurrence timeframe": recur ? "1" : "",
+          "End Date": recur ? endDate : "",
+          "Days of the Week": recur ? days.join(",") : "",
+          Note: note,
+        }),
+      );
+      onClose();
+      await onSaved();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const hours = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0"));
+  const mins = ["00", "15", "30", "45"];
+  const week = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+  return (
+    <ModalShell
+      title="AVAILABILITY"
+      section="AVAILABILITY"
+      onClose={onClose}
+      footer={
+        <button type="submit" form="avail-form" className="mh-hcc-modal__save" disabled={saving}>
+          {saving ? "Saving…" : "Save Availability"}
+        </button>
+      }
+    >
+      <form id="avail-form" className="mh-hcc-modal__form" onSubmit={onSubmit}>
+        <label>
+          <span>Title / Name (optional)</span>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} />
+        </label>
+        <label>
+          <span>Type</span>
+          <select value={type} onChange={(e) => setType(e.target.value)}>
+            <option>Available to Teach</option>
+            <option>Office Hours</option>
+          </select>
+        </label>
+        <div className="mh-hcc-modal__times">
+          <label>
+            <span>Start</span>
+            <span className="mh-hcc-modal__timepair">
+              <select value={startH} onChange={(e) => setStartH(e.target.value)}>
+                {hours.map((h) => (
+                  <option key={h}>{h}</option>
+                ))}
+              </select>
+              <select value={startM} onChange={(e) => setStartM(e.target.value)}>
+                {mins.map((m) => (
+                  <option key={m}>{m}</option>
+                ))}
+              </select>
+            </span>
+          </label>
+          <label>
+            <span>End</span>
+            <span className="mh-hcc-modal__timepair">
+              <select value={endH} onChange={(e) => setEndH(e.target.value)}>
+                {hours.map((h) => (
+                  <option key={h}>{h}</option>
+                ))}
+              </select>
+              <select value={endM} onChange={(e) => setEndM(e.target.value)}>
+                {mins.map((m) => (
+                  <option key={m}>{m}</option>
+                ))}
+              </select>
+            </span>
+          </label>
+        </div>
+        <label>
+          <span>Date</span>
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+        </label>
+        <label className="mh-hcc-modal__check">
+          <input type="checkbox" checked={recur} onChange={(e) => setRecur(e.target.checked)} />
+          <span>Set availability recurrence timeframe</span>
+        </label>
+        {recur ? (
+          <label>
+            <span>End Date</span>
+            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+          </label>
+        ) : null}
+        {recur ? (
+          <fieldset className="mh-hcc-modal__days">
+            <legend>Days of the Week</legend>
+            {week.map((d) => (
+              <label key={d}>
+                <input
+                  type="checkbox"
+                  checked={days.includes(d)}
+                  onChange={(e) =>
+                    setDays((prev) => (e.target.checked ? [...prev, d] : prev.filter((x) => x !== d)))
+                  }
+                />
+                {d}
+              </label>
+            ))}
+          </fieldset>
+        ) : null}
+        <label>
+          <span>Note</span>
+          <textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} />
+        </label>
+      </form>
+    </ModalShell>
+  );
+}
+
+export function AvailabilityView({ config }: { config: TeacherScreenConfig }) {
+  const live = useOptionalTeacherLive();
+  const a = config.availability;
+  const cal = a?.calendar;
+  const slots = a?.slots ?? [];
+  const [year, setYear] = useState(cal?.year ?? 2026);
+  const [month, setMonth] = useState(cal?.month ?? 8);
+  const [addOpen, setAddOpen] = useState(false);
+  const [addType, setAddType] = useState("Available to Teach");
+  const [generalOpen, setGeneralOpen] = useState(false);
+  const [generalHtml, setGeneralHtml] = useState(a?.generalInfo || "");
+  const [selectedIso, setSelectedIso] = useState<string | null>(null);
+  const teachingByDay = a?.teachingByDay ?? [];
+
+  const markedDates = useMemo(() => {
+    const fromApi = a?.calendar?.markedDates ?? [];
+    if (fromApi.length) return fromApi;
+    return expandAvailabilityMarks(slots);
+  }, [a?.calendar?.markedDates, slots]);
+
+  useEffect(() => {
+    if (cal) {
+      setYear(cal.year);
+      setMonth(cal.month);
+    }
+  }, [cal?.year, cal?.month, markedDates.length]);
+
+  useEffect(() => {
+    setGeneralHtml(a?.generalInfo || "");
+  }, [a?.generalInfo]);
+
+  useEffect(() => {
+    if (!markedDates.length) return;
+    setSelectedIso((prev) => {
+      if (prev && markedDates.includes(prev)) return prev;
+      const inMonth = markedDates.find((iso) => {
+        const [y, m] = iso.split("-").map(Number);
+        return y === year && m === month + 1;
+      });
+      return inMonth || markedDates[0] || null;
+    });
+  }, [markedDates, year, month]);
+
+  function shiftMonth(delta: number) {
+    const d = new Date(year, month + delta, 1);
+    setYear(d.getFullYear());
+    setMonth(d.getMonth());
+  }
+
+  async function saveGeneral(e: FormEvent) {
+    e.preventDefault();
+    await live?.runAction(
+      "Save Content",
+      JSON.stringify({ __kind: "general", Content: generalHtml }),
+    );
+    setGeneralOpen(false);
+    await live?.refresh();
+  }
+
+  const words = generalHtml.trim() ? generalHtml.trim().split(/\s+/).length : 0;
+  const officeHoursText = (a?.officeHours || "").trim();
+  const selectedSlots = useMemo(() => {
+    if (!selectedIso) return [];
+    return slots.filter((slot) => {
+      if (slot.date === selectedIso) return true;
+      if (!slot.repeats || !slot.date) return false;
+      if (slot.endDate && (selectedIso < slot.date || selectedIso > slot.endDate)) return false;
+      if (!slot.endDate && slot.date !== selectedIso) return false;
+      const day = new Date(`${selectedIso}T12:00:00`).toLocaleDateString("en-US", { weekday: "short" });
+      const days = slot.repeats.split(/[·,]/).map((x) => x.trim().slice(0, 3).toLowerCase());
+      return days.includes(day.toLowerCase());
+    });
+  }, [slots, selectedIso]);
+
+  const selectedLabel = selectedIso
+    ? new Date(`${selectedIso}T12:00:00`).toLocaleDateString("en-US", {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      })
+    : null;
+
+  return (
+    <FacultyProfileLayout config={config} tabs={a?.tabs}>
+      <div className="mh-hcc-avail">
+        <div className="mh-hcc-avail__cards">
+          <section className="mh-hcc-avail__card">
+            <div className="mh-hcc-profile__card-head">
+              <h2>REGULAR OFFICE HOURS</h2>
+              <PencilButton
+                onClick={() => {
+                  setAddType("Office Hours");
+                  setAddOpen(true);
+                }}
+                label="Add office hours"
+              />
+            </div>
+            {officeHoursText ? (
+              <p className="mh-hcc-avail__pre">{officeHoursText}</p>
+            ) : (
+              <p className="mh-teacher-muted">No office hours published yet.</p>
+            )}
+          </section>
+          <section className="mh-hcc-avail__card">
+            <div className="mh-hcc-profile__card-head">
+              <h2>GENERAL INFORMATION</h2>
+              <PencilButton onClick={() => setGeneralOpen(true)} label="Edit general information" />
+            </div>
+            {a?.generalInfo ? (
+              <div className="mh-hcc-profile__rich" dangerouslySetInnerHTML={{ __html: a.generalInfo }} />
+            ) : (
+              <p className="mh-teacher-muted">No content available.</p>
+            )}
+          </section>
+        </div>
+
+        <section className="mh-hcc-avail__main">
+          <div className="mh-hcc-avail__main-head">
+            <div>
+              <h2>AVAILABILITY</h2>
+              <p className="mh-hcc-avail__note">
+                {a?.note ||
+                  (slots.length
+                    ? `${slots.length} window(s) on the calendar.`
+                    : "Add windows students can request.")}
+              </p>
+            </div>
+            <button
+              type="button"
+              className="mh-hcc-avail__add"
+              onClick={() => {
+                setAddType("Available to Teach");
+                setAddOpen(true);
+              }}
+            >
+              + Add
+            </button>
+          </div>
+
+          {slots.length ? (
+            <ul className="mh-hcc-avail__slots">
+              {slots.map((slot, i) => (
+                <li key={`${slot.date || slot.day}-${slot.start}-${i}`} className="mh-hcc-avail__slot">
+                  <div className="mh-hcc-avail__slot-top">
+                    <strong>{slot.title || slot.mode}</strong>
+                    <span className="mh-hcc-avail__pill">{slot.mode}</span>
+                  </div>
+                  <p>
+                    {formatClockLabel(slot.start)}–{formatClockLabel(slot.end)}
+                    {slot.date ? ` · ${slot.date}` : ""}
+                    {slot.endDate && slot.endDate !== slot.date ? ` → ${slot.endDate}` : ""}
+                  </p>
+                  <p className="mh-hcc-avail__slot-meta">
+                    {slot.repeats || slot.day}
+                    {slot.note ? ` · ${slot.note}` : ""}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+
+          <div className="mh-hcc-avail__grid">
+            <div className="mh-hcc-avail__side">
+              <h3>CURRENT TEACHING SCHEDULE</h3>
+              {teachingByDay.length === 0 ? (
+                <p className="mh-teacher-muted">No content available.</p>
+              ) : (
+                teachingByDay.map((day) => (
+                  <div key={day.day} className="mh-hcc-profile__dayblock">
+                    <strong>{day.day}</strong>
+                    {day.entries.map((e) => (
+                      <p key={`${e.course}-${e.section}-${e.time}`}>
+                        {e.course} ({e.section}) — {e.time}
+                      </p>
+                    ))}
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="mh-hcc-avail__calwrap">
+              <MonthCalendar
+                year={year}
+                month={month}
+                markedDates={markedDates}
+                selectedIso={selectedIso}
+                onSelect={setSelectedIso}
+                onPrev={() => shiftMonth(-1)}
+                onNext={() => shiftMonth(1)}
+              />
+              <div className="mh-hcc-avail__daydetail">
+                <h3>{selectedLabel || "Select a day"}</h3>
+                {selectedSlots.length === 0 ? (
+                  <p className="mh-teacher-muted">No availability on this day.</p>
+                ) : (
+                  selectedSlots.map((slot, i) => (
+                    <div key={`sel-${slot.start}-${i}`} className="mh-hcc-avail__dayitem">
+                      <strong>{slot.title || slot.mode}</strong>
+                      <span>
+                        {formatClockLabel(slot.start)}–{formatClockLabel(slot.end)}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <AvailabilityModal
+        open={addOpen}
+        defaultType={addType}
+        onClose={() => setAddOpen(false)}
+        onSaved={async () => live?.refresh()}
+      />
+
+      {generalOpen ? (
+        <ModalShell
+          title="GENERAL INFORMATION"
+          section="CONTENT"
+          onClose={() => setGeneralOpen(false)}
+          footer={
+            <button type="submit" form="general-form" className="mh-hcc-modal__save">
+              Save Content
+            </button>
+          }
+        >
+          <form id="general-form" onSubmit={saveGeneral}>
+            <div className="mh-hcc-rte__toolbar" aria-hidden>
+              <select defaultValue="sans-serif">
+                <option>sans-serif</option>
+                <option>serif</option>
+              </select>
+              <select defaultValue="10pt">
+                <option>10pt</option>
+                <option>12pt</option>
+                <option>14pt</option>
+              </select>
+              <button type="button">B</button>
+              <button type="button">I</button>
+              <button type="button">U</button>
+            </div>
+            <textarea
+              className="mh-hcc-rte__editor"
+              rows={10}
+              value={generalHtml}
+              onChange={(e) => setGeneralHtml(e.target.value)}
+              placeholder="Write general availability information…"
+            />
+            <p className="mh-hcc-rte__words">{words} WORDS</p>
+          </form>
+        </ModalShell>
+      ) : null}
+    </FacultyProfileLayout>
+  );
+}
+
+export function CompensationView({ config }: { config: TeacherScreenConfig }) {
+  const c = config.compensation;
+  return (
+    <FacultyProfileLayout config={config} tabs={c?.tabs}>
+      <div className="mh-hcc-profile__split">
+        <section>
+          <h2>PREVIOUS CONTRACTS</h2>
+          <p className="mh-teacher-muted">No contracts found.</p>
+        </section>
+        <section>
+          <h2>CURRENT CONTRACT</h2>
+          <table className="mh-hcc-profile__table">
+            <thead>
+              <tr>
+                <th>CONTRACT</th>
+                <th>COMPENSATION</th>
+                <th>REQUIREMENTS</th>
+                <th>EARNINGS</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td colSpan={4}>No contracts found.</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+      </div>
+    </FacultyProfileLayout>
+  );
+}
+
+export function ScheduleView({ config }: { config: TeacherScreenConfig }) {
+  const live = useOptionalTeacherLive();
+  const s = config.schedule;
+  const teachingByDay = s?.teachingByDay ?? [];
+  const [weekStart, setWeekStart] = useState(s?.weekStart || "2026-09-13");
+  const [addOpen, setAddOpen] = useState(false);
+
+  useEffect(() => {
+    if (s?.weekStart) setWeekStart(s.weekStart);
+  }, [s?.weekStart]);
+
+  const weekDays = useMemo(() => {
+    if (s?.weekDays?.length) return s.weekDays;
+    return [];
+  }, [s?.weekDays]);
+
+  function shiftWeek(delta: number) {
+    const d = new Date(`${weekStart}T12:00:00`);
+    d.setDate(d.getDate() + delta * 7);
+    const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    setWeekStart(iso);
+  }
+
+  const weekLabel = useMemo(() => {
+    const start = new Date(`${weekStart}T12:00:00`);
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    return `${start.toLocaleDateString("en-US", {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    })} - ${end.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`.toUpperCase();
+  }, [weekStart]);
+
+  return (
+    <FacultyProfileLayout config={config} tabs={s?.tabs}>
+      <div className="mh-hcc-profile__split mh-hcc-profile__split--schedule">
+        <section>
+          <h2>CURRENT TEACHING SCHEDULE</h2>
+          {teachingByDay.length === 0 ? (
+            <p className="mh-teacher-muted">No content available.</p>
+          ) : (
+            teachingByDay.map((day) => (
+              <div key={day.day} className="mh-hcc-profile__dayblock">
+                <strong>{day.day}</strong>
+                {day.entries.map((e) => (
+                  <p key={`${e.course}-${e.section}-${e.time}`}>
+                    {e.course} [{e.section}] — {e.time}
+                  </p>
+                ))}
+              </div>
+            ))
+          )}
+        </section>
+        <section className="mh-hcc-weekcal">
+          <div className="mh-hcc-profile__card-head">
+            <h2>SCHEDULE</h2>
+            <button type="button" className="mh-hcc-profile__add" onClick={() => setAddOpen(true)}>
+              + Add
+            </button>
+          </div>
+          <div className="mh-hcc-weekcal__nav">
+            <button type="button" onClick={() => shiftWeek(-1)}>
+              &lt; PREVIOUS WEEK
+            </button>
+            <strong>{weekLabel}</strong>
+            <button type="button" onClick={() => shiftWeek(1)}>
+              NEXT WEEK &gt;
+            </button>
+          </div>
+          <div className="mh-hcc-weekcal__grid">
+            {(weekDays.length
+              ? weekDays
+              : ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((label, i) => {
+                  const d = new Date(`${weekStart}T12:00:00`);
+                  d.setDate(d.getDate() + i);
+                  return {
+                    label,
+                    date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`,
+                    dateLabel: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+                    entries: [] as Array<{ kind: string; title: string; time: string }>,
+                  };
+                })
+            ).map((day, i) => (
+              <div key={day.label} className={`mh-hcc-weekcal__col mh-hcc-weekcal__col--${i}`}>
+                <header>
+                  <span>{day.label}</span>
+                  <em>{day.dateLabel || day.date}</em>
+                </header>
+                <div className="mh-hcc-weekcal__body">
+                  {day.entries.length === 0 ? (
+                    i === 0 ? (
+                      <p className="mh-teacher-muted">{s?.emptyMessage || "No availability times were found."}</p>
+                    ) : null
+                  ) : (
+                    day.entries.map((e) => (
+                      <article key={`${e.title}-${e.time}`} className={`mh-hcc-weekcal__event is-${e.kind}`}>
+                        <strong>{e.title}</strong>
+                        <span>{e.time}</span>
+                      </article>
+                    ))
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+      <AvailabilityModal open={addOpen} onClose={() => setAddOpen(false)} onSaved={async () => live?.refresh()} />
+    </FacultyProfileLayout>
+  );
+}
+
+export function SettingsView({ config }: { config: TeacherScreenConfig }) {
+  const live = useOptionalTeacherLive();
+  const initial =
+    config.settings?.groups?.[0]?.fields?.find((f) => f.label === "New Time Zone")?.value || DEFAULT_HCC_TIME_ZONE;
+  const [zone, setZone] = useState(initial);
+  const current =
+    config.settings?.groups?.[0]?.fields?.find((f) => f.label === "Current Time")?.value ||
+    new Date().toLocaleString();
+
+  useEffect(() => setZone(initial), [initial]);
+
+  async function onSave(e: FormEvent) {
+    e.preventDefault();
+    await live?.runAction("Save Time Zone", JSON.stringify({ "New Time Zone": zone }));
+    await live?.refresh();
+  }
+
+  return (
+    <div className="mh-hcc-timezone" data-figma-id={config.figmaId}>
+      <h1>CHANGE YOUR TIME ZONE</h1>
+      <form onSubmit={onSave}>
+        <label>
+          <span>Current Time</span>
+          <input className="mh-teacher-field" value={current} readOnly />
+        </label>
+        <label>
+          <span>New Time Zone</span>
+          <select className="mh-teacher-field mh-hcc-timezone__select" value={zone} onChange={(e) => setZone(e.target.value)} size={12}>
+            {HCC_TIME_ZONES.map((z) => (
+              <option key={z} value={z}>
+                {z}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button type="submit" className="mh-hcc-modal__save">
+          Save Time Zone
+        </button>
+      </form>
+    </div>
+  );
+}
+
+export function SecurityView({ config }: { config: TeacherScreenConfig }) {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [verified, setVerified] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!verified) {
+    return (
+      <div className="mh-hcc-verify" data-figma-id={config.figmaId}>
+        <h1>ACCOUNT VERIFICATION REQUIRED</h1>
+        <p>To continue, first verify that it&apos;s you by entering your current password.</p>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!currentPassword.trim()) {
+              setError("Enter your current password.");
+              return;
+            }
+            setError(null);
+            setVerified(true);
+          }}
+        >
+          <label>
+            <span>Current Password</span>
+            <input
+              type="password"
+              className="mh-teacher-field"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+            />
+          </label>
+          {error ? <p className="mh-teacher-error">{error}</p> : null}
+          <button type="submit" className="mh-hcc-modal__save">
+            Continue
+          </button>
+        </form>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mh-hcc-verify" data-figma-id={config.figmaId}>
+      <h1>Security Settings</h1>
+      <p className="mh-teacher-muted">Account verified. Manage password and session security from here.</p>
+      <p>
+        MFA: <strong>{config.security?.mfaEnabled ? "Enabled" : "Not enabled"}</strong>
+      </p>
+    </div>
+  );
+}
+
+export function AccomplishmentsView({ config }: { config: TeacherScreenConfig }) {
+  const live = useOptionalTeacherLive();
+  const a = config.accomplishments;
+  const items = a?.items ?? [];
+  const stats = a?.stats ?? [];
+  const facultyItems = items.filter((i) => i.category !== "student");
+  const studentItems = items.filter((i) => i.category === "student");
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState("");
+  const [detail, setDetail] = useState("");
+  const [year, setYear] = useState(String(new Date().getFullYear()));
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  async function onSave(e: FormEvent) {
+    e.preventDefault();
+    if (!title.trim()) {
+      setError("Enter an accomplishment title.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await live?.runAction(
+        "Save Accomplishment",
+        JSON.stringify({ Title: title.trim(), Detail: detail.trim(), Year: year.trim() }),
+      );
+      setOpen(false);
+      setTitle("");
+      setDetail("");
+      await live?.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save accomplishment.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <FacultyProfileLayout config={config} tabs={a?.tabs}>
+      <div className="mh-hcc-accomplish" data-figma-id={config.figmaId}>
+        <div className="mh-hcc-profile__card-head">
+          <h2>MY ACCOMPLISHMENTS &amp; BADGES</h2>
+          <button type="button" className="mh-hcc-profile__add" onClick={() => setOpen(true)}>
+            + Add
+          </button>
+        </div>
+
+        {stats.length ? (
+          <div className="mh-hcc-accomplish__stats">
+            {stats.map((s) => (
+              <div key={s.label} className="mh-hcc-accomplish__stat">
+                <strong>{s.value}</strong>
+                <span>{s.label}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="mh-hcc-accomplish__grid">
+          <section className="mh-hcc-profile__card">
+            <div className="mh-hcc-profile__card-head">
+              <h2>FACULTY RECORD</h2>
+            </div>
+            {facultyItems.length === 0 ? (
+              <p className="mh-teacher-muted">No faculty accomplishments yet. Add awards, certifications, or recognitions.</p>
+            ) : (
+              <ul className="mh-hcc-accomplish__list">
+                {facultyItems.map((item) => (
+                  <li key={`${item.title}-${item.year}-${item.detail}`}>
+                    <div>
+                      <strong>{item.title}</strong>
+                      {item.detail ? <p>{item.detail}</p> : null}
+                    </div>
+                    <span className={`mh-teacher-badge mh-teacher-badge--${item.tone || "success"}`}>
+                      {item.year}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="mh-hcc-profile__card">
+            <div className="mh-hcc-profile__card-head">
+              <h2>STUDENT BADGES ISSUED</h2>
+            </div>
+            {studentItems.length === 0 ? (
+              <p className="mh-teacher-muted">No student badges issued from your sections yet.</p>
+            ) : (
+              <ul className="mh-hcc-accomplish__list">
+                {studentItems.map((item) => (
+                  <li key={`${item.title}-${item.year}-${item.detail}`}>
+                    <div>
+                      <strong>{item.title}</strong>
+                      {item.detail ? <p>{item.detail}</p> : null}
+                    </div>
+                    <span className={`mh-teacher-badge mh-teacher-badge--${item.tone || "info"}`}>
+                      {item.year}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
+      </div>
+
+      {open ? (
+        <ModalShell
+          title="Add accomplishment"
+          section="Faculty record"
+          onClose={() => setOpen(false)}
+          footer={
+            <>
+              <button type="button" className="mh-hcc-modal__cancel" onClick={() => setOpen(false)}>
+                Cancel
+              </button>
+              <button type="submit" form="mh-accomplish-form" className="mh-hcc-modal__save" disabled={saving}>
+                {saving ? "Saving…" : "Save"}
+              </button>
+            </>
+          }
+        >
+          <form id="mh-accomplish-form" className="mh-hcc-modal__form" onSubmit={onSave}>
+            <label>
+              <span>Title</span>
+              <input className="mh-teacher-field" value={title} onChange={(e) => setTitle(e.target.value)} />
+            </label>
+            <label>
+              <span>Detail</span>
+              <textarea className="mh-teacher-field" rows={3} value={detail} onChange={(e) => setDetail(e.target.value)} />
+            </label>
+            <label>
+              <span>Year</span>
+              <input className="mh-teacher-field" value={year} onChange={(e) => setYear(e.target.value)} />
+            </label>
+            {error ? <p className="mh-teacher-error">{error}</p> : null}
+          </form>
+        </ModalShell>
+      ) : null}
+    </FacultyProfileLayout>
+  );
+}

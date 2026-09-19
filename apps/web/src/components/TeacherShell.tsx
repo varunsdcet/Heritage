@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { AskHeritageFab } from "@/components/AskHeritageFab";
 
 type NavLeaf = {
   label: string;
@@ -347,15 +348,18 @@ export function TeacherShell({
       ) : null}
 
       <aside className="mh-teacher__sidebar">
-        <div className="mh-teacher__brand">
-          <span className="mh-teacher__brand-mark" aria-hidden>
-            MH
-          </span>
-          <span className="mh-teacher__brand-text">
-            <span className="mh-teacher__brand-title">Campus OS</span>
-            <span className="mh-teacher__brand-sub">Heritage Community College</span>
-          </span>
-        </div>
+        <button
+          type="button"
+          className="mh-teacher__brand mh-teacher__brand--logo"
+          aria-label="Heritage Community College"
+          onClick={() => router.push("/instructor")}
+        >
+          <img
+            src="/brand/login_logo.png"
+            alt="Heritage Community College"
+            className="mh-teacher__brand-logo"
+          />
+        </button>
 
         <nav className="mh-teacher__nav" aria-label="Teacher">
           {NAV.map((entry) => {
@@ -511,15 +515,6 @@ export function TeacherShell({
 
             <button
               type="button"
-              className="mh-teacher__ask"
-              onClick={() => router.push("/instructor/ask")}
-            >
-              <NavIcon name="sparkle" active />
-              <span>Ask MyHeritage</span>
-            </button>
-
-            <button
-              type="button"
               className="mh-teacher__bell"
               aria-label="Notifications"
               onClick={() => router.push("/instructor/notifications")}
@@ -545,6 +540,7 @@ export function TeacherShell({
         </header>
 
         <div className="mh-teacher__scroll">{children}</div>
+        <AskHeritageFab role="instructor" />
       </div>
     </div>
   );
