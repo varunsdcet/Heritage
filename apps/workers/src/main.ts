@@ -54,6 +54,10 @@ async function relayOnce() {
         });
       }
 
+      if (event.eventName === "Compliance.sweep") {
+        // Payload-only marker; API process owns the real sweep. Ack the event.
+      }
+
       await prisma.eventOutbox.update({
         where: { id: event.id },
         data: { status: "delivered", attempts: { increment: 1 } },

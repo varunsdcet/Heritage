@@ -88,6 +88,18 @@ When a question is outside the available context, the Coach states the limitatio
 - Do not write rejected prompt content to interaction, audit, or outbox storage.
 - Persist provider as `campus_grounding_v1` for Phase 1 so UI and audit screens do not imply an external model was used.
 
-## Future provider boundary
+## Instructor Teaching Operations Assistant
 
-Later model generation remains behind `packages/ai`. A provider receives only the already-authorized context bundle, must return citations from the supplied source IDs, and is rejected if it introduces unknown citations. Model failure falls back to the deterministic grounded response rather than returning uncited content.
+Instructor Ask Heritage (`faculty_assistant`) is the Teaching Operations Assistant.
+
+It covers six operating lanes: Plan & Prepare, Run the Class, Assess & Grade, Support Students, Communicate, Close & Report.
+
+Phase 1 behaviour:
+
+- Answers are grounded in **authorized sections only**.
+- Morning summary / dashboard cards come from live schedule, roster, attendance, draft grades, and mail facts.
+- At-risk cues use transparent rules (for example ≥2 absences/lates in 30 days, missing submissions) — not opaque model judgment.
+- Write-style prompts (`Mark … absent`, `Send …`) return a **preview** and require the instructor to confirm on the matching screen.
+- Page-aware hints apply when `contextPath` is attendance, gradebook, messages, or content.
+
+Do not brand this surface as a “Copilot” in product copy.

@@ -1594,3 +1594,46 @@ model BadgeDefinition {
 
   @@index([institutionId])
 }
+
+/// Campus compliance: attendance miss escalation, teacher SLAs, explanation locks.
+model ComplianceCase {
+  id             String    @id @default(uuid())
+  institutionId  String
+  subjectType    String
+  subjectRef     String
+  caseKind       String
+  severity       String    @default("warning")
+  status         String    @default("open")
+  title          String
+  detail         String    @default("")
+  missCount      Int       @default(0)
+  explanation    String?
+  resolvedAt     DateTime?
+  resolvedById   String?
+  metaJson       String    @default("{}")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  rowVersion     Int       @default(1)
+
+  @@index([institutionId, status])
+  @@index([institutionId, caseKind, status])
+  @@index([subjectType, subjectRef])
+}
+
+/// Join telemetry for class sessions (mobile vs desktop). Report only — never blocks.
+model SessionJoinEvent {
+  id             String   @id @default(uuid())
+  institutionId  String
+  classSessionId String
+  studentId      String?
+  accountId      String?
+  clientKind     String   @default("unknown")
+  userAgent      String   @default("")
+  joinedAt       DateTime @default(now())
+  createdAt      DateTime @default(now())
+  rowVersion     Int      @default(1)
+
+  @@index([institutionId, joinedAt])
+  @@index([classSessionId, joinedAt])
+  @@index([studentId, joinedAt])
+}

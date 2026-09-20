@@ -189,10 +189,29 @@ export function HccBadgesView({ config }: { config: TeacherScreenConfig }) {
     router.push(`/instructor/f/t82-badges-accomplishments${qs.toString() ? `?${qs}` : ""}`);
   }
 
+  const rows = (d?.rows || []).filter((r) => {
+    if (badge && badge !== "All Badges" && r.badge !== badge) return false;
+    if (status && status !== "All" && r.status !== status) return false;
+    if (user.trim()) {
+      const q = user.trim().toLowerCase();
+      if (!r.student.toLowerCase().includes(q) && !r.badge.toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
+
   return (
     <div className="mh-hcc-page">
       <Crumb items={["Home", "Badges / Accomplishments"]} />
-      <h1>BADGES / ACCOMPLISHMENTS</h1>
+      <div className="mh-hcc-profile__card-head">
+        <h1>BADGES / ACCOMPLISHMENTS</h1>
+        <button
+          type="button"
+          className="mh-hcc-btn"
+          onClick={() => router.push(config.primaryActionHref || "/instructor/f/t70-add-badge")}
+        >
+          {config.primaryAction || "Add Badge / Accomplishment"}
+        </button>
+      </div>
       <div className="mh-hcc-filters">
         <label>
           <span>USER FILTER</span>
@@ -228,7 +247,51 @@ export function HccBadgesView({ config }: { config: TeacherScreenConfig }) {
           Search Badges
         </button>
       </div>
-      <p className="mh-teacher-muted">{d?.empty || "No badges / accomplishments were found."}</p>
+      {(d?.definitions?.length ?? 0) > 0 ? (
+        <section className="mh-hcc-profile__card" style={{ marginBottom: 16 }}>
+          <div className="mh-hcc-profile__card-head">
+            <h2>BADGE BASES</h2>
+          </div>
+          <ul className="mh-hcc-accomplish__list">
+            {d!.definitions!.map((def) => (
+              <li key={def.id}>
+                <div>
+                  <strong>{def.name}</strong>
+                  {def.description ? <p>{def.description}</p> : null}
+                  <p className="mh-teacher-muted">
+                    {def.badgeType} · {def.approvalMode}
+                  </p>
+                </div>
+                <span className="mh-teacher-badge mh-teacher-badge--info">{def.status}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      {rows.length === 0 ? (
+        <p className="mh-teacher-muted">{d?.empty || "No badges / accomplishments were found."}</p>
+      ) : (
+        <div className="mh-teacher-table-wrap">
+          <table className="mh-teacher-table">
+            <thead>
+              <tr>
+                <th>Student</th>
+                <th>Badge</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id}>
+                  <td>{r.student}</td>
+                  <td>{r.badge}</td>
+                  <td>{r.status}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

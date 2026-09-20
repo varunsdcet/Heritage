@@ -1276,6 +1276,24 @@ async function main() {
         weightPercent: 25,
         dueAt: new Date("2026-10-28T23:59:00.000Z"),
       },
+      {
+        id: "99999999-9999-4999-8999-999999999910",
+        institutionId: INST,
+        sectionId: "77777777-7777-4777-8777-777777777705",
+        title: "Structures Lab",
+        maxScore: 100,
+        weightPercent: 30,
+        dueAt: new Date("2026-10-22T23:59:00.000Z"),
+      },
+      {
+        id: "99999999-9999-4999-8999-999999999911",
+        institutionId: INST,
+        sectionId: "77777777-7777-4777-8777-777777777705",
+        title: "Final Exam",
+        maxScore: 100,
+        weightPercent: 40,
+        dueAt: new Date("2026-12-10T16:00:00.000Z"),
+      },
     ],
   });
   await prisma.assignment.update({

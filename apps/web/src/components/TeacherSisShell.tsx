@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { AskHeritageFab } from "@/components/AskHeritageFab";
+import { api, loadSession } from "@/lib/api";
 
 type NavChild = { label: string; href: string; match?: string[]; section?: string; countKey?: string };
 type NavItem = {
@@ -105,6 +106,7 @@ const NAV: NavItem[] = [
       { section: "STUDENT MANAGEMENT", label: "Leave of Absence", href: "/instructor/f/t48-leave-of-absence" },
       { section: "STUDENT MANAGEMENT", label: "Course Withdraw Requests", href: "/instructor/f/t49-course-withdraw-requests" },
       { section: "STUDENT MANAGEMENT", label: "Pending Grade Submissions", href: "/instructor/f/t62-pending-grade-submissions", countKey: "grades" },
+      { section: "STUDENT MANAGEMENT", label: "Accountability inbox", href: "/instructor/compliance" },
       { section: "STUDENT MANAGEMENT", label: "Pending Transcript Changes (0)", href: "/instructor/f/t64-pending-transcript-changes" },
       { section: "STUDENT MANAGEMENT", label: "Pending Entry / Progress Marks (0)", href: "/instructor/f/t62-pending-grade-submissions" },
       { section: "STUDENT MANAGEMENT", label: "Badges / Accomplishments (0)", href: "/instructor/f/t82-badges-accomplishments" },
@@ -362,11 +364,35 @@ export function TeacherSisShell({
   const [openGroup, setOpenGroup] = useState<string | null>(null);
   const [searchQ, setSearchQ] = useState("");
   const [navOpen, setNavOpen] = useState(false);
+  const [upcoming, setUpcoming] = useState<
+    Array<{ id: string; courseCode: string; title: string; label: string; joinUrl?: string | null; minutesUntil: number }>
+  >([]);
 
   function submitHeaderSearch() {
     const q = searchQ.trim();
     router.push(q ? `/instructor/search?q=${encodeURIComponent(q)}` : "/instructor/search");
   }
+
+  useEffect(() => {
+    const s = loadSession();
+    if (!s?.accessToken) return;
+    let cancelled = false;
+    const load = () => {
+      void api<{ items: typeof upcoming }>("/compliance/upcoming?hours=12", {}, s.accessToken)
+        .then((res) => {
+          if (!cancelled) setUpcoming(res.items ?? []);
+        })
+        .catch(() => {
+          if (!cancelled) setUpcoming([]);
+        });
+    };
+    load();
+    const t = window.setInterval(load, 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(t);
+    };
+  }, []);
 
   const navItems = useMemo(
     () =>
@@ -477,6 +503,31 @@ export function TeacherSisShell({
               className="mh-teacher__brand-logo"
             />
           </button>
+
+          {upcoming.length ? (
+            <div className="mh-teacher__upcoming" aria-label="Upcoming classes">
+              <p className="mh-teacher__upcoming-kicker">Up next</p>
+              {upcoming.slice(0, 3).map((u) => (
+                <button
+                  key={u.id}
+                  type="button"
+                  className={`mh-teacher__upcoming-item${u.minutesUntil <= 60 ? " is-soon" : ""}`}
+                  onClick={() => {
+                    if (u.joinUrl) window.open(u.joinUrl, "_blank", "noopener,noreferrer");
+                    else router.push("/instructor/f/t06-profile-schedule");
+                  }}
+                >
+                  <strong>
+                    {u.courseCode} · {u.label}
+                  </strong>
+                  <span>{u.title}</span>
+                </button>
+              ))}
+              <button type="button" className="mh-teacher__upcoming-link" onClick={() => router.push("/instructor/compliance")}>
+                Accountability inbox
+              </button>
+            </div>
+          ) : null}
 
           <nav className="mh-teacher__nav" aria-label="Teacher">
             {navItems.map((item) => {

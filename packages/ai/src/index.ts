@@ -17,7 +17,7 @@ export {
 export { resolveStudyCoachPolicy, stripPromptInjection } from "./policy.js";
 export { isStudyCoachQuestion, studyCoachAnswer } from "./study.js";
 export { isAdminAskDataQuestion, adminAskDataAnswer } from "./admin-ask.js";
-export { isFacultyAssistantQuestion, facultyAssistantAnswer } from "./faculty.js";
+export { isFacultyAssistantQuestion, facultyAssistantAnswer, facultyOpsIntent } from "./faculty.js";
 export { isStudentSuccessQuestion, studentSuccessAnswer } from "./success.js";
 export { retrieveKnowledgeHits } from "./knowledge.js";
 export { isCareerAssistantQuestion, careerAssistantAnswer } from "./career.js";

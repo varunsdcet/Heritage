@@ -1,11 +1,12 @@
 import { Router } from "express";
-import { z } from "zod";
+import { randomUUID } from "crypto";
 import {
   CreateGradeItemRequest,
   GradebookResponse,
   PublishGradesRequest,
   StudentGradesResponse,
   UpsertGradeRequest,
+  Uuid,
 } from "@myheritage/contracts";
 import { prisma } from "@myheritage/db";
 import { requireApproval } from "@myheritage/auth";
@@ -13,6 +14,17 @@ import { writeAuditAndOutbox } from "@myheritage/events";
 import { requireAuth, requireRoles, type AuthedRequest } from "../../middleware/auth.js";
 
 export const gradesRouter: Router = Router();
+
+function parseSectionId(raw: string) {
+  const parsed = Uuid.safeParse(String(raw ?? "").trim());
+  if (!parsed.success) {
+    throw Object.assign(
+      new Error("Invalid section id — open gradebook from Grades Submission or pick a section tab"),
+      { code: "VALIDATION_ERROR", status: 400 },
+    );
+  }
+  return parsed.data;
+}
 
 function letterFor(score: number, max: number) {
   const pct = (score / max) * 100;
@@ -140,6 +152,27 @@ function normalizeGradeStatus(status: string | null | undefined) {
     | "under_review";
 }
 
+/** Guarantee at least one assessable column so instructors can enter grades for enrolled students. */
+async function ensureSectionAssignments(
+  institutionId: string,
+  sectionId: string,
+  existing: Array<{ id: string; title: string; maxScore: unknown; weightPercent: unknown; createdAt?: Date }>,
+) {
+  if (existing.length > 0) return existing;
+  const created = await prisma.assignment.create({
+    data: {
+      id: randomUUID(),
+      institutionId,
+      sectionId,
+      title: "Final Grade",
+      maxScore: 100,
+      weightPercent: 100,
+      dueAt: null,
+    },
+  });
+  return [created];
+}
+
 gradesRouter.get(
   "/:sectionId",
   requireAuth,
@@ -147,16 +180,8 @@ gradesRouter.get(
   async (req, res, next) => {
     try {
       const user = (req as AuthedRequest).user;
-      const sectionIdRaw = String(req.params.sectionId ?? "");
-      const sectionIdParsed = z.string().uuid().safeParse(sectionIdRaw);
-      if (!sectionIdParsed.success) {
-        throw Object.assign(new Error("Invalid section id — open gradebook from My Courses or pick a section tab"), {
-          code: "VALIDATION_ERROR",
-          status: 400,
-        });
-      }
-      const sectionId = sectionIdParsed.data;
-      const section = await prisma.section.findFirst({
+      const sectionId = parseSectionId(String(req.params.sectionId ?? ""));
+      let section = await prisma.section.findFirst({
         where: {
           id: sectionId,
           institutionId: user.institutionId,
@@ -174,32 +199,56 @@ gradesRouter.get(
       });
       if (!section) throw Object.assign(new Error("Section not found"), { code: "NOT_FOUND", status: 404 });
 
+      const assignments = await ensureSectionAssignments(
+        user.institutionId,
+        section.id,
+        section.assignments,
+      );
+      if (assignments !== section.assignments) {
+        section = {
+          ...section,
+          assignments: assignments as typeof section.assignments,
+        };
+      }
+
+      const rows = section.enrolments.map((e) => {
+        const cells = assignments.map((a) => {
+          const cell = e.gradeItems.find((g) => g.assignmentId === a.id);
+          return {
+            gradeItemId: cell?.id ?? "00000000-0000-4000-8000-000000000000",
+            assignmentId: a.id,
+            score: cell?.score == null ? null : Number(cell.score),
+            maxScore: Number(a.maxScore),
+            status: normalizeGradeStatus(cell?.status),
+            rowVersion: Number(cell?.rowVersion ?? 1) || 1,
+          };
+        });
+        const needsAttention = cells.some(
+          (c) => c.score == null || c.status === "draft" || c.status === "pending_publish",
+        );
+        return {
+          studentId: e.studentId,
+          studentNumber: e.student.studentNumber || "—",
+          name: `${e.student.person?.givenName ?? ""} ${e.student.person?.familyName ?? ""}`.trim() || "Student",
+          needsAttention,
+          cells,
+        };
+      });
+
+      // Students who still need grades first so the roster matches the submit-grades workflow.
+      rows.sort((a, b) => Number(b.needsAttention) - Number(a.needsAttention) || a.name.localeCompare(b.name));
+
       const payload = GradebookResponse.parse({
         sectionId: section.id,
         courseCode: section.course.code,
         courseTitle: section.course.title,
-        assignments: section.assignments.map((a) => ({
+        assignments: assignments.map((a) => ({
           id: a.id,
           title: a.title,
           maxScore: Number(a.maxScore),
           weightPercent: Number(a.weightPercent),
         })),
-        rows: section.enrolments.map((e) => ({
-          studentId: e.studentId,
-          studentNumber: e.student.studentNumber || "—",
-          name: `${e.student.person?.givenName ?? ""} ${e.student.person?.familyName ?? ""}`.trim() || "Student",
-          cells: section.assignments.map((a) => {
-            const cell = e.gradeItems.find((g) => g.assignmentId === a.id);
-            return {
-              gradeItemId: cell?.id ?? "00000000-0000-4000-8000-000000000000",
-              assignmentId: a.id,
-              score: cell?.score == null ? null : Number(cell.score),
-              maxScore: Number(a.maxScore),
-              status: normalizeGradeStatus(cell?.status),
-              rowVersion: Number(cell?.rowVersion ?? 1) || 1,
-            };
-          }),
-        })),
+        rows,
       });
       res.json(payload);
     } catch (err) {
@@ -298,9 +347,9 @@ gradesRouter.post("/", requireAuth, requireRoles("instructor", "admin"), async (
 
 gradesRouter.patch("/:id", requireAuth, requireRoles("instructor", "admin"), async (req, res, next) => {
   try {
-    const user = (req as AuthedRequest).user;
-    const id = z.string().uuid().parse(req.params.id);
-    const body = UpsertGradeRequest.parse(req.body);
+      const user = (req as AuthedRequest).user;
+      const id = parseSectionId(String(req.params.id ?? ""));
+      const body = UpsertGradeRequest.parse(req.body);
     const existing = await prisma.gradeItem.findFirst({
       where: {
         id,
@@ -360,7 +409,7 @@ gradesRouter.post(
   async (req, res, next) => {
     try {
       const user = (req as AuthedRequest).user;
-      const sectionId = z.string().uuid().parse(req.params.sectionId);
+      const sectionId = parseSectionId(String(req.params.sectionId ?? ""));
       const body = PublishGradesRequest.parse(req.body);
       const idempotencyKey = req.header("idempotency-key")?.trim();
       if (!idempotencyKey) {

@@ -13,6 +13,8 @@ export type Session = {
   roles: string[];
   givenName: string;
   familyName: string;
+  accountStatus?: "active" | "paused";
+  pauseGate?: boolean;
 };
 
 export class ApiError extends Error {

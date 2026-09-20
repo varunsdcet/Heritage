@@ -53,11 +53,13 @@ coursesRouter.get("/me", requireAuth, async (req, res, next) => {
         include: {
           course: true,
           term: true,
-          _count: { select: { enrolments: true } },
+          _count: { select: { enrolments: { where: { status: "enrolled" } } } },
         },
       });
+      // Only sections with enrolled students (hide empty shells).
+      const withStudents = sections.filter((s) => s._count.enrolments > 0);
       res.json({
-        items: sections.map((s) => ({
+        items: withStudents.map((s) => ({
           sectionId: s.id,
           code: s.course.code,
           title: s.course.title,

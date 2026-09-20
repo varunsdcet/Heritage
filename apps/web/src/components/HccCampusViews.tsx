@@ -111,6 +111,7 @@ export function HccMyCoursesView({ config }: { config: TeacherScreenConfig }) {
 }
 
 export function HccEvaluationsView({ config }: { config: TeacherScreenConfig }) {
+  const router = useRouter();
   const rows = config.hccEvaluations?.rows ?? [];
   return (
     <div className="mh-hcc-page">
@@ -131,19 +132,30 @@ export function HccEvaluationsView({ config }: { config: TeacherScreenConfig }) 
               <td colSpan={4}>No evaluations found.</td>
             </tr>
           ) : (
-            rows.map((r) => (
-              <tr key={`${r.course}-${r.offering}`}>
-                <td>
-                  <strong>
-                    {r.course} ({r.offering})
-                  </strong>
-                  <div>{r.title}</div>
-                </td>
-                <td>{r.evaluation}</td>
-                <td>{r.dates}</td>
-                <td className="mh-hcc-pre">{r.schedule}</td>
-              </tr>
-            ))
+            rows.map((r) => {
+              const href =
+                r.href ||
+                (r.id
+                  ? `/instructor/f/t36-course-evaluations?sectionId=${encodeURIComponent(r.id)}`
+                  : "");
+              return (
+                <tr
+                  key={r.id || `${r.course}-${r.offering}`}
+                  className={href ? "is-click" : undefined}
+                  onClick={() => href && router.push(href)}
+                >
+                  <td>
+                    <strong>
+                      {r.course} ({r.offering})
+                    </strong>
+                    <div>{r.title}</div>
+                  </td>
+                  <td>{r.evaluation}</td>
+                  <td>{r.dates}</td>
+                  <td className="mh-hcc-pre">{r.schedule}</td>
+                </tr>
+              );
+            })
           )}
         </tbody>
       </table>
@@ -152,7 +164,9 @@ export function HccEvaluationsView({ config }: { config: TeacherScreenConfig }) 
 }
 
 export function HccCourseHistoryView({ config }: { config: TeacherScreenConfig }) {
-  const rows = config.hccCourseHistory?.rows ?? [];
+  const router = useRouter();
+  const d = config.hccCourseHistory;
+  const rows = d?.rows ?? [];
   return (
     <div className="mh-hcc-page">
       <Crumb items={["Home", "Course History"]} />
@@ -162,24 +176,40 @@ export function HccCourseHistoryView({ config }: { config: TeacherScreenConfig }
           <tr>
             <th>COURSE</th>
             <th>ROOM</th>
+            <th>INSTRUCTOR(S)</th>
             <th>DATES</th>
             <th>SCHEDULE</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
-            <tr key={`${r.course}-${r.offering}`}>
-              <td>
-                <strong>
-                  {r.course} ({r.offering})
-                </strong>
-                <div>{r.title}</div>
-              </td>
-              <td>{r.room}</td>
-              <td>{r.dates}</td>
-              <td>{r.schedule}</td>
+          {rows.length === 0 ? (
+            <tr>
+              <td colSpan={5}>{d?.empty || "No course history was found."}</td>
             </tr>
-          ))}
+          ) : (
+            rows.map((r) => (
+              <tr
+                key={r.id || `${r.course}-${r.offering}`}
+                className={r.href ? "is-click" : undefined}
+                onClick={() => {
+                  if (r.href) router.push(r.href);
+                }}
+                style={r.href ? { cursor: "pointer" } : undefined}
+              >
+                <td>
+                  <strong className="mh-hcc-course-link">
+                    {r.course} ({r.offering})
+                  </strong>
+                  <div>{r.title}</div>
+                  {r.term ? <div className="mh-teacher-muted">{r.term}</div> : null}
+                </td>
+                <td>{r.room}</td>
+                <td>{r.instructor || ""}</td>
+                <td className="mh-hcc-profile__pre">{r.dates}</td>
+                <td className="mh-hcc-profile__pre">{r.schedule}</td>
+              </tr>
+            ))
+          )}
         </tbody>
       </table>
     </div>
@@ -191,12 +221,22 @@ export function HccGradesSubmissionView({ config }: { config: TeacherScreenConfi
   const search = useSearchParams();
   const d = config.hccGradesSubmission;
   const rows = d?.rows ?? [];
-  const course = search.get("course") || d?.courseFilter || "All Courses";
-  const status = search.get("status") || d?.statusFilter || "Submission Required";
   const courseOptions = d?.courseOptions?.length ? d.courseOptions : ["All Courses"];
   const statusOptions = d?.statusOptions?.length
     ? d.statusOptions
     : ["Submission Required", "Submitted", "All Statuses"];
+  const rawCourse = search.get("course") || d?.courseFilter || "All Courses";
+  const rawStatus = search.get("status") || d?.statusFilter || "Submission Required";
+  const course = courseOptions.includes(rawCourse)
+    ? rawCourse
+    : d?.courseFilter && courseOptions.includes(d.courseFilter)
+      ? d.courseFilter
+      : "All Courses";
+  const status = statusOptions.includes(rawStatus)
+    ? rawStatus
+    : d?.statusFilter && statusOptions.includes(d.statusFilter)
+      ? d.statusFilter
+      : "Submission Required";
 
   function applyFilters(next: { course?: string; status?: string }) {
     const params = new URLSearchParams();
@@ -254,14 +294,29 @@ export function HccGradesSubmissionView({ config }: { config: TeacherScreenConfi
             </tr>
           ) : (
             rows.map((r) => (
-              <tr key={r.id}>
+              <tr
+                key={r.id}
+                className={
+                  r.status === "Submission Required" ? "mh-hcc-table__row is-attention" : undefined
+                }
+              >
                 <td>
                   <strong>
                     {r.course} ({r.offering})
                   </strong>
                   <div>{r.title}</div>
                 </td>
-                <td>{r.status}</td>
+                <td>
+                  <span
+                    className={
+                      r.status === "Submission Required"
+                        ? "mh-hcc-pill is-warn"
+                        : "mh-hcc-pill is-ok"
+                    }
+                  >
+                    {r.status}
+                  </span>
+                </td>
                 <td>{r.gradingType}</td>
                 <td>{r.dates}</td>
                 <td>
@@ -908,7 +963,30 @@ export function HccRepositoryView({ config }: { config: TeacherScreenConfig }) {
 }
 
 export function HccPendingSchedulesView({ config }: { config: TeacherScreenConfig }) {
+  const router = useRouter();
+  const search = useSearchParams();
   const d = config.hccPendingSchedules;
+  const changeType = search.get("type") || d?.changeType || "All Types";
+  const show = search.get("show") === "1" || Boolean(d?.show);
+  const rows = show ? d?.rows ?? [] : [];
+  const typeOptions = d?.changeTypeOptions?.length
+    ? d.changeTypeOptions
+    : ["All Types", "New Schedule", "Schedule Change", "Schedule Update"];
+
+  function apply(next: { type?: string; show?: boolean } = {}) {
+    const params = new URLSearchParams();
+    const nextType = next.type ?? changeType;
+    const nextShow = next.show ?? true;
+    if (nextType && nextType !== "All Types") params.set("type", nextType);
+    if (nextShow) params.set("show", "1");
+    const qs = params.toString();
+    router.push(
+      qs
+        ? `/instructor/f/t38-pending-course-schedules?${qs}`
+        : "/instructor/f/t38-pending-course-schedules",
+    );
+  }
+
   return (
     <div className="mh-hcc-page">
       <Crumb items={["Home", "Pending Course Schedules"]} />
@@ -916,15 +994,95 @@ export function HccPendingSchedulesView({ config }: { config: TeacherScreenConfi
       <div className="mh-hcc-filters">
         <label>
           <span>CHANGE TYPE</span>
-          <select defaultValue={d?.changeType || "All Types"}>
-            <option>All Types</option>
+          <select
+            value={changeType}
+            onChange={(e) => {
+              // Keep current show state when changing type if already showing
+              apply({ type: e.target.value, show });
+            }}
+          >
+            {typeOptions.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
           </select>
         </label>
-        <button type="button" className="mh-hcc-btn">
+        <button type="button" className="mh-hcc-btn" onClick={() => apply({ show: true })}>
           Show Courses
         </button>
       </div>
-      <p className="mh-teacher-muted">{d?.empty || "No pending course schedules were found."}</p>
+
+      {!show ? (
+        <p className="mh-teacher-muted">
+          {d?.empty || "Choose a change type, then click Show Courses."}
+        </p>
+      ) : (
+        <>
+          <p className="mh-hcc-results">Results: {rows.length}</p>
+          <table className="mh-hcc-table">
+            <thead>
+              <tr>
+                <th>COURSE</th>
+                <th>CHANGE TYPE</th>
+                <th>SCHEDULE</th>
+                <th>STATUS</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr>
+                  <td colSpan={5}>{d?.empty || "No pending course schedules were found."}</td>
+                </tr>
+              ) : (
+                rows.map((r) => (
+                  <tr key={r.id || `${r.course}-${r.offering}-${r.type}`}>
+                    <td>
+                      <strong>
+                        {r.course}
+                        {r.offering ? ` (${r.offering})` : ""}
+                      </strong>
+                      {r.title ? <div>{r.title}</div> : null}
+                      {r.location ? <div className="mh-teacher-muted">{r.location}</div> : null}
+                    </td>
+                    <td>{r.type}</td>
+                    <td className="mh-hcc-profile__pre">{r.schedule || "TBA"}</td>
+                    <td>
+                      <span
+                        className={`mh-teacher-badge ${
+                          r.tone === "danger"
+                            ? "is-danger"
+                            : r.tone === "info"
+                              ? "is-info"
+                              : r.tone === "success"
+                                ? "is-success"
+                                : "is-warning"
+                        }`}
+                      >
+                        {r.status || "Pending"}
+                      </span>
+                      {r.requested ? (
+                        <div className="mh-teacher-muted">Requested {r.requested}</div>
+                      ) : null}
+                      {r.proposer ? <div className="mh-teacher-muted">{r.proposer}</div> : null}
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="mh-hcc-link"
+                        onClick={() => router.push(r.href || "/instructor/sections")}
+                      >
+                        REVIEW
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </>
+      )}
     </div>
   );
 }

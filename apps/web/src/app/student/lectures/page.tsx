@@ -49,7 +49,14 @@ export default function StudentLecturesPage() {
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                     <StatusPill tone="neutral">{l.deliveryMode}</StatusPill>
                     {l.joinUrl ? (
-                      <Button type="button" onClick={() => window.open(l.joinUrl!, "_blank", "noopener,noreferrer")}>
+                      <Button
+                        type="button"
+                        onClick={() => {
+                          void api(`/compliance/sessions/${l.id}/join`, { method: "POST", body: "{}" }, session.accessToken)
+                            .catch(() => undefined)
+                            .finally(() => window.open(l.joinUrl!, "_blank", "noopener,noreferrer"));
+                        }}
+                      >
                         Join
                       </Button>
                     ) : (

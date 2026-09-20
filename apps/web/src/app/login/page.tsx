@@ -106,6 +106,10 @@ function LoginForm() {
         return;
       }
       saveSession(session, remember);
+      if (session.pauseGate || session.accountStatus === "paused") {
+        router.push("/student/compliance/explain");
+        return;
+      }
       const next = searchParams.get("next");
       router.push(next && next.startsWith("/") ? next : homeForRoles(session.roles));
     } catch (err) {

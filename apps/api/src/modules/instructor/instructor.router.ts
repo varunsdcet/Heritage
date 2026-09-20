@@ -32,7 +32,7 @@ instructorRouter.get("/sis/screen", async (req, res, next) => {
     const qIndex = pathRaw.indexOf("?");
     const pathname = qIndex >= 0 ? pathRaw.slice(0, qIndex) : pathRaw;
     const embedded = new URLSearchParams(qIndex >= 0 ? pathRaw.slice(qIndex + 1) : "");
-    const filterKeys = [
+    const     filterKeys = [
       "status",
       "campus",
       "program",
@@ -53,6 +53,9 @@ instructorRouter.get("/sis/screen", async (req, res, next) => {
       "course",
       "faculty",
       "mode",
+      "sectionId",
+      "type",
+      "show",
     ];
     for (const key of filterKeys) {
       const v = req.query[key];

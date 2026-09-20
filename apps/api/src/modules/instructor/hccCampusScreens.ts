@@ -89,6 +89,12 @@ type SectionRow = {
     studentName: string;
     email: string;
   }>;
+  assignments?: Array<{
+    id: string;
+    title: string;
+    maxScore: number;
+    weightPercent: number;
+  }>;
 };
 
 type SessionRow = {
@@ -172,7 +178,7 @@ export async function buildHccMyCourses(
     return "unknown";
   }
 
-  let filtered = [...ctx.sections];
+  let filtered = ctx.sections.filter((s) => s.enrolmentCount > 0);
 
   if (termFilter !== "All Terms") {
     filtered = filtered.filter((s) => {
@@ -231,19 +237,94 @@ export async function buildHccMyCourses(
   };
 }
 
-export async function buildHccCourseEvaluations(ctx: {
-  sections: SectionRow[];
-  classSessions: SessionRow[];
-  term: { code: string; name: string } | null;
-}) {
+export async function buildHccCourseEvaluations(
+  ctx: {
+    sections: SectionRow[];
+    classSessions: SessionRow[];
+    term: { code: string; name: string } | null;
+    user?: { institutionId: string };
+  },
+  path = "",
+) {
+  const qs = path.includes("?") ? new URLSearchParams(path.slice(path.indexOf("?") + 1)) : new URLSearchParams();
+  const sectionId = (qs.get("sectionId") || "").trim();
+
   const past = ctx.term ? ctx.sections.filter((s) => s.termCode !== ctx.term!.code) : [];
-  const rows = (past.length ? past : ctx.sections).map((s) => ({
+  const pool = past.length ? past : ctx.sections;
+
+  if (sectionId) {
+    const section = pool.find((s) => s.id === sectionId) ?? ctx.sections.find((s) => s.id === sectionId);
+    if (section) {
+      const evalRows = ctx.user?.institutionId
+        ? await prisma.courseEvaluation.findMany({
+            where: {
+              institutionId: ctx.user.institutionId,
+              OR: [{ sectionId: section.id }, { courseCode: section.courseCode }],
+            },
+            orderBy: { updatedAt: "desc" },
+            take: 80,
+          })
+        : [];
+      const submitted = evalRows.filter((r) => r.status === "submitted" && r.overallRating != null);
+      const pending = evalRows.filter((r) => r.status === "pending");
+      const avg =
+        submitted.length > 0
+          ? (submitted.reduce((sum, r) => sum + (r.overallRating ?? 0), 0) / submitted.length).toFixed(1)
+          : "—";
+      const responseRate =
+        evalRows.length > 0 ? `${Math.round((submitted.length / evalRows.length) * 100)}%` : "0%";
+      const comments = submitted.slice(0, 20).map((r) => {
+        let text = "Student feedback submitted.";
+        try {
+          const parsed = r.responsesJson ? (JSON.parse(r.responsesJson) as { comment?: string }) : null;
+          if (parsed?.comment) text = parsed.comment;
+        } catch {
+          /* keep default */
+        }
+        return {
+          rating: (r.overallRating ?? 0).toFixed(1),
+          text,
+          term: `${ctx.term?.name ?? "Term"} · ${r.courseCode}`,
+        };
+      });
+      return {
+        title: `${section.courseCode} · Evaluation Results`,
+        subtitle: `${section.courseTitle} · ${section.code}`,
+        breadcrumbs: ["Home", "Course Evaluations", section.courseCode],
+        archetype: "evaluations",
+        primaryAction: "Back to evaluations",
+        primaryActionHref: "/instructor/f/t36-course-evaluations",
+        evaluations: {
+          summary: [
+            {
+              label: "Overall Rating",
+              value: String(avg),
+              hint: submitted.length ? `From ${submitted.length} response(s)` : "No submitted ratings yet",
+            },
+            {
+              label: "Response Rate",
+              value: responseRate,
+              hint: `${submitted.length}/${evalRows.length || 0} submitted`,
+            },
+            { label: "Pending", value: String(pending.length), hint: "Awaiting student response" },
+            { label: "Section", value: section.code, hint: section.courseTitle },
+          ],
+          comments,
+        },
+        countLabel: `${submitted.length} response(s)`,
+      };
+    }
+  }
+
+  const rows = pool.map((s) => ({
+    id: s.id,
     course: s.courseCode,
     title: s.courseTitle,
     offering: s.code,
     evaluation: "End of course evaluation",
     dates: scheduleLabel(ctx.classSessions, s.code).split("\n")[0] || "—",
     schedule: scheduleLabel(ctx.classSessions, s.code).split("\n")[1] || "Mon-Fri",
+    href: `/instructor/f/t36-course-evaluations?sectionId=${encodeURIComponent(s.id)}`,
   }));
   return {
     title: "COURSE EVALUATION RESULTS",
@@ -255,24 +336,67 @@ export async function buildHccCourseEvaluations(ctx: {
 }
 
 export async function buildHccCourseHistory(ctx: {
+  displayName?: string;
   sections: SectionRow[];
   classSessions: SessionRow[];
   term: { code: string; name: string } | null;
+  terms?: Array<{ code: string; name: string; startsOn?: string; endsOn?: string }>;
 }) {
-  const past = ctx.term ? ctx.sections.filter((s) => s.termCode !== ctx.term!.code) : ctx.sections;
-  const rows = past.map((s) => ({
-    course: s.courseCode,
-    title: s.courseTitle,
-    offering: s.code,
-    room: "TBA",
-    dates: "Sep 1, 2025 - Dec 18, 2025",
-    schedule: "Mon-Fri, 9:00am - 1:00pm",
-  }));
+  const termMeta = new Map((ctx.terms ?? []).map((t) => [t.code, t]));
+  const currentCode = ctx.term?.code;
+
+  // HCC Course History lists all assigned offerings. Prefer past terms first; if the
+  // instructor only has current-term sections, still show those so the page isn't blank.
+  const past = currentCode
+    ? ctx.sections.filter((s) => s.termCode !== currentCode)
+    : [];
+  const source = past.length ? past : ctx.sections;
+
+  const rows = source
+    .map((s) => {
+      const sessions = ctx.classSessions.filter((c) => c.sectionCode === s.code);
+      const scheduleParts = scheduleLabel(ctx.classSessions, s.code).split("\n");
+      const meta = termMeta.get(s.termCode);
+      const first = sessions[0];
+      const last = sessions[sessions.length - 1];
+      const start =
+        meta?.startsOn ||
+        (first
+          ? first.startsAt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+          : null);
+      const endRaw = last?.endsAt ?? last?.startsAt ?? null;
+      const end =
+        meta?.endsOn ||
+        (endRaw
+          ? endRaw.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+          : null);
+      const dates =
+        start && end && start !== end ? `${start} - ${end}` : start || end || meta?.name || s.termCode || "—";
+      const room = sessions.find((x) => x.location)?.location || "TBA";
+      return {
+        id: s.id,
+        course: s.courseCode,
+        title: s.courseTitle,
+        offering: s.code,
+        room,
+        dates,
+        schedule: scheduleParts[1] || scheduleParts[0] || "TBA",
+        instructor: ctx.displayName || "",
+        term: meta?.name || s.termCode,
+        termStartsOn: meta?.startsOn || "",
+        href: `/instructor/sections/${s.id}`,
+      };
+    })
+    .sort((a, b) => String(a.termStartsOn || a.dates).localeCompare(String(b.termStartsOn || b.dates)));
+
   return {
     title: "COURSE HISTORY",
     breadcrumbs: ["Home", "Course History"],
     archetype: "hccCourseHistory",
-    hccCourseHistory: { rows },
+    hccCourseHistory: {
+      rows: rows.map(({ termStartsOn: _t, ...rest }) => rest),
+      empty: rows.length ? undefined : "No course history was found for your faculty record.",
+    },
     countLabel: `${rows.length} course(s)`,
   };
 }
@@ -287,51 +411,94 @@ export async function buildHccGradesSubmission(
   path = "",
 ) {
   const qs = path.includes("?") ? new URLSearchParams(path.slice(path.indexOf("?") + 1)) : new URLSearchParams();
-  const courseFilter = (qs.get("course") || "All Courses").trim() || "All Courses";
-  const statusFilter = (qs.get("status") || "Submission Required").trim() || "Submission Required";
+  const rawCourse = (qs.get("course") || "All Courses").trim() || "All Courses";
+  const rawStatus = (qs.get("status") || "Submission Required").trim() || "Submission Required";
 
   const pool = ctx.term
     ? ctx.sections.filter((s) => s.termCode === ctx.term!.code)
     : ctx.sections;
 
-  const courseOptions = [
-    "All Courses",
-    ...[...new Set(pool.map((s) => `${s.courseCode} · ${s.courseTitle}`))].sort((a, b) => a.localeCompare(b)),
-  ];
+  // Use course codes as select values so the filter never returns a value that is not in the options
+  // (that mismatch surfaces as an "invalid" control in the browser).
+  const courseCodes = [...new Set(pool.map((s) => s.courseCode))].sort((a, b) => a.localeCompare(b));
+  const courseOptions = ["All Courses", ...courseCodes];
   const statusOptions = ["Submission Required", "Submitted", "All Statuses"];
 
-  const grades = ctx.grades ?? [];
-  function sectionStatus(sectionCode: string): "Submission Required" | "Submitted" {
-    const mine = grades.filter((g) => g.sectionCode === sectionCode);
-    if (!mine.length) return "Submission Required";
-    const open = mine.some(
-      (g) => g.score == null || g.status === "draft" || g.status === "pending_publish",
+  function resolveCourseFilter(raw: string): string {
+    if (!raw || raw === "All Courses") return "All Courses";
+    if (courseOptions.includes(raw)) return raw;
+    const code = raw.split(/[·|—–-]/)[0]?.trim() || raw;
+    if (courseOptions.includes(code)) return code;
+    const hit = pool.find(
+      (s) =>
+        s.courseCode === raw ||
+        s.courseCode === code ||
+        `${s.courseCode} · ${s.courseTitle}` === raw ||
+        `${s.courseCode} (${s.code})` === raw,
     );
-    return open ? "Submission Required" : "Submitted";
+    return hit ? hit.courseCode : "All Courses";
+  }
+
+  function resolveStatusFilter(raw: string): string {
+    if (statusOptions.includes(raw)) return raw;
+    const lower = raw.toLowerCase();
+    if (lower.includes("all")) return "All Statuses";
+    if (lower.includes("submit") && !lower.includes("required")) return "Submitted";
+    return "Submission Required";
+  }
+
+  const courseFilter = resolveCourseFilter(rawCourse);
+  const statusFilter = resolveStatusFilter(rawStatus);
+
+  const grades = ctx.grades ?? [];
+  function sectionBoard(section: SectionRow) {
+    const enrolled = section.enrolments.filter((e) => e.status === "enrolled");
+    const assignmentCount = section.assignments?.length ?? 0;
+    const mine = grades.filter((g) => g.sectionCode === section.code);
+    const missingFromGrades = mine.filter(
+      (g) => g.score == null || g.status === "draft" || g.status === "pending_publish",
+    ).length;
+    // Expected cells ≈ enrolled × assessments; if no grade rows yet, all are still open.
+    const expected = assignmentCount > 0 ? enrolled.length * assignmentCount : enrolled.length;
+    const scored = mine.filter((g) => g.score != null && g.status !== "draft" && g.status !== "pending_publish").length;
+    const missing = assignmentCount > 0 ? Math.max(expected - scored, missingFromGrades) : enrolled.length;
+    const open =
+      enrolled.length === 0
+        ? false
+        : assignmentCount === 0
+          ? true
+          : missing > 0 || mine.some((g) => g.score == null || g.status === "draft" || g.status === "pending_publish");
+    return {
+      enrolled: enrolled.length,
+      missing,
+      status: (open ? "Submission Required" : "Submitted") as "Submission Required" | "Submitted",
+    };
   }
 
   let rows = pool.map((s) => {
-    const status = sectionStatus(s.code);
+    const board = sectionBoard(s);
     return {
       id: s.id,
       course: s.courseCode,
       title: s.courseTitle,
       offering: s.code,
-      status,
-      gradingType: "Final Grades",
+      status: board.status,
+      gradingType: board.enrolled
+        ? `Final Grades · ${board.enrolled} student(s) · ${board.missing} missing`
+        : "Final Grades · no enrolled students",
       dates: "Continuous",
       href: `/instructor/gradebook?sectionId=${encodeURIComponent(s.id)}`,
-      courseLabel: `${s.courseCode} · ${s.courseTitle}`,
+      highlight: board.status === "Submission Required" && board.enrolled > 0,
+      studentCount: board.enrolled,
+      missingCount: board.missing,
     };
   });
 
+  // Courses that still need grades first so the queue matches the submit workflow.
+  rows.sort((a, b) => Number(b.highlight) - Number(a.highlight) || a.course.localeCompare(b.course));
+
   if (courseFilter !== "All Courses") {
-    rows = rows.filter(
-      (r) =>
-        r.courseLabel === courseFilter ||
-        r.course === courseFilter ||
-        `${r.course} (${r.offering})` === courseFilter,
-    );
+    rows = rows.filter((r) => r.course === courseFilter);
   }
   if (statusFilter !== "All Statuses") {
     rows = rows.filter((r) => r.status === statusFilter);
@@ -346,7 +513,7 @@ export async function buildHccGradesSubmission(
       statusFilter,
       courseOptions,
       statusOptions,
-      rows: rows.map(({ courseLabel: _c, ...rest }) => rest),
+      rows: rows.map(({ highlight: _h, studentCount: _s, missingCount: _m, ...rest }) => rest),
     },
     countLabel: `${rows.length} course(s)`,
   };
@@ -484,15 +651,84 @@ export async function buildHccRepository() {
   };
 }
 
-export async function buildHccPendingSchedules() {
+export async function buildHccPendingSchedules(
+  ctx: {
+    displayName: string;
+    sections: SectionRow[];
+    classSessions: SessionRow[];
+    term: { code: string; name: string } | null;
+  },
+  path = "",
+) {
+  const qs = path.includes("?") ? new URLSearchParams(path.slice(path.indexOf("?") + 1)) : new URLSearchParams();
+  const changeType = (qs.get("type") || "All Types").trim() || "All Types";
+  const show = qs.get("show") === "1" || qs.get("show") === "true";
+
+  const current = ctx.term
+    ? ctx.sections.filter((s) => s.termCode === ctx.term!.code)
+    : ctx.sections;
+  const source = current.length ? current : ctx.sections;
+
+  const allRows = source.map((s) => {
+    const sessions = ctx.classSessions.filter((c) => c.sectionCode === s.code);
+    const schedule = scheduleLabel(ctx.classSessions, s.code);
+    const loc = sessions.find((x) => x.location)?.location || "TBA";
+    let type = "New Schedule";
+    let status = "Needs Confirmation";
+    let tone: "warning" | "danger" | "info" | "success" = "warning";
+    if (sessions.length && loc !== "TBA") {
+      type = "Schedule Update";
+      status = "Ready to Approve";
+      tone = "info";
+    } else if (sessions.length) {
+      type = "Schedule Change";
+      status = "Conflict Detected";
+      tone = "danger";
+    }
+    const requested = sessions[0]?.startsAt
+      ? sessions[0].startsAt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+      : new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    return {
+      id: s.id,
+      course: s.courseCode,
+      offering: s.code,
+      title: s.courseTitle,
+      type,
+      schedule,
+      location: loc,
+      requested,
+      proposer: "Registrar Scheduling",
+      status,
+      tone,
+      href: `/instructor/sections/${s.id}`,
+    };
+  });
+
+  const changeTypeOptions = [
+    "All Types",
+    ...[...new Set(allRows.map((r) => r.type))].sort((a, b) => a.localeCompare(b)),
+  ];
+
+  const filtered =
+    changeType === "All Types" ? allRows : allRows.filter((r) => r.type === changeType);
+
+  const rows = show ? filtered : [];
+
   return {
     title: "PENDING COURSE SCHEDULES",
     breadcrumbs: ["Home", "Pending Course Schedules"],
     archetype: "hccPendingSchedules",
+    countLabel: show ? `${rows.length} course(s)` : "Click Show Courses to load",
     hccPendingSchedules: {
-      changeType: "All Types",
-      rows: [] as Array<{ course: string; type: string }>,
-      empty: "No pending course schedules were found.",
+      changeType,
+      changeTypeOptions,
+      show,
+      rows,
+      empty: show
+        ? filtered.length === 0
+          ? "No pending course schedules match this change type."
+          : "No pending course schedules were found."
+        : "Choose a change type, then click Show Courses.",
     },
   };
 }

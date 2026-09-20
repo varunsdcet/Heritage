@@ -448,7 +448,7 @@ async function loadCtx(user: SessionClaims): Promise<InstructorCtx> {
         where: { institutionId: user.institutionId, sectionId: { in: sectionIds } },
         include: { section: { include: { course: true } } },
         orderBy: { startsAt: "asc" },
-        take: 40,
+        take: 200,
       })
     : [];
 
@@ -684,7 +684,11 @@ function buildDashboard(ctx: InstructorCtx): InstructorLivePayload {
       officeHours: sec
         ? [{ day: "By appointment", window: "See calendar", mode: "Campus", remaining: sec.code }]
         : [],
-      endedCourses: ctx.sections.map((s) => `${s.courseCode}: ${s.code}`),
+      endedCourses: ctx.sections.map((s) => ({
+        label: `${s.courseCode}: ${s.code}`,
+        sectionId: s.id,
+        href: `/instructor/gradebook?sectionId=${encodeURIComponent(s.id)}`,
+      })),
     },
   };
 }
@@ -2448,7 +2452,7 @@ async function buildAccomplishments(ctx: InstructorCtx): Promise<InstructorLiveP
   const currentCodes = [...new Set(currentSections.map((s) => s.courseCode).filter(Boolean))];
   const studentIds = [...new Set(ctx.sections.flatMap((s) => s.enrolments.map((e) => e.studentId)))];
 
-  const [facultyItems, badges] = await Promise.all([
+  const [facultyItems, badges, definitions, badgeForm] = await Promise.all([
     loadFacultyAccomplishments(ctx),
     studentIds.length
       ? prisma.studentBadge.findMany({
@@ -2458,6 +2462,12 @@ async function buildAccomplishments(ctx: InstructorCtx): Promise<InstructorLiveP
           take: 40,
         })
       : Promise.resolve([]),
+    prisma.badgeDefinition.findMany({
+      where: { institutionId: ctx.user.institutionId },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    }),
+    buildAddBadgeFormPayload(ctx.user.institutionId),
   ]);
 
   const teachingItems = [
@@ -2496,18 +2506,40 @@ async function buildAccomplishments(ctx: InstructorCtx): Promise<InstructorLiveP
     category: "student" as const,
   }));
 
+  const createBaseGroup = badgeForm.form.groups.find((g) => g.title === "Create Base") || badgeForm.form.groups[0];
+  const settingsGroups = badgeForm.form.groups.filter((g) => g.title !== "Create Base");
+
   return {
     title: "My Accomplishments & Badges",
     subtitle: "",
+    primaryAction: "Create Base",
+    primaryActionHref: ADD_BADGE_PATH,
+    secondaryAction: "Manage badges",
+    secondaryActionHref: BADGES_LIST_PATH,
     accomplishments: {
       tabs: profileTabs(ACCOMPLISHMENTS_PATH),
       stats: [
         { label: "Current sections", value: String(currentSections.length) },
         { label: "Courses taught", value: String(courseCodes.length) },
         { label: "Students", value: String(studentIds.length || ctx.studentCount) },
+        { label: "Badge bases", value: String(definitions.length) },
         { label: "Badges issued", value: String(issued.filter((i) => i.tone === "success").length) },
       ],
       items: [...facultyItems, ...teachingItems, ...issued],
+      createBase: {
+        title: "Create Base",
+        submitLabel: "Save Badge / Accomplishment",
+        href: ADD_BADGE_PATH,
+        groups: createBaseGroup ? [createBaseGroup, ...settingsGroups] : badgeForm.form.groups,
+      },
+      definitions: definitions.map((b) => ({
+        id: b.id,
+        name: b.name,
+        description: b.description,
+        badgeType: b.badgeType,
+        approvalMode: b.approvalMode,
+        status: b.status,
+      })),
     },
   };
 }
@@ -3537,14 +3569,27 @@ function buildCourseResourcesPane(ctx: InstructorCtx): InstructorLivePayload {
   };
 }
 
-function buildResources(ctx: InstructorCtx): InstructorLivePayload {
+function buildResources(ctx: InstructorCtx, path = ""): InstructorLivePayload {
   const { sec, assignmentFiles, uploadFiles, lectureFiles, files } = collectResourceFiles(ctx);
+  const courseId = parseScreenQuery(path).query.get("courseId")?.trim() || "";
+  const repoCourse = courseId
+    ? buildRepositoryCatalog().find((c) => c.id === courseId || c.number === courseId)
+    : undefined;
+  const code = repoCourse?.number || sec?.courseCode;
+  const title = repoCourse?.name || sec?.courseTitle;
+  const courseLabel = code && title ? `${code} · ${title}` : code || title || "Course files";
   return {
-    title: sec ? `${sec.courseCode} Resources` : "Course Resources",
-    subtitle: sec ? `Course file manager for ${sec.code}` : "Section instructional materials",
+    title: code ? `${code} Resources` : "Course Resources",
+    subtitle: repoCourse
+      ? `Content repository file manager for ${code}`
+      : sec
+        ? `Course file manager for ${sec.code}`
+        : "Section instructional materials",
     fileManager: {
-      courseTitle: sec ? `${sec.courseCode} · ${sec.courseTitle}` : "Course files",
-      breadcrumbs: ["My Courses", sec?.courseCode ?? "Section", "Resources"],
+      courseTitle: courseLabel,
+      breadcrumbs: repoCourse
+        ? ["Content Repository", code || "Course", "Resources"]
+        : ["My Courses", sec?.courseCode ?? "Section", "Resources"],
       tree: [
         {
           name: "Add activity or resource",
@@ -3764,7 +3809,7 @@ async function routePayload(
     return buildGradingSchemesList();
   }
   if (p.includes("t70") || p.includes("add-badge") || p.includes(ADD_BADGE_PATH)) {
-    return buildAddBadgeFormPayload();
+    return buildAddBadgeFormPayload(ctx.user.institutionId);
   }
   if (p.includes("t69") || p.includes("add-course-type")) {
     return buildAddCourseTypeForm(path);
@@ -3779,7 +3824,7 @@ async function routePayload(
     return buildVersionEditor(ctx);
   }
   if (p.includes("t32") || p.includes("file-manager") || p.includes("resource-file")) {
-    return buildResources(ctx);
+    return buildResources(ctx, path);
   }
   if (p.includes("t33") || p.includes("help-support")) {
     return buildHelpSupport(ctx, overlay);
@@ -3919,7 +3964,7 @@ async function routePayload(
     return buildHccTranscriptPending();
   }
   if (p.includes("t38") || p.includes("pending-course-schedule")) {
-    return buildHccPendingSchedules();
+    return buildHccPendingSchedules(ctx, path);
   }
   if (
     (p.includes("t37") || p.includes("course-repository") || p.includes("content-repository")) &&
@@ -3972,7 +4017,7 @@ async function routePayload(
     );
   }
   if (p.includes("t36") || p.includes("course-evaluation")) {
-    return buildHccCourseEvaluations(ctx);
+    return buildHccCourseEvaluations(ctx, path);
   }
   if (p.includes("t22") || p.includes("in-11") || p.includes("student-detail")) {
     return buildStudentDetail(ctx, studentId ?? (overlay?.studentId as string | undefined) ?? null);
@@ -6818,6 +6863,10 @@ async function saveAttendanceSession(ctx: InstructorCtx, path: string, finalize:
         },
       });
     }
+    // Fire miss escalation promptly after attendance finalize (non-blocking).
+    void import("../campusCompliance/sweep.js")
+      .then(({ escalateStudentMisses }) => escalateStudentMisses(ctx.user.institutionId))
+      .catch(() => undefined);
   }
 
   const attendance = {
@@ -7593,8 +7642,12 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
       message = `History opened${courseId ? ` · ${courseId}` : ""}`;
       result = { id: courseId, action: "history" };
     } else if (lower.includes("manage content")) {
-      message = `Opening manage${input.rowKey ? ` · ${input.rowKey}` : ""}`;
-      result = { id: input.rowKey || "", manage: true };
+      const courseId = (input.rowKey || "").trim();
+      const href = courseId
+        ? `/instructor/f/t32-resource-file-manager?courseId=${encodeURIComponent(courseId)}`
+        : "/instructor/f/t32-resource-file-manager";
+      message = `Opening manage${courseId ? ` · ${courseId}` : ""}`;
+      result = { id: courseId, manage: true, href };
     } else if (
       (lower.includes("create course") || lower.includes("save course")) &&
       !lower.includes("configuration") &&
@@ -8195,10 +8248,15 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
       });
       message = `Resource saved · ${row.name}`;
       result = { id: row.id, name: row.name };
-    } else if (lower.includes("save badge") || lower.includes("badge / accomplishment")) {
+    } else if (
+      lower.includes("save badge") ||
+      lower.includes("badge / accomplishment") ||
+      lower.includes("create base") ||
+      (lower.includes("create badge") && lower.includes("accomplishment"))
+    ) {
       const fields = parseActionFields(input.rowKey) || {};
       const row = await createBadgeDefinition(user.institutionId, fields);
-      message = `Badge saved · ${row.name}`;
+      message = `Badge base saved · ${row.name}`;
       result = { id: row.id, name: row.name };
     } else if (
       (lower.includes("save term") || lower.includes("add term") || lower.includes("create term")) &&
@@ -8552,15 +8610,25 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
         result = { error: true };
       } else {
         const badge = badgeFromFields(fields);
+        const row = await createBadgeDefinition(user.institutionId, {
+          Name: name,
+          Description: fields.Description || "",
+          Version: fields.Version || "",
+          Language: fields.Language || "English",
+          "Issuer Name": fields["Issuer Name"] || "Heritage Community College",
+          Contact: fields.Contact || "",
+          "Badge Text": fields["Badge Text"] || fields.Description || "",
+          "Badge Image": fields.Image || fields["Badge Image"] || "",
+        });
         await patchScreenOverlay(user.institutionId, path, (prev) => {
           const extras = Array.isArray(prev.extraCourseBadges)
             ? [...(prev.extraCourseBadges as Array<Record<string, unknown>>)]
             : [];
-          extras.unshift(badge);
+          extras.unshift({ ...badge, id: row.id });
           return { ...prev, extraCourseBadges: extras.slice(0, 50) };
         });
-        message = `Badge created · ${badge.name}`;
-        result = badge;
+        message = `Badge created · ${row.name}`;
+        result = { ...badge, id: row.id };
       }
     } else if (lower.includes("create group") && !lower.includes("course group") && !lower.includes("course type")) {
       const fields = parseActionFields(input.rowKey) || { Name: input.rowKey || "New group" };

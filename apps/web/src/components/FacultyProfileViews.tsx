@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import type { TeacherScreenConfig } from "@/lib/teacherCatalog";
 import { useOptionalTeacherLive } from "@/lib/useTeacherSisLive";
@@ -139,7 +139,22 @@ export function FacultyProfileLayout({
           </p>
           {topics.length ? (
             <p className="mh-hcc-profile__topics">
-              <strong>Topics:</strong> {topics.join(", ")}
+              <strong>Topics:</strong>{" "}
+              {(header?.topicLinks?.length
+                ? header.topicLinks
+                : topics.map((label) => ({ label, href: "/instructor/sections" }))
+              ).map((t, i, arr) => (
+                <span key={`${t.label}-${i}`}>
+                  <button
+                    type="button"
+                    className="mh-hcc-profile__topic-link"
+                    onClick={() => router.push(t.href)}
+                  >
+                    {t.label}
+                  </button>
+                  {i < arr.length - 1 ? ", " : ""}
+                </span>
+              ))}
             </p>
           ) : null}
         </div>
@@ -307,10 +322,20 @@ export function ProfileBioView({ config }: { config: TeacherScreenConfig }) {
 }
 
 export function ProfileTopicsView({ config }: { config: TeacherScreenConfig }) {
+  const router = useRouter();
   const p = config.profileTopics;
-  const current = p?.currentCourses?.length ? p.currentCourses : p?.teaching ?? [];
-  const previous = p?.previousCourses ?? [];
-  const chair = p?.academicChair ?? [];
+  const current = p?.topicLinks?.current?.length
+    ? p.topicLinks.current
+    : (p?.currentCourses?.length ? p.currentCourses : p?.teaching ?? []).map((label) => ({
+        label,
+        href: "/instructor/sections",
+      }));
+  const previous = p?.topicLinks?.previous?.length
+    ? p.topicLinks.previous
+    : (p?.previousCourses ?? []).map((label) => ({ label, href: "/instructor/sections" }));
+  const chair = p?.topicLinks?.chair?.length
+    ? p.topicLinks.chair
+    : (p?.academicChair ?? []).map((label) => ({ label, href: "/instructor/sections" }));
   const schedule = p?.teachingSchedule ?? [];
 
   return (
@@ -322,7 +347,15 @@ export function ProfileTopicsView({ config }: { config: TeacherScreenConfig }) {
             {current.length ? (
               <ul className="mh-hcc-profile__list">
                 {current.map((t) => (
-                  <li key={t}>{t}</li>
+                  <li key={t.label}>
+                    <button
+                      type="button"
+                      className="mh-hcc-profile__topic-link"
+                      onClick={() => router.push(t.href)}
+                    >
+                      {t.label}
+                    </button>
+                  </li>
                 ))}
               </ul>
             ) : (
@@ -334,7 +367,15 @@ export function ProfileTopicsView({ config }: { config: TeacherScreenConfig }) {
             {previous.length ? (
               <ul className="mh-hcc-profile__list">
                 {previous.map((t) => (
-                  <li key={t}>{t}</li>
+                  <li key={t.label}>
+                    <button
+                      type="button"
+                      className="mh-hcc-profile__topic-link"
+                      onClick={() => router.push(t.href)}
+                    >
+                      {t.label}
+                    </button>
+                  </li>
                 ))}
               </ul>
             ) : (
@@ -348,7 +389,21 @@ export function ProfileTopicsView({ config }: { config: TeacherScreenConfig }) {
             {chair.length ? (
               <>
                 <p className="mh-hcc-profile__subhead">Topics</p>
-                <p className="mh-hcc-profile__topics-block">• {chair.join(", ")}</p>
+                <p className="mh-hcc-profile__topics-block">
+                  •{" "}
+                  {chair.map((t, i) => (
+                    <span key={t.label}>
+                      <button
+                        type="button"
+                        className="mh-hcc-profile__topic-link"
+                        onClick={() => router.push(t.href)}
+                      >
+                        {t.label}
+                      </button>
+                      {i < chair.length - 1 ? ", " : ""}
+                    </span>
+                  ))}
+                </p>
               </>
             ) : (
               <p className="mh-teacher-muted">No content available.</p>
@@ -378,9 +433,15 @@ export function ProfileTopicsView({ config }: { config: TeacherScreenConfig }) {
                   schedule.map((row) => (
                     <tr key={`${row.code}-${row.course}`}>
                       <td>
-                        <strong>
-                          {row.course} ({row.code})
-                        </strong>
+                        <button
+                          type="button"
+                          className="mh-hcc-profile__topic-link mh-hcc-profile__topic-link--block"
+                          onClick={() => router.push(row.href || "/instructor/sections")}
+                        >
+                          <strong>
+                            {row.course} ({row.code})
+                          </strong>
+                        </button>
                         <br />
                         {row.title}
                       </td>
@@ -406,6 +467,127 @@ function formatClockLabel(hhmm: string) {
   if (Number.isNaN(h)) return hhmm;
   const d = new Date(2000, 0, 1, h, m);
   return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).toLowerCase().replace(" ", "");
+}
+
+function slotOccursOnDate(
+  slot: {
+    date?: string;
+    endDate?: string;
+    repeats?: string;
+    day?: string;
+  },
+  iso: string,
+) {
+  if (!iso) return false;
+  if (slot.date === iso) return true;
+  const repeats = (slot.repeats || "").trim();
+  if (!repeats) {
+    // Non-recurring: also match weekday label stored in day when date missing
+    if (!slot.date && slot.day) {
+      const weekday = new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", { weekday: "long" });
+      return slot.day.toLowerCase() === weekday.toLowerCase() || slot.day.slice(0, 3).toLowerCase() === weekday.slice(0, 3).toLowerCase();
+    }
+    return false;
+  }
+  if (slot.date && iso < slot.date) return false;
+  if (slot.endDate && iso > slot.endDate) return false;
+  if (slot.date && !slot.endDate && slot.date !== iso) {
+    // Recurring without end date: treat as weekly from start date forward
+    if (iso < slot.date) return false;
+  }
+  const day = new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", { weekday: "short" }).toLowerCase();
+  const days = repeats.split(/[·,;/|\s]+/).map((x) => x.trim().slice(0, 3).toLowerCase()).filter(Boolean);
+  return days.includes(day);
+}
+
+function focusIsoFromSlot(slot: { date?: string; endDate?: string; repeats?: string }) {
+  if (slot.date) return slot.date;
+  return null;
+}
+
+function AvailabilityDetailModal({
+  slot,
+  onClose,
+  onFocusDay,
+}: {
+  slot: {
+    id?: string;
+    day: string;
+    start: string;
+    end: string;
+    mode: string;
+    location: string;
+    date?: string;
+    repeats?: string;
+    endDate?: string;
+    note?: string;
+    title?: string;
+  };
+  onClose: () => void;
+  onFocusDay: (iso: string) => void;
+}) {
+  const range =
+    slot.date && slot.endDate && slot.endDate !== slot.date
+      ? `${slot.date} → ${slot.endDate}`
+      : slot.date || "—";
+  return (
+    <ModalShell
+      title={slot.title || slot.mode || "Availability"}
+      section="DETAILS"
+      onClose={onClose}
+      footer={
+        slot.date ? (
+          <button
+            type="button"
+            className="mh-hcc-modal__save"
+            onClick={() => {
+              onFocusDay(slot.date!);
+              onClose();
+            }}
+          >
+            Show on calendar
+          </button>
+        ) : (
+          <button type="button" className="mh-hcc-modal__save" onClick={onClose}>
+            Close
+          </button>
+        )
+      }
+    >
+      <dl className="mh-hcc-avail__detail">
+        <div>
+          <dt>Type</dt>
+          <dd>{slot.mode}</dd>
+        </div>
+        <div>
+          <dt>Time</dt>
+          <dd>
+            {formatClockLabel(slot.start)}–{formatClockLabel(slot.end)}
+          </dd>
+        </div>
+        <div>
+          <dt>Date</dt>
+          <dd>{range}</dd>
+        </div>
+        <div>
+          <dt>Repeats</dt>
+          <dd>{slot.repeats || slot.day || "Does not repeat"}</dd>
+        </div>
+        {slot.location ? (
+          <div>
+            <dt>Location</dt>
+            <dd>{slot.location}</dd>
+          </div>
+        ) : null}
+        {slot.note ? (
+          <div>
+            <dt>Note</dt>
+            <dd className="mh-hcc-profile__pre">{slot.note}</dd>
+          </div>
+        ) : null}
+      </dl>
+    </ModalShell>
+  );
 }
 
 function expandAvailabilityMarks(
@@ -444,6 +626,8 @@ function MonthCalendar({
   year,
   month,
   markedDates,
+  availabilityDates,
+  scheduleDates,
   selectedIso,
   onSelect,
   onPrev,
@@ -452,12 +636,16 @@ function MonthCalendar({
   year: number;
   month: number;
   markedDates: string[];
+  availabilityDates?: string[];
+  scheduleDates?: string[];
   selectedIso?: string | null;
   onSelect?: (iso: string) => void;
   onPrev: () => void;
   onNext: () => void;
 }) {
   const marked = new Set(markedDates);
+  const avail = new Set(availabilityDates?.length ? availabilityDates : markedDates);
+  const sched = new Set(scheduleDates ?? []);
   const first = new Date(year, month, 1);
   const startPad = first.getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -492,12 +680,16 @@ function MonthCalendar({
       </div>
       <div className="mh-hcc-cal__grid">
         {cells.map((c, idx) => {
-          const isMarked = Boolean(c.iso && marked.has(c.iso));
+          const hasAvail = Boolean(c.iso && avail.has(c.iso));
+          const hasSched = Boolean(c.iso && sched.has(c.iso));
+          const isMarked = Boolean(c.iso && marked.has(c.iso)) || hasAvail || hasSched;
           const isSelected = Boolean(c.iso && selectedIso === c.iso);
           const className = [
             "mh-hcc-cal__cell",
             c.day ? "" : "is-empty",
             isMarked ? "is-marked" : "",
+            hasSched ? "is-teaching" : "",
+            hasAvail ? "is-avail" : "",
             isSelected ? "is-selected" : "",
           ]
             .filter(Boolean)
@@ -512,16 +704,23 @@ function MonthCalendar({
               className={className}
               onClick={() => onSelect?.(c.iso)}
               aria-pressed={isSelected}
-              aria-label={`${label} ${c.day}${isMarked ? ", has availability" : ""}`}
+              aria-label={`${label} ${c.day}${hasSched ? ", teaching" : ""}${hasAvail ? ", availability" : ""}`}
             >
               <span>{c.day}</span>
-              {isMarked ? <i className="mh-hcc-cal__dot" aria-hidden /> : null}
+              {(hasSched || hasAvail) && (
+                <span className="mh-hcc-cal__marks" aria-hidden>
+                  {hasSched ? <i className="mh-hcc-cal__dot mh-hcc-cal__dot--teach" /> : null}
+                  {hasAvail ? <i className="mh-hcc-cal__dot mh-hcc-cal__dot--avail" /> : null}
+                </span>
+              )}
             </button>
           );
         })}
       </div>
       <p className="mh-hcc-cal__legend">
-        <i className="mh-hcc-cal__dot" aria-hidden /> Marked days have published availability
+        <i className="mh-hcc-cal__dot mh-hcc-cal__dot--teach" aria-hidden /> Teaching{" "}
+        <i className="mh-hcc-cal__dot mh-hcc-cal__dot--avail" aria-hidden /> Availability — click a day to
+        review or add
       </p>
     </div>
   );
@@ -532,11 +731,13 @@ function AvailabilityModal({
   onClose,
   onSaved,
   defaultType = "Available to Teach",
+  defaultDate,
 }: {
   open: boolean;
   onClose: () => void;
   onSaved: () => Promise<void>;
   defaultType?: string;
+  defaultDate?: string | null;
 }) {
   const live = useOptionalTeacherLive();
   const [title, setTitle] = useState("");
@@ -545,7 +746,7 @@ function AvailabilityModal({
   const [startM, setStartM] = useState("00");
   const [endH, setEndH] = useState("10");
   const [endM, setEndM] = useState("00");
-  const [date, setDate] = useState("2026-09-18");
+  const [date, setDate] = useState(defaultDate || "2026-09-18");
   const [recur, setRecur] = useState(true);
   const [endDate, setEndDate] = useState("2026-09-25");
   const [days, setDays] = useState<string[]>(["Mon", "Tue", "Wed", "Thu", "Fri"]);
@@ -553,8 +754,19 @@ function AvailabilityModal({
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (open) setType(defaultType);
-  }, [open, defaultType]);
+    if (!open) return;
+    setType(defaultType);
+    if (defaultDate) {
+      setDate(defaultDate);
+      const end = new Date(`${defaultDate}T12:00:00`);
+      if (!Number.isNaN(end.getTime())) {
+        end.setDate(end.getDate() + 7);
+        setEndDate(
+          `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, "0")}-${String(end.getDate()).padStart(2, "0")}`,
+        );
+      }
+    }
+  }, [open, defaultType, defaultDate]);
 
   if (!open) return null;
 
@@ -685,6 +897,7 @@ function AvailabilityModal({
 }
 
 export function AvailabilityView({ config }: { config: TeacherScreenConfig }) {
+  const router = useRouter();
   const live = useOptionalTeacherLive();
   const a = config.availability;
   const cal = a?.calendar;
@@ -696,34 +909,99 @@ export function AvailabilityView({ config }: { config: TeacherScreenConfig }) {
   const [generalOpen, setGeneralOpen] = useState(false);
   const [generalHtml, setGeneralHtml] = useState(a?.generalInfo || "");
   const [selectedIso, setSelectedIso] = useState<string | null>(null);
+  const [selectedSlotKey, setSelectedSlotKey] = useState<string | null>(null);
+  const [detailSlotKey, setDetailSlotKey] = useState<string | null>(null);
+  const prevSlotCount = useRef(slots.length);
   const teachingByDay = a?.teachingByDay ?? [];
+  const scheduleByDate = a?.scheduleByDate ?? [];
+
+  function slotKey(slot: (typeof slots)[number], i: number) {
+    return slot.id || `${slot.date || slot.day}-${slot.start}-${slot.end}-${slot.mode}-${i}`;
+  }
+
+  function focusSlot(slot: (typeof slots)[number], i: number, openDetail = false) {
+    const key = slotKey(slot, i);
+    setSelectedSlotKey(key);
+    const iso = focusIsoFromSlot(slot);
+    if (iso) {
+      const [y, m] = iso.split("-").map(Number);
+      if (y && m) {
+        setYear(y);
+        setMonth(m - 1);
+      }
+      setSelectedIso(iso);
+    } else if (slot.repeats || slot.day) {
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+      for (let d = 1; d <= daysInMonth; d++) {
+        const isoTry = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+        if (slotOccursOnDate(slot, isoTry)) {
+          setSelectedIso(isoTry);
+          break;
+        }
+      }
+    }
+    if (openDetail) setDetailSlotKey(key);
+  }
+
+  useEffect(() => {
+    if (slots.length > prevSlotCount.current && slots[0]) {
+      focusSlot(slots[0], 0, true);
+    }
+    prevSlotCount.current = slots.length;
+  }, [slots]);
+
+  const scheduleDates = useMemo(() => {
+    const fromApi = a?.calendar?.scheduleDates ?? [];
+    if (fromApi.length) return fromApi;
+    const fromSessions = [...new Set(scheduleByDate.map((s) => s.date))].sort();
+    if (fromSessions.length) return fromSessions;
+    // Fall back: paint weekly teaching pattern onto the visible month
+    const teachDays = new Set(teachingByDay.filter((d) => d.entries.length).map((d) => d.day));
+    if (!teachDays.size) return [];
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const out: string[] = [];
+    for (let d = 1; d <= daysInMonth; d++) {
+      const date = new Date(year, month, d);
+      const label = date.toLocaleDateString("en-US", { weekday: "long" });
+      if (!teachDays.has(label)) continue;
+      out.push(`${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`);
+    }
+    return out;
+  }, [a?.calendar?.scheduleDates, scheduleByDate, teachingByDay, year, month]);
+
+  const availabilityDates = useMemo(() => {
+    const fromApi = a?.calendar?.availabilityDates ?? [];
+    if (fromApi.length) return fromApi;
+    return expandAvailabilityMarks(slots);
+  }, [a?.calendar?.availabilityDates, slots]);
 
   const markedDates = useMemo(() => {
     const fromApi = a?.calendar?.markedDates ?? [];
     if (fromApi.length) return fromApi;
-    return expandAvailabilityMarks(slots);
-  }, [a?.calendar?.markedDates, slots]);
+    return [...new Set([...availabilityDates, ...scheduleDates])].sort();
+  }, [a?.calendar?.markedDates, availabilityDates, scheduleDates]);
 
   useEffect(() => {
     if (cal) {
       setYear(cal.year);
       setMonth(cal.month);
     }
-  }, [cal?.year, cal?.month, markedDates.length]);
+  }, [cal?.year, cal?.month]);
 
   useEffect(() => {
     setGeneralHtml(a?.generalInfo || "");
   }, [a?.generalInfo]);
 
   useEffect(() => {
-    if (!markedDates.length) return;
     setSelectedIso((prev) => {
-      if (prev && markedDates.includes(prev)) return prev;
+      if (prev) return prev;
       const inMonth = markedDates.find((iso) => {
         const [y, m] = iso.split("-").map(Number);
         return y === year && m === month + 1;
       });
-      return inMonth || markedDates[0] || null;
+      if (inMonth) return inMonth;
+      if (markedDates[0]) return markedDates[0];
+      return `${year}-${String(month + 1).padStart(2, "0")}-01`;
     });
   }, [markedDates, year, month]);
 
@@ -731,6 +1009,11 @@ export function AvailabilityView({ config }: { config: TeacherScreenConfig }) {
     const d = new Date(year, month + delta, 1);
     setYear(d.getFullYear());
     setMonth(d.getMonth());
+  }
+
+  function openAdd(type = "Available to Teach") {
+    setAddType(type);
+    setAddOpen(true);
   }
 
   async function saveGeneral(e: FormEvent) {
@@ -747,16 +1030,31 @@ export function AvailabilityView({ config }: { config: TeacherScreenConfig }) {
   const officeHoursText = (a?.officeHours || "").trim();
   const selectedSlots = useMemo(() => {
     if (!selectedIso) return [];
-    return slots.filter((slot) => {
-      if (slot.date === selectedIso) return true;
-      if (!slot.repeats || !slot.date) return false;
-      if (slot.endDate && (selectedIso < slot.date || selectedIso > slot.endDate)) return false;
-      if (!slot.endDate && slot.date !== selectedIso) return false;
-      const day = new Date(`${selectedIso}T12:00:00`).toLocaleDateString("en-US", { weekday: "short" });
-      const days = slot.repeats.split(/[·,]/).map((x) => x.trim().slice(0, 3).toLowerCase());
-      return days.includes(day.toLowerCase());
-    });
+    return slots
+      .map((slot, i) => ({ slot, i, key: slotKey(slot, i) }))
+      .filter(({ slot }) => slotOccursOnDate(slot, selectedIso));
   }, [slots, selectedIso]);
+
+  const selectedTeaching = useMemo(() => {
+    if (!selectedIso) return [];
+    const dated = scheduleByDate.filter((s) => s.date === selectedIso);
+    if (dated.length) return dated;
+    const weekday = new Date(`${selectedIso}T12:00:00`).toLocaleDateString("en-US", { weekday: "long" });
+    const pattern = teachingByDay.find((d) => d.day === weekday);
+    return (pattern?.entries ?? []).map((e) => ({
+      date: selectedIso,
+      course: e.course,
+      section: e.section,
+      time: e.time,
+      href: "/instructor/sections",
+      recurring: true as const,
+    }));
+  }, [selectedIso, scheduleByDate, teachingByDay]);
+
+  const detailSlot = useMemo(() => {
+    if (!detailSlotKey) return null;
+    return slots.find((slot, i) => slotKey(slot, i) === detailSlotKey) || null;
+  }, [detailSlotKey, slots]);
 
   const selectedLabel = selectedIso
     ? new Date(`${selectedIso}T12:00:00`).toLocaleDateString("en-US", {
@@ -774,13 +1072,7 @@ export function AvailabilityView({ config }: { config: TeacherScreenConfig }) {
           <section className="mh-hcc-avail__card">
             <div className="mh-hcc-profile__card-head">
               <h2>REGULAR OFFICE HOURS</h2>
-              <PencilButton
-                onClick={() => {
-                  setAddType("Office Hours");
-                  setAddOpen(true);
-                }}
-                label="Add office hours"
-              />
+              <PencilButton onClick={() => openAdd("Office Hours")} label="Add office hours" />
             </div>
             {officeHoursText ? (
               <p className="mh-hcc-avail__pre">{officeHoursText}</p>
@@ -808,41 +1100,44 @@ export function AvailabilityView({ config }: { config: TeacherScreenConfig }) {
               <p className="mh-hcc-avail__note">
                 {a?.note ||
                   (slots.length
-                    ? `${slots.length} window(s) on the calendar.`
-                    : "Add windows students can request.")}
+                    ? `${slots.length} window(s) — click a card or day row for full details.`
+                    : "Pick a day on the calendar to review teaching and add availability.")}
               </p>
             </div>
-            <button
-              type="button"
-              className="mh-hcc-avail__add"
-              onClick={() => {
-                setAddType("Available to Teach");
-                setAddOpen(true);
-              }}
-            >
+            <button type="button" className="mh-hcc-avail__add" onClick={() => openAdd("Available to Teach")}>
               + Add
             </button>
           </div>
 
           {slots.length ? (
             <ul className="mh-hcc-avail__slots">
-              {slots.map((slot, i) => (
-                <li key={`${slot.date || slot.day}-${slot.start}-${i}`} className="mh-hcc-avail__slot">
-                  <div className="mh-hcc-avail__slot-top">
-                    <strong>{slot.title || slot.mode}</strong>
-                    <span className="mh-hcc-avail__pill">{slot.mode}</span>
-                  </div>
-                  <p>
-                    {formatClockLabel(slot.start)}–{formatClockLabel(slot.end)}
-                    {slot.date ? ` · ${slot.date}` : ""}
-                    {slot.endDate && slot.endDate !== slot.date ? ` → ${slot.endDate}` : ""}
-                  </p>
-                  <p className="mh-hcc-avail__slot-meta">
-                    {slot.repeats || slot.day}
-                    {slot.note ? ` · ${slot.note}` : ""}
-                  </p>
-                </li>
-              ))}
+              {slots.map((slot, i) => {
+                const key = slotKey(slot, i);
+                const active = selectedSlotKey === key;
+                return (
+                  <li key={key}>
+                    <button
+                      type="button"
+                      className={`mh-hcc-avail__slot${active ? " is-active" : ""}`}
+                      onClick={() => focusSlot(slot, i, true)}
+                    >
+                      <div className="mh-hcc-avail__slot-top">
+                        <strong>{slot.title || slot.mode}</strong>
+                        <span className="mh-hcc-avail__pill">{slot.mode}</span>
+                      </div>
+                      <p>
+                        {formatClockLabel(slot.start)}–{formatClockLabel(slot.end)}
+                        {slot.date ? ` · ${slot.date}` : ""}
+                        {slot.endDate && slot.endDate !== slot.date ? ` → ${slot.endDate}` : ""}
+                      </p>
+                      <p className="mh-hcc-avail__slot-meta">
+                        {slot.repeats || slot.day}
+                        {slot.note ? ` · ${slot.note}` : ""}
+                      </p>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           ) : null}
 
@@ -870,25 +1165,80 @@ export function AvailabilityView({ config }: { config: TeacherScreenConfig }) {
                 year={year}
                 month={month}
                 markedDates={markedDates}
+                availabilityDates={availabilityDates}
+                scheduleDates={scheduleDates}
                 selectedIso={selectedIso}
-                onSelect={setSelectedIso}
+                onSelect={(iso) => {
+                  setSelectedIso(iso);
+                  setSelectedSlotKey(null);
+                }}
                 onPrev={() => shiftMonth(-1)}
                 onNext={() => shiftMonth(1)}
               />
               <div className="mh-hcc-avail__daydetail">
-                <h3>{selectedLabel || "Select a day"}</h3>
-                {selectedSlots.length === 0 ? (
-                  <p className="mh-teacher-muted">No availability on this day.</p>
-                ) : (
-                  selectedSlots.map((slot, i) => (
-                    <div key={`sel-${slot.start}-${i}`} className="mh-hcc-avail__dayitem">
-                      <strong>{slot.title || slot.mode}</strong>
-                      <span>
-                        {formatClockLabel(slot.start)}–{formatClockLabel(slot.end)}
-                      </span>
-                    </div>
-                  ))
-                )}
+                <div className="mh-hcc-avail__daydetail-head">
+                  <h3>{selectedLabel || "Select a day"}</h3>
+                  {selectedIso ? (
+                    <button
+                      type="button"
+                      className="mh-hcc-avail__day-cta"
+                      onClick={() => openAdd("Available to Teach")}
+                    >
+                      + Add for this day
+                    </button>
+                  ) : null}
+                </div>
+
+                {selectedTeaching.length > 0 ? (
+                  <div className="mh-hcc-avail__daysection">
+                    <p className="mh-hcc-avail__daysection-label">Teaching</p>
+                    {selectedTeaching.map((row, i) => (
+                      <button
+                        key={`teach-${row.course}-${row.section}-${row.time}-${i}`}
+                        type="button"
+                        className="mh-hcc-avail__dayitem mh-hcc-avail__dayitem--link"
+                        onClick={() => router.push(row.href || "/instructor/sections")}
+                      >
+                        <strong>
+                          {row.course} ({row.section})
+                          {"recurring" in row && row.recurring ? (
+                            <span className="mh-hcc-avail__soft"> · weekly pattern</span>
+                          ) : null}
+                        </strong>
+                        <span>{row.time}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
+                <div className="mh-hcc-avail__daysection">
+                  <p className="mh-hcc-avail__daysection-label">Availability</p>
+                  {selectedSlots.length === 0 ? (
+                    <p className="mh-teacher-muted">
+                      No availability window on this day. Use <strong>Add for this day</strong> to publish
+                      office hours or teaching availability.
+                    </p>
+                  ) : (
+                    selectedSlots.map(({ slot, i, key }) => (
+                      <button
+                        key={key}
+                        type="button"
+                        className={`mh-hcc-avail__dayitem mh-hcc-avail__dayitem--link${
+                          selectedSlotKey === key ? " is-active" : ""
+                        }`}
+                        onClick={() => {
+                          setSelectedSlotKey(key);
+                          setDetailSlotKey(key);
+                        }}
+                      >
+                        <strong>{slot.title || slot.mode}</strong>
+                        <span>
+                          {formatClockLabel(slot.start)}–{formatClockLabel(slot.end)}
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -898,9 +1248,32 @@ export function AvailabilityView({ config }: { config: TeacherScreenConfig }) {
       <AvailabilityModal
         open={addOpen}
         defaultType={addType}
+        defaultDate={selectedIso}
         onClose={() => setAddOpen(false)}
-        onSaved={async () => live?.refresh()}
+        onSaved={async () => {
+          await live?.refresh();
+          setSelectedSlotKey(null);
+          if (selectedIso) {
+            // keep day selected so the new window appears under the calendar
+            setSelectedIso(selectedIso);
+          }
+        }}
       />
+
+      {detailSlot ? (
+        <AvailabilityDetailModal
+          slot={detailSlot}
+          onClose={() => setDetailSlotKey(null)}
+          onFocusDay={(iso) => {
+            const [y, m] = iso.split("-").map(Number);
+            if (y && m) {
+              setYear(y);
+              setMonth(m - 1);
+            }
+            setSelectedIso(iso);
+          }}
+        />
+      ) : null}
 
       {generalOpen ? (
         <ModalShell
@@ -981,6 +1354,21 @@ export function ScheduleView({ config }: { config: TeacherScreenConfig }) {
   const teachingByDay = s?.teachingByDay ?? [];
   const [weekStart, setWeekStart] = useState(s?.weekStart || "2026-09-13");
   const [addOpen, setAddOpen] = useState(false);
+  const [selected, setSelected] = useState<{
+    kind: string;
+    title: string;
+    time: string;
+    dayLabel: string;
+    dateLabel?: string;
+    course?: string;
+    section?: string;
+    location?: string;
+    mode?: string;
+    note?: string;
+    repeats?: string;
+    joinUrl?: string;
+    sessionTitle?: string;
+  } | null>(null);
 
   useEffect(() => {
     if (s?.weekStart) setWeekStart(s.weekStart);
@@ -1021,9 +1409,23 @@ export function ScheduleView({ config }: { config: TeacherScreenConfig }) {
               <div key={day.day} className="mh-hcc-profile__dayblock">
                 <strong>{day.day}</strong>
                 {day.entries.map((e) => (
-                  <p key={`${e.course}-${e.section}-${e.time}`}>
+                  <button
+                    key={`${e.course}-${e.section}-${e.time}`}
+                    type="button"
+                    className="mh-hcc-profile__slot"
+                    onClick={() =>
+                      setSelected({
+                        kind: "class",
+                        title: `${e.course} [${e.section}]`,
+                        time: e.time,
+                        dayLabel: day.day,
+                        course: e.course,
+                        section: e.section,
+                      })
+                    }
+                  >
                     {e.course} [{e.section}] — {e.time}
-                  </p>
+                  </button>
                 ))}
               </div>
             ))
@@ -1055,7 +1457,7 @@ export function ScheduleView({ config }: { config: TeacherScreenConfig }) {
                     label,
                     date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`,
                     dateLabel: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-                    entries: [] as Array<{ kind: string; title: string; time: string }>,
+                    entries: [] as NonNullable<NonNullable<TeacherScreenConfig["schedule"]>["weekDays"]>[number]["entries"],
                   };
                 })
             ).map((day, i) => (
@@ -1071,10 +1473,21 @@ export function ScheduleView({ config }: { config: TeacherScreenConfig }) {
                     ) : null
                   ) : (
                     day.entries.map((e) => (
-                      <article key={`${e.title}-${e.time}`} className={`mh-hcc-weekcal__event is-${e.kind}`}>
+                      <button
+                        key={`${e.title}-${e.time}`}
+                        type="button"
+                        className={`mh-hcc-weekcal__event is-${e.kind}`}
+                        onClick={() =>
+                          setSelected({
+                            ...e,
+                            dayLabel: day.label,
+                            dateLabel: day.dateLabel || day.date,
+                          })
+                        }
+                      >
                         <strong>{e.title}</strong>
                         <span>{e.time}</span>
-                      </article>
+                      </button>
                     ))
                   )}
                 </div>
@@ -1084,6 +1497,77 @@ export function ScheduleView({ config }: { config: TeacherScreenConfig }) {
         </section>
       </div>
       <AvailabilityModal open={addOpen} onClose={() => setAddOpen(false)} onSaved={async () => live?.refresh()} />
+      {selected ? (
+        <ModalShell
+          title="SCHEDULE DETAILS"
+          section={selected.kind === "availability" ? "AVAILABILITY" : "CLASS SESSION"}
+          onClose={() => setSelected(null)}
+          footer={
+            <button type="button" className="mh-hcc-modal__save" onClick={() => setSelected(null)}>
+              Close
+            </button>
+          }
+        >
+          <dl className="mh-hcc-slot-detail">
+            <div>
+              <dt>Title</dt>
+              <dd>{selected.sessionTitle || selected.title}</dd>
+            </div>
+            {selected.course ? (
+              <div>
+                <dt>Course</dt>
+                <dd>
+                  {selected.course}
+                  {selected.section ? ` · Section ${selected.section}` : ""}
+                </dd>
+              </div>
+            ) : null}
+            <div>
+              <dt>When</dt>
+              <dd>
+                {selected.dayLabel}
+                {selected.dateLabel ? ` · ${selected.dateLabel}` : ""}
+                <br />
+                {selected.time}
+              </dd>
+            </div>
+            {selected.mode ? (
+              <div>
+                <dt>Type</dt>
+                <dd>{selected.mode}</dd>
+              </div>
+            ) : null}
+            {selected.location ? (
+              <div>
+                <dt>Location</dt>
+                <dd>{selected.location}</dd>
+              </div>
+            ) : null}
+            {selected.repeats ? (
+              <div>
+                <dt>Repeats</dt>
+                <dd>{selected.repeats}</dd>
+              </div>
+            ) : null}
+            {selected.note ? (
+              <div>
+                <dt>Note</dt>
+                <dd>{selected.note}</dd>
+              </div>
+            ) : null}
+            {selected.joinUrl ? (
+              <div>
+                <dt>Join link</dt>
+                <dd>
+                  <a href={selected.joinUrl} target="_blank" rel="noreferrer">
+                    Open session
+                  </a>
+                </dd>
+              </div>
+            ) : null}
+          </dl>
+        </ModalShell>
+      ) : null}
     </FacultyProfileLayout>
   );
 }
@@ -1183,15 +1667,26 @@ export function SecurityView({ config }: { config: TeacherScreenConfig }) {
 
 export function AccomplishmentsView({ config }: { config: TeacherScreenConfig }) {
   const live = useOptionalTeacherLive();
+  const router = useRouter();
   const a = config.accomplishments;
   const items = a?.items ?? [];
   const stats = a?.stats ?? [];
+  const definitions = a?.definitions ?? [];
+  const createBase = a?.createBase;
   const facultyItems = items.filter((i) => i.category !== "student");
   const studentItems = items.filter((i) => i.category === "student");
   const [open, setOpen] = useState(false);
+  const [baseOpen, setBaseOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [detail, setDetail] = useState("");
   const [year, setYear] = useState(String(new Date().getFullYear()));
+  const [baseValues, setBaseValues] = useState<Record<string, string>>(() => {
+    const init: Record<string, string> = {};
+    for (const g of createBase?.groups ?? []) {
+      for (const f of g.fields) init[f.label] = f.value ?? "";
+    }
+    return init;
+  });
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -1219,14 +1714,38 @@ export function AccomplishmentsView({ config }: { config: TeacherScreenConfig })
     }
   }
 
+  async function onSaveBase(e: FormEvent) {
+    e.preventDefault();
+    if (!(baseValues.Name || "").trim()) {
+      setError("Enter a badge base name.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await live?.runAction("Create Base", JSON.stringify(baseValues));
+      setBaseOpen(false);
+      await live?.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save badge base.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <FacultyProfileLayout config={config} tabs={a?.tabs}>
       <div className="mh-hcc-accomplish" data-figma-id={config.figmaId}>
         <div className="mh-hcc-profile__card-head">
           <h2>MY ACCOMPLISHMENTS &amp; BADGES</h2>
-          <button type="button" className="mh-hcc-profile__add" onClick={() => setOpen(true)}>
-            + Add
-          </button>
+          <div className="mh-hcc-accomplish__actions">
+            <button type="button" className="mh-hcc-profile__add" onClick={() => setBaseOpen(true)}>
+              + Create Base
+            </button>
+            <button type="button" className="mh-hcc-profile__add" onClick={() => setOpen(true)}>
+              + Add
+            </button>
+          </div>
         </div>
 
         {stats.length ? (
@@ -1239,6 +1758,40 @@ export function AccomplishmentsView({ config }: { config: TeacherScreenConfig })
             ))}
           </div>
         ) : null}
+
+        <section className="mh-hcc-profile__card mh-hcc-accomplish__base">
+          <div className="mh-hcc-profile__card-head">
+            <h2>CREATE BASE</h2>
+            <button
+              type="button"
+              className="mh-teacher-link"
+              onClick={() => router.push(createBase?.href || "/instructor/f/t70-add-badge")}
+            >
+              Full badge form
+            </button>
+          </div>
+          {definitions.length === 0 ? (
+            <p className="mh-teacher-muted">
+              No badge bases yet. Create a base definition students can earn, then issue awards from Badges /
+              Accomplishments.
+            </p>
+          ) : (
+            <ul className="mh-hcc-accomplish__list">
+              {definitions.map((d) => (
+                <li key={d.id}>
+                  <div>
+                    <strong>{d.name}</strong>
+                    {d.description ? <p>{d.description}</p> : null}
+                    <p className="mh-teacher-muted">
+                      {d.badgeType} · {d.approvalMode}
+                    </p>
+                  </div>
+                  <span className="mh-teacher-badge mh-teacher-badge--info">{d.status}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
 
         <div className="mh-hcc-accomplish__grid">
           <section className="mh-hcc-profile__card">
@@ -1318,6 +1871,66 @@ export function AccomplishmentsView({ config }: { config: TeacherScreenConfig })
               <span>Year</span>
               <input className="mh-teacher-field" value={year} onChange={(e) => setYear(e.target.value)} />
             </label>
+            {error ? <p className="mh-teacher-error">{error}</p> : null}
+          </form>
+        </ModalShell>
+      ) : null}
+
+      {baseOpen ? (
+        <ModalShell
+          title={createBase?.title || "Create Base"}
+          section="Badge definition"
+          onClose={() => setBaseOpen(false)}
+          footer={
+            <>
+              <button type="button" className="mh-hcc-modal__cancel" onClick={() => setBaseOpen(false)}>
+                Cancel
+              </button>
+              <button type="submit" form="mh-create-base-form" className="mh-hcc-modal__save" disabled={saving}>
+                {saving ? "Saving…" : createBase?.submitLabel || "Save Badge / Accomplishment"}
+              </button>
+            </>
+          }
+        >
+          <form id="mh-create-base-form" className="mh-hcc-modal__form" onSubmit={onSaveBase}>
+            {(createBase?.groups ?? []).map((group) => (
+              <fieldset key={group.title} className="mh-hcc-modal__fieldset">
+                <legend>{group.title}</legend>
+                {group.fields.map((field) => (
+                  <label key={field.label}>
+                    <span>{field.label}</span>
+                    {field.type === "textarea" ? (
+                      <textarea
+                        className="mh-teacher-field"
+                        rows={3}
+                        value={baseValues[field.label] ?? ""}
+                        onChange={(e) => setBaseValues((prev) => ({ ...prev, [field.label]: e.target.value }))}
+                      />
+                    ) : field.type === "select" ? (
+                      <select
+                        className="mh-teacher-field"
+                        value={baseValues[field.label] ?? field.value}
+                        onChange={(e) => setBaseValues((prev) => ({ ...prev, [field.label]: e.target.value }))}
+                      >
+                        {(field.options ?? []).map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        className="mh-teacher-field"
+                        type={field.type === "file" ? "text" : "text"}
+                        placeholder={field.type === "file" ? "Image URL or file name" : undefined}
+                        value={baseValues[field.label] ?? ""}
+                        onChange={(e) => setBaseValues((prev) => ({ ...prev, [field.label]: e.target.value }))}
+                      />
+                    )}
+                  </label>
+                ))}
+              </fieldset>
+            ))}
             {error ? <p className="mh-teacher-error">{error}</p> : null}
           </form>
         </ModalShell>

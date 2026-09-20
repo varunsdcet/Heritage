@@ -5739,7 +5739,12 @@ a.mh-sis-tabs__item {
 
 .mh-teacher {
   display: flex;
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  max-height: 100vh;
+  max-height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
   background: #f6f7f4;
   font-family: var(--mh-font-sans);
   color: #1a1c19;
@@ -5756,20 +5761,25 @@ a.mh-sis-tabs__item {
   flex-shrink: 0;
   background: #1a1c19;
   color: #fff;
-  min-height: 100vh;
-  position: sticky;
-  top: 0;
+  align-self: stretch;
+  height: auto;
+  max-height: none;
+  position: relative;
+  top: auto;
   box-sizing: border-box;
+  overflow: hidden;
 }
 
 .mh-teacher__sidebar-top {
-  flex: 1;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   padding: 24px 16px 16px;
   gap: 20px;
   min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .mh-teacher__brand {
@@ -5795,6 +5805,61 @@ a.mh-sis-tabs__item {
   width: auto;
   max-width: 100%;
   object-fit: contain;
+}
+
+.mh-teacher__upcoming {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.mh-teacher__upcoming-kicker {
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8d928a;
+}
+
+.mh-teacher__upcoming-item {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  text-align: left;
+  padding: 6px 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.mh-teacher__upcoming-item strong {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mh-teacher__upcoming-item span {
+  font-size: 11px;
+  color: #b8bcb4;
+}
+
+.mh-teacher__upcoming-item.is-soon strong {
+  color: #fbbf24;
+}
+
+.mh-teacher__upcoming-link {
+  border: 0;
+  background: transparent;
+  color: #86efac;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
 }
 
 .mh-teacher__logo {
@@ -5978,11 +6043,13 @@ a.mh-sis-tabs__item {
 }
 
 .mh-teacher__sidebar-foot {
+  flex: 0 0 auto;
   padding: 16px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;
   flex-direction: column;
   gap: 12px;
+  background: #1a1c19;
 }
 
 .mh-teacher__user-card {
@@ -6104,7 +6171,9 @@ a.mh-sis-tabs__item {
   flex-direction: column;
   flex: 1;
   min-width: 0;
-  min-height: 100vh;
+  min-height: 0;
+  height: auto;
+  overflow: hidden;
 }
 
 .mh-teacher__header {
@@ -6300,8 +6369,10 @@ a.mh-sis-tabs__item {
   flex: 1;
   padding: 24px 32px;
   overflow: auto;
+  overscroll-behavior: contain;
   box-sizing: border-box;
   min-width: 0;
+  min-height: 0;
 }
 
 .mh-teacher__scroll:has(.mh-hcc-mail),
@@ -9704,6 +9775,10 @@ button.mh-teacher-pill.is-active {
 @media (max-width: 1100px) {
   .mh-teacher {
     flex-direction: column;
+    height: auto;
+    max-height: none;
+    min-height: 100vh;
+    overflow: visible;
   }
 
   .mh-teacher__nav-toggle {
@@ -9712,13 +9787,31 @@ button.mh-teacher-pill.is-active {
 
   .mh-teacher__sidebar {
     width: 100%;
+    height: auto;
+    max-height: none;
     min-height: auto;
     position: static;
     display: none;
+    overflow: visible;
   }
 
   .mh-teacher.is-nav-open .mh-teacher__sidebar {
     display: flex;
+    max-height: min(80vh, 720px);
+    overflow: hidden;
+  }
+
+  .mh-teacher.is-nav-open .mh-teacher__sidebar-top {
+    overflow-y: auto;
+  }
+
+  .mh-teacher__main {
+    overflow: visible;
+    min-height: 0;
+  }
+
+  .mh-teacher__scroll {
+    overflow: visible;
   }
 
   .mh-teacher-split,
@@ -10725,6 +10818,13 @@ select.mh-teacher-field:focus {
   min-height: 32px;
 }
 
+.mh-teacher-gradebook-live__row.is-attention td {
+  background: #fff7ed;
+}
+.mh-teacher-gradebook-live__row.is-attention td:first-child {
+  box-shadow: inset 3px 0 0 #ea580c;
+}
+
 .mh-teacher-gradebook-stats {
   display: flex;
   flex-wrap: wrap;
@@ -10760,6 +10860,27 @@ select.mh-teacher-field:focus {
   color: #5c5f5a;
   font-size: 10px;
   font-weight: 700;
+}
+
+.mh-teacher-tabs--gradebook {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mh-teacher-tabs--gradebook .mh-teacher-tabs__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.mh-teacher-tabs--gradebook .mh-teacher-tabs__code {
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.mh-teacher-tabs--gradebook .mh-teacher-tabs__count {
+  margin-left: 0;
 }
 
 .mh-teacher-tabs__item.is-active .mh-teacher-tabs__count {
@@ -13581,6 +13702,59 @@ select.mh-teacher-field:focus {
   line-height: 1.5;
 }
 
+.mh-ask-chat__welcome:has(.mh-ask-ops-grid) {
+  max-width: 720px;
+}
+
+.mh-ask-ops-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+  margin: 8px 0 4px;
+  text-align: left;
+}
+
+.mh-ask-ops-card {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--mh-border, #e5e7eb);
+  background: var(--mh-surface, #fff);
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+.mh-ask-ops-card:hover:not(:disabled) {
+  border-color: var(--mh-brand, #0f7a4a);
+  box-shadow: 0 1px 0 rgba(15, 122, 74, 0.12);
+}
+
+.mh-ask-ops-card:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.mh-ask-ops-card strong {
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
+.mh-ask-ops-card span {
+  font-size: 12px;
+  color: var(--mh-text-muted);
+  line-height: 1.35;
+}
+
+@media (max-width: 720px) {
+  .mh-ask-ops-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
 .mh-ask-chat__row {
   display: flex;
   max-width: min(78%, 640px);
@@ -13928,9 +14102,50 @@ select.mh-teacher-field:focus {
   align-items: end;
 }
 
+.mh-teacher-repo-table {
+  grid-template-columns: minmax(200px, 1.5fr) minmax(72px, 0.45fr) minmax(72px, 0.45fr) minmax(90px, 0.55fr) minmax(240px, 1.5fr);
+}
+
+.mh-teacher-repo-course {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.mh-teacher-repo-course:hover strong,
+.mh-teacher-repo-course:focus-visible strong {
+  color: #017f3f;
+  text-decoration: underline;
+}
+
 .mh-teacher-repo-actions {
   flex-wrap: wrap;
   justify-content: flex-end;
+  gap: 6px 10px;
+}
+
+@media (max-width: 1100px) {
+  .mh-teacher-repo-table {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .mh-teacher-repo-table .mh-teacher-table__head {
+    display: none;
+  }
+  .mh-teacher-repo-table__row {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 14px 8px;
+  }
+  .mh-teacher-repo-actions {
+    justify-content: flex-start;
+  }
 }
 
 .mh-teacher-linked-course-pick {
@@ -15282,6 +15497,28 @@ select.mh-teacher-field:focus {
   max-width: 720px;
   line-height: 1.45;
 }
+.mh-hcc-profile__topic-link {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  color: #0f7a4a;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.mh-hcc-profile__topic-link:hover {
+  color: #0c653d;
+}
+.mh-hcc-profile__topic-link--block {
+  display: inline;
+  text-align: left;
+}
+.mh-hcc-profile__topic-link--block strong {
+  font-weight: 700;
+}
 .mh-hcc-profile__card-head {
   display: flex;
   align-items: center;
@@ -15323,10 +15560,20 @@ select.mh-teacher-field:focus {
 .mh-hcc-profile__split--topics {
   grid-template-columns: minmax(180px, 0.55fr) minmax(420px, 1.45fr);
 }
-.mh-hcc-profile__split--avail,
-.mh-hcc-profile__split--schedule {
+.mh-hcc-profile__split--avail {
   grid-template-columns: minmax(240px, 0.9fr) minmax(360px, 1.3fr);
   margin-top: 8px;
+}
+.mh-hcc-profile__split--schedule {
+  grid-template-columns: minmax(160px, 0.25fr) minmax(0, 0.75fr);
+  margin-top: 8px;
+  align-items: start;
+}
+.mh-hcc-profile__split--schedule > section:first-child {
+  min-width: 0;
+}
+.mh-hcc-profile__split--schedule .mh-hcc-weekcal {
+  min-width: 0;
 }
 .mh-hcc-profile__dayblock {
   margin: 0 0 14px;
@@ -15445,11 +15692,56 @@ select.mh-teacher-field:focus {
   gap: 10px;
 }
 .mh-hcc-avail__slot {
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
   padding: 12px 14px;
   border-radius: 12px;
   border: 1px solid #e5efe9;
   background: rgba(255, 255, 255, 0.88);
   animation: mh-avail-in 280ms ease both;
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+button.mh-hcc-avail__slot:hover {
+  border-color: #0f7a4a;
+  box-shadow: 0 8px 18px rgba(15, 122, 74, 0.12);
+  transform: translateY(-1px);
+}
+button.mh-hcc-avail__slot.is-active {
+  border-color: #0f7a4a;
+  outline: 2px solid rgba(15, 122, 74, 0.35);
+  outline-offset: 1px;
+  background: #f3faf6;
+}
+.mh-hcc-avail__dayitem.is-active {
+  background: #f3faf6;
+  border-radius: 8px;
+  margin: 0 -6px;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+.mh-hcc-avail__detail {
+  margin: 0;
+  display: grid;
+  gap: 12px;
+}
+.mh-hcc-avail__detail div {
+  display: grid;
+  gap: 2px;
+}
+.mh-hcc-avail__detail dt {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+.mh-hcc-avail__detail dd {
+  margin: 0;
+  font-size: 14px;
+  color: #111827;
 }
 .mh-hcc-avail__slot-top {
   display: flex;
@@ -15756,6 +16048,10 @@ button.mh-hcc-cal__cell {
   background: linear-gradient(180deg, rgba(15, 122, 74, 0.12), rgba(15, 122, 74, 0.04));
   border-color: #b7d8c5;
 }
+.mh-hcc-cal__cell.is-teaching:not(.is-avail) {
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.1), rgba(37, 99, 235, 0.03));
+  border-color: #bfdbfe;
+}
 .mh-hcc-cal__cell.is-selected {
   outline: 2px solid #0f7a4a;
   outline-offset: -2px;
@@ -15764,6 +16060,11 @@ button.mh-hcc-cal__cell {
 .mh-hcc-cal__cell:not(.is-empty):hover {
   background: #f0faf4;
   transform: translateY(-1px);
+}
+.mh-hcc-cal__marks {
+  display: flex;
+  gap: 3px;
+  align-self: flex-start;
 }
 .mh-hcc-cal__dot {
   display: block;
@@ -15775,8 +16076,17 @@ button.mh-hcc-cal__cell {
   margin: 0 auto 0 0;
   align-self: flex-start;
 }
+.mh-hcc-cal__dot--teach {
+  background: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+.mh-hcc-cal__dot--avail {
+  background: #0f7a4a;
+  box-shadow: 0 0 0 3px rgba(15, 122, 74, 0.15);
+}
 .mh-hcc-cal__legend {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   margin: 10px 0 0;
@@ -15786,6 +16096,59 @@ button.mh-hcc-cal__cell {
 .mh-hcc-cal__legend .mh-hcc-cal__dot {
   margin: 0;
   box-shadow: none;
+  display: inline-block;
+}
+.mh-hcc-avail__daydetail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.mh-hcc-avail__daydetail-head h3 {
+  margin: 0;
+}
+.mh-hcc-avail__day-cta {
+  border: 0;
+  border-radius: 999px;
+  background: rgba(15, 122, 74, 0.1);
+  color: #0f7a4a;
+  font-weight: 700;
+  font-size: 12px;
+  padding: 6px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mh-hcc-avail__day-cta:hover {
+  background: rgba(15, 122, 74, 0.16);
+}
+.mh-hcc-avail__daysection {
+  margin-top: 8px;
+}
+.mh-hcc-avail__daysection-label {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+.mh-hcc-avail__dayitem--link {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.mh-hcc-avail__dayitem--link:hover strong {
+  color: #0f7a4a;
+  text-decoration: underline;
+}
+.mh-hcc-avail__soft {
+  font-weight: 500;
+  color: #6b7280;
 }
 .mh-hcc-weekcal__nav {
   display: flex;
@@ -15849,9 +16212,69 @@ button.mh-hcc-cal__cell {
   border-radius: 4px;
   background: #f0fdf4;
   font-size: 11px;
+  border: 0;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  color: inherit;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+.mh-hcc-weekcal__event:hover,
+.mh-hcc-weekcal__event:focus-visible {
+  outline: 2px solid #0f7a4a;
+  outline-offset: 1px;
+  box-shadow: 0 2px 8px rgba(15, 122, 74, 0.18);
+  transform: translateY(-1px);
 }
 .mh-hcc-weekcal__event.is-availability {
   background: #eff6ff;
+}
+.mh-hcc-weekcal__event.is-availability:hover,
+.mh-hcc-weekcal__event.is-availability:focus-visible {
+  outline-color: #2563eb;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.18);
+}
+.mh-hcc-profile__dayblock button.mh-hcc-profile__slot {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 4px 0;
+  margin: 0 0 2px;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.mh-hcc-profile__dayblock button.mh-hcc-profile__slot:hover,
+.mh-hcc-profile__dayblock button.mh-hcc-profile__slot:focus-visible {
+  color: #0f7a4a;
+  background: #f0faf4;
+  outline: none;
+}
+.mh-hcc-slot-detail {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+.mh-hcc-slot-detail dt {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+.mh-hcc-slot-detail dd {
+  margin: 2px 0 0;
+  font-size: 14px;
+  color: #111827;
+}
+.mh-hcc-slot-detail a {
+  color: #0f7a4a;
+  font-weight: 600;
 }
 .mh-hcc-rte__toolbar {
   display: flex;
@@ -15883,6 +16306,28 @@ button.mh-hcc-cal__cell {
 }
 .mh-hcc-accomplish {
   padding: 4px 0 16px;
+}
+.mh-hcc-accomplish__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.mh-hcc-accomplish__base {
+  margin-bottom: 20px;
+}
+.mh-hcc-modal__fieldset {
+  border: 0;
+  margin: 0 0 12px;
+  padding: 0;
+}
+.mh-hcc-modal__fieldset legend {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #6b7280;
+  margin-bottom: 8px;
 }
 .mh-hcc-accomplish__stats {
   display: grid;
@@ -16209,6 +16654,20 @@ button.mh-hcc-cal__cell {
   color: #166534;
   font-size: 0.75rem;
   font-weight: 600;
+}
+.mh-hcc-pill.is-warn {
+  background: #ffedd5;
+  color: #9a3412;
+}
+.mh-hcc-pill.is-ok {
+  background: #dcfce7;
+  color: #166534;
+}
+.mh-hcc-table__row.is-attention td {
+  background: #fff7ed;
+}
+.mh-hcc-table__row.is-attention td:first-child {
+  box-shadow: inset 3px 0 0 #ea580c;
 }
 .mh-hcc-link {
   border: 0;
@@ -19189,3 +19648,4 @@ button.mh-sis-tax__download:disabled {
   font-size: 0.82rem;
   color: #64748b;
 }
+

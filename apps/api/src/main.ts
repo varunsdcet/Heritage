@@ -21,6 +21,7 @@ import { aiRouter } from "./modules/ai/ai.router.js";
 import { applicantRouter } from "./modules/applicant/applicant.router.js";
 import { employerRouter } from "./modules/employer/employer.router.js";
 import { mailRouter } from "./modules/mail/mail.router.js";
+import { campusComplianceRouter } from "./modules/campusCompliance/campusCompliance.router.js";
 import { errorHandler } from "./middleware/error-handler.js";
 
 const app: Express = express();
@@ -117,6 +118,7 @@ app.use("/grade-items", gradesRouter);
 app.use("/approvals", approvalsRouter);
 app.use("/messages", messagesRouter);
 app.use("/mail", mailRouter);
+app.use("/compliance", campusComplianceRouter);
 app.use("/search", searchRouter);
 app.use("/ai", aiRouter);
 app.use("/catalog", catalogRouter);
@@ -152,6 +154,32 @@ if (process.env.NODE_ENV !== "test") {
   app.listen(port, () => {
     console.log(`MyHeritage API listening on http://localhost:${port}`);
   });
+
+  // Campus compliance: pre-class reminders, miss escalation, teacher SLAs.
+  const sweepMs = Number(process.env.COMPLIANCE_SWEEP_MS ?? 60_000);
+  setTimeout(() => {
+    void import("./modules/campusCompliance/sweep.js")
+      .then(({ runComplianceSweep }) => runComplianceSweep())
+      .then((summary) => console.log("compliance bootstrap sweep", summary))
+      .catch((err) => console.error("compliance bootstrap failed", err));
+  }, 8_000);
+  setInterval(() => {
+    void import("./modules/campusCompliance/sweep.js")
+      .then(({ runComplianceSweep }) => runComplianceSweep())
+      .then((summary) => {
+        if (
+          summary.warned ||
+          summary.paused ||
+          summary.attendanceSla ||
+          summary.gradeSla ||
+          summary.preclass ||
+          summary.missReminders
+        ) {
+          console.log("compliance sweep", summary);
+        }
+      })
+      .catch((err) => console.error("compliance sweep failed", err));
+  }, Math.max(30_000, sweepMs));
 }
 
 export { app };

@@ -193,7 +193,15 @@ export function mergeTeacherLive(
   for (const [key, value] of Object.entries(payload)) {
     if (value === undefined) continue;
     // Live domain may switch archetype (e.g. HCC My Courses / Students screens).
-    if (CHROME_KEYS.has(key) && key !== "title" && key !== "subtitle" && key !== "primaryActionHref" && key !== "archetype") {
+    if (
+      CHROME_KEYS.has(key) &&
+      key !== "title" &&
+      key !== "subtitle" &&
+      key !== "primaryAction" &&
+      key !== "primaryActionHref" &&
+      key !== "archetype" &&
+      key !== "breadcrumbs"
+    ) {
       continue;
     }
     merged[key] = value;
@@ -454,7 +462,7 @@ export function TeacherLiveProvider({
       setBusy(true);
       setToast(null);
       try {
-        const res = await api<TeacherLiveResponse>(
+        const res = await api<TeacherLiveResponse & { result?: { href?: string } }>(
           `/instructor/sis/action`,
           {
             method: "POST",
@@ -465,6 +473,14 @@ export function TeacherLiveProvider({
         setSource(res.source ?? "domain");
         if (res.payload) setPayload(res.payload);
         if (res.bootstrap) setBootstrap(res.bootstrap);
+        const nextHref =
+          typeof res.result?.href === "string" && res.result.href.startsWith("/")
+            ? res.result.href
+            : null;
+        if (nextHref) {
+          window.location.assign(nextHref);
+          return true;
+        }
         setToast(res.message || `Saved · ${action}`);
         window.setTimeout(() => setToast(null), 2800);
         return res.ok !== false;

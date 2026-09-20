@@ -264,13 +264,14 @@ export type TeacherScreenConfig = {
     announcements: Array<{ title: string; body: string; when: string }>;
     alerts: Array<{ title: string; body: string; tone: "critical" | "warning" | "info" }>;
     officeHours: Array<{ day: string; window: string; mode: string; remaining?: string }>;
-    endedCourses?: string[];
+    endedCourses?: Array<{ label: string; href: string; sectionId?: string }>;
   };
   profileHeader?: {
     name: string;
     email: string;
     status?: string;
     topics?: string[];
+    topicLinks?: Array<{ label: string; href: string }>;
     avatarUrl?: string;
   };
   profileBio?: {
@@ -293,6 +294,11 @@ export type TeacherScreenConfig = {
     currentCourses?: string[];
     previousCourses?: string[];
     academicChair?: string[];
+    topicLinks?: {
+      current?: Array<{ label: string; href: string }>;
+      previous?: Array<{ label: string; href: string }>;
+      chair?: Array<{ label: string; href: string }>;
+    };
     academicLead?: string;
     research: string[];
     certifications: Array<{ name: string; issuer: string; year: string }>;
@@ -303,11 +309,13 @@ export type TeacherScreenConfig = {
       delivery: string;
       location: string;
       schedule: string;
+      href?: string;
     }>;
   };
   availability?: {
     tabs: Array<{ label: string; href: string; active?: boolean }>;
     slots: Array<{
+      id?: string;
       day: string;
       start: string;
       end: string;
@@ -326,11 +334,20 @@ export type TeacherScreenConfig = {
       day: string;
       entries: Array<{ course: string; section: string; time: string }>;
     }>;
+    scheduleByDate?: Array<{
+      date: string;
+      course: string;
+      section: string;
+      time: string;
+      href?: string;
+    }>;
     calendar?: {
       year: number;
       month: number;
       monthLabel?: string;
       markedDates: string[];
+      availabilityDates?: string[];
+      scheduleDates?: string[];
     };
   };
   compensation?: {
@@ -356,7 +373,19 @@ export type TeacherScreenConfig = {
       label: string;
       date: string;
       dateLabel?: string;
-      entries: Array<{ kind: string; title: string; time: string }>;
+      entries: Array<{
+        kind: string;
+        title: string;
+        time: string;
+        course?: string;
+        section?: string;
+        location?: string;
+        mode?: string;
+        note?: string;
+        repeats?: string;
+        joinUrl?: string;
+        sessionTitle?: string;
+      }>;
     }>;
     emptyMessage?: string;
   };
@@ -380,6 +409,29 @@ export type TeacherScreenConfig = {
       year: string;
       tone?: TeacherBadgeTone;
       category?: "faculty" | "student";
+    }>;
+    createBase?: {
+      title: string;
+      submitLabel: string;
+      href?: string;
+      groups: Array<{
+        title: string;
+        fields: Array<{
+          label: string;
+          value: string;
+          type?: string;
+          language?: string;
+          options?: Array<{ label: string; value: string }>;
+        }>;
+      }>;
+    };
+    definitions?: Array<{
+      id: string;
+      name: string;
+      description: string;
+      badgeType: string;
+      approvalMode: string;
+      status: string;
     }>;
   };
   hccMyCourses?: {
@@ -405,23 +457,30 @@ export type TeacherScreenConfig = {
   };
   hccEvaluations?: {
     rows: Array<{
+      id?: string;
       course: string;
       title: string;
       offering: string;
       evaluation: string;
       dates: string;
       schedule: string;
+      href?: string;
     }>;
   };
   hccCourseHistory?: {
     rows: Array<{
+      id?: string;
       course: string;
       title: string;
       offering: string;
       room: string;
       dates: string;
       schedule: string;
+      instructor?: string;
+      term?: string;
+      href?: string;
     }>;
+    empty?: string;
   };
   hccGradesSubmission?: {
     courseFilter?: string;
@@ -543,7 +602,22 @@ export type TeacherScreenConfig = {
   };
   hccPendingSchedules?: {
     changeType?: string;
-    rows?: Array<{ course: string; type: string }>;
+    changeTypeOptions?: string[];
+    show?: boolean;
+    rows?: Array<{
+      id?: string;
+      course: string;
+      offering?: string;
+      title?: string;
+      type: string;
+      schedule?: string;
+      location?: string;
+      requested?: string;
+      proposer?: string;
+      status?: string;
+      tone?: TeacherBadgeTone;
+      href?: string;
+    }>;
     empty?: string;
   };
   hccTranscriptPending?: { banner: string };

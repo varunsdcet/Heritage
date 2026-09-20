@@ -49,7 +49,8 @@ export const aiRouter: Router = Router();
 const LLM_CAPABILITIES = new Set<AiCapabilityId>([
   "campus_coach",
   "study_coach",
-  "faculty_assistant",
+  // faculty_assistant stays deterministic Teaching Ops cards — LLM rewrite
+  // was inventing "I can't see schedule/attendance" even when facts existed.
   "student_success",
   "career_assistant",
   "student_services",
@@ -327,7 +328,7 @@ aiRouter.post("/ask", async (req, res, next) => {
     else if ((role === "admin" || role === "registrar") && isAdminAskDataQuestion(question)) capability = "admin_ask_data";
     else if (role === "instructor" && /rubric|grade suggestion|draft feedback|suggest.*score/.test(question.toLowerCase()))
       capability = "grading_assistant";
-    else if (role === "instructor" && isFacultyAssistantQuestion(question)) capability = "faculty_assistant";
+    else if (role === "instructor") capability = "faculty_assistant";
     else if (role === "applicant") capability = requested ?? "admissions_assistant";
     else if (
       role === "student" &&
@@ -357,10 +358,11 @@ aiRouter.post("/ask", async (req, res, next) => {
       assessmentAttemptOpen: parsed.data.assessmentAttemptOpen,
     });
 
+    const coachFacts = await buildCoachFacts(user, role);
     let grounded = groundedCoachAnswer({
       role,
       question,
-      facts: await buildCoachFacts(user, role),
+      facts: coachFacts,
     });
     let provider = "campus_grounding_v1";
     let analysis: DegreePlanAnalysis | undefined;
@@ -519,12 +521,29 @@ aiRouter.post("/ask", async (req, res, next) => {
       }>;
       grounded = facultyAssistantAnswer({
         question,
-        rows: rows.map((row) => ({
-          id: `missing:${row.assignmentId}:${row.studentId}`,
-          title: `${row.courseCode} · ${row.assignmentTitle}`,
-          uri: "/instructor/gradebook",
-          text: `${row.displayName} (${row.studentNumber}) has not submitted “${row.assignmentTitle}” for ${row.courseCode} ${row.sectionCode}${row.dueAt ? ` (due ${row.dueAt})` : ""}.`,
-        })),
+        contextPath: parsed.data.contextPath,
+        facts: coachFacts,
+        rows: rows.map((row) => {
+          let dueLabel = "";
+          if (row.dueAt) {
+            const d = new Date(row.dueAt);
+            dueLabel = Number.isNaN(d.getTime())
+              ? ` (due ${row.dueAt})`
+              : ` (due ${new Intl.DateTimeFormat("en-CA", {
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                  timeZone: "America/Vancouver",
+                })
+                  .format(d)
+                  .replace(/\.$/, "")})`;
+          }
+          return {
+            id: `missing:${row.assignmentId}:${row.studentId}`,
+            title: `${row.courseCode} · ${row.assignmentTitle}`,
+            uri: "/instructor/gradebook",
+            text: `${row.displayName} (${row.studentNumber}) has not submitted “${row.assignmentTitle}” for ${row.courseCode} ${row.sectionCode}${dueLabel}.`,
+          };
+        }),
       });
       provider = "faculty_assistant_v1";
     } else if (capability === "student_success") {

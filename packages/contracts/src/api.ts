@@ -30,6 +30,8 @@ export const LoginResponse = z.object({
   givenName: z.string(),
   familyName: z.string(),
   requiresMfa: z.boolean(),
+  accountStatus: z.enum(["active", "paused"]).optional(),
+  pauseGate: z.boolean().optional(),
 });
 
 export const SessionClaims = z.object({
@@ -39,6 +41,8 @@ export const SessionClaims = z.object({
   institutionId: Uuid,
   roles: z.array(RoleName),
   sessionId: Uuid,
+  /** active | paused — paused students may only resolve compliance explanations */
+  accountStatus: z.enum(["active", "paused"]).optional(),
 });
 
 export const UpsertGradeRequest = z.object({
@@ -108,6 +112,7 @@ export const GradebookResponse = z.object({
       studentId: Uuid,
       studentNumber: z.string(),
       name: z.string(),
+      needsAttention: z.boolean().optional(),
       cells: z.array(
         z.object({
           gradeItemId: Uuid,

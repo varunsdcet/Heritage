@@ -94,7 +94,7 @@ export async function loginWithPassword(input: {
     // already tried student number above
   }
 
-  if (!account || account.status !== "active") {
+  if (!account || (account.status !== "active" && account.status !== "paused")) {
     throw Object.assign(new Error("Invalid credentials"), { code: "UNAUTHORIZED", status: 401 });
   }
   const ok = await verifyPassword(input.password, account.passwordHash);
@@ -139,13 +139,14 @@ export async function loginWithPassword(input: {
       eventName: "Account.login",
       purpose: "authentication",
       before: null,
-      after: { sessionId: created.id, ip: input.ipAddress, remember },
+      after: { sessionId: created.id, ip: input.ipAddress, remember, accountStatus: account.status },
       source: "auth.login",
       correlationId,
     });
     return created;
   });
 
+  const accountStatus = account.status === "paused" ? ("paused" as const) : ("active" as const);
   const claims: SessionClaims = {
     sub: account.id,
     accountId: account.id,
@@ -153,6 +154,7 @@ export async function loginWithPassword(input: {
     institutionId: account.institutionId,
     roles,
     sessionId: session.id,
+    accountStatus,
   };
 
   const accessToken = await signSession(claims, ttl);
@@ -165,6 +167,8 @@ export async function loginWithPassword(input: {
     givenName: account.person.givenName,
     familyName: account.person.familyName,
     requiresMfa: account.mfaEnabled,
+    accountStatus,
+    pauseGate: accountStatus === "paused",
   };
 }
 

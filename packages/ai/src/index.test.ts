@@ -14,6 +14,9 @@ import {
   stripPromptInjection,
   isAdminAskDataQuestion,
   adminAskDataAnswer,
+  facultyOpsIntent,
+  facultyAssistantAnswer,
+  isFacultyAssistantQuestion,
 } from "./index.js";
 
 describe("ai gateway", () => {
@@ -211,6 +214,41 @@ describe("ai gateway", () => {
     });
     expect(result.text).toContain("42");
     expect(result.text).toContain("No free-form SQL");
+  });
+
+  it("routes instructor Teaching Ops intents and morning summary cards", () => {
+    expect(facultyOpsIntent("Give me a morning teaching summary.")).toBe("dashboard");
+    expect(facultyOpsIntent("Mark Amit and Raj absent")).toBe("write_preview");
+    expect(
+      facultyOpsIntent(
+        "What I can't confirm from this evidence: those aren't in the current signal set, so I can't answer what am I teaching today",
+      ),
+    ).toBe("dashboard");
+    expect(isFacultyAssistantQuestion("What classes am I teaching today?")).toBe(true);
+    const result = facultyAssistantAnswer({
+      question: "Give me a morning teaching summary.",
+      rows: [],
+      contextPath: "/instructor/ask",
+      facts: [
+        {
+          id: "s1",
+          title: "Today",
+          uri: "/instructor/calendar",
+          text: "Today: ACSW 200 lecture at 09:00 · room A101",
+          kind: "session",
+        },
+        {
+          id: "g1",
+          title: "Grades",
+          uri: "/instructor/gradebook",
+          text: "3 grade items remain in draft",
+          kind: "grade",
+        },
+      ],
+    });
+    expect(result.text).toContain("live teaching dashboard");
+    expect(result.text).toContain("ACSW 200");
+    expect(result.suggestedActions.some((a) => a.href.includes("/instructor"))).toBe(true);
   });
 
   it("passes the deterministic AI eval suite", async () => {

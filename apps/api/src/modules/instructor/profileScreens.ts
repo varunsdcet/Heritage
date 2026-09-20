@@ -85,6 +85,23 @@ function pad2(n: number) {
   return String(n).padStart(2, "0");
 }
 
+export function courseTopicLinks(
+  ctx: ProfileCtx,
+  codes: string[],
+): Array<{ label: string; href: string }> {
+  const byCode = new Map<string, string>();
+  for (const s of ctx.sections) {
+    if (!s.courseCode || byCode.has(s.courseCode)) continue;
+    byCode.set(s.courseCode, `/instructor/sections/${s.id}`);
+  }
+  return [...new Set(codes.filter(Boolean))]
+    .sort()
+    .map((code) => ({
+      label: code,
+      href: byCode.get(code) || "/instructor/sections",
+    }));
+}
+
 export function profileHeaderPayload(ctx: ProfileCtx) {
   const topics = [...new Set(ctx.sections.map((s) => s.courseCode).filter(Boolean))].sort();
   return {
@@ -92,6 +109,7 @@ export function profileHeaderPayload(ctx: ProfileCtx) {
     email: ctx.person.email,
     status: "Active",
     topics,
+    topicLinks: courseTopicLinks(ctx, topics),
     avatarUrl: "",
   };
 }
@@ -476,6 +494,11 @@ function buildWeekCalendar(ctx: ProfileCtx, slots: AvailabilitySlot[], weekStart
           kind: "class" as const,
           title: `${s.courseCode} [${s.sectionCode}]`,
           time: `${formatClock(s.startsAt)} - ${formatClock(ends)}`,
+          course: s.courseCode,
+          section: s.sectionCode,
+          location: s.location || "TBA",
+          joinUrl: s.joinUrl || undefined,
+          sessionTitle: s.title || undefined,
         };
       });
     const slotEntries = slots
@@ -491,6 +514,10 @@ function buildWeekCalendar(ctx: ProfileCtx, slots: AvailabilitySlot[], weekStart
         kind: "availability" as const,
         title: slot.title || slot.mode,
         time: `${slot.start}–${slot.end}`,
+        mode: slot.mode,
+        location: slot.location || undefined,
+        note: slot.note || undefined,
+        repeats: slot.repeats || undefined,
       }));
     return {
       label,
@@ -518,10 +545,29 @@ function isoLocal(d: Date) {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
-function buildMonthCalendar(slots: AvailabilitySlot[], year?: number, month?: number) {
-  const marked = new Set<string>();
+function buildScheduleByDate(ctx: ProfileCtx) {
+  const sectionHref = new Map(ctx.sections.map((s) => [s.code, `/instructor/sections/${s.id}`]));
+  return ctx.classSessions.map((s) => {
+    const ends = s.endsAt ?? new Date(s.startsAt.getTime() + 90 * 60 * 1000);
+    return {
+      date: isoLocal(s.startsAt),
+      course: s.courseCode,
+      section: s.sectionCode,
+      time: `${formatClock(s.startsAt)} - ${formatClock(ends)}`,
+      href: sectionHref.get(s.sectionCode) || "/instructor/sections",
+    };
+  });
+}
+
+function buildMonthCalendar(
+  slots: AvailabilitySlot[],
+  scheduleDates: string[] = [],
+  year?: number,
+  month?: number,
+) {
+  const availability = new Set<string>();
   for (const slot of slots) {
-    if (slot.date) marked.add(slot.date);
+    if (slot.date) availability.add(slot.date);
     if (slot.date && slot.endDate && slot.repeats) {
       const cur = new Date(`${slot.date}T12:00:00`);
       const last = new Date(`${slot.endDate}T12:00:00`);
@@ -532,19 +578,28 @@ function buildMonthCalendar(slots: AvailabilitySlot[], year?: number, month?: nu
         .filter(Boolean);
       while (cur <= last) {
         const short = cur.toLocaleDateString("en-US", { weekday: "short" }).toLowerCase();
-        if (days.includes(short)) marked.add(isoLocal(cur));
+        if (days.includes(short)) availability.add(isoLocal(cur));
         cur.setDate(cur.getDate() + 1);
       }
     }
   }
-  const markedDates = [...marked].sort();
+  const schedule = new Set(scheduleDates.filter(Boolean));
+  const markedDates = [...new Set([...availability, ...schedule])].sort();
+  const availabilityDates = [...availability].sort();
+  const scheduleMarked = [...schedule].sort();
   let focusYear = year;
   let focusMonth = month;
   if (focusYear == null || focusMonth == null) {
-    const focusIso = markedDates[0] || slots.find((s) => s.date)?.date || "2026-09-01";
+    const today = new Date();
+    const todayIso = isoLocal(today);
+    const focusIso =
+      markedDates.find((d) => d >= todayIso) ||
+      markedDates[markedDates.length - 1] ||
+      slots.find((s) => s.date)?.date ||
+      todayIso;
     const focus = new Date(`${focusIso}T12:00:00`);
-    focusYear = Number.isNaN(focus.getTime()) ? 2026 : focus.getFullYear();
-    focusMonth = Number.isNaN(focus.getTime()) ? 8 : focus.getMonth();
+    focusYear = Number.isNaN(focus.getTime()) ? today.getFullYear() : focus.getFullYear();
+    focusMonth = Number.isNaN(focus.getTime()) ? today.getMonth() : focus.getMonth();
   }
   return {
     year: focusYear,
@@ -554,6 +609,8 @@ function buildMonthCalendar(slots: AvailabilitySlot[], year?: number, month?: nu
       year: "numeric",
     }),
     markedDates,
+    availabilityDates,
+    scheduleDates: scheduleMarked,
   };
 }
 
@@ -632,6 +689,11 @@ export async function buildProfilePayload(
     sections: currentSections,
     classSessions: ctx.classSessions.filter((s) => currentSections.some((x) => x.code === s.sectionCode)),
   });
+  const scheduleByDate = buildScheduleByDate({
+    ...ctx,
+    sections: currentSections,
+    classSessions: ctx.classSessions.filter((s) => currentSections.some((x) => x.code === s.sectionCode)),
+  });
   const connect = await loadJsonRecord<ConnectPayload>(ctx, PROFILE_BIO_PATH, "connect", {
     phone: "",
     email: ctx.person.email,
@@ -653,9 +715,13 @@ export async function buildProfilePayload(
   const chair = await loadJsonRecord<{ codes: string[] }>(ctx, PROFILE_TOPICS_PATH, "academicChair", {
     codes: headerTopics.length ? headerTopics : courseCodes,
   });
+  const previousCodesMerged = [...new Set([...(previousCourses.codes || []), ...pastCodes])].sort();
+  const chairCodes = chair.codes.length ? chair.codes : headerTopics;
+  const headerBase = profileHeaderPayload(ctx);
   const header = {
-    ...profileHeaderPayload(ctx),
-    topics: chair.codes.length ? chair.codes : profileHeaderPayload(ctx).topics,
+    ...headerBase,
+    topics: chairCodes.length ? chairCodes : headerBase.topics,
+    topicLinks: courseTopicLinks(ctx, chairCodes.length ? chairCodes : headerBase.topics),
   };
 
   if (p.includes("t25") || p.includes("add-availability")) {
@@ -679,12 +745,22 @@ export async function buildProfilePayload(
         tabs: profileTabs(PROFILE_TOPICS_PATH),
         teaching: courseCodes,
         currentCourses: courseCodes,
-        previousCourses: [...new Set([...(previousCourses.codes || []), ...pastCodes])].sort(),
-        academicChair: chair.codes,
+        previousCourses: previousCodesMerged,
+        academicChair: chairCodes,
+        topicLinks: {
+          current: courseTopicLinks(ctx, courseCodes),
+          previous: courseTopicLinks(ctx, previousCodesMerged),
+          chair: courseTopicLinks(ctx, chairCodes),
+        },
         academicLead: "",
         research: [],
         certifications: [],
-        teachingSchedule: teachingRows,
+        teachingSchedule: teachingRows.map((row) => ({
+          ...row,
+          href:
+            courseTopicLinks(ctx, [row.course])[0]?.href ||
+            `/instructor/sections`,
+        })),
       },
     };
   }
@@ -698,6 +774,7 @@ export async function buildProfilePayload(
         return `${when}${range ? ` · ${range}` : ""} · ${s.start}–${s.end}`;
       })
       .join("\n");
+    const scheduleDates = scheduleByDate.map((s) => s.date);
     return {
       title: "Manage My Profile",
       subtitle: "",
@@ -710,10 +787,20 @@ export async function buildProfilePayload(
         officeHours: officeFromSlots,
         generalInfo: general.html,
         teachingByDay,
-        calendar: buildMonthCalendar(availabilitySlots),
-        note: availabilitySlots.length
-          ? `${availabilitySlots.length} availability window(s) published.`
-          : "No availability times were found.",
+        scheduleByDate,
+        calendar: buildMonthCalendar(availabilitySlots, scheduleDates),
+        note: [
+          scheduleByDate.length
+            ? `${scheduleByDate.length} teaching session(s) on the calendar.`
+            : teachingByDay.length
+              ? "Weekly teaching pattern loaded — pick a day to review."
+              : null,
+          availabilitySlots.length
+            ? `${availabilitySlots.length} availability window(s) published.`
+            : "Click a day, then Add availability for that date.",
+        ]
+          .filter(Boolean)
+          .join(" "),
       },
     };
   }
@@ -752,7 +839,7 @@ export async function buildProfilePayload(
                 day: d.label.slice(0, 3),
                 time: e.time,
                 course: e.title,
-                room: "—",
+                room: ("location" in e && e.location) || "—",
               })),
             ),
           },

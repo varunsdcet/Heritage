@@ -172,11 +172,35 @@ export async function createCourseResource(
   });
 }
 
-export async function listBadgesPayload(institutionId: string) {
-  const badges = await prisma.badgeDefinition.findMany({
+async function programOptionsForBadges(institutionId: string) {
+  const programs = await prisma.program.findMany({
     where: { institutionId },
-    orderBy: { createdAt: "desc" },
+    orderBy: [{ code: "asc" }, { name: "asc" }],
+    take: 100,
+    select: { code: true, name: true },
   });
+  return [
+    { label: "All Programs", value: "All Programs" },
+    ...programs.map((p) => ({
+      label: `${p.code}: ${p.name}`,
+      value: p.code,
+    })),
+  ];
+}
+
+export async function listBadgesPayload(institutionId: string) {
+  const [badges, awards] = await Promise.all([
+    prisma.badgeDefinition.findMany({
+      where: { institutionId },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.studentBadge.findMany({
+      where: { institutionId },
+      include: { student: { include: { person: true } } },
+      orderBy: { updatedAt: "desc" },
+      take: 100,
+    }),
+  ]);
   return {
     title: "BADGES & ACCOMPLISHMENTS",
     breadcrumbs: ["Home", "Badges & Accomplishments"],
@@ -184,7 +208,10 @@ export async function listBadgesPayload(institutionId: string) {
     primaryAction: "Add Badge / Accomplishment",
     primaryActionHref: ADD_BADGE_PATH,
     hccBadges: {
-      empty: "No badges / accomplishments were found.",
+      empty:
+        badges.length || awards.length
+          ? undefined
+          : "No badges / accomplishments were found.",
       definitions: badges.map((b) => ({
         id: b.id,
         name: b.name,
@@ -193,14 +220,26 @@ export async function listBadgesPayload(institutionId: string) {
         approvalMode: b.approvalMode,
         status: b.status,
       })),
-      rows: [] as Array<{ id: string; student: string; badge: string; status: string }>,
+      rows: awards.map((a) => ({
+        id: a.id,
+        student: `${a.student.person.givenName} ${a.student.person.familyName}`,
+        badge: a.title,
+        status: a.status === "earned" ? "Awarded" : a.status === "denied" ? "Denied" : "Pending",
+      })),
       badgeOptions: ["All Badges", ...badges.map((b) => b.name)],
       statusOptions: ["Pending", "Awarded", "Denied", "All"],
     },
   };
 }
 
-export function buildAddBadgeFormPayload() {
+export async function buildAddBadgeFormPayload(institutionId?: string) {
+  const programOptions = institutionId
+    ? await programOptionsForBadges(institutionId)
+    : [
+        { label: "All Programs", value: "All Programs" },
+        { label: "DAP", value: "DAP" },
+        { label: "DIB", value: "DIB" },
+      ];
   return {
     title: "ADD BADGE / ACCOMPLISHMENT",
     breadcrumbs: ["Home", "Badges & Accomplishments", "Add Badge / Accomplishment"],
@@ -212,12 +251,29 @@ export function buildAddBadgeFormPayload() {
       submitLabel: "Save Badge / Accomplishment",
       groups: [
         {
-          title: "Badge / Accomplishment Details",
+          title: "Create Base",
           fields: [
             { label: "Name", value: "", type: "text", language: "English" },
             { label: "Description", value: "", type: "textarea", language: "English" },
             { label: "Badge Text", value: "", type: "textarea", language: "English" },
             { label: "Badge Image", value: "", type: "file", language: "English" },
+            { label: "Version", value: "", type: "text" },
+            {
+              label: "Language",
+              value: "English",
+              type: "select",
+              options: [
+                { label: "English", value: "English" },
+                { label: "French", value: "French" },
+              ],
+            },
+          ],
+        },
+        {
+          title: "Issuer",
+          fields: [
+            { label: "Issuer Name", value: "Heritage Community College", type: "text" },
+            { label: "Contact", value: "", type: "text" },
           ],
         },
         {
@@ -246,11 +302,7 @@ export function buildAddBadgeFormPayload() {
               label: "Program(s)",
               value: "All Programs",
               type: "select",
-              options: [
-                { label: "All Programs", value: "All Programs" },
-                { label: "DAP", value: "DAP" },
-                { label: "DIB", value: "DIB" },
-              ],
+              options: programOptions,
             },
             {
               label: "Courses Completed",
@@ -291,11 +343,19 @@ export async function createBadgeDefinition(
   institutionId: string,
   fields: Record<string, string>,
 ) {
+  const name = (fields.Name || "Untitled badge").trim();
+  const descriptionParts = [
+    (fields.Description || "").trim(),
+    fields.Version ? `Version: ${fields.Version.trim()}` : "",
+    fields.Language ? `Language: ${fields.Language.trim()}` : "",
+    fields["Issuer Name"] ? `Issuer: ${fields["Issuer Name"].trim()}` : "",
+    fields.Contact ? `Contact: ${fields.Contact.trim()}` : "",
+  ].filter(Boolean);
   return prisma.badgeDefinition.create({
     data: {
       institutionId,
-      name: (fields.Name || "Untitled badge").trim(),
-      description: (fields.Description || "").trim(),
+      name,
+      description: descriptionParts.join("\n"),
       badgeText: (fields["Badge Text"] || "").trim(),
       imageUrl: (fields["Badge Image"] || "").trim() || null,
       approvalMode: fields["Badge Approval"] || "Instant / Automated",

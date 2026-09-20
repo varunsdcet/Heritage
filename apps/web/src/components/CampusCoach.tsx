@@ -33,9 +33,12 @@ const suggestions: Record<ShellRole, string[]> = {
     "How do I request a transcript?",
   ],
   instructor: [
-    "Which students have not submitted Assignment work?",
-    "Which students may need help?",
-    "Summarize my teaching load.",
+    "Give me a morning teaching summary.",
+    "What classes am I teaching today?",
+    "Which assignments need grading?",
+    "Who might need help in this class?",
+    "Show students with attendance below 80% and missing work.",
+    "Validate my gradebook and list missing marks.",
   ],
   admin: [
     "How many students are currently enrolled?",
@@ -53,6 +56,39 @@ const suggestions: Record<ShellRole, string[]> = {
     "What employer records are available to me?",
   ],
 };
+
+const instructorOpsBlocks = [
+  {
+    title: "Today",
+    body: "Classes, rooms, times, and attendance status",
+    prompt: "Give me a morning teaching summary.",
+  },
+  {
+    title: "Action Required",
+    body: "Ungraded work, unread messages, pending grades",
+    prompt: "Which assignments need grading?",
+  },
+  {
+    title: "Student Attention",
+    body: "Low attendance, missing work, declining performance",
+    prompt: "Who might need help in this class?",
+  },
+  {
+    title: "My Courses",
+    body: "Assigned sections and enrollment counts",
+    prompt: "Show all courses assigned to me.",
+  },
+  {
+    title: "Quick Actions",
+    body: "Attendance, gradebook, messages, badges",
+    href: "/instructor/attendance",
+  },
+  {
+    title: "Ask AI",
+    body: "Natural-language teaching operations",
+    prompt: "What should I focus on as an instructor today?",
+  },
+] as const;
 
 /** `crypto.randomUUID` is missing on non-secure origins (plain HTTP VPS). */
 function clientId() {
@@ -77,7 +113,7 @@ function capabilityForPath(role: ShellRole, contextPath: string): string | undef
   if (contextPath.startsWith("/student/success")) return "student_success";
   if (contextPath.startsWith("/student/career")) return "career_assistant";
   if (contextPath.startsWith("/admin/ai")) return "admin_ask_data";
-  if (contextPath.startsWith("/instructor/ask") && role === "instructor") return "faculty_assistant";
+  if (role === "instructor" && contextPath.startsWith("/instructor")) return "faculty_assistant";
   if (contextPath.startsWith("/applicant")) return "admissions_assistant";
   return undefined;
 }
@@ -257,14 +293,22 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
         <header className="mh-ask-chat__head">
           <LogoMark size={32} />
           <div className="mh-ask-chat__head-copy">
-            <h1>{contextPath.includes("/study") ? "Study with AI" : "Ask Heritage"}</h1>
+            <h1>
+              {contextPath.includes("/study")
+                ? "Study with AI"
+                : role === "instructor"
+                  ? "Ask Heritage · Teaching Ops"
+                  : "Ask Heritage"}
+            </h1>
             <span>
               {contextPath.includes("/study")
                 ? "Course-grounded tutoring with academic-integrity gates"
-                : "Grounded answers from your campus records"}
+                : role === "instructor"
+                  ? "Plan, run class, assess, support students, and close the term — grounded in your sections"
+                  : "Grounded answers from your campus records"}
             </span>
           </div>
-          <StatusPill tone="ai">Read-only</StatusPill>
+          <StatusPill tone="ai">{role === "instructor" ? "Ops · confirm writes" : "Read-only"}</StatusPill>
         </header>
 
         <div ref={threadRef} className="mh-ask-chat__thread" role="log" aria-live="polite" aria-busy={loading || historyLoading}>
@@ -275,12 +319,34 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
           {empty ? (
             <div className="mh-ask-chat__welcome">
               <LogoMark size={44} />
-              <h2>Ask Heritage</h2>
+              <h2>{role === "instructor" ? "Teaching Operations Assistant" : "Ask Heritage"}</h2>
               <p>
                 {role === "instructor"
-                  ? "Ask about roster risk, missing work, teaching load, and advising flags. Replies stay in this chat."
+                  ? "Prepare classes, manage students, attendance and marks, create learning material, communicate, spot struggling students, and finish course admin — in natural language. Writes stay previews until you confirm on the live screen."
                   : "Ask about admissions, courses, grades, fees, practicum, and policies. Replies stay in this chat."}
               </p>
+              {role === "instructor" ? (
+                <div className="mh-ask-ops-grid" aria-label="Teaching operations home">
+                  {instructorOpsBlocks.map((block) => (
+                    <button
+                      key={block.title}
+                      type="button"
+                      className="mh-ask-ops-card"
+                      disabled={loading}
+                      onClick={() => {
+                        if ("href" in block && block.href) {
+                          router.push(block.href);
+                          return;
+                        }
+                        if ("prompt" in block && block.prompt) void send(block.prompt);
+                      }}
+                    >
+                      <strong>{block.title}</strong>
+                      <span>{block.body}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               <div className="mh-ask-chat__chips">
                 {suggestions[role].map((suggestion) => (
                   <button

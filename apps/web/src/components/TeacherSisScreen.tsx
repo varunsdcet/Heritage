@@ -505,9 +505,21 @@ function PageHead({
 function DashboardView({ config }: { config: TeacherScreenConfig }) {
   const router = useRouter();
   const d = config.dashboard;
-  const ended = d?.endedCourses?.length
-    ? d.endedCourses
-    : (d?.timetable || []).map((row) => `${row.code}: ${row.room || row.title}`);
+  const endedLinks =
+    d?.endedCourses?.length
+      ? d.endedCourses.map((row) => ({
+          label: row.label,
+          href: row.href || (row.sectionId ? `/instructor/gradebook?sectionId=${encodeURIComponent(row.sectionId)}` : "/instructor/gradebook"),
+        }))
+      : (d?.timetable || []).map((row) => {
+          const sectionId = row.href?.match(/\/sections\/([^/?#]+)/)?.[1];
+          return {
+            label: `${row.code}: ${row.room || row.title}`,
+            href: sectionId
+              ? `/instructor/gradebook?sectionId=${encodeURIComponent(sectionId)}`
+              : row.href || "/instructor/gradebook",
+          };
+        });
   const quick = d?.quickActions || [];
   const sections = d?.timetable || [];
   return (
@@ -538,15 +550,31 @@ function DashboardView({ config }: { config: TeacherScreenConfig }) {
         </div>
       </section>
 
-      {ended.length ? (
+      {endedLinks.length ? (
         <section className="mh-hcc-banner" role="status">
           <div className="mh-hcc-banner__copy">
             <strong>Courses you are teaching have ended. Please submit your final marks.</strong>
             <p>
-              <span className="mh-hcc-banner__dot" /> Live sections: {ended.join(", ")}
+              <span className="mh-hcc-banner__dot" /> Live sections:{" "}
+              {endedLinks.map((item, i) => (
+                <span key={`${item.label}-${i}`}>
+                  {i > 0 ? ", " : null}
+                  <button
+                    type="button"
+                    className="mh-hcc-banner__link"
+                    onClick={() => router.push(item.href)}
+                  >
+                    {item.label}
+                  </button>
+                </span>
+              ))}
             </p>
           </div>
-          <button type="button" className="mh-hcc-banner__action" onClick={() => router.push("/instructor/gradebook")}>
+          <button
+            type="button"
+            className="mh-hcc-banner__action"
+            onClick={() => router.push(endedLinks[0]?.href || "/instructor/gradebook")}
+          >
             Submit marks
           </button>
         </section>
@@ -1491,11 +1519,23 @@ function VersionEditorView({ config }: { config: TeacherScreenConfig }) {
 }
 
 function EvaluationsView({ config }: { config: TeacherScreenConfig }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const e = config.evaluations;
   if (!e) return null;
+  const backHref =
+    config.primaryActionHref ||
+    (searchParams.get("sectionId") ? "/instructor/f/t36-course-evaluations" : "");
   return (
     <div className="mh-teacher-stack" data-figma-id={config.figmaId}>
-      <PageHead config={config} />
+      {backHref ? (
+        <p className="mh-hcc-profile__crumb">
+          <button type="button" className="mh-hcc-link" onClick={() => router.push(backHref)}>
+            ← Back to Course Evaluations
+          </button>
+        </p>
+      ) : null}
+      <PageHead config={config} hideActions={!config.primaryActionHref} />
       <div className="mh-teacher-dash__kpis">
         {e.summary.map((s) => (
           <div key={s.label} className="mh-teacher-dash__kpi">
@@ -1508,16 +1548,25 @@ function EvaluationsView({ config }: { config: TeacherScreenConfig }) {
       <section className="mh-teacher-card">
         <h2>Student Comments</h2>
         <div className="mh-teacher-list">
-          {e.comments.map((c) => (
-            <div key={c.text} className="mh-teacher-list__item">
+          {e.comments.length === 0 ? (
+            <div className="mh-teacher-list__item">
               <div>
-                <strong>{c.text}</strong>
-                <span>
-                  {c.term} · Rating {c.rating}
-                </span>
+                <strong>No submitted comments yet.</strong>
+                <span>Results appear after students complete end-of-course evaluations.</span>
               </div>
             </div>
-          ))}
+          ) : (
+            e.comments.map((c) => (
+              <div key={`${c.term}-${c.rating}-${c.text}`} className="mh-teacher-list__item">
+                <div>
+                  <strong>{c.text}</strong>
+                  <span>
+                    {c.term} · Rating {c.rating}
+                  </span>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </section>
     </div>
@@ -8281,6 +8330,13 @@ function ContentRepositoryView({ config }: { config: TeacherScreenConfig }) {
   const paged = filtered.slice((pageNum - 1) * size, pageNum * size);
   const pageOptions = Array.from({ length: pageCount }, (_, i) => String(i + 1));
 
+  function manageHref(courseId: string) {
+    return `/instructor/f/t32-resource-file-manager?courseId=${encodeURIComponent(courseId)}`;
+  }
+  function editHref(courseId: string) {
+    return `/instructor/f/t80-create-content-course?courseId=${encodeURIComponent(courseId)}`;
+  }
+
   return (
     <div className="mh-teacher-stack" data-figma-id={config.figmaId}>
       <SisCrumb crumbs={config.breadcrumbs} />
@@ -8358,13 +8414,7 @@ function ContentRepositoryView({ config }: { config: TeacherScreenConfig }) {
       </div>
 
       <section className="mh-teacher-card">
-        <div
-          className="mh-teacher-table mh-teacher-repo-table"
-          style={{
-            gridTemplateColumns:
-              "minmax(220px,1.6fr) minmax(80px,0.5fr) minmax(80px,0.5fr) minmax(90px,0.6fr) minmax(280px,1.4fr)",
-          }}
-        >
+        <div className="mh-teacher-table mh-teacher-repo-table">
           <div className="mh-teacher-table__head">
             <span>Course Name / Number</span>
             <span>LMS</span>
@@ -8386,31 +8436,24 @@ function ContentRepositoryView({ config }: { config: TeacherScreenConfig }) {
             paged.map((course) => (
               <div key={course.id} className="mh-teacher-table__row mh-teacher-repo-table__row">
                 <span>
-                  <strong>
-                    {course.number} — {course.name}
-                  </strong>
+                  <button
+                    type="button"
+                    className="mh-teacher-repo-course"
+                    onClick={() => router.push(manageHref(course.id))}
+                  >
+                    <strong>
+                      {course.number} — {course.name}
+                    </strong>
+                  </button>
                 </span>
                 <span>{course.lms}</span>
                 <span>{course.status}</span>
                 <span>{course.courseTypes}</span>
                 <span className="mh-teacher-schemes-list__actions mh-teacher-repo-actions">
-                  <button
-                    type="button"
-                    className="mh-teacher-link"
-                    disabled={live?.busy}
-                    onClick={() => void live?.runAction?.("Manage Content Course", course.id)}
-                  >
+                  <button type="button" className="mh-teacher-link" onClick={() => router.push(manageHref(course.id))}>
                     MANAGE
                   </button>
-                  <button
-                    type="button"
-                    className="mh-teacher-link"
-                    onClick={() =>
-                      router.push(
-                        `/instructor/f/t80-create-content-course?courseId=${encodeURIComponent(course.id)}`,
-                      )
-                    }
-                  >
+                  <button type="button" className="mh-teacher-link" onClick={() => router.push(editHref(course.id))}>
                     EDIT
                   </button>
                   <button

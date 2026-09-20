@@ -317,7 +317,7 @@ export async function buildCoachFacts(user: SessionClaims, role: RoleName): Prom
       kind: "mail",
     });
   } else if (role === "instructor") {
-    const sections = await prisma.section.findMany({
+    const sectionsRaw = await prisma.section.findMany({
       where: { institutionId: user.institutionId, instructorPersonId: user.personId },
       include: {
         course: true,
@@ -329,57 +329,98 @@ export async function buildCoachFacts(user: SessionClaims, role: RoleName): Prom
         },
         _count: { select: { enrolments: true } },
       },
-      take: 10,
+      take: 20,
+    });
+    const sections = [...sectionsRaw].sort((a, b) => {
+      const ar = /retake/i.test(a.code) ? 1 : 0;
+      const br = /retake/i.test(b.code) ? 1 : 0;
+      if (ar !== br) return ar - br;
+      return a.course.code.localeCompare(b.course.code);
     });
 
     const sectionIds = sections.map((s) => s.id);
-    const [todaySessions, todayAbsent, draftGrades, mailUnread] = await Promise.all([
-      prisma.classSession.findMany({
-        where: {
-          institutionId: user.institutionId,
-          sectionId: { in: sectionIds },
-          startsAt: { gte: dayStart, lte: dayEnd },
-        },
-        include: { section: { include: { course: true } } },
-        orderBy: { startsAt: "asc" },
-        take: 8,
-      }),
-      prisma.attendanceRecord.findMany({
-        where: {
-          institutionId: user.institutionId,
-          sectionId: { in: sectionIds },
-          status: { in: ["absent", "late", "excused"] },
-          recordedAt: { gte: dayStart, lte: dayEnd },
-        },
-        include: {
-          student: { include: { person: true } },
-          section: { include: { course: true } },
-        },
-        take: 20,
-      }),
-      prisma.gradeItem.count({
-        where: {
-          institutionId: user.institutionId,
-          status: "draft",
-          assignment: { section: { institutionId: user.institutionId, instructorPersonId: user.personId } },
-        },
-      }),
-      prisma.mailThreadPlacement.count({
-        where: {
-          institutionId: user.institutionId,
-          accountId: user.accountId,
-          readAt: null,
-          folder: { kind: "inbox" },
-        },
-      }),
-    ]);
+    const weekEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const [todaySessions, weekSessions, todayAbsent, recentAbsent, draftGrades, mailUnread, badgeBases] =
+      await Promise.all([
+        prisma.classSession.findMany({
+          where: {
+            institutionId: user.institutionId,
+            sectionId: { in: sectionIds },
+            startsAt: { gte: dayStart, lte: dayEnd },
+          },
+          include: { section: { include: { course: true } } },
+          orderBy: { startsAt: "asc" },
+          take: 8,
+        }),
+        prisma.classSession.findMany({
+          where: {
+            institutionId: user.institutionId,
+            sectionId: { in: sectionIds },
+            startsAt: { gte: dayStart, lte: weekEnd },
+          },
+          include: { section: { include: { course: true } } },
+          orderBy: { startsAt: "asc" },
+          take: 16,
+        }),
+        prisma.attendanceRecord.findMany({
+          where: {
+            institutionId: user.institutionId,
+            sectionId: { in: sectionIds },
+            status: { in: ["absent", "late", "excused"] },
+            recordedAt: { gte: dayStart, lte: dayEnd },
+          },
+          include: {
+            student: { include: { person: true } },
+            section: { include: { course: true } },
+          },
+          take: 20,
+        }),
+        prisma.attendanceRecord.findMany({
+          where: {
+            institutionId: user.institutionId,
+            sectionId: { in: sectionIds },
+            status: { in: ["absent", "late"] },
+            recordedAt: { gte: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000) },
+          },
+          include: {
+            student: { include: { person: true } },
+            section: { include: { course: true } },
+          },
+          take: 80,
+        }),
+        prisma.gradeItem.count({
+          where: {
+            institutionId: user.institutionId,
+            status: "draft",
+            assignment: { section: { institutionId: user.institutionId, instructorPersonId: user.personId } },
+          },
+        }),
+        prisma.mailThreadPlacement.count({
+          where: {
+            institutionId: user.institutionId,
+            accountId: user.accountId,
+            readAt: null,
+            folder: { kind: "inbox" },
+          },
+        }),
+        prisma.badgeDefinition.count({ where: { institutionId: user.institutionId } }),
+      ]);
+
+    const dueSoon = sections
+      .flatMap((s) =>
+        s.assignments
+          .filter((a) => a.dueAt && a.dueAt >= now && a.dueAt <= weekEnd)
+          .map((a) => ({ section: s, assignment: a })),
+      )
+      .sort((a, b) => a.assignment.dueAt!.getTime() - b.assignment.dueAt!.getTime())
+      .slice(0, 8);
 
     facts.push(
       ...sections.map((section) => ({
         id: `section:${section.id}`,
         title: `${section.course.code} - ${section.code}`,
-        uri: "/instructor/sections",
-        text: `${section.course.code} ${section.code} has ${section._count.enrolments} enrolled records and ${section.assignments.length} assignments.`,
+        uri: `/instructor/sections/${section.id}`,
+        text: `${section.course.code} ${section.code} (${section.course.title}) has ${section._count.enrolments} enrolled and ${section.assignments.length} assignments.`,
         kind: "course" as const,
       })),
       ...todaySessions.map((session) => ({
@@ -387,13 +428,25 @@ export async function buildCoachFacts(user: SessionClaims, role: RoleName): Prom
         title: `${session.section.course.code} - ${session.title}`,
         uri: "/instructor/calendar",
         text: `Today: ${session.title} for ${session.section.course.code} at ${campusDate(session.startsAt, campusTimeZone)}${
-          session.location ? ` (${session.location})` : ""
+          session.location ? ` · room ${session.location}` : ""
         }.`,
         kind: "session" as const,
       })),
+      ...weekSessions
+        .filter((s) => !todaySessions.some((t) => t.id === s.id))
+        .slice(0, 8)
+        .map((session) => ({
+          id: `session-week:${session.id}`,
+          title: `${session.section.course.code} - ${session.title}`,
+          uri: "/instructor/calendar",
+          text: `This week: ${session.title} for ${session.section.course.code} at ${campusDate(session.startsAt, campusTimeZone)}${
+            session.location ? ` · ${session.location}` : ""
+          }.`,
+          kind: "session" as const,
+        })),
     );
 
-    for (const section of sections.slice(0, 3)) {
+    for (const section of sections.filter((s) => !/retake/i.test(s.code)).slice(0, 3)) {
       const names = section.enrolments
         .slice(0, 8)
         .map((e) => `${e.student.person.givenName} ${e.student.person.familyName}`)
@@ -401,7 +454,7 @@ export async function buildCoachFacts(user: SessionClaims, role: RoleName): Prom
       facts.push({
         id: `roster:${section.id}`,
         title: `Class list · ${section.course.code}`,
-        uri: "/instructor/sections",
+        uri: `/instructor/sections/${section.id}`,
         text: `${section.course.code} ${section.code} class list (${section.enrolments.length} shown): ${names || "no enrolled students"}.`,
         kind: "roster",
       });
@@ -427,19 +480,66 @@ export async function buildCoachFacts(user: SessionClaims, role: RoleName): Prom
       });
     }
 
+    const absenceCount = new Map<string, { name: string; course: string; count: number }>();
+    for (const row of recentAbsent) {
+      const key = `${row.studentId}:${row.sectionId}`;
+      const name = `${row.student.person.givenName} ${row.student.person.familyName}`;
+      const course = row.section.course.code;
+      const prev = absenceCount.get(key);
+      if (prev) prev.count += 1;
+      else absenceCount.set(key, { name, course, count: 1 });
+    }
+    const multiAbsent = [...absenceCount.entries()]
+      .filter(([, v]) => v.count >= 2)
+      .sort((a, b) => b[1].count - a[1].count)
+      .slice(0, 8);
+    for (const [key, v] of multiAbsent) {
+      facts.push({
+        id: `attendance-risk:${key}`,
+        title: `Attendance attention · ${v.course}`,
+        uri: "/instructor/attendance",
+        text: `${v.name} has ${v.count} absent/late marks in ${v.course} over the last 30 days (rule: ≥2).`,
+        kind: "attendance",
+      });
+    }
+
+    for (const item of dueSoon) {
+      facts.push({
+        id: `assignment-due:${item.assignment.id}`,
+        title: `${item.section.course.code} · ${item.assignment.title}`,
+        uri: "/instructor/assessments",
+        text: `${item.assignment.title} for ${item.section.course.code} is due ${campusDate(item.assignment.dueAt!, campusTimeZone)}.`,
+        kind: "assignment",
+      });
+    }
+
     facts.push({
       id: `gradebook:${user.personId}`,
       title: "Your gradebook",
       uri: "/instructor/gradebook",
-      text: `${draftGrades} grade items in your assigned sections remain in draft.`,
+      text: `${draftGrades} grade items in your assigned sections remain in draft (awaiting grading or publish).`,
       kind: "grade",
     });
     facts.push({
       id: `mail:unread:${user.accountId}`,
       title: "Unread mail",
-      uri: "/instructor/mail",
+      uri: "/instructor/messages",
       text: `You have ${mailUnread} unread inbox message(s).`,
       kind: "mail",
+    });
+    facts.push({
+      id: `badges:bases:${user.institutionId}`,
+      title: "Badge bases",
+      uri: "/instructor/f/t82-badges-accomplishments",
+      text: `${badgeBases} institution badge base(s) are defined. Create or award from Badges / Accomplishments.`,
+      kind: "portal",
+    });
+    facts.push({
+      id: `teaching-ops:${user.personId}`,
+      title: "Teaching Operations",
+      uri: "/instructor/ask",
+      text: `Teaching load: ${sections.length} section(s), ${todaySessions.length} class(es) today, ${multiAbsent.length} student(s) with ≥2 recent absences, ${draftGrades} draft grade item(s), ${mailUnread} unread message(s).`,
+      kind: "portal",
     });
   } else if (role === "admin" || role === "registrar") {
     const [students, sections, pendingApprovals, auditEvents, pendingLoa, draftGradeCount, recentStudents, programs] =

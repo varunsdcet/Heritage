@@ -7,11 +7,14 @@ import { TeacherSisShell } from "@/components/TeacherSisShell";
 import { api, loadSession, type Session } from "@/lib/api";
 
 const NIL = "00000000-0000-4000-8000-000000000000";
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-function isUuid(value: string | null | undefined): value is string {
-  return Boolean(value && UUID_RE.test(value));
+/** RFC UUID or demo seed ids (e.g. a1a1a1a1-s0s0-…). Matches packages/contracts Uuid. */
+function isSectionId(value: string | null | undefined): value is string {
+  if (!value) return false;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
+    return true;
+  }
+  return /^[0-9a-zA-Z][0-9a-zA-Z-]{7,62}$/.test(value);
 }
 
 type HistoryRow = {
@@ -26,6 +29,7 @@ type SectionItem = {
   sectionId: string;
   code: string;
   title: string;
+  termCode?: string;
   enrolmentCount?: number;
 };
 
@@ -66,10 +70,10 @@ function InstructorGradebookInner() {
   const [publishing, setPublishing] = useState(false);
 
   async function refresh(s: Session, sid: string) {
-    if (!isUuid(sid)) {
-      throw new Error("Invalid section id — pick a section from the tabs above");
+    if (!isSectionId(sid)) {
+      throw new Error("Invalid section id — pick a section from the list");
     }
-    const data = await api<GradebookResponse>(`/gradebooks/${sid}`, {}, s.accessToken);
+    const data = await api<GradebookResponse>(`/gradebooks/${encodeURIComponent(sid)}`, {}, s.accessToken);
     setBook(data);
     const next: Record<string, string> = {};
     for (const row of data.rows) {
@@ -90,19 +94,57 @@ function InstructorGradebookInner() {
     }
     setSession(s);
     setLoading(true);
-    const wanted = searchParams.get("sectionId");
+    const wanted = (searchParams.get("sectionId") || "").trim();
     api<{ items: SectionItem[] }>("/courses/me", {}, s.accessToken)
       .then(async (res) => {
-        const items = [...(res.items ?? [])].sort((a, b) => (b.enrolmentCount ?? 0) - (a.enrolmentCount ?? 0));
+        const all = [...(res.items ?? [])];
+        // Prefer current-term sections with roster; always keep deep-linked section.
+        const withRoster = all.filter((i) => (i.enrolmentCount ?? 0) > 0);
+        const termCounts = new Map<string, number>();
+        for (const i of withRoster) {
+          const t = i.termCode || "";
+          termCounts.set(t, (termCounts.get(t) || 0) + 1);
+        }
+        const currentTerm =
+          [...termCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ||
+          withRoster[0]?.termCode ||
+          all[0]?.termCode ||
+          "";
+        let items = withRoster.filter((i) => !currentTerm || i.termCode === currentTerm);
+        if (!items.length) items = withRoster.length ? withRoster : all;
+
+        if (wanted && isSectionId(wanted)) {
+          const hit = all.find((i) => i.sectionId === wanted);
+          if (hit && !items.some((i) => i.sectionId === wanted)) {
+            items = [hit, ...items];
+          }
+        }
+
+        items = [...items].sort((a, b) => a.code.localeCompare(b.code));
         setSections(items);
-        const fromQuery = isUuid(wanted) ? items.find((i) => i.sectionId === wanted)?.sectionId : null;
-        const first = fromQuery || items.find((i) => isUuid(i.sectionId))?.sectionId;
+
+        const fromQuery =
+          wanted && isSectionId(wanted)
+            ? items.find((i) => i.sectionId === wanted)?.sectionId ||
+              all.find((i) => i.sectionId === wanted)?.sectionId ||
+              wanted
+            : null;
+        const first =
+          fromQuery ||
+          items.find((i) => /ACSW\s*500/i.test(i.code))?.sectionId ||
+          items[0]?.sectionId ||
+          null;
+
         if (!first) {
           setError("No sections assigned to this instructor.");
           setLoading(false);
           return;
         }
+
         setSectionId(first);
+        if (wanted !== first) {
+          router.replace(`/instructor/gradebook?sectionId=${encodeURIComponent(first)}`);
+        }
         await refresh(s, first);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load gradebook"))
@@ -273,7 +315,7 @@ function InstructorGradebookInner() {
     setError(null);
     try {
       const res = await api<{ approvalRequestId: string }>(
-        `/gradebooks/${sectionId}/publish`,
+        `/gradebooks/${encodeURIComponent(sectionId)}/publish`,
         {
           method: "POST",
           body: JSON.stringify({ gradeItemIds: ids }),
@@ -293,6 +335,7 @@ function InstructorGradebookInner() {
   async function switchSection(sid: string) {
     if (!session) return;
     setSectionId(sid);
+    router.replace(`/instructor/gradebook?sectionId=${encodeURIComponent(sid)}`);
     setLoading(true);
     setError(null);
     setStatus(null);
@@ -311,11 +354,17 @@ function InstructorGradebookInner() {
   const userName = `${session.givenName} ${session.familyName}`.trim() || "Instructor";
   const activeSection = sections.find((s) => s.sectionId === sectionId);
   const dirtyCount = Object.values(dirty).filter(Boolean).length;
+  const heading =
+    book != null
+      ? `${book.courseCode} · ${book.courseTitle}`
+      : activeSection
+        ? `${activeSection.code} · ${activeSection.title}`
+        : "Live section gradebook";
 
   return (
     <TeacherSisShell
       title="Gradebook"
-      subtitle={activeSection ? `${activeSection.code} · ${activeSection.title}` : "Live section gradebook"}
+      subtitle={heading}
       activeHref="/instructor/gradebook"
       userName={userName}
       userRole="INSTRUCTOR"
@@ -323,8 +372,11 @@ function InstructorGradebookInner() {
       <div className="mh-teacher-stack">
         <div className="mh-teacher-page-head">
           <div>
-            <h2>Live gradebook</h2>
-            <p>Enter draft scores, save them, then submit for registrar approval.</p>
+            <h2>{book?.courseCode || activeSection?.code || "Live gradebook"}</h2>
+            <p>
+              {book?.courseTitle || activeSection?.title || "Enter draft scores, save, then submit for approval."}
+              {book ? ` · ${book.rows.length} student(s)` : ""}
+            </p>
           </div>
           <div className="mh-teacher-actions">
             <button
@@ -346,17 +398,20 @@ function InstructorGradebookInner() {
           </div>
         </div>
 
-        <div className="mh-teacher-tabs" role="tablist" aria-label="Sections">
+        <div className="mh-teacher-tabs mh-teacher-tabs--gradebook" role="tablist" aria-label="Sections">
           {sections.map((s) => (
             <button
               key={s.sectionId}
               type="button"
               className={`mh-teacher-tabs__item${s.sectionId === sectionId ? " is-active" : ""}`}
               onClick={() => void switchSection(s.sectionId)}
+              title={s.title}
             >
-              {s.code}
+              <span className="mh-teacher-tabs__code">{s.code}</span>
               {typeof s.enrolmentCount === "number" ? (
-                <span className="mh-teacher-tabs__count">{s.enrolmentCount}</span>
+                <span className="mh-teacher-tabs__count" aria-label={`${s.enrolmentCount} students`}>
+                  {s.enrolmentCount}
+                </span>
               ) : null}
             </button>
           ))}
