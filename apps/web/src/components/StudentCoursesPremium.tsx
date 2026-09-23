@@ -448,6 +448,11 @@ export function StudentCourseDetailPremiumView({ sectionId }: { sectionId: strin
     courses: Array<{ sectionId: string; code: string; items: GradeRow[] }>;
   }>("/grades/me");
   const [infoOpen, setInfoOpen] = useState(false);
+  const [infoScheduleView, setInfoScheduleView] = useState<"week" | "calendar">("week");
+  const [calMonth, setCalMonth] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  });
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [answers, setAnswers] = useState<Record<string, number>>({});
 
@@ -555,6 +560,56 @@ export function StudentCourseDetailPremiumView({ sectionId }: { sectionId: strin
         : d,
     );
   }, [weekDays, course?.courseCode, course?.courseTitle]);
+
+  const calendarCells = useMemo(() => {
+    const year = calMonth.getFullYear();
+    const month = calMonth.getMonth();
+    const firstDow = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const byDay: Record<number, string[]> = {};
+
+    const pushSlot = (dayNum: number, text: string) => {
+      if (!byDay[dayNum]) byDay[dayNum] = [];
+      if (!byDay[dayNum].includes(text)) byDay[dayNum].push(text);
+    };
+
+    for (const s of sessions) {
+      const d = new Date(s.startsAt);
+      if (d.getFullYear() === year && d.getMonth() === month) {
+        const end = s.endsAt ? ` – ${formatTime(s.endsAt)}` : "";
+        pushSlot(d.getDate(), `${formatTime(s.startsAt)}${end}`);
+      }
+    }
+
+    // Fallback recurring Mon–Thu slots for ACSW 500 when no calendar events
+    if (sessions.length === 0) {
+      const isFamily =
+        /ACSW\s*500/i.test(course?.courseCode || "") || /family\s*studies/i.test(course?.courseTitle || "");
+      if (isFamily) {
+        for (let day = 1; day <= daysInMonth; day++) {
+          const dow = new Date(year, month, day).getDay();
+          if (dow >= 1 && dow <= 4) pushSlot(day, "5:00pm – 10:00pm");
+        }
+      }
+    }
+
+    const cells: Array<{ day: number | null; slots: string[]; inRange: boolean }> = [];
+    for (let i = 0; i < firstDow; i++) cells.push({ day: null, slots: [], inRange: false });
+    const rangeStart = startDate ? new Date(startDate) : null;
+    const rangeEnd = endDate ? new Date(endDate) : null;
+    if (rangeStart) rangeStart.setHours(0, 0, 0, 0);
+    if (rangeEnd) rangeEnd.setHours(23, 59, 59, 999);
+    for (let day = 1; day <= daysInMonth; day++) {
+      const cellDate = new Date(year, month, day);
+      const inRange =
+        (!rangeStart || cellDate >= rangeStart) && (!rangeEnd || cellDate <= rangeEnd);
+      cells.push({ day, slots: byDay[day] || [], inRange });
+    }
+    while (cells.length % 7 !== 0) cells.push({ day: null, slots: [], inRange: false });
+    return cells;
+  }, [calMonth, sessions, course?.courseCode, course?.courseTitle, startDate, endDate]);
+
+  const calMonthLabel = calMonth.toLocaleDateString("en-CA", { month: "long", year: "numeric" });
 
   const showingActivity = Boolean(viewed);
   const showingGrades = tab === "Grades" && !showingActivity;
@@ -940,36 +995,102 @@ export function StudentCourseDetailPremiumView({ sectionId }: { sectionId: strin
                           <dd>Campus: {location}</dd>
                         </div>
                       </dl>
-                      <div className="mh-student-course-info-views">
-                        <button type="button" className="mh-teacher-link">
+                      <div className="mh-student-course-info-views" role="tablist" aria-label="Schedule view">
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={infoScheduleView === "week"}
+                          className={`mh-teacher-link${infoScheduleView === "week" ? " is-active" : ""}`}
+                          onClick={() => setInfoScheduleView("week")}
+                        >
                           Weekly View
                         </button>
-                        <button type="button" className="mh-teacher-link">
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={infoScheduleView === "calendar"}
+                          className={`mh-teacher-link${infoScheduleView === "calendar" ? " is-active" : ""}`}
+                          onClick={() => {
+                            setInfoScheduleView("calendar");
+                            if (startDate) {
+                              const d = new Date(startDate);
+                              setCalMonth(new Date(d.getFullYear(), d.getMonth(), 1));
+                            }
+                          }}
+                        >
                           Calendar View
                         </button>
                       </div>
                     </div>
-                    <h3>Course schedule</h3>
-                    <div className="mh-student-course-premium__week">
-                      {scheduleDays.map((d) => (
-                        <div
-                          key={d.label}
-                          className={d.entries.length ? "has-slot" : ""}
-                          style={
-                            d.entries.length && scheduleColors[d.label]
-                              ? { background: scheduleColors[d.label] }
-                              : undefined
-                          }
-                        >
-                          <strong>{d.label}</strong>
-                          {d.entries.length === 0 ? (
-                            <p className="mh-teacher-muted">—</p>
-                          ) : (
-                            d.entries.map((e) => <p key={e}>{e}</p>)
-                          )}
+                    <h3>{infoScheduleView === "week" ? "Course schedule" : "Course calendar"}</h3>
+                    {infoScheduleView === "week" ? (
+                      <div className="mh-student-course-premium__week">
+                        {scheduleDays.map((d) => (
+                          <div
+                            key={d.label}
+                            className={d.entries.length ? "has-slot" : ""}
+                            style={
+                              d.entries.length && scheduleColors[d.label]
+                                ? { background: scheduleColors[d.label] }
+                                : undefined
+                            }
+                          >
+                            <strong>{d.label}</strong>
+                            {d.entries.length === 0 ? (
+                              <p className="mh-teacher-muted">—</p>
+                            ) : (
+                              d.entries.map((e) => <p key={e}>{e}</p>)
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="mh-student-course-cal">
+                        <div className="mh-student-course-cal__nav">
+                          <button
+                            type="button"
+                            className="mh-hcc-btn ghost"
+                            onClick={() =>
+                              setCalMonth((m) => new Date(m.getFullYear(), m.getMonth() - 1, 1))
+                            }
+                          >
+                            ← Prev
+                          </button>
+                          <strong>{calMonthLabel}</strong>
+                          <button
+                            type="button"
+                            className="mh-hcc-btn ghost"
+                            onClick={() =>
+                              setCalMonth((m) => new Date(m.getFullYear(), m.getMonth() + 1, 1))
+                            }
+                          >
+                            Next →
+                          </button>
                         </div>
-                      ))}
-                    </div>
+                        <div className="mh-student-course-cal__grid" role="grid" aria-label={calMonthLabel}>
+                          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
+                            <div key={d} className="mh-student-course-cal__dow">
+                              {d}
+                            </div>
+                          ))}
+                          {calendarCells.map((cell, idx) => (
+                            <div
+                              key={`c-${idx}`}
+                              className={`mh-student-course-cal__cell${cell.day ? "" : " is-empty"}${
+                                cell.slots.length ? " has-slot" : ""
+                              }${cell.inRange ? " in-range" : ""}`}
+                            >
+                              {cell.day ? <span className="mh-student-course-cal__day">{cell.day}</span> : null}
+                              {cell.slots.map((s) => (
+                                <span key={s} className="mh-student-course-cal__slot">
+                                  {s}
+                                </span>
+                              ))}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

@@ -13,10 +13,16 @@ type NavItem = {
   href: string;
   icon: string;
   badge?: string;
+  match?: string[];
   children?: NavChild[];
 };
 
 const NAV: NavItem[] = [
+  {
+    label: "Dashboard",
+    href: "/instructor",
+    icon: "bar-chart",
+  },
   {
     label: "My Profile / Settings",
     href: "/instructor/f/t02-profile-biography",
@@ -55,6 +61,11 @@ const NAV: NavItem[] = [
       { label: "Grades Submission", href: "/instructor/f/t62-pending-grade-submissions?mode=submission", countKey: "grades" },
       { label: "Course History", href: "/instructor/f/t39-course-history" },
     ],
+  },
+  {
+    label: "AI Draft",
+    href: "/instructor/ai-draft",
+    icon: "sparkles",
   },
   {
     label: "Workshops",
@@ -209,7 +220,7 @@ const STUDIO_NAV = [
 ];
 
 function NavIcon({ name, active }: { name: string; active?: boolean }) {
-  const stroke = active ? "#F1F0F7" : "#A29FBA";
+  const stroke = active ? "#2563EB" : "#64748B";
   const common = {
     width: 16,
     height: 16,
@@ -272,6 +283,13 @@ function NavIcon({ name, active }: { name: string; active?: boolean }) {
           <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9c.3.6.9 1 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
         </svg>
       );
+    case "sparkles":
+      return (
+        <svg {...common}>
+          <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" />
+          <path d="M12 8.5 13.2 11l2.5.4-1.8 1.8.4 2.5L12 14.5 10.7 15.7l.4-2.5-1.8-1.8 2.5-.4z" />
+        </svg>
+      );
     default:
       return <span style={{ width: 16, height: 16 }} />;
   }
@@ -315,7 +333,7 @@ function childMatches(pathname: string, child: NavChild, search: URLSearchParams
 
 function isActive(pathname: string, item: NavItem, search: URLSearchParams) {
   if (item.children?.length) return item.children.some((child) => childMatches(pathname, child, search, item.children));
-  return pathMatches(pathname, item.href);
+  return pathMatches(pathname, item.href, item.match);
 }
 
 export function TeacherSisShell({

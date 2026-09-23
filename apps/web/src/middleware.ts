@@ -22,15 +22,21 @@ function portalForPath(pathname: string): string | null {
 function rolesFromCookie(raw: string | undefined): string[] {
   if (!raw) return [];
   try {
-    const parsed = JSON.parse(decodeURIComponent(raw)) as unknown;
-    return Array.isArray(parsed) ? parsed.map(String) : [];
+    const decoded = decodeURIComponent(raw);
+    // Prefer JSON array when present.
+    if (decoded.trim().startsWith("[")) {
+      const parsed = JSON.parse(decoded) as unknown;
+      return Array.isArray(parsed) ? parsed.map(String) : [];
+    }
+    // Comma-separated: admin,registrar
+    return decoded.split(",").map((r) => r.trim()).filter(Boolean);
   } catch {
     return raw.split(",").map((r) => r.trim()).filter(Boolean);
   }
 }
 
 function homeForRoles(roles: string[]): string {
-  for (const role of ["instructor", "admin", "registrar", "applicant", "employer", "student"]) {
+  for (const role of ["admin", "registrar", "instructor", "applicant", "employer", "student"]) {
     if (roles.includes(role)) return ROLE_HOME[role] ?? "/login";
   }
   return "/login";

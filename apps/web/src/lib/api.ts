@@ -39,7 +39,8 @@ const SESSION_SHORT_AGE_SEC = 60 * 60 * 12;
 
 function writeRoleCookie(roles: string[], maxAgeSec = SESSION_MAX_AGE_SEC) {
   if (typeof document === "undefined") return;
-  const value = encodeURIComponent(JSON.stringify(roles));
+  // Comma-separated is more reliable than JSON for middleware cookie parsing.
+  const value = encodeURIComponent(roles.map(String).filter(Boolean).join(","));
   const secure = typeof window !== "undefined" && window.location.protocol === "https:" ? "; Secure" : "";
   document.cookie = `${ROLE_COOKIE}=${value}; Path=/; SameSite=Lax; Max-Age=${maxAgeSec}${secure}`;
 }
@@ -49,11 +50,17 @@ function tokenExpired(accessToken: string): boolean {
     const part = accessToken.split(".")[1];
     if (!part) return true;
     const padded = part.replace(/-/g, "+").replace(/_/g, "/") + "==".slice((part.length * 3) % 4);
-    const payload = JSON.parse(atob(padded)) as { exp?: number };
+    const json =
+      typeof atob === "function"
+        ? atob(padded)
+        : Buffer.from(padded, "base64").toString("utf8");
+    const payload = JSON.parse(json) as { exp?: number };
     if (typeof payload.exp !== "number") return false;
-    return Date.now() >= payload.exp * 1000;
+    // 30s skew so clock drift does not bounce a fresh login.
+    return Date.now() >= payload.exp * 1000 - 30_000;
   } catch {
-    return true;
+    // Do not wipe a fresh session because of a decode glitch.
+    return false;
   }
 }
 

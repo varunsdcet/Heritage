@@ -74,6 +74,7 @@ export function HccMyCoursesView({ config }: { config: TeacherScreenConfig }) {
             <th>COURSE</th>
             <th>DELIVERY METHOD</th>
             <th>STUDENTS</th>
+            <th>ATTENDANCE</th>
             <th>STATUS</th>
             <th>LOCATION</th>
             <th>SCHEDULE</th>
@@ -82,7 +83,7 @@ export function HccMyCoursesView({ config }: { config: TeacherScreenConfig }) {
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={6}>No courses found.</td>
+              <td colSpan={7}>No courses found.</td>
             </tr>
           ) : (
             rows.map((r) => (
@@ -96,6 +97,16 @@ export function HccMyCoursesView({ config }: { config: TeacherScreenConfig }) {
                 </td>
                 <td>{r.delivery}</td>
                 <td>{r.students}</td>
+                <td
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    router.push(r.attendanceHref || `/instructor/attendance?sectionId=${encodeURIComponent(r.id)}`);
+                  }}
+                >
+                  <span className={`mh-hcc-att-chip is-${r.attendanceTone || "muted"}`}>
+                    {r.attendanceLabel || "Not taken yet"}
+                  </span>
+                </td>
                 <td>
                   <span className="mh-hcc-pill">{r.status}</span>
                 </td>
@@ -448,48 +459,211 @@ export function HccPendingGradesView({ config }: { config: TeacherScreenConfig }
 }
 
 export function HccAttendanceView({ config }: { config: TeacherScreenConfig }) {
+  const router = useRouter();
+  const live = useOptionalTeacherLive();
   const d = config.hccAttendance;
-  const groups = d?.groups ?? [];
+  const [date, setDate] = useState(d?.dateFilter || "2026-09-18");
+  const [studentFilter, setStudentFilter] = useState(d?.studentFilter || "");
+  const [courseFilter, setCourseFilter] = useState(d?.courseFilter || "All Courses");
+  const [groups, setGroups] = useState(d?.groups ?? []);
+  const [weekOpen, setWeekOpen] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDate(d?.dateFilter || "2026-09-18");
+    setStudentFilter(d?.studentFilter || "");
+    setCourseFilter(d?.courseFilter || "All Courses");
+    setGroups(d?.groups ?? []);
+  }, [d?.dateFilter, d?.studentFilter, d?.courseFilter, d?.groups]);
+
+  const courseOptions = [
+    "All Courses",
+    ...[...new Set((d?.groups ?? []).map((g) => `${g.course} (${g.offering})`))].sort(),
+  ];
+
+  function load(nextDate = date) {
+    const qs = new URLSearchParams();
+    if (nextDate) qs.set("date", nextDate);
+    router.push(`/instructor/attendance?${qs.toString()}`);
+  }
+
+  function setStatus(studentId: string, status: string) {
+    setGroups((prev) =>
+      prev.map((g) => ({
+        ...g,
+        students: g.students.map((s) => (s.id === studentId ? { ...s, status } : s)),
+      })),
+    );
+  }
+
+  function setNote(studentId: string, note: string) {
+    setGroups((prev) =>
+      prev.map((g) => ({
+        ...g,
+        students: g.students.map((s) => (s.id === studentId ? { ...s, note } : s)),
+      })),
+    );
+  }
+
+  function rosterPayload() {
+    return JSON.stringify({
+      date,
+      roster: groups.flatMap((g) =>
+        g.students.map((s) => ({
+          studentId: s.id,
+          studentNumber: s.studentNumber,
+          id: s.studentNumber,
+          name: s.name,
+          status: s.status,
+          note: s.note,
+          sectionId: g.sectionId,
+        })),
+      ),
+    });
+  }
+
+  async function save(finalize: boolean) {
+    const action = finalize
+      ? d?.primaryAction || config.primaryAction || "Submit Attendance"
+      : d?.secondaryAction || config.secondaryAction || "Save Draft";
+    await live?.runAction?.(action, rosterPayload());
+    if (finalize) {
+      setToast("Attendance submitted. Opening course attendance…");
+      await live?.refresh?.();
+      const firstSection = groups.find((g) => g.sectionId)?.sectionId;
+      window.setTimeout(() => {
+        if (firstSection) {
+          router.push(`/instructor/sections/${firstSection}?tab=Attendance`);
+        } else {
+          router.push("/instructor/sections");
+        }
+      }, 700);
+      return;
+    }
+    setToast("Draft saved.");
+    await live?.refresh?.();
+  }
+
+  const visible = groups
+    .filter((g) => courseFilter === "All Courses" || courseFilter === `${g.course} (${g.offering})`)
+    .map((g) => ({
+      ...g,
+      students: g.students.filter((s) => {
+        const q = studentFilter.trim().toLowerCase();
+        if (!q) return true;
+        return s.name.toLowerCase().includes(q) || s.studentNumber.toLowerCase().includes(q);
+      }),
+    }));
+
+  const weekDates = (() => {
+    const base = new Date(`${date}T12:00:00`);
+    return Array.from({ length: 7 }, (_, i) => {
+      const x = new Date(base);
+      x.setDate(base.getDate() - 3 + i);
+      const iso = `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
+      return {
+        value: iso,
+        label: x.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+        active: iso === date,
+      };
+    });
+  })();
+
   return (
-    <div className="mh-hcc-page">
-      <Crumb items={["Home", "Course Attendance"]} />
-      <h1>COURSE ATTENDANCE</h1>
-      <div className="mh-hcc-actions">
-        <button type="button" className="mh-hcc-btn">
-          Week View
-        </button>
-        <button type="button" className="mh-hcc-btn ghost">
-          Print Roster
-        </button>
+    <div className="mh-hcc-page mh-hcc-page--attendance">
+      <div className="mh-hcc-att-head">
+        <div>
+          <Crumb items={["Home", "Course Attendance"]} />
+          <h1>COURSE ATTENDANCE</h1>
+        </div>
+        <div className="mh-hcc-actions">
+          <button type="button" className="mh-hcc-btn ghost" onClick={() => setWeekOpen((v) => !v)}>
+            Week View
+          </button>
+          <button type="button" className="mh-hcc-btn ghost" onClick={() => window.print()}>
+            Print Roster
+          </button>
+          <button type="button" className="mh-hcc-btn ghost" disabled={live?.busy} onClick={() => void save(false)}>
+            {live?.busy ? "Saving…" : d?.secondaryAction || "Save Draft"}
+          </button>
+          <button type="button" className="mh-hcc-btn" disabled={live?.busy} onClick={() => void save(true)}>
+            {live?.busy ? "Submitting…" : d?.primaryAction || "Submit Attendance"}
+          </button>
+        </div>
       </div>
+      {toast ? (
+        <p className="mh-hcc-att-toast" role="status">
+          {toast}
+        </p>
+      ) : null}
       <div className="mh-hcc-filters">
         <label>
           <span>DATE FILTER</span>
-          <input type="date" defaultValue={d?.dateFilter || "2026-09-18"} />
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         </label>
         <label>
           <span>STUDENT FILTER</span>
-          <input placeholder="Student # or last name" />
+          <input
+            placeholder="Student # or last name"
+            value={studentFilter}
+            onChange={(e) => setStudentFilter(e.target.value)}
+          />
         </label>
         <label>
           <span>COURSE FILTER</span>
-          <select defaultValue={d?.courseFilter || "All Courses"}>
-            <option>All Courses</option>
+          <select value={courseFilter} onChange={(e) => setCourseFilter(e.target.value)}>
+            {courseOptions.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
           </select>
         </label>
-        <button type="button" className="mh-hcc-btn">
+        <button type="button" className="mh-hcc-btn" onClick={() => load()}>
           Load Attendance
         </button>
       </div>
+      {weekOpen ? (
+        <nav className="mh-week-nav" aria-label="Week view">
+          {weekDates.map((w) => (
+            <button
+              key={w.value}
+              type="button"
+              className={`mh-week-nav__item${w.active ? " is-active" : ""}`}
+              onClick={() => load(w.value)}
+            >
+              {w.label}
+            </button>
+          ))}
+        </nav>
+      ) : null}
       <div className="mh-hcc-date-nav">
-        <button type="button">{d?.prevLabel || "Sep. 17, 2026"}</button>
+        <button
+          type="button"
+          onClick={() => {
+            const x = new Date(`${date}T12:00:00`);
+            x.setDate(x.getDate() - 1);
+            load(`${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`);
+          }}
+        >
+          {d?.prevLabel || "Previous"}
+        </button>
         <strong>{d?.centerLabel}</strong>
-        <button type="button">{d?.nextLabel || "Sep. 19, 2026"}</button>
+        <button
+          type="button"
+          onClick={() => {
+            const x = new Date(`${date}T12:00:00`);
+            x.setDate(x.getDate() + 1);
+            load(`${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`);
+          }}
+        >
+          {d?.nextLabel || "Next"}
+        </button>
       </div>
-      {groups.every((g) => g.students.length === 0) ? (
+      {visible.every((g) => g.students.length === 0) ? (
         <p className="mh-teacher-muted">No students were found. Please change the filters above to see other possibilities.</p>
       ) : (
-        groups.map((g) =>
+        visible.map((g) =>
           g.students.length === 0 ? null : (
             <section key={g.offering} className="mh-hcc-att-group">
               <h2>
@@ -518,14 +692,30 @@ export function HccAttendanceView({ config }: { config: TeacherScreenConfig }) {
                       </td>
                       <td>
                         <label>
-                          <input type="radio" name={`att-${s.id}`} defaultChecked={s.status === "Present"} /> Present
+                          <input
+                            type="radio"
+                            name={`att-${s.id}`}
+                            checked={s.status === "Present"}
+                            onChange={() => setStatus(s.id, "Present")}
+                          />{" "}
+                          Present
                         </label>{" "}
                         <label>
-                          <input type="radio" name={`att-${s.id}`} defaultChecked={s.status === "Absent"} /> Absent
+                          <input
+                            type="radio"
+                            name={`att-${s.id}`}
+                            checked={s.status === "Absent"}
+                            onChange={() => setStatus(s.id, "Absent")}
+                          />{" "}
+                          Absent
                         </label>
                       </td>
                       <td>
-                        <input className="mh-teacher-field" defaultValue={s.note} />
+                        <input
+                          className="mh-teacher-field"
+                          value={s.note}
+                          onChange={(e) => setNote(s.id, e.target.value)}
+                        />
                       </td>
                     </tr>
                   ))}
@@ -549,18 +739,18 @@ export function HccStudentsView({ config }: { config: TeacherScreenConfig }) {
   const loading = Boolean(live?.loading);
 
   const FILTER_META: Array<{ key: string; label: string; kind?: "select" | "date" }> = [
-    { key: "campus", label: "CAMPUS FILTER" },
-    { key: "program", label: "PROGRAM FILTER" },
-    { key: "pathway", label: "PATHWAY FILTER" },
-    { key: "schedule", label: "SCHEDULE FILTER" },
-    { key: "programTerm", label: "PROGRAM TERM FILTER" },
-    { key: "admissionTerm", label: "ADMISSION TERM FILTER" },
-    { key: "nationality", label: "NATIONALITY FILTER" },
-    { key: "status", label: "STATUS FILTER" },
-    { key: "agent", label: "AGENT FILTER" },
-    { key: "advisor", label: "ADVISOR FILTER" },
-    { key: "startDate", label: "START DATE FILTER", kind: "date" },
-    { key: "endDate", label: "END DATE FILTER", kind: "date" },
+    { key: "campus", label: "CAMPUS" },
+    { key: "program", label: "PROGRAM" },
+    { key: "pathway", label: "PATHWAY" },
+    { key: "schedule", label: "SCHEDULE" },
+    { key: "programTerm", label: "PROGRAM TERM" },
+    { key: "admissionTerm", label: "ADMISSION TERM" },
+    { key: "nationality", label: "NATIONALITY" },
+    { key: "status", label: "STATUS" },
+    { key: "agent", label: "AGENT" },
+    { key: "advisor", label: "ADVISOR" },
+    { key: "startDate", label: "START DATE", kind: "date" },
+    { key: "endDate", label: "END DATE", kind: "date" },
   ];
 
   const [draft, setDraft] = useState<Record<string, string>>(() => {

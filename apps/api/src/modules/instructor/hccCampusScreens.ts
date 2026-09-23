@@ -178,7 +178,8 @@ export async function buildHccMyCourses(
     return "unknown";
   }
 
-  let filtered = ctx.sections.filter((s) => s.enrolmentCount > 0);
+  // Include sections with no enrolments so a newly created course can be opened and activities added.
+  let filtered = ctx.sections;
 
   if (termFilter !== "All Terms") {
     filtered = filtered.filter((s) => {
@@ -200,10 +201,56 @@ export async function buildHccMyCourses(
     });
   }
 
+  const sectionIds = filtered.map((s) => s.id);
+  const attendanceRows =
+    sectionIds.length && ctx.user?.institutionId
+      ? await prisma.attendanceRecord.findMany({
+          where: {
+            institutionId: ctx.user.institutionId,
+            sectionId: { in: sectionIds },
+          },
+          orderBy: { recordedAt: "desc" },
+          take: 500,
+          select: {
+            sectionId: true,
+            meetingLabel: true,
+            status: true,
+            recordedAt: true,
+          },
+        })
+      : [];
+
+  const attendanceBySection = new Map<
+    string,
+    { meetingLabel: string; recordedAt: Date; present: number; total: number }
+  >();
+  for (const row of attendanceRows) {
+    const cur = attendanceBySection.get(row.sectionId);
+    if (!cur) {
+      attendanceBySection.set(row.sectionId, {
+        meetingLabel: row.meetingLabel,
+        recordedAt: row.recordedAt,
+        present: /present|late/i.test(row.status) ? 1 : 0,
+        total: 1,
+      });
+      continue;
+    }
+    // Same latest meeting only
+    if (row.meetingLabel === cur.meetingLabel && Math.abs(row.recordedAt.getTime() - cur.recordedAt.getTime()) < 86_400_000) {
+      cur.total += 1;
+      if (/present|late/i.test(row.status)) cur.present += 1;
+    }
+  }
+
   const courses = filtered.map((s) => {
     const timing = termTiming(s.termCode);
     const status =
       timing === "ended" ? "Ended" : timing === "upcoming" ? "Upcoming" : "In Progress";
+    const att = attendanceBySection.get(s.id);
+    const attendanceLabel = att
+      ? `Taken ${att.meetingLabel} · ${att.present}/${att.total} present`
+      : "Not taken yet";
+    const attendanceTone = att ? ("ok" as const) : ("warn" as const);
     return {
       id: s.id,
       code: s.courseCode,
@@ -218,6 +265,9 @@ export async function buildHccMyCourses(
       schedule: scheduleLabel(ctx.classSessions, s.code),
       href: `/instructor/sections/${s.id}`,
       term: termMeta.get(s.termCode)?.name || s.termCode,
+      attendanceLabel,
+      attendanceTone,
+      attendanceHref: `/instructor/attendance?sectionId=${encodeURIComponent(s.id)}`,
     };
   });
 
@@ -601,6 +651,7 @@ export async function buildHccAttendance(ctx: {
     ? ctx.sections.filter((s) => s.termCode === ctx.term!.code)
     : ctx.sections;
   const groups = current.map((s) => ({
+    sectionId: s.id,
     course: s.courseCode,
     title: s.courseTitle,
     offering: s.code,
@@ -622,17 +673,27 @@ export async function buildHccAttendance(ctx: {
     year: "numeric",
     weekday: "short",
   });
+  const prev = new Date(d);
+  prev.setDate(d.getDate() - 1);
+  const next = new Date(d);
+  next.setDate(d.getDate() + 1);
+  const navLabel = (x: Date) =>
+    x.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   return {
     title: "COURSE ATTENDANCE",
     breadcrumbs: ["Home", "Course Attendance"],
     archetype: "hccAttendance",
+    primaryAction: "Submit Attendance",
+    secondaryAction: "Save Draft",
     hccAttendance: {
       dateFilter: dateIso,
       studentFilter: "",
       courseFilter: "All Courses",
       centerLabel: `ATTENDANCE FOR: ${label.toUpperCase()}`,
-      prevLabel: "Sep. 17, 2026",
-      nextLabel: "Sep. 19, 2026",
+      prevLabel: navLabel(prev),
+      nextLabel: navLabel(next),
+      primaryAction: "Submit Attendance",
+      secondaryAction: "Save Draft",
       groups,
     },
   };

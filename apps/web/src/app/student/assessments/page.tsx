@@ -351,7 +351,7 @@ function AssessmentDetail({
           {isSubmitted ? (
             <div
               className="mh-teacher-banner"
-              style={{ background: "#e8f5ee", borderColor: "rgba(1,127,63,0.22)", color: "#017f3f" }}
+              style={{ background: "#e8f5ee", borderColor: "rgba(1,127,63,0.22)", color: "#2563EB" }}
             >
               This assessment has been submitted. Your instructor will publish results when grading is complete.
             </div>
@@ -359,7 +359,7 @@ function AssessmentDetail({
           {hasPriorSubmit && canStart ? (
             <div
               className="mh-teacher-banner"
-              style={{ background: "#e8f5ee", borderColor: "rgba(1,127,63,0.22)", color: "#017f3f" }}
+              style={{ background: "#e8f5ee", borderColor: "rgba(1,127,63,0.22)", color: "#2563EB" }}
             >
               Previous attempt submitted. You still have {assessment.maxAttempts - assessment.attemptCount} attempt
               {assessment.maxAttempts - assessment.attemptCount === 1 ? "" : "s"} remaining.

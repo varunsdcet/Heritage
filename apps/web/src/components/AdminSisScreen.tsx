@@ -1366,7 +1366,7 @@ function SearchResultsView({ config }: { config: SisScreenConfig }) {
 
   const iconFor = (type: string) => {
     const t = type.toLowerCase();
-    if (t.includes("student")) return { bg: "#eaf6ef", stroke: "#017f3f", path: "user" as const };
+    if (t.includes("student")) return { bg: "#eaf6ef", stroke: "#2563EB", path: "user" as const };
     if (t.includes("application")) return { bg: "#fef9e7", stroke: "#996600", path: "file" as const };
     if (t.includes("finance")) return { bg: "rgba(29,78,216,0.1)", stroke: "#1d4ed8", path: "card" as const };
     return { bg: "#fef9e7", stroke: "#996600", path: "shield" as const };

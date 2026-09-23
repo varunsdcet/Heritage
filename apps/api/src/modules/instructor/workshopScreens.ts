@@ -279,6 +279,7 @@ export async function buildWorkshopEnrolments(institutionId: string, path: strin
         studentName: row.name,
         studentNumber: row.studentNumber,
         workshop: `${row.workshopCode} — ${row.workshopTitle}`,
+        workshopId: row.workshopId,
         status: row.statusLabel,
         statusTone: statusTone(row.status),
         enrolledOn: row.enrolledOn,

@@ -451,7 +451,7 @@ function InstructorGradebookInner() {
             ) : book.rows.length === 0 ? (
               <p className="mh-teacher-muted">No enrolled students in this section.</p>
             ) : (
-              <div style={{ overflowX: "auto" }}>
+              <div className="mh-teacher-gradebook-scroll">
                 <table className="mh-teacher-gradebook-live">
                   <thead>
                     <tr>

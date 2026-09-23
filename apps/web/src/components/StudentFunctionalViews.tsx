@@ -839,7 +839,7 @@ export function StudentAssignmentDetailView({ assignmentId }: { assignmentId: st
                   </div>
                 </div>
                 {submittedLocked && assignment.submission?.submittedAt ? (
-                  <div className="mh-teacher-banner" style={{ background: "#e8f5ee", borderColor: "rgba(1,127,63,0.22)", color: "#017f3f" }}>
+                  <div className="mh-teacher-banner" style={{ background: "#e8f5ee", borderColor: "rgba(1,127,63,0.22)", color: "#2563EB" }}>
                     Submitted {formatDate(assignment.submission.submittedAt)}
                     {assignment.state === "graded" ? " · Graded and published" : ""}
                   </div>
@@ -897,14 +897,14 @@ export function StudentAssignmentDetailView({ assignmentId }: { assignmentId: st
                         }}
                       />
                       <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden>
-                        <path d="M12 16V8M12 8l-3 3M12 8l3 3" stroke="#017f3f" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                        <path d="M12 16V8M12 8l-3 3M12 8l3 3" stroke="#2563EB" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
                         <path
                           d="M20 16.5a3.5 3.5 0 0 0-2.1-6.4A5.5 5.5 0 0 0 7.1 8.4 3.5 3.5 0 0 0 4 11.8"
-                          stroke="#017f3f"
+                          stroke="#2563EB"
                           strokeWidth="1.6"
                           strokeLinecap="round"
                         />
-                        <path d="M8 19h8" stroke="#017f3f" strokeWidth="1.6" strokeLinecap="round" />
+                        <path d="M8 19h8" stroke="#2563EB" strokeWidth="1.6" strokeLinecap="round" />
                       </svg>
                       <strong>{busy ? "Uploading…" : "Choose a file to upload"}</strong>
                       <span>PDF, Office, images, or ZIP · up to 10 MiB</span>

@@ -31,6 +31,11 @@ type ActiveCourse = {
 
 const BASE_NAV: NavItem[] = [
   {
+    label: "Dashboard",
+    href: "/student",
+    icon: "bar-chart",
+  },
+  {
     label: "My Profile / Settings",
     href: "/student/profile",
     icon: "user",
@@ -154,6 +159,12 @@ function NavIcon({ name, active }: { name: string; active?: boolean }) {
     "aria-hidden": true as const,
   };
   switch (name) {
+    case "bar-chart":
+      return (
+        <svg {...common}>
+          <path d="M4 20V10M12 20V4M20 20v-7" />
+        </svg>
+      );
     case "user":
       return (
         <svg {...common}>
@@ -274,7 +285,7 @@ function StudentSisShellInner({
     const session = loadSession();
     if (!session?.accessToken) return;
     let cancelled = false;
-    api<{ studentNumber?: string }>("/me/profile", {}, session.accessToken)
+    api<{ studentNumber?: string }>("/me/profile", {}, session.accessToken, { skipAuthRedirect: true })
       .then((p) => {
         if (!cancelled && p.studentNumber) setResolvedNumber(p.studentNumber);
       })
@@ -300,7 +311,7 @@ function StudentSisShellInner({
         status?: string;
         enrolmentStatus?: "enrolled" | "completed";
       }>;
-    }>("/courses/me", {}, session.accessToken)
+    }>("/courses/me", {}, session.accessToken, { skipAuthRedirect: true })
       .then((payload) => {
         if (cancelled) return;
         const fromCourses = payload.courses ?? [];

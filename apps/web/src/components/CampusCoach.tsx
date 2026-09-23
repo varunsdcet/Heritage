@@ -148,12 +148,27 @@ function messagesFromHistory(items: CoachHistoryResponse["items"]): ChatMessage[
   ]);
 }
 
+function formatCoachWhen(iso?: string) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const threadRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState("");
+  const [attachNote, setAttachNote] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(true);
@@ -222,7 +237,11 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
     }
     setError(null);
     setLoading(true);
-    setMessages((current) => [...current, { id: pendingId, role: "user", text: trimmed }]);
+    setMessages((current) => [
+      ...current,
+      { id: pendingId, role: "user", text: trimmed, createdAt: new Date().toISOString() },
+    ]);
+    setAttachNote(null);
 
     try {
       const response = await api<CoachAnswer>(
@@ -370,6 +389,11 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
               aria-label={message.role === "user" ? "You" : "Ask Heritage"}
             >
               <div className="mh-ask-chat__bubble">
+                {message.createdAt ? (
+                  <time className="mh-ask-chat__when" dateTime={message.createdAt}>
+                    {formatCoachWhen(message.createdAt)}
+                  </time>
+                ) : null}
                 {message.role === "assistant" ? (
                   <MarkdownMessage text={message.text} />
                 ) : (
@@ -436,7 +460,36 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
 
         <form className="mh-ask-chat__composer" onSubmit={onSubmit}>
           {error ? <Banner tone="danger">{error}</Banner> : null}
+          {attachNote ? (
+            <p className="mh-ask-chat__attach-note">
+              Attachment ready: <strong>{attachNote}</strong>{" "}
+              <button type="button" className="mh-ask-chat__attach-clear" onClick={() => setAttachNote(null)}>
+                Remove
+              </button>
+            </p>
+          ) : null}
           <div className="mh-ask-chat__composer-row">
+            <input
+              ref={fileRef}
+              type="file"
+              className="mh-ask-chat__file"
+              aria-label="Add attachment"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                setAttachNote(file ? file.name : null);
+                e.target.value = "";
+              }}
+            />
+            <button
+              type="button"
+              className="mh-ask-chat__attach"
+              aria-label="Add attachment or link"
+              title="Add attachment or link"
+              disabled={loading}
+              onClick={() => fileRef.current?.click()}
+            >
+              +
+            </button>
             <label className="mh-ask-chat__composer-field">
               <textarea
                 ref={inputRef}

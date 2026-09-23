@@ -1797,12 +1797,12 @@ export const ADMIN_SIS_SCREENS: Record<string, SisScreenConfig> = {
     archetype: "analytics",
     analytics: {
       bars: [
-        { label: "Academic Advising", value: "142", width: "88%", color: "#017f3f" },
+        { label: "Academic Advising", value: "142", width: "88%", color: "#2563EB" },
         { label: "Peer Tutoring", value: "98", width: "64%", color: "#849f38" },
         { label: "Financial Advice", value: "45", width: "32%", color: "#1d4ed8" },
       ],
       outcomes: [
-        { label: "Resolved positive outcomes (70%)", color: "#017f3f" },
+        { label: "Resolved positive outcomes (70%)", color: "#2563EB" },
         { label: "In Progress active review (20%)", color: "#fac020" },
         { label: "Escalated without resolution (10%)", color: "#ba1a1a" },
       ],
@@ -1844,7 +1844,7 @@ export const ADMIN_SIS_SCREENS: Record<string, SisScreenConfig> = {
         { label: "Oct", height: "100%", active: true },
       ],
       methods: [
-        { label: "Stripe Gateway", value: "58% ($1,020,400)", color: "#017f3f" },
+        { label: "Stripe Gateway", value: "58% ($1,020,400)", color: "#2563EB" },
         { label: "Direct ACH", value: "32% ($560,300)", color: "#1d4ed8" },
         { label: "Internal Checks", value: "10% ($175,000)", color: "#8d928a" },
       ],
@@ -2066,10 +2066,10 @@ export const ADMIN_SIS_SCREENS: Record<string, SisScreenConfig> = {
     ],
     crmDash: {
       funnel: [
-        { label: "Inquiry", value: "1247 Leads (100%)", pct: 100, color: "#017f3f" },
+        { label: "Inquiry", value: "1247 Leads (100%)", pct: 100, color: "#2563EB" },
         { label: "Application Started", value: "684 Leads (55%)", pct: 55, color: "#849f38" },
         { label: "Admitted Status", value: "342 Leads (27%)", pct: 27, color: "#1d4ed8" },
-        { label: "Enrolled", value: "210 Leads (17%)", pct: 17, color: "#1a1c19" },
+        { label: "Enrolled", value: "210 Leads (17%)", pct: 17, color: "#1F2937" },
       ],
       recent: [
         {
@@ -2375,12 +2375,12 @@ export const ADMIN_SIS_SCREENS: Record<string, SisScreenConfig> = {
       leftTitle: "Conversion Stages Optimization",
       rightTitle: "Top Lead Acquisition Channels",
       bars: [
-        { label: "Prospect -> Applied", value: "14.2 days", width: "100%", color: "#017f3f" },
+        { label: "Prospect -> Applied", value: "14.2 days", width: "100%", color: "#2563EB" },
         { label: "Applied -> Admitted", value: "3.1 days", width: "51%", color: "#849f38" },
         { label: "Admitted -> Enrolled", value: "8.4 days", width: "39%", color: "#1d4ed8" },
       ],
       outcomes: [
-        { label: "Direct / Web Search", color: "#017f3f", value: "4,102 leads" },
+        { label: "Direct / Web Search", color: "#2563EB", value: "4,102 leads" },
         { label: "Paid Advertisements", color: "#1d4ed8", value: "2,904 leads" },
         { label: "College Fairs & Outreach", color: "#849f38", value: "1,240 leads" },
         { label: "Alumni Referrals", color: "#8d928a", value: "840 leads" },
@@ -5717,7 +5717,7 @@ export const ADMIN_SIS_SCREENS: Record<string, SisScreenConfig> = {
           label: "GPT-4o",
           amount: "$1,420",
           pct: 57,
-          color: "#017f3f",
+          color: "#2563EB",
           href: "/admin/f/ai-10-usage-cost",
         },
         {

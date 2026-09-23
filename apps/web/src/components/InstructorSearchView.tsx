@@ -179,24 +179,29 @@ export function InstructorSearchView() {
     }
     const params = new URLSearchParams();
     const qFromUrl = (searchParams.get("q") ?? "").trim();
-    const composed = [
-      qFromUrl,
-      next.studentNumber,
-      next.lastName,
-      next.firstName,
-      next.email,
-      next.sisEmail,
-      next.preferredName,
-      next.middleName,
-      next.program.split(":")[0],
-      next.city,
-    ]
+    const nameBits = [next.lastName, next.firstName, next.preferredName, next.middleName]
       .map((v) => v.trim())
       .filter(Boolean);
+    // Prefer explicit q; don't duplicate the same token from first/last name fields.
+    const qParts = [qFromUrl, ...nameBits.filter((bit) => bit.toLowerCase() !== qFromUrl.toLowerCase())];
+    const composed = [qParts.join(" "), next.studentNumber, next.email, next.sisEmail, next.program.split(":")[0], next.city]
+      .map((v) => v.trim())
+      .filter(Boolean);
+    // Dedupe tokens so q=Brown&firstName=Brown does not become "Brown Brown".
+    const seenTok = new Set<string>();
+    const q = composed
+      .join(" ")
+      .split(/\s+/)
+      .filter((t) => {
+        const key = t.toLowerCase();
+        if (!key || seenTok.has(key)) return false;
+        seenTok.add(key);
+        return true;
+      })
+      .join(" ");
     const hasFilters = Object.values(next).some((v) => v.trim()) || Boolean(qFromUrl);
-    // Live /search requires a q token; use student-number prefix when only dropdown filters are set.
-    const q = composed.join(" ").trim() || (hasFilters ? "ST-" : "");
-    if (q) params.set("q", q);
+    const qFinal = q || (hasFilters ? "ST-" : "");
+    if (qFinal) params.set("q", qFinal);
     for (const [key, value] of Object.entries(next)) {
       if (value.trim()) params.set(key, value.trim());
     }
@@ -241,14 +246,16 @@ export function InstructorSearchView() {
           }
           if (f.status) {
             const st = f.status.toLowerCase();
-            // Match lifecycle-ish tokens present in sub (enrolled/active/withdrawn/etc.)
             const statusAliases: Record<string, string[]> = {
-              "active student": ["enrolled", "active"],
-              "registered student": ["registered", "completed"],
-              "withdrawn students": ["withdrawn"],
-              "leave of absence": ["leave", "loa"],
-              "on-hold": ["hold", "probation"],
-              "follow up": ["alert", "warning", "follow"],
+              "active student": ["active student", "enrolled", "active"],
+              "registered student": ["registered student", "registered", "completed"],
+              "withdrawn students": ["withdrawn students", "withdrawn"],
+              "leave of absence": ["leave of absence", "leave", "loa"],
+              "on-hold": ["on-hold", "hold", "probation"],
+              "follow up": ["follow up", "alert", "warning", "follow"],
+              "new inquiry": ["new inquiry", "inquiry"],
+              "approved application": ["approved application", "approved"],
+              "pre-enrolment application": ["pre-enrolment", "pre-enroll"],
             };
             const aliases = statusAliases[st] || [st];
             if (!aliases.some((a) => hay.includes(a))) return false;
@@ -580,7 +587,22 @@ export function InstructorSearchView() {
         <div className="mh-teacher-search__list">
           {visibleGroups.map((group) =>
             group.items.map((item) => (
-              <article key={`${group.type}-${item.id}`} className="mh-teacher-search__card">
+              <article
+                key={`${group.type}-${item.id}`}
+                className={`mh-teacher-search__card${item.href ? " is-clickable" : ""}`}
+                role={item.href ? "link" : undefined}
+                tabIndex={item.href ? 0 : undefined}
+                onClick={() => {
+                  if (item.href) router.push(item.href);
+                }}
+                onKeyDown={(e) => {
+                  if (!item.href) return;
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    router.push(item.href);
+                  }
+                }}
+              >
                 <div className="mh-teacher-search__icon">
                   <img src={groupIcon(group.type)} alt="" width={18} height={18} />
                 </div>
@@ -595,7 +617,10 @@ export function InstructorSearchView() {
                   <button
                     type="button"
                     className="mh-teacher-btn mh-teacher-btn--secondary"
-                    onClick={() => router.push(item.href!)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      router.push(item.href!);
+                    }}
                   >
                     {actionLabel(group.type)}
                   </button>

@@ -502,299 +502,415 @@ function PageHead({
 
 /* ——— Existing archetype views ——— */
 
+function QuickAccessIcon({ name }: { name: string }) {
+  const common = {
+    width: 22,
+    height: 22,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 2,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true as const,
+  };
+  switch (name) {
+    case "calendar":
+      return (
+        <svg {...common}>
+          <rect x="3" y="4" width="18" height="18" rx="2" />
+          <path d="M16 2v4M8 2v4M3 10h18" />
+        </svg>
+      );
+    case "clipboard":
+      return (
+        <svg {...common}>
+          <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" />
+          <rect x="9" y="3" width="6" height="4" rx="1" />
+          <path d="M9 12h6M9 16h4" />
+        </svg>
+      );
+    case "check":
+      return (
+        <svg {...common}>
+          <path d="M9 11l3 3L22 4" />
+          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+        </svg>
+      );
+    case "settings":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9c.3.6.9 1 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+        </svg>
+      );
+    case "plus":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 8v8M8 12h8" />
+        </svg>
+      );
+    case "clock":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 7v5l3 2" />
+        </svg>
+      );
+    case "mail":
+      return (
+        <svg {...common}>
+          <rect x="3" y="5" width="18" height="14" rx="2" />
+          <path d="m3 7 9 6 9-6" />
+        </svg>
+      );
+    case "board":
+      return (
+        <svg {...common}>
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <path d="M8 9h8M8 13h5M8 17h6" />
+        </svg>
+      );
+    case "megaphone":
+      return (
+        <svg {...common}>
+          <path d="m3 11 18-5v12L3 13v-2z" />
+          <path d="M11.5 15.5V19a2 2 0 0 1-2 2h-1" />
+        </svg>
+      );
+    case "books":
+      return (
+        <svg {...common}>
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+          <path d="M8 7h8M8 11h6" />
+        </svg>
+      );
+    case "sparkles":
+      return (
+        <svg {...common}>
+          <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" />
+          <path d="M12 8.5 13.2 11l2.5.4-1.8 1.8.4 2.5L12 14.5 10.7 15.7l.4-2.5-1.8-1.8 2.5-.4z" />
+        </svg>
+      );
+    default:
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="8" />
+        </svg>
+      );
+  }
+}
+
 function DashboardView({ config }: { config: TeacherScreenConfig }) {
   const router = useRouter();
+  const live = useOptionalTeacherLive();
   const d = config.dashboard;
-  const endedLinks =
-    d?.endedCourses?.length
-      ? d.endedCourses.map((row) => ({
-          label: row.label,
-          href: row.href || (row.sectionId ? `/instructor/gradebook?sectionId=${encodeURIComponent(row.sectionId)}` : "/instructor/gradebook"),
-        }))
-      : (d?.timetable || []).map((row) => {
-          const sectionId = row.href?.match(/\/sections\/([^/?#]+)/)?.[1];
-          return {
-            label: `${row.code}: ${row.room || row.title}`,
-            href: sectionId
-              ? `/instructor/gradebook?sectionId=${encodeURIComponent(sectionId)}`
-              : row.href || "/instructor/gradebook",
-          };
-        });
-  const quick = d?.quickActions || [];
   const sections = d?.timetable || [];
-  return (
-    <div className="mh-hcc-home" data-figma-id={config.figmaId}>
-      <section className="mh-hcc-hero" aria-label="Campus home">
-        <div className="mh-hcc-hero__media" aria-hidden>
-          <img src="/brand/campus/hero.png" alt="" className="mh-hcc-hero__img" />
-        </div>
-        <div className="mh-hcc-hero__veil" aria-hidden />
-        <div className="mh-hcc-hero__content">
-          <p className="mh-hcc-hero__brand">Heritage Community College</p>
-          <h1 className="mh-hcc-hero__title">Welcome to campus</h1>
-          <p className="mh-hcc-hero__lead">
-            Every day is an opportunity to learn, grow, and take another step toward your goals.
-          </p>
-          <div className="mh-hcc-hero__cta">
-            <button type="button" className="mh-hcc-hero__btn" onClick={() => router.push("/instructor/sections")}>
-              Open my sections
-            </button>
-            <button
-              type="button"
-              className="mh-hcc-hero__btn mh-hcc-hero__btn--ghost"
-              onClick={() => router.push("/instructor/messages")}
-            >
-              Message Center
-            </button>
-          </div>
-        </div>
-      </section>
+  const gradeSubs = d?.gradeSubmissions || [];
+  const announcements = d?.announcements || [];
+  const alerts = d?.alerts || [];
+  const [tab, setTab] = useState("sections");
 
-      {endedLinks.length ? (
-        <section className="mh-hcc-banner" role="status">
-          <div className="mh-hcc-banner__copy">
-            <strong>Courses you are teaching have ended. Please submit your final marks.</strong>
-            <p>
-              <span className="mh-hcc-banner__dot" /> Live sections:{" "}
-              {endedLinks.map((item, i) => (
-                <span key={`${item.label}-${i}`}>
-                  {i > 0 ? ", " : null}
-                  <button
-                    type="button"
-                    className="mh-hcc-banner__link"
-                    onClick={() => router.push(item.href)}
-                  >
-                    {item.label}
-                  </button>
-                </span>
-              ))}
-            </p>
+  const studentCount = live?.bootstrap?.studentCount ?? 0;
+  const sectionCount = live?.bootstrap?.sectionCount ?? sections.length;
+  const courseCount = new Set(sections.map((s) => s.code)).size || sections.length;
+  const draftGradeCount = live?.bootstrap?.draftGradeCount ?? gradeSubs.length;
+  const instructorName = d?.name || live?.bootstrap?.displayName || "Instructor";
+  const instructorMeta = d?.meta || live?.bootstrap?.email || "";
+  const designation = d?.statusBadge || (sectionCount ? "Instructor" : "Instructor");
+
+  const tabs = [
+    { id: "sections", label: "My Sections" },
+    { id: "grades", label: "Pending Grade Submissions" },
+    { id: "notifications", label: "Notifications" },
+    { id: "alerts", label: "Alerts" },
+    { id: "schedule", label: "Schedule" },
+    { id: "office", label: "Office Hours" },
+  ] as const;
+
+  const quickAccess = [
+    { label: "Settings", href: "/instructor/f/t15-settings", tone: "navy", icon: "settings" },
+    { label: "My Courses", href: "/instructor/sections", tone: "rose", icon: "plus" },
+    { label: "Availability", href: "/instructor/f/t04-profile-availability", tone: "cyan", icon: "clock" },
+    { label: "Messages", href: "/instructor/messages", tone: "red", icon: "mail" },
+    { label: "Workshop", href: "/instructor/f/t11-workshops?list=mine", tone: "sky", icon: "board" },
+    { label: "Student", href: "/instructor/f/t12-students-view", tone: "blue", icon: "megaphone" },
+    { label: "AI Draft", href: "/instructor/ai-draft", tone: "violet", icon: "books" },
+    { label: "Ask AI", href: "/instructor/ask", tone: "indigo", icon: "sparkles" },
+    { label: "Submit Grade", href: "/instructor/gradebook", tone: "sky", icon: "clipboard" },
+  ] as const;
+
+  const stats = [
+    { label: "Students", value: studentCount, icon: "users", href: "/instructor/f/t12-students-view" },
+    { label: "Courses", value: courseCount, icon: "book", href: "/instructor/sections" },
+    { label: "Active Sections", value: sectionCount, icon: "signal", href: "/instructor/sections" },
+    { label: "Draft Grades", value: draftGradeCount, icon: "user", href: "/instructor/gradebook" },
+  ];
+
+  return (
+    <div className="mh-ct-dash" data-figma-id={config.figmaId}>
+      <div className="mh-ct-dash__main">
+        <div className="mh-ct-dash__stats">
+          {stats.map((s) => (
+            <button
+              key={s.label}
+              type="button"
+              className="mh-ct-dash__stat"
+              onClick={() => router.push(s.href)}
+            >
+              <span className={`mh-ct-dash__stat-icon mh-ct-dash__stat-icon--${s.icon}`} aria-hidden />
+              <div>
+                <strong>{s.value}</strong>
+                <span>{s.label}</span>
+              </div>
+            </button>
+          ))}
+        </div>
+
+        <section className="mh-ct-dash__controls">
+          <h2>Dashboard Controls</h2>
+          <div className="mh-ct-dash__controls-row">
+            <div className="mh-ct-dash__designation">
+              <strong>
+                {designation} · {instructorName}
+              </strong>
+              {instructorMeta ? <span>{instructorMeta}</span> : null}
+            </div>
+            <button type="button" className="mh-ct-dash__control-chip" onClick={() => router.push("/instructor/ai-draft")}>
+              AI Draft
+            </button>
+            <button type="button" className="mh-ct-dash__control-chip" onClick={() => router.push("/instructor/ask")}>
+              Ask MyHeritage
+            </button>
           </div>
+        </section>
+
+        <div className="mh-ct-dash__tabs" role="tablist" aria-label="Dashboard views">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === t.id}
+              className={`mh-ct-dash__tab${tab === t.id ? " is-active" : ""}`}
+              onClick={() => setTab(t.id)}
+            >
+              {t.label}
+            </button>
+          ))}
           <button
             type="button"
-            className="mh-hcc-banner__action"
-            onClick={() => router.push(endedLinks[0]?.href || "/instructor/gradebook")}
+            className="mh-ct-dash__refresh"
+            aria-label="Refresh"
+            onClick={() => void live?.refresh()}
           >
-            Submit marks
+            ↻
           </button>
-        </section>
-      ) : null}
-
-      <section className="mh-hcc-story">
-        <div className="mh-hcc-story__visual">
-          <img src="/brand/campus/learn.png" alt="Learning spaces at Heritage Community College" />
         </div>
-        <div className="mh-hcc-story__copy">
-          <h2>Grow beyond the classroom</h2>
-          <p>
-            Explore, connect, and make the most of your time at Heritage. Check Moodle daily, review deadlines early, and
-            use campus email for important announcements.
-          </p>
-          <ul>
-            <li>Course names, dates, and class timings live in Program Plan</li>
-            <li>Review your schedule 5–7 days before a course begins</li>
-            <li>Seek support early if you need assistance</li>
-          </ul>
-        </div>
-      </section>
 
-      {d ? (
-        <section className="mh-hcc-instructor">
-          <header className="mh-hcc-instructor__head">
-            <div>
-              <h2>
-                {d.greeting.includes("Welcome") ? `Instructor · ${d.name}` : `${d.greeting} ${d.name}`}
-              </h2>
-              <p className="mh-teacher-muted">{d.meta}</p>
-            </div>
-            {d.statusBadge ? <span className="mh-teacher-dash__status">{d.statusBadge}</span> : null}
+        <section className="mh-ct-dash__panel">
+          <header className="mh-ct-dash__panel-head">
+            <h2>{tabs.find((t) => t.id === tab)?.label}</h2>
           </header>
 
-          {sections.length ? (
-            <div className="mh-hcc-section-strip" aria-label="Assigned sections">
-              {sections.map((row) => (
-                <button
-                  key={row.time + row.code}
-                  type="button"
-                  className="mh-hcc-section-chip"
-                  onClick={() => row.href && router.push(row.href)}
-                >
-                  <span className="mh-hcc-section-chip__code">{row.code}</span>
-                  <span className="mh-hcc-section-chip__meta">{row.room}</span>
-                  <strong>{row.title}</strong>
-                </button>
-              ))}
-            </div>
-          ) : null}
-
-          {quick.length ? (
-            <div className="mh-hcc-quick">
-              {quick.map((a) => (
-                <button
-                  key={a.label}
-                  type="button"
-                  className={`mh-hcc-quick__btn${a.variant === "ai" ? " is-ai" : ""}${a.variant === "primary" ? " is-primary" : ""}`}
-                  onClick={() => router.push(a.href)}
-                >
-                  {a.label}
-                </button>
-              ))}
-            </div>
-          ) : null}
-
-          <div className="mh-hcc-workgrid">
-            <div className="mh-hcc-workgrid__main">
-              <section className="mh-hcc-panel">
-                <div className="mh-hcc-panel__head">
-                  <h2>My sections</h2>
-                  <button type="button" className="mh-teacher-link" onClick={() => router.push("/instructor/sections")}>
-                    All courses
-                  </button>
-                </div>
-                <div className="mh-hcc-list">
-                  {sections.length === 0 ? (
-                    <p className="mh-teacher-muted">No sections assigned yet.</p>
-                  ) : (
-                    sections.map((row) => (
-                      <button
-                        key={row.time + row.code}
-                        type="button"
-                        className="mh-hcc-list__row"
-                        onClick={() => row.href && router.push(row.href)}
-                      >
-                        <span className="mh-hcc-list__time">{row.time}</span>
-                        <span className="mh-hcc-list__body">
-                          <strong>
-                            {row.code} · {row.title}
-                          </strong>
-                          <em>{row.room}</em>
-                        </span>
-                        <span className={badgeClass(row.statusTone)}>{row.status}</span>
-                        <span className="mh-hcc-list__go">{row.action || "Open"}</span>
-                      </button>
-                    ))
-                  )}
-                </div>
-              </section>
-
-              {(d.gradeSubmissions?.length ?? 0) > 0 ? (
-                <section className="mh-hcc-panel">
-                  <div className="mh-hcc-panel__head">
-                    <h2>Final grade submissions</h2>
-                    <button
-                      type="button"
-                      className="mh-teacher-link"
-                      onClick={() => router.push("/instructor/f/t62-pending-grade-submissions")}
-                    >
-                      Open board
-                    </button>
-                  </div>
-                  <div className="mh-hcc-list">
-                    {d.gradeSubmissions!.map((row) => (
-                      <button
-                        key={row.sectionCode}
-                        type="button"
-                        className="mh-hcc-list__row"
-                        onClick={() => router.push(row.href || "/instructor/gradebook")}
-                      >
-                        <span className="mh-hcc-list__time">{row.code}</span>
-                        <span className="mh-hcc-list__body">
-                          <strong>{row.title}</strong>
-                          <em>
-                            {row.sectionCode} · {row.missing} missing
-                          </em>
-                        </span>
-                        <span className={badgeClass(row.statusTone)}>{row.status}</span>
-                        <span className="mh-hcc-list__go">Submit</span>
-                      </button>
-                    ))}
-                  </div>
-                </section>
-              ) : null}
-
-              <section className="mh-hcc-panel">
-                <div className="mh-hcc-panel__head">
-                  <h2>Notifications</h2>
-                  <button type="button" className="mh-teacher-link" onClick={() => router.push("/instructor/notifications")}>
-                    Open inbox
-                  </button>
-                </div>
-                <div className="mh-hcc-list">
-                  {(d.announcements || []).length === 0 ? (
-                    <p className="mh-teacher-muted">No notifications yet.</p>
-                  ) : (
-                    d.announcements.map((a) => (
-                      <button
-                        key={a.title}
-                        type="button"
-                        className="mh-hcc-list__row mh-hcc-list__row--stack"
-                        onClick={() => router.push("/instructor/notifications")}
-                      >
-                        <span className="mh-hcc-list__body">
-                          <strong>{a.title}</strong>
-                          <em>{a.when}</em>
-                          <span className="mh-hcc-list__note">{a.body}</span>
-                        </span>
-                      </button>
-                    ))
-                  )}
-                </div>
-              </section>
-            </div>
-
-            <div className="mh-hcc-workgrid__side">
-              <section className="mh-hcc-panel">
-                <div className="mh-hcc-panel__head">
-                  <h2>Alerts</h2>
-                </div>
-                <div className="mh-hcc-list">
-                  {(d.alerts || []).length === 0 ? (
-                    <p className="mh-teacher-muted">No alerts.</p>
-                  ) : (
-                    d.alerts.map((a) => (
-                      <button
-                        key={a.title}
-                        type="button"
-                        className={`mh-hcc-list__row mh-hcc-list__row--stack mh-hcc-alert--${a.tone}`}
-                        onClick={() =>
-                          router.push(
-                            /grade|draft|submit/i.test(`${a.title} ${a.body}`)
-                              ? "/instructor/gradebook"
-                              : "/instructor/notifications",
-                          )
-                        }
-                      >
-                        <span className="mh-hcc-list__body">
-                          <strong>{a.title}</strong>
-                          <span className="mh-hcc-list__note">{a.body}</span>
-                        </span>
-                      </button>
-                    ))
-                  )}
-                </div>
-              </section>
-              <section className="mh-hcc-panel mh-hcc-panel--action">
-                <div className="mh-hcc-panel__head">
-                  <h2>Message Center</h2>
-                </div>
-                <p className="mh-hcc-panel__lead">Inbox and chat threads stay in Communication → Message Center.</p>
-                <div className="mh-hcc-panel__actions">
-                  <button type="button" className="mh-hcc-hero__btn" onClick={() => router.push("/instructor/messages")}>
-                    Open inbox
-                  </button>
+          {tab === "sections" ? (
+            <div className="mh-ct-dash__list">
+              {sections.length === 0 ? (
+                <p className="mh-teacher-muted">No sections assigned yet.</p>
+              ) : (
+                sections.map((row) => (
                   <button
+                    key={row.time + row.code + row.room}
                     type="button"
-                    className="mh-hcc-hero__btn mh-hcc-hero__btn--ghost mh-hcc-hero__btn--dark"
-                    onClick={() => router.push("/instructor/ask")}
+                    className="mh-ct-dash__row"
+                    onClick={() => row.href && router.push(row.href)}
                   >
-                    Ask MyHeritage
+                    <span className="mh-ct-dash__row-time">{row.code}</span>
+                    <span className="mh-ct-dash__row-body">
+                      <strong>{row.title}</strong>
+                      <em>
+                        Section {row.room}
+                        {row.time ? ` · Term ${row.time}` : ""}
+                      </em>
+                    </span>
+                    <span className={badgeClass(row.statusTone)}>{row.status}</span>
+                    <span className="mh-ct-dash__row-go">{row.action || "Open"}</span>
                   </button>
-                </div>
-              </section>
+                ))
+              )}
             </div>
-          </div>
+          ) : null}
+
+          {tab === "grades" ? (
+            <div className="mh-ct-dash__list">
+              {gradeSubs.length === 0 ? (
+                <p className="mh-teacher-muted">No pending grade submissions.</p>
+              ) : (
+                gradeSubs.map((row) => (
+                  <button
+                    key={row.sectionCode}
+                    type="button"
+                    className="mh-ct-dash__row"
+                    onClick={() => router.push(row.href || "/instructor/gradebook")}
+                  >
+                    <span className="mh-ct-dash__row-time">{row.code}</span>
+                    <span className="mh-ct-dash__row-body">
+                      <strong>{row.title}</strong>
+                      <em>
+                        {row.sectionCode} · {row.missing} missing
+                      </em>
+                    </span>
+                    <span className={badgeClass(row.statusTone)}>{row.status}</span>
+                    <span className="mh-ct-dash__row-go">Submit</span>
+                  </button>
+                ))
+              )}
+            </div>
+          ) : null}
+
+          {tab === "notifications" ? (
+            <div className="mh-ct-dash__list">
+              {announcements.length === 0 ? (
+                <p className="mh-teacher-muted">No notifications yet.</p>
+              ) : (
+                announcements.map((a) => (
+                  <button
+                    key={a.title + a.when}
+                    type="button"
+                    className="mh-ct-dash__row mh-ct-dash__row--stack"
+                    onClick={() => router.push("/instructor/notifications")}
+                  >
+                    <span className="mh-ct-dash__row-body">
+                      <strong>{a.title}</strong>
+                      <em>{a.when}</em>
+                      <span className="mh-ct-dash__row-note">{a.body}</span>
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+          ) : null}
+
+          {tab === "alerts" ? (
+            <div className="mh-ct-dash__list">
+              {alerts.length === 0 ? (
+                <p className="mh-teacher-muted">No alerts.</p>
+              ) : (
+                alerts.map((a) => (
+                  <button
+                    key={a.title}
+                    type="button"
+                    className={`mh-ct-dash__row mh-ct-dash__row--stack mh-ct-dash__alert--${a.tone}`}
+                    onClick={() =>
+                      router.push(
+                        /grade|draft|submit/i.test(`${a.title} ${a.body}`)
+                          ? "/instructor/gradebook"
+                          : "/instructor/notifications",
+                      )
+                    }
+                  >
+                    <span className="mh-ct-dash__row-body">
+                      <strong>{a.title}</strong>
+                      <span className="mh-ct-dash__row-note">{a.body}</span>
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+          ) : null}
+
+          {tab === "schedule" ? (
+            <div className="mh-ct-dash__list">
+              {sections.length === 0 ? (
+                <p className="mh-teacher-muted">No schedule items yet.</p>
+              ) : (
+                sections.map((row) => (
+                  <button
+                    key={`sched-${row.code}-${row.room}`}
+                    type="button"
+                    className="mh-ct-dash__row"
+                    onClick={() => router.push(row.href || "/instructor/f/t06-profile-schedule")}
+                  >
+                    <span className="mh-ct-dash__row-time">{row.time}</span>
+                    <span className="mh-ct-dash__row-body">
+                      <strong>
+                        {row.code} · {row.title}
+                      </strong>
+                      <em>{row.room}</em>
+                    </span>
+                    <span className="mh-ct-dash__row-go">Open</span>
+                  </button>
+                ))
+              )}
+            </div>
+          ) : null}
+
+          {tab === "office" ? (
+            <div className="mh-ct-dash__list">
+              {(d?.officeHours || []).length === 0 ? (
+                <p className="mh-teacher-muted">No office hours listed.</p>
+              ) : (
+                (d?.officeHours || []).map((h) => (
+                  <div key={h.day + h.window} className="mh-ct-dash__row mh-ct-dash__row--static">
+                    <span className="mh-ct-dash__row-time">{h.day}</span>
+                    <span className="mh-ct-dash__row-body">
+                      <strong>{h.window}</strong>
+                      <em>
+                        {h.mode}
+                        {h.remaining ? ` · ${h.remaining}` : ""}
+                      </em>
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          ) : null}
         </section>
-      ) : null}
+      </div>
+
+      <aside className="mh-ct-dash__aside">
+        <h2>Quick Access</h2>
+        <div className="mh-ct-dash__qa-grid">
+          {quickAccess.map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              className={`mh-ct-dash__qa mh-ct-dash__qa--${item.tone}`}
+              onClick={() => router.push(item.href)}
+            >
+              <span className="mh-ct-dash__qa-ico" aria-hidden>
+                <QuickAccessIcon name={item.icon} />
+              </span>
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </div>
+        <details className="mh-ct-dash__acc">
+          <summary>Shared Files</summary>
+          <p className="mh-teacher-muted">No shared files yet.</p>
+        </details>
+        <details className="mh-ct-dash__acc" open={Boolean(gradeSubs.length || alerts.length)}>
+          <summary>To-do</summary>
+          {alerts.length || gradeSubs.length ? (
+            <ul className="mh-ct-dash__todo">
+              {gradeSubs.slice(0, 3).map((g) => (
+                <li key={g.sectionCode}>
+                  <button type="button" onClick={() => router.push(g.href || "/instructor/gradebook")}>
+                    Submit Grade · {g.code}
+                  </button>
+                </li>
+              ))}
+              {alerts.slice(0, 3).map((a) => (
+                <li key={a.title}>{a.title}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mh-teacher-muted">Nothing pending.</p>
+          )}
+        </details>
+      </aside>
     </div>
   );
 }
@@ -4654,7 +4770,19 @@ function WorkshopsView({ config }: { config: TeacherScreenConfig }) {
           {live?.loading ? <p className="mh-teacher-muted">Loading workshops…</p> : null}
           {!live?.loading && cards.length === 0 ? <p className="mh-teacher-muted">No workshops were found.</p> : null}
           {cards.map((card) => (
-            <article key={card.title} className="mh-teacher-workshop-card">
+            <article
+              key={card.title}
+              className="mh-teacher-workshop-card is-clickable"
+              role="link"
+              tabIndex={0}
+              onClick={() => router.push(card.href || "/instructor/f/t24-workshop-detail")}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  router.push(card.href || "/instructor/f/t24-workshop-detail");
+                }
+              }}
+            >
               <div className="mh-teacher-workshop-card__top">
                 <div className="mh-teacher-workshop-card__tags">
                   <span className={badgeClass("info")}>{card.tag}</span>
@@ -4678,7 +4806,10 @@ function WorkshopsView({ config }: { config: TeacherScreenConfig }) {
                 <button
                   type="button"
                   className="mh-teacher-btn"
-                  onClick={() => router.push(card.href || "/instructor/f/t24-workshop-detail")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    router.push(card.href || "/instructor/f/t24-workshop-detail");
+                  }}
                 >
                   View Workshop
                 </button>
@@ -4835,7 +4966,23 @@ function WorkshopEnrolmentsView({ config }: { config: TeacherScreenConfig }) {
                   <strong>{row.studentName}</strong>
                 </span>
                 <span>{row.studentNumber}</span>
-                <span>{row.workshop}</span>
+                <span>
+                  {row.workshopId ? (
+                    <button
+                      type="button"
+                      className="mh-teacher-link"
+                      onClick={() =>
+                        router.push(
+                          `/instructor/f/t24-workshop-detail?workshopId=${encodeURIComponent(row.workshopId!)}`,
+                        )
+                      }
+                    >
+                      {row.workshop}
+                    </button>
+                  ) : (
+                    row.workshop
+                  )}
+                </span>
                 <span>
                   <span className={badgeClass(row.statusTone)}>{row.status}</span>
                 </span>
@@ -5279,6 +5426,27 @@ function StudentDetailView({ config }: { config: TeacherScreenConfig }) {
             </div>
           ) : null}
 
+          {tab === "Current Courses" ? (
+            <div className="mh-teacher-list" style={{ marginTop: 16 }}>
+              {d.courses.length === 0 ? (
+                <p className="mh-teacher-muted">No active enrolments in your sections.</p>
+              ) : (
+                d.courses.map((c) => (
+                  <div key={c.code} className="mh-teacher-list__item">
+                    <div>
+                      <strong>
+                        {c.code} · {c.title}
+                      </strong>
+                      <span>
+                        {c.grade} · {c.status}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          ) : null}
+
           {tab === "Assessments" ? (
             <div className="mh-teacher-list" style={{ marginTop: 16 }}>
               {assessments.length === 0 ? (
@@ -5413,7 +5581,9 @@ function StudentDetailView({ config }: { config: TeacherScreenConfig }) {
             <section className="mh-teacher-card">
               <h2>{tab} summary</h2>
               <p className="mh-teacher-muted">
-                {tab === "Assessments"
+                {tab === "Current Courses"
+                  ? `${d.courses.length} current course enrolment(s).`
+                  : tab === "Assessments"
                   ? `${assessments.length} assessment row(s) from your gradebook.`
                   : tab === "Requirements"
                     ? `${requirements.length} program requirement(s).`
@@ -5865,9 +6035,9 @@ function AssessmentBuilderView({ config }: { config: TeacherScreenConfig }) {
 
         <div className="mh-teacher-assess__upload">
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" aria-hidden>
-            <path d="M12 16V8M12 8l-3 3M12 8l3 3" stroke="#017f3f" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-            <path d="M20 16.5a3.5 3.5 0 0 0-2.1-6.4A5.5 5.5 0 0 0 7.1 8.4 3.5 3.5 0 0 0 4 11.8" stroke="#017f3f" strokeWidth="1.6" strokeLinecap="round" />
-            <path d="M8 19h8" stroke="#017f3f" strokeWidth="1.6" strokeLinecap="round" />
+            <path d="M12 16V8M12 8l-3 3M12 8l3 3" stroke="#2563EB" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M20 16.5a3.5 3.5 0 0 0-2.1-6.4A5.5 5.5 0 0 0 7.1 8.4 3.5 3.5 0 0 0 4 11.8" stroke="#2563EB" strokeWidth="1.6" strokeLinecap="round" />
+            <path d="M8 19h8" stroke="#2563EB" strokeWidth="1.6" strokeLinecap="round" />
           </svg>
           <strong>{data.uploadHint}</strong>
           <span>{data.uploadFormats}</span>
@@ -5884,8 +6054,8 @@ function AssessmentBuilderView({ config }: { config: TeacherScreenConfig }) {
           <div className="mh-teacher-assess__preview-meta">
             <span>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <rect x="3" y="5" width="18" height="16" rx="2" stroke="#017f3f" strokeWidth="1.6" />
-                <path d="M3 10h18M8 3v4M16 3v4" stroke="#017f3f" strokeWidth="1.6" strokeLinecap="round" />
+                <rect x="3" y="5" width="18" height="16" rx="2" stroke="#2563EB" strokeWidth="1.6" />
+                <path d="M3 10h18M8 3v4M16 3v4" stroke="#2563EB" strokeWidth="1.6" strokeLinecap="round" />
               </svg>
               {`Open Date: ${formatPreview(openDate, data.preview.openDate.replace(/^Open Date:\s*/, ""))}`}
             </span>
@@ -7013,11 +7183,16 @@ function CourseAdminView({ config }: { config: TeacherScreenConfig }) {
                     <button
                       type="button"
                       className="mh-teacher-link"
-                      onClick={() =>
-                        router.push(`${createHref}&sessionId=${encodeURIComponent(session.id)}`)
-                      }
+                      onClick={() => {
+                        const liveSection = !session.id.startsWith("sess-");
+                        router.push(
+                          liveSection
+                            ? `/instructor/sections/${encodeURIComponent(session.id)}`
+                            : `${createHref}&sessionId=${encodeURIComponent(session.id)}`,
+                        );
+                      }}
                     >
-                      VIEW
+                      {session.id.startsWith("sess-") ? "VIEW" : "OPEN COURSE"}
                     </button>
                     <button
                       type="button"

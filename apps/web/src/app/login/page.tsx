@@ -2,7 +2,7 @@
 
 import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { api, loadSession, saveSession, type Session } from "@/lib/api";
+import { api, clearSession, loadSession, saveSession, type Session } from "@/lib/api";
 
 function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
@@ -17,8 +17,8 @@ function isValidIdentifier(value: string) {
 }
 
 function homeForRoles(roles: string[]) {
-  if (roles.includes("instructor")) return "/instructor";
   if (roles.includes("admin") || roles.includes("registrar")) return "/admin";
+  if (roles.includes("instructor")) return "/instructor";
   if (roles.includes("applicant")) return "/applicant";
   if (roles.includes("employer")) return "/employer";
   if (roles.length > 1) return "/role-select";
@@ -28,7 +28,7 @@ function homeForRoles(roles: string[]) {
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [email, setEmail] = useState("ST-2024-001");
+  const [email, setEmail] = useState("admin@heritage.edu");
   const [password, setPassword] = useState("Heritage!2026");
   const [showPassword, setShowPassword] = useState(false);
   const [remember, setRemember] = useState(true);
@@ -37,13 +37,13 @@ function LoginForm() {
   const [touchedEmail, setTouchedEmail] = useState(false);
   const [touchedPassword, setTouchedPassword] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [existing, setExisting] = useState<Session | null>(null);
 
   useEffect(() => {
-    const existing = loadSession();
-    if (!existing) return;
-    const next = searchParams.get("next");
-    router.replace(next && next.startsWith("/") ? next : homeForRoles(existing.roles));
-  }, [router, searchParams]);
+    // Do not auto-bounce away — a saved student/instructor session was blocking admin login.
+    const session = loadSession();
+    setExisting(session);
+  }, []);
 
   const emailTrimmed = email.trim();
   const emailError = useMemo(() => {
@@ -105,13 +105,23 @@ function LoginForm() {
         setError("Multi-factor authentication is required for this account. Complete MFA with your institution before continuing.");
         return;
       }
+      if (!session.accessToken || !session.roles?.length) {
+        setError("Sign-in succeeded but no session was returned. Try again.");
+        return;
+      }
+      // Replace any previous account only after a successful login.
+      clearSession();
+      setExisting(null);
       saveSession(session, remember);
       if (session.pauseGate || session.accountStatus === "paused") {
-        router.push("/student/compliance/explain");
+        window.location.assign("/student/compliance/explain");
         return;
       }
       const next = searchParams.get("next");
-      router.push(next && next.startsWith("/") ? next : homeForRoles(session.roles));
+      // Prefer role home over a stale ?next= from another portal (e.g. /student while logging in as admin).
+      const dest = next && next.startsWith("/") && canUseNext(next, session.roles) ? next : homeForRoles(session.roles);
+      // Full navigation so middleware sees the freshly written mh_roles cookie (router.push races).
+      window.location.assign(dest);
     } catch (err) {
       const raw = err instanceof Error ? err.message : "Sign-in failed";
       const friendly =
@@ -130,6 +140,15 @@ function LoginForm() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function canUseNext(next: string, roles: string[]) {
+    if (next.startsWith("/admin")) return roles.includes("admin") || roles.includes("registrar");
+    if (next.startsWith("/instructor")) return roles.includes("instructor");
+    if (next.startsWith("/student")) return roles.includes("student");
+    if (next.startsWith("/applicant")) return roles.includes("applicant");
+    if (next.startsWith("/employer")) return roles.includes("employer");
+    return true;
   }
 
   const fieldError = Boolean(passwordError);
@@ -181,13 +200,80 @@ function LoginForm() {
 
         <form onSubmit={onSubmit} noValidate style={{ width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 24 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <h1 style={{ margin: 0, fontFamily: "var(--mh-font-display)", fontSize: 34, fontWeight: 600, lineHeight: 1.15, letterSpacing: "-0.03em", color: "#1A1C19" }}>
+            <h1 style={{ margin: 0, fontFamily: "var(--mh-font-display)", fontSize: 34, fontWeight: 600, lineHeight: 1.15, letterSpacing: "-0.03em", color: "#1F2937" }}>
               Sign in to MyHeritage
             </h1>
             <p style={{ margin: 0, color: "#5C5F5A", fontSize: 15, lineHeight: 1.4 }}>
               Students, instructors, and staff sign in with campus email or student number.
             </p>
           </div>
+
+          {existing ? (
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+                padding: "12px 14px",
+                borderRadius: 12,
+                background: "#F0F4F1",
+                border: "1px solid #D5DED8",
+              }}
+            >
+              <p style={{ margin: 0, fontSize: 14, color: "#1F2937", lineHeight: 1.4 }}>
+                Already signed in as{" "}
+                <strong>
+                  {existing.givenName} {existing.familyName}
+                </strong>
+                .
+              </p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                <button
+                  type="button"
+                  className="mh-btn"
+                  onClick={() => {
+                    const next = searchParams.get("next");
+                    const dest =
+                      next && next.startsWith("/") && canUseNext(next, existing.roles)
+                        ? next
+                        : homeForRoles(existing.roles);
+                    window.location.assign(dest);
+                  }}
+                  style={{
+                    border: 0,
+                    borderRadius: 999,
+                    padding: "8px 14px",
+                    background: "#1B2A4A",
+                    color: "#fff",
+                    fontWeight: 650,
+                    cursor: "pointer",
+                    fontSize: 13,
+                  }}
+                >
+                  Continue
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearSession();
+                    setExisting(null);
+                  }}
+                  style={{
+                    border: "1px solid #C5CEC8",
+                    borderRadius: 999,
+                    padding: "8px 14px",
+                    background: "#fff",
+                    color: "#1F2937",
+                    fontWeight: 650,
+                    cursor: "pointer",
+                    fontSize: 13,
+                  }}
+                >
+                  Use a different account
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           {error && !passwordError && !emailError ? (
             <div style={{ display: "flex", gap: 6, alignItems: "center", color: "#BA1A1A", fontSize: 13 }}>
@@ -198,7 +284,7 @@ function LoginForm() {
 
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: "#1A1C19" }}>Student number or email</span>
+              <span style={{ fontSize: 14, fontWeight: 600, color: "#1F2937" }}>Student number or email</span>
               <input
                 value={email}
                 onChange={(e) => {
@@ -219,7 +305,7 @@ function LoginForm() {
                   borderRadius: 6,
                   border: `1px solid ${emailError ? "#BA1A1A" : "#E1E3DC"}`,
                   background: "#F9FAF6",
-                  color: "#1A1C19",
+                  color: "#1F2937",
                   outline: "none",
                 }}
               />
@@ -232,7 +318,7 @@ function LoginForm() {
             </label>
 
             <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: "#1A1C19" }}>Password</span>
+              <span style={{ fontSize: 14, fontWeight: 600, color: "#1F2937" }}>Password</span>
               <div style={{ position: "relative" }}>
                 <input
                   type={showPassword ? "text" : "password"}
@@ -254,7 +340,7 @@ function LoginForm() {
                     borderRadius: 6,
                     border: `1px solid ${fieldError ? "#BA1A1A" : "#E1E3DC"}`,
                     background: "#F9FAF6",
-                    color: "#1A1C19",
+                    color: "#1F2937",
                     outline: "none",
                   }}
                 />
@@ -305,8 +391,8 @@ function LoginForm() {
                     width: 18,
                     height: 18,
                     borderRadius: 4,
-                    border: `2px solid ${remember ? "#017F3F" : "#E1E3DC"}`,
-                    background: remember ? "#017F3F" : "#FFFFFF",
+                    border: `2px solid ${remember ? "#2563EB" : "#E1E3DC"}`,
+                    background: remember ? "#2563EB" : "#FFFFFF",
                     display: "grid",
                     placeItems: "center",
                     flexShrink: 0,
@@ -317,7 +403,7 @@ function LoginForm() {
                 </span>
                 Remember me
               </label>
-              <a href="/reset" style={{ color: "#017F3F", fontWeight: 600, fontSize: 14, textDecoration: "none" }}>
+              <a href="/reset" style={{ color: "#2563EB", fontWeight: 600, fontSize: 14, textDecoration: "none" }}>
                 Forgot password?
               </a>
             </div>
@@ -331,7 +417,7 @@ function LoginForm() {
                 width: "100%",
                 border: "none",
                 borderRadius: 6,
-                background: canSubmit ? "#017F3F" : "#C5C9C0",
+                background: canSubmit ? "#2563EB" : "#C5C9C0",
                 color: "#FFFFFF",
                 fontSize: 15,
                 fontWeight: 600,

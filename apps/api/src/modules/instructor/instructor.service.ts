@@ -128,6 +128,7 @@ import {
   questionFromFields,
 } from "./courseLmsScreens.js";
 import { isJitsiMeetUrl, jitsiMeetUrl } from "../../lib/jitsiMeet.js";
+import { createClassSessionWithNotifications } from "../campusCompliance/sessions.js";
 
 export type InstructorLivePayload = Record<string, unknown>;
 
@@ -649,7 +650,7 @@ function buildDashboard(ctx: InstructorCtx): InstructorLivePayload {
       greeting: "Welcome to Heritage Community College",
       name: ctx.displayName,
       meta: ctx.person.email,
-      statusBadge: ctx.sections.length ? "Teaching" : "No sections",
+      statusBadge: ctx.sections.length ? "Instructor" : "Instructor",
       quickActions: [
         { label: "Message Center", href: "/instructor/messages", variant: "primary" },
         { label: "Notifications", href: "/instructor/notifications", variant: "secondary" },
@@ -659,7 +660,7 @@ function buildDashboard(ctx: InstructorCtx): InstructorLivePayload {
       timetable: ctx.sections.slice(0, 6).map((s) => {
         const board = sectionGradeBoard(ctx, s.code);
         return {
-          time: s.termCode,
+          time: s.termCode || "",
           code: s.courseCode,
           title: s.courseTitle,
           room: s.code,
@@ -1014,7 +1015,160 @@ function lmsSessionFor(code: string, fallback: string) {
   return fallback;
 }
 
-function buildCourseDetail(ctx: InstructorCtx, path: string): InstructorLivePayload {
+function resolveSectionFromPath(ctx: InstructorCtx, path: string) {
+  const { pathname, query } = parseScreenQuery(path);
+  const viewId = (query.get("view") || "").trim();
+  const sectionId = viewId || pathname.split("/").pop() || "";
+  return (
+    ctx.sections.find((s) => s.id === sectionId) ||
+    (sectionId === "demo" ? ctx.sections[0] : undefined) ||
+    ctx.sections.find((s) => s.enrolments.some((e) => e.status === "enrolled")) ||
+    ctx.sections[0]
+  );
+}
+
+function parseNotifyStudentIds(fields: Record<string, string>): string[] | undefined {
+  const audience = (fields.Audience || fields.audience || "All enrolled students").trim().toLowerCase();
+  if (audience.startsWith("all") || audience === "") return undefined;
+  const raw = fields.NotifyStudentIds || fields.notifyStudentIds || fields.StudentIds || "";
+  const ids = raw
+    .split(/[,;\s]+/)
+    .map((id) => id.trim())
+    .filter((id) => /^[0-9a-f-]{36}$/i.test(id));
+  if (!ids.length) {
+    throw Object.assign(new Error("Select at least one student to notify"), {
+      status: 400,
+      code: "NO_STUDENTS",
+    });
+  }
+  return ids;
+}
+
+async function publishOnlineClassSession(
+  ctx: InstructorCtx,
+  path: string,
+  fields: Record<string, string>,
+) {
+  const sec = resolveSectionFromPath(ctx, path);
+  if (!sec) {
+    throw Object.assign(new Error("No teaching section found for this course"), {
+      status: 400,
+      code: "NO_SECTION",
+    });
+  }
+  const title =
+    (fields.Name || fields.Title || fields.title || `${sec.courseCode} Online Class`).trim() ||
+    `${sec.courseCode} Online Class`;
+  const openRaw = (fields["Open date/time"] || fields.StartsAt || fields.startsAt || "").trim();
+  const startsAt = openRaw ? new Date(openRaw) : new Date();
+  const joinUrl =
+    (fields.JoinUrl || fields.joinUrl || "").trim().startsWith("http")
+      ? (fields.JoinUrl || fields.joinUrl || "").trim()
+      : jitsiMeetUrl(sec.courseCode, sec.code);
+  const notifyStudentIds = parseNotifyStudentIds(fields);
+  const published = await createClassSessionWithNotifications({
+    institutionId: ctx.user.institutionId,
+    sectionId: sec.id,
+    title,
+    startsAt: Number.isNaN(startsAt.getTime()) ? new Date() : startsAt,
+    joinUrl,
+    deliveryMode: "online",
+    sessionKind: "lecture",
+    notifyStudentIds,
+    createdByAccountId: ctx.user.accountId,
+  });
+  return {
+    sectionId: sec.id,
+    joinUrl: published.session.joinUrl || joinUrl,
+    sessionId: published.session.id,
+    notified: published.notified,
+    title: published.session.title,
+  };
+}
+
+async function loadSectionAttendancePayload(
+  ctx: InstructorCtx,
+  sectionId: string,
+): Promise<{
+  meetings: Array<{
+    label: string;
+    present: number;
+    absent: number;
+    late: number;
+    excused: number;
+    total: number;
+  }>;
+  rows: Array<{
+    studentId: string;
+    name: string;
+    studentNumber: string;
+    status: string;
+    meetingLabel: string;
+    recordedAt: string;
+  }>;
+  markHref: string;
+  emptyMessage?: string;
+  attendanceDates: string[];
+}> {
+  const records = await prisma.attendanceRecord.findMany({
+    where: { institutionId: ctx.user.institutionId, sectionId },
+    include: { student: { include: { person: true } } },
+    orderBy: [{ meetingLabel: "desc" }, { recordedAt: "desc" }],
+    take: 500,
+  });
+  const byMeeting = new Map<
+    string,
+    { label: string; present: number; absent: number; late: number; excused: number; total: number }
+  >();
+  const rows = records.map((r) => {
+    const status = (r.status || "present").toLowerCase();
+    const cur = byMeeting.get(r.meetingLabel) || {
+      label: r.meetingLabel,
+      present: 0,
+      absent: 0,
+      late: 0,
+      excused: 0,
+      total: 0,
+    };
+    cur.total += 1;
+    if (status === "absent") cur.absent += 1;
+    else if (status === "late") cur.late += 1;
+    else if (status === "excused") cur.excused += 1;
+    else cur.present += 1;
+    byMeeting.set(r.meetingLabel, cur);
+    return {
+      studentId: r.studentId,
+      name: `${r.student.person.givenName} ${r.student.person.familyName}`.trim(),
+      studentNumber: r.student.studentNumber,
+      status: status.charAt(0).toUpperCase() + status.slice(1),
+      meetingLabel: r.meetingLabel,
+      recordedAt: r.recordedAt.toISOString(),
+    };
+  });
+  const meetings = [...byMeeting.values()].sort((a, b) => b.label.localeCompare(a.label));
+  const attendanceDates = meetings.map((m) => {
+    const d = new Date(`${m.label}T12:00:00`);
+    if (Number.isNaN(d.getTime())) return m.label;
+    return d.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      weekday: "short",
+    });
+  });
+  return {
+    meetings,
+    rows,
+    markHref: `/instructor/attendance?sectionId=${encodeURIComponent(sectionId)}`,
+    emptyMessage:
+      meetings.length === 0
+        ? "No attendance submitted for this section yet. Mark attendance, then return here."
+        : undefined,
+    attendanceDates,
+  };
+}
+
+async function buildCourseDetail(ctx: InstructorCtx, path: string): Promise<InstructorLivePayload> {
   const { pathname, query } = parseScreenQuery(path);
   const viewId = (query.get("view") || "").trim();
   const sectionId = viewId || pathname.split("/").pop() || "";
@@ -1103,12 +1257,13 @@ function buildCourseDetail(ctx: InstructorCtx, path: string): InstructorLivePayl
       ? liveJoinRaw
       : jitsiMeetUrl(sec.courseCode, sec.code);
 
-  return {
+  const payload: InstructorLivePayload = {
     title: `${sec.courseCode}: ${sec.courseTitle}`.toUpperCase().includes(sec.courseCode)
       ? `${sec.courseCode}: ${sec.courseTitle}`
       : `${sec.courseCode}: ${sec.courseTitle}`,
     subtitle: session,
     courseDetail: {
+      sectionId: sec.id,
       code: sec.courseCode,
       title: sec.courseTitle,
       meta: `${session} · ${location}`,
@@ -1137,13 +1292,16 @@ function buildCourseDetail(ctx: InstructorCtx, path: string): InstructorLivePayl
           initials: `${ctx.person.givenName[0] ?? ""}${ctx.person.familyName[0] ?? ""}`.toUpperCase(),
         },
       ],
-      roster: sec.enrolments.map((e) => ({
-        name: e.studentName,
-        studentNumber: e.studentNumber,
-        program: e.programName,
-        standing: e.standing,
-        email: e.email,
-      })),
+      roster: sec.enrolments
+        .filter((e) => e.status === "enrolled")
+        .map((e) => ({
+          studentId: e.studentId,
+          name: e.studentName,
+          studentNumber: e.studentNumber,
+          program: e.programName,
+          standing: e.standing,
+          email: e.email,
+        })),
       assessments: sec.assignments.map((a) => ({
         title: a.title,
         due: a.dueAt ? a.dueAt.toLocaleString() : "—",
@@ -1185,6 +1343,21 @@ function buildCourseDetail(ctx: InstructorCtx, path: string): InstructorLivePayl
       }),
     },
   };
+
+  const attendance = await loadSectionAttendancePayload(ctx, sec.id);
+  const detail = payload.courseDetail as Record<string, unknown> & {
+    lms?: { attendanceDates?: string[] };
+  };
+  detail.attendance = {
+    meetings: attendance.meetings,
+    rows: attendance.rows,
+    markHref: attendance.markHref,
+    emptyMessage: attendance.emptyMessage,
+  };
+  if (detail.lms && attendance.attendanceDates.length) {
+    detail.lms.attendanceDates = attendance.attendanceDates;
+  }
+  return payload;
 }
 
 function buildAnnouncements(ctx: InstructorCtx): InstructorLivePayload {
@@ -1898,9 +2071,9 @@ async function buildStudentDetail(ctx: InstructorCtx, studentId?: string | null)
     studentDetail: {
       name: focus.studentName,
       meta: `${focus.studentNumber} · ${focus.programName || "—"} · ${focus.email}`,
-      tabs: ["Overview", "Assessments", "Requirements", "Flags", "Leave"],
+      tabs: ["Overview", "Current Courses", "Assessments", "Requirements", "Flags", "Leave"],
       fields: [
-        { label: "Institution", value: institution?.name || institution?.legalName || "—" },
+        { label: "Institution", value: institution?.name || institution?.legalName || "Heritage Community College" },
         { label: "Current GPA", value: gpaPct != null ? `${gpaLetter} (${gpaPct}%)` : "—" },
         { label: "Attendance", value: attendancePct },
         { label: "Academic Standing", value: standingLabel },
@@ -4029,9 +4202,10 @@ async function routePayload(
   }
   if (p.includes("attendance") && !p.includes("workshop")) {
     const dateMatch = path.match(/[?&]date=([^&]+)/);
+    const today = new Date().toISOString().slice(0, 10);
     return buildHccAttendance({
       ...ctx,
-      dateIso: dateMatch ? decodeURIComponent(dateMatch[1]!) : "2026-09-18",
+      dateIso: dateMatch ? decodeURIComponent(dateMatch[1]!) : today,
     });
   }
   if (p.includes("t19") || p.includes("create-edit-assessment")) {
@@ -4302,7 +4476,9 @@ function parseFileManagerUploads(rowKey?: string): OverlayFile[] {
 
 function overlayStoragePath(path: string) {
   const { pathname, query } = parseScreenQuery(path);
-  for (const key of ["tab", "more", "action", "qtype", "qid"]) query.delete(key);
+  for (const key of ["tab", "more", "action", "qtype", "qid", "atype", "topic", "aid", "sid", "view"]) {
+    query.delete(key);
+  }
   const qs = query.toString();
   return qs ? `${pathname}?${qs}` : pathname;
 }
@@ -4811,7 +4987,7 @@ function parseScreenQuery(path: string) {
   };
 }
 
-function buildActiveCourses(ctx: InstructorCtx, path = ""): InstructorLivePayload {
+async function buildActiveCourses(ctx: InstructorCtx, path = ""): Promise<InstructorLivePayload> {
   const { query } = parseScreenQuery(path);
   const viewId = (query.get("view") || "").trim();
   const courseOptions = [
@@ -4926,7 +5102,7 @@ function buildActiveCourses(ctx: InstructorCtx, path = ""): InstructorLivePayloa
     ...(liveRows.length ? [] : fallbackRows.filter((row) => row.id !== "course-acsw-200")),
   ];
   const viewed = viewId ? rows.find((row) => row.id === viewId) : undefined;
-  const detail = viewId ? buildCourseDetail(ctx, `/instructor/sections/${viewId}`) : null;
+  const detail = viewId ? await buildCourseDetail(ctx, `/instructor/sections/${viewId}`) : null;
   const courseDetail =
     detail && typeof detail.courseDetail === "object" && detail.courseDetail
       ? (detail.courseDetail as Record<string, unknown> & { code?: string; title?: string; meta?: string })
@@ -6814,13 +6990,35 @@ async function saveAttendanceSession(ctx: InstructorCtx, path: string, finalize:
     return existingAttendance;
   }
 
-  let rosterFromClient: Array<{ studentId?: string; id?: string; studentNumber?: string; name: string; status: string }> | null =
-    null;
+  let rosterFromClient: Array<{
+    studentId?: string;
+    id?: string;
+    studentNumber?: string;
+    name: string;
+    status: string;
+    sectionId?: string;
+  }> | null = null;
   if (rowKey?.trim().startsWith("{") || rowKey?.trim().startsWith("[")) {
     try {
       const parsed = JSON.parse(rowKey) as
-        | { roster?: Array<{ studentId?: string; id?: string; studentNumber?: string; name: string; status: string }> }
-        | Array<{ studentId?: string; id?: string; studentNumber?: string; name: string; status: string }>;
+        | {
+            roster?: Array<{
+              studentId?: string;
+              id?: string;
+              studentNumber?: string;
+              name: string;
+              status: string;
+              sectionId?: string;
+            }>;
+          }
+        | Array<{
+            studentId?: string;
+            id?: string;
+            studentNumber?: string;
+            name: string;
+            status: string;
+            sectionId?: string;
+          }>;
       rosterFromClient = Array.isArray(parsed) ? parsed : parsed.roster ?? null;
     } catch {
       rosterFromClient = null;
@@ -6841,23 +7039,40 @@ async function saveAttendanceSession(ctx: InstructorCtx, path: string, finalize:
         r.name === e.studentName,
     );
     const prior = existingAttendance?.roster?.find((r) => r.studentId === e.studentId);
+    const homeSection =
+      ctx.sections.find((s) => s.enrolments.some((en) => en.studentId === e.studentId && en.status === "enrolled")) ||
+      sec;
     return {
       studentId: e.studentId,
       studentNumber: e.studentNumber,
       name: e.studentName,
       status: fromClient?.status || prior?.status || "Present",
+      sectionId: fromClient?.sectionId || homeSection?.id || sec.id,
     };
   });
 
   if (finalize && roster.length) {
-    const meetingLabel = new Date().toISOString().slice(0, 10);
+    let meetingFromFields = "";
+    if (rowKey?.trim().startsWith("{")) {
+      try {
+        const parsed = JSON.parse(rowKey) as { date?: string };
+        if (typeof parsed.date === "string") meetingFromFields = parsed.date.trim();
+      } catch {
+        meetingFromFields = "";
+      }
+    }
+    const pathDate = parseScreenQuery(path).query.get("date")?.trim() || "";
+    const meetingLabel =
+      (/^\d{4}-\d{2}-\d{2}$/.test(meetingFromFields) && meetingFromFields) ||
+      (/^\d{4}-\d{2}-\d{2}$/.test(pathDate) && pathDate) ||
+      new Date().toISOString().slice(0, 10);
     for (const row of roster) {
       await prisma.attendanceRecord.create({
         data: {
           id: randomUUID(),
           institutionId: ctx.user.institutionId,
           studentId: row.studentId,
-          sectionId: activeEnrolments.section.id,
+          sectionId: row.sectionId || activeEnrolments.section.id,
           meetingLabel,
           status: row.status.toLowerCase(),
         },
@@ -7361,6 +7576,7 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
     } else if (
       lower.includes("finalize session") ||
       lower.includes("submit & finalize") ||
+      lower === "submit attendance" ||
       (lower.includes("attendance") && lower.includes("submit")) ||
       lower.includes("mark all present")
     ) {
@@ -8725,6 +8941,31 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
       });
       message = `Topic added · ${title}`;
       result = topic;
+    } else if (lower.includes("publish online class") || lower.includes("publish meeting") || lower.includes("publish class session")) {
+      const fields = parseActionFields(input.rowKey) || {};
+      const published = await publishOnlineClassSession(ctx, path, fields);
+      const activityId = (fields.ActivityId || fields.Id || "").trim();
+      if (activityId) {
+        await patchScreenOverlay(user.institutionId, path, (prev) => {
+          const topicActivities = {
+            ...((prev.topicActivities as Record<string, Array<Record<string, unknown>>>) || {}),
+          };
+          for (const key of Object.keys(topicActivities)) {
+            topicActivities[key] = (topicActivities[key] || []).map((row) =>
+              String(row.id || "") === activityId
+                ? {
+                    ...row,
+                    joinUrl: published.joinUrl,
+                    note: `Published · ${published.notified} student(s) notified. Join now.`,
+                  }
+                : row,
+            );
+          }
+          return { ...prev, topicActivities, lastPublishedClass: published };
+        });
+      }
+      message = `Online class published · ${published.notified} student(s) notified`;
+      result = published;
     } else if (lower.includes("add an activity or resource") || lower.includes("add activity") || lower.includes("add resource")) {
       const fields = parseActionFields(input.rowKey) || {};
       const topicId = (fields.TopicId || fields.topicId || "").trim();
@@ -8734,20 +8975,39 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
         message = "Select a topic first";
         result = { error: true };
       } else {
-        const activity = {
+        const activity: Record<string, unknown> = {
           id: `act-${Date.now().toString(36)}`,
           type,
           name,
         };
+        if (type === "BIGBLUEBUTTON") {
+          const publishNow = !/^(no|false|0|skip)$/i.test(
+            String(fields.PublishMeeting || fields["Publish meeting"] || "yes").trim() || "yes",
+          );
+          if (publishNow) {
+            const published = await publishOnlineClassSession(ctx, path, { ...fields, Name: name });
+            activity.joinUrl = published.joinUrl;
+            activity.note = `Published · ${published.notified} student(s) notified. Join now.`;
+            result = { topicId, activity, published };
+            message = `Online class ready · ${name} · ${published.notified} student(s) notified`;
+          } else {
+            const sec = resolveSectionFromPath(ctx, path);
+            activity.joinUrl = sec ? jitsiMeetUrl(sec.courseCode, sec.code) : null;
+            activity.note = "Room ready — publish to notify students.";
+            result = { topicId, activity };
+            message = `Added ${type} · ${name}`;
+          }
+        } else {
+          result = { topicId, activity };
+          message = `Added ${type} · ${name}`;
+        }
         await patchScreenOverlay(user.institutionId, path, (prev) => {
           const topicActivities = {
-            ...((prev.topicActivities as Record<string, Array<{ type: string; name: string }>>) || {}),
+            ...((prev.topicActivities as Record<string, Array<Record<string, unknown>>>) || {}),
           };
           topicActivities[topicId] = [...(topicActivities[topicId] || []), activity];
           return { ...prev, topicActivities };
         });
-        message = `Added ${type} · ${name}`;
-        result = { topicId, activity };
       }
     } else if (lower.includes("hide activity") || lower.includes("show activity")) {
       const activityId = (input.rowKey || "").trim();

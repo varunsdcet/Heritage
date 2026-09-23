@@ -99,7 +99,7 @@ export function AiDashView({ config }: { config: SisScreenConfig }) {
                 <div className="mh-sis-cp-progress__track">
                   <div
                     className="mh-sis-cp-progress__fill"
-                    style={{ width: `${item.pct}%`, background: item.color || "#017f3f" }}
+                    style={{ width: `${item.pct}%`, background: item.color || "#2563EB" }}
                   />
                 </div>
               </button>

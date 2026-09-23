@@ -82,99 +82,90 @@ export function FacultyProfileLayout({
   config,
   tabs,
   children,
+  contentClassName,
 }: {
   config: TeacherScreenConfig;
   tabs?: Array<{ label: string; href: string; active?: boolean }>;
   children: ReactNode;
+  contentClassName?: string;
 }) {
   const router = useRouter();
   const live = useOptionalTeacherLive();
   const header = config.profileHeader;
   const bio = config.profileBio;
   const name = header?.name || bio?.name || live?.bootstrap?.displayName || "Instructor";
-  const email =
-    header?.email ||
-    bio?.personal?.find((f) => f.label === "Email")?.value ||
-    live?.bootstrap?.email ||
-    "";
   const status = header?.status || "Active";
-  const topics =
-    header?.topics?.length
-      ? header.topics
-      : bio?.expertise?.length
-        ? bio.expertise
-        : config.profileTopics?.teaching || [];
+  const staffId = bio?.staffId || "INSTRUCTOR";
   const tabItems = tabs?.length ? tabs : bio?.tabs || [];
-  const [zoom, setZoom] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
 
   return (
-    <div className="mh-hcc-profile" data-figma-id={config.figmaId}>
-      <p className="mh-hcc-profile__crumb">
-        Home <span>›</span> My Profile
+    <div className="mh-ct-profile" data-figma-id={config.figmaId}>
+      <p className="mh-ct-profile__crumb">
+        Home <span>›</span> My Profile <span>›</span> {name}
       </p>
-      <header className="mh-hcc-profile__head">
-        <button
-          type="button"
-          className="mh-hcc-profile__avatar"
-          onClick={() => setZoom(true)}
-          aria-label="Zoom profile photo"
-        >
-          <svg viewBox="0 0 64 64" width="88" height="88">
-            <circle cx="32" cy="32" r="32" fill="#e8eef2" />
-            <path
-              d="M32 12c8 0 14 8 8 16-7 2-9 6-8 10 8 1 16 6 18 14H14c2-8 10-13 18-14 1-4-1-8-8-10-6-8 0-16 8-16z"
-              fill="#9aa7b2"
-            />
-          </svg>
-        </button>
-        <div>
-          <h1>{name}</h1>
-          {email ? (
-            <p>
-              <span className="mh-hcc-profile__mail">✉</span> {email}
-            </p>
-          ) : null}
-          <p>
-            <strong>Status:</strong> <span className="mh-hcc-profile__status">{status}</span>
-          </p>
-          {topics.length ? (
-            <p className="mh-hcc-profile__topics">
-              <strong>Topics:</strong>{" "}
-              {(header?.topicLinks?.length
-                ? header.topicLinks
-                : topics.map((label) => ({ label, href: "/instructor/sections" }))
-              ).map((t, i, arr) => (
-                <span key={`${t.label}-${i}`}>
-                  <button
-                    type="button"
-                    className="mh-hcc-profile__topic-link"
-                    onClick={() => router.push(t.href)}
-                  >
-                    {t.label}
-                  </button>
-                  {i < arr.length - 1 ? ", " : ""}
-                </span>
-              ))}
-            </p>
-          ) : null}
+
+      <header className="mh-ct-profile__titlebar">
+        <div className="mh-ct-profile__title">
+          <h1>
+            {staffId} - {name}
+          </h1>
+          <span className="mh-ct-profile__badge">{status}</span>
+        </div>
+        <div className="mh-ct-profile__actions">
+          <div className="mh-ct-profile__actions-menu">
+            <button
+              type="button"
+              className="mh-ct-profile__btn"
+              aria-expanded={actionsOpen}
+              onClick={() => setActionsOpen((v) => !v)}
+            >
+              Actions ▾
+            </button>
+            {actionsOpen ? (
+              <div className="mh-ct-profile__actions-drop" role="menu">
+                <button type="button" role="menuitem" onClick={() => { setActionsOpen(false); router.push("/instructor/messages"); }}>
+                  Message Center
+                </button>
+                <button type="button" role="menuitem" onClick={() => { setActionsOpen(false); router.push("/instructor/f/t15-settings"); }}>
+                  Settings
+                </button>
+                <button type="button" role="menuitem" onClick={() => { setActionsOpen(false); router.push("/instructor/f/t35-security-settings"); }}>
+                  Security
+                </button>
+              </div>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            className="mh-ct-profile__btn"
+            onClick={() => router.push("/instructor/f/t02-profile-biography")}
+          >
+            Update
+          </button>
+          <button type="button" className="mh-ct-profile__btn mh-ct-profile__btn--primary" onClick={() => router.back()}>
+            ← Back
+          </button>
         </div>
       </header>
-      {tabItems.length ? (
-        <div className="mh-hcc-profile__tabs">
-          {tabItems.map((t) => (
-            <button
-              key={t.href}
-              type="button"
-              className={t.active ? "is-active" : ""}
-              onClick={() => router.push(t.href)}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-      ) : null}
-      <div className="mh-hcc-profile__body">{children}</div>
-      <AvatarZoom open={zoom} onClose={() => setZoom(false)} name={name} />
+
+      <div className={`mh-ct-profile__card${contentClassName ? ` ${contentClassName}` : ""}`}>
+        {tabItems.length ? (
+          <nav className="mh-ct-profile__side" aria-label="Profile sections">
+            {tabItems.map((t) => (
+              <button
+                key={t.href}
+                type="button"
+                className={t.active ? "is-active" : ""}
+                onClick={() => router.push(t.href)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </nav>
+        ) : null}
+        <div className="mh-ct-profile__content">{children}</div>
+      </div>
     </div>
   );
 }
@@ -187,6 +178,7 @@ export function ProfileBioView({ config }: { config: TeacherScreenConfig }) {
   const email = connect?.email || config.profileHeader?.email || p?.personal?.find((f) => f.label === "Email")?.value || "";
   const phone = connect?.phone || p?.personal?.find((f) => f.label === "Phone")?.value || "";
   const [modal, setModal] = useState<"connect" | "education" | null>(null);
+  const [zoom, setZoom] = useState(false);
   const [phoneVal, setPhoneVal] = useState(phone === "—" ? "" : phone);
   const [emailVal, setEmailVal] = useState(email);
   const [eduBg, setEduBg] = useState(education?.background || "");
@@ -226,45 +218,97 @@ export function ProfileBioView({ config }: { config: TeacherScreenConfig }) {
     await live?.refresh();
   }
 
-  const eduBlocks = [education?.background, education?.experience, education?.organizations].filter(Boolean);
+  const personal = p?.personal || [];
+  const academic = p?.academic || [];
+  const val = (label: string, fallback = "—") =>
+    personal.find((f) => f.label === label)?.value ||
+    academic.find((f) => f.label === label)?.value ||
+    fallback;
+
+  const infoRows: Array<[string, string, string, string]> = [
+    ["Staff ID", p?.staffId || val("Staff ID"), "Full Name", val("Full Name", p?.name || "—")],
+    ["Email", email || "—", "Phone", phone && phone !== "—" ? phone : "—"],
+    ["Preferred Name", val("Preferred Name"), "Pronouns", val("Pronouns")],
+    ["Office", val("Office"), "Department", val("Department", p?.department || "—")],
+  ];
+
+  const otherRows: Array<[string, string, string, string]> = [
+    ["Faculty Rank", val("Faculty Rank", p?.role || "Instructor"), "Highest Degree", val("Highest Degree")],
+    ["Years Teaching", val("Years Teaching"), "Hire Date", val("Hire Date")],
+  ];
 
   return (
     <FacultyProfileLayout config={config} tabs={p?.tabs}>
-      <div className="mh-hcc-profile__split">
-        <section className="mh-hcc-profile__card">
-          <div className="mh-hcc-profile__card-head">
-            <h2>CONNECT</h2>
-            <PencilButton onClick={() => setModal("connect")} label="Edit connect" />
+      <section className="mh-ct-profile__block">
+        <h2>Teacher Information</h2>
+        <div className="mh-ct-profile__info">
+          <div className="mh-ct-profile__identity">
+            <button
+              type="button"
+              className="mh-ct-profile__avatar"
+              onClick={() => setZoom(true)}
+              aria-label="Zoom profile photo"
+            >
+              <svg viewBox="0 0 64 64" width="96" height="96">
+                <circle cx="32" cy="32" r="32" fill="#e8eef2" />
+                <path
+                  d="M32 12c8 0 14 8 8 16-7 2-9 6-8 10 8 1 16 6 18 14H14c2-8 10-13 18-14 1-4-1-8-8-10-6-8 0-16 8-16z"
+                  fill="#9aa7b2"
+                />
+              </svg>
+              <span className="mh-ct-profile__avatar-edit" aria-hidden>
+                ✎
+              </span>
+            </button>
+            <strong>{p?.name || "Instructor"}</strong>
+            <span>{p?.role || "Teacher"}</span>
+            <div className="mh-ct-profile__identity-actions">
+              <PencilButton onClick={() => setModal("connect")} label="Edit connect" />
+              <PencilButton onClick={() => setModal("education")} label="Edit education" />
+            </div>
           </div>
-          <p>
-            <strong>E-mail</strong>
-            <br />
-            {email || "—"}
-          </p>
-          {phone && phone !== "—" ? (
-            <p>
-              <strong>Phone</strong>
-              <br />
-              {phone}
-            </p>
-          ) : null}
-        </section>
-        <section className="mh-hcc-profile__card">
-          <div className="mh-hcc-profile__card-head">
-            <h2>EDUCATION / ACCREDITATION</h2>
-            <PencilButton onClick={() => setModal("education")} label="Edit education" />
-          </div>
-          {eduBlocks.length ? (
-            eduBlocks.map((block) => (
-              <p key={block!.slice(0, 24)} className="mh-hcc-profile__pre">
-                {block}
-              </p>
-            ))
-          ) : (
-            <p className="mh-teacher-muted">No content available.</p>
-          )}
-        </section>
-      </div>
+          <table className="mh-ct-profile__table">
+            <tbody>
+              {infoRows.map((row, i) => (
+                <tr key={i}>
+                  <th>{row[0]}</th>
+                  <td>{row[1]}</td>
+                  <th>{row[2]}</th>
+                  <td>{row[3]}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="mh-ct-profile__block">
+        <h2>Other Information</h2>
+        <table className="mh-ct-profile__table">
+          <tbody>
+            {otherRows.map((row, i) => (
+              <tr key={i}>
+                <th>{row[0]}</th>
+                <td>{row[1]}</td>
+                <th>{row[2]}</th>
+                <td>{row[3]}</td>
+              </tr>
+            ))}
+            {education?.background || education?.experience || education?.organizations ? (
+              <tr>
+                <th>Education / Accreditation</th>
+                <td colSpan={3} className="mh-ct-profile__pre">
+                  {[education?.background, education?.experience, education?.organizations]
+                    .filter(Boolean)
+                    .join("\n\n")}
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </section>
+
+      <AvatarZoom open={zoom} onClose={() => setZoom(false)} name={p?.name || "Instructor"} />
 
       {modal === "connect" ? (
         <ModalShell
@@ -1351,7 +1395,6 @@ export function CompensationView({ config }: { config: TeacherScreenConfig }) {
 export function ScheduleView({ config }: { config: TeacherScreenConfig }) {
   const live = useOptionalTeacherLive();
   const s = config.schedule;
-  const teachingByDay = s?.teachingByDay ?? [];
   const [weekStart, setWeekStart] = useState(s?.weekStart || "2026-09-13");
   const [addOpen, setAddOpen] = useState(false);
   const [selected, setSelected] = useState<{
@@ -1398,39 +1441,8 @@ export function ScheduleView({ config }: { config: TeacherScreenConfig }) {
   }, [weekStart]);
 
   return (
-    <FacultyProfileLayout config={config} tabs={s?.tabs}>
-      <div className="mh-hcc-profile__split mh-hcc-profile__split--schedule">
-        <section>
-          <h2>CURRENT TEACHING SCHEDULE</h2>
-          {teachingByDay.length === 0 ? (
-            <p className="mh-teacher-muted">No content available.</p>
-          ) : (
-            teachingByDay.map((day) => (
-              <div key={day.day} className="mh-hcc-profile__dayblock">
-                <strong>{day.day}</strong>
-                {day.entries.map((e) => (
-                  <button
-                    key={`${e.course}-${e.section}-${e.time}`}
-                    type="button"
-                    className="mh-hcc-profile__slot"
-                    onClick={() =>
-                      setSelected({
-                        kind: "class",
-                        title: `${e.course} [${e.section}]`,
-                        time: e.time,
-                        dayLabel: day.day,
-                        course: e.course,
-                        section: e.section,
-                      })
-                    }
-                  >
-                    {e.course} [{e.section}] — {e.time}
-                  </button>
-                ))}
-              </div>
-            ))
-          )}
-        </section>
+    <FacultyProfileLayout config={config} tabs={s?.tabs} contentClassName="mh-ct-profile__card--schedule">
+      <div className="mh-hcc-profile__split mh-hcc-profile__split--schedule mh-hcc-profile__split--schedule-only">
         <section className="mh-hcc-weekcal">
           <div className="mh-hcc-profile__card-head">
             <h2>SCHEDULE</h2>
@@ -1463,30 +1475,29 @@ export function ScheduleView({ config }: { config: TeacherScreenConfig }) {
             ).map((day, i) => (
               <div key={day.label} className={`mh-hcc-weekcal__col mh-hcc-weekcal__col--${i}`}>
                 <header>
-                  <span>{day.label}</span>
-                  <em>{day.dateLabel || day.date}</em>
+                  <strong>{day.label}</strong>
+                  <span>{day.dateLabel}</span>
                 </header>
                 <div className="mh-hcc-weekcal__body">
-                  {day.entries.length === 0 ? (
-                    i === 0 ? (
-                      <p className="mh-teacher-muted">{s?.emptyMessage || "No availability times were found."}</p>
-                    ) : null
+                  {(day.entries || []).length === 0 ? (
+                    <p className="mh-teacher-muted mh-hcc-weekcal__empty">No sessions</p>
                   ) : (
-                    day.entries.map((e) => (
+                    (day.entries || []).map((entry, idx) => (
                       <button
-                        key={`${e.title}-${e.time}`}
+                        key={`${day.date}-${entry.title}-${idx}`}
                         type="button"
-                        className={`mh-hcc-weekcal__event is-${e.kind}`}
+                        className={`mh-hcc-weekcal__event is-${entry.kind || "class"}`}
                         onClick={() =>
                           setSelected({
-                            ...e,
+                            ...entry,
+                            kind: entry.kind || "class",
                             dayLabel: day.label,
                             dateLabel: day.dateLabel || day.date,
                           })
                         }
                       >
-                        <strong>{e.title}</strong>
-                        <span>{e.time}</span>
+                        <strong>{entry.title}</strong>
+                        <span>{entry.time}</span>
                       </button>
                     ))
                   )}

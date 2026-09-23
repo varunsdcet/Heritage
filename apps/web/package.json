@@ -14,10 +14,12 @@
     "@myheritage/contracts": "workspace:*",
     "@myheritage/tokens": "workspace:*",
     "@myheritage/ui": "workspace:*",
+    "@stripe/stripe-js": "^9.16.0",
     "marked": "^18.0.13",
     "next": "^15.2.2",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "stripe": "^22.6.2"
   },
   "devDependencies": {
     "@types/react": "^19.0.10",

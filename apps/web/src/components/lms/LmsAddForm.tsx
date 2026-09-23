@@ -3,16 +3,25 @@
 import { useMemo, useState } from "react";
 import { formForActivity, type LmsFormField } from "@/lib/lmsActivityForms";
 
+type RosterStudent = {
+  studentId?: string;
+  name: string;
+  studentNumber: string;
+  email: string;
+};
+
 type Props = {
   code: string;
   label: string;
   busy?: boolean;
+  roster?: RosterStudent[];
   onSave: (values: Record<string, string>) => void;
   onCancel: () => void;
 };
 
-export function LmsAddForm({ code, label, busy, onSave, onCancel }: Props) {
+export function LmsAddForm({ code, label, busy, roster = [], onSave, onCancel }: Props) {
   const spec = useMemo(() => formForActivity(code), [code]);
+  const isOnlineClass = /bigbluebutton/i.test(code);
   const [open, setOpen] = useState<Record<string, boolean>>(() => {
     const next: Record<string, boolean> = {};
     spec.sections.forEach((s, i) => {
@@ -21,7 +30,11 @@ export function LmsAddForm({ code, label, busy, onSave, onCancel }: Props) {
     return next;
   });
   const [values, setValues] = useState<Record<string, string>>(() => {
-    const next: Record<string, string> = { Name: `New ${label}` };
+    const next: Record<string, string> = {
+      Name: isOnlineClass ? "Online Class Link" : `New ${label}`,
+      Audience: "All enrolled students",
+      "Publish meeting": "Yes — notify students now",
+    };
     for (const section of spec.sections) {
       for (const field of section.fields) {
         if (field.default) next[field.name] = field.default;
@@ -30,6 +43,7 @@ export function LmsAddForm({ code, label, busy, onSave, onCancel }: Props) {
     }
     return next;
   });
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [error, setError] = useState("");
 
   if (spec.error) {
@@ -47,6 +61,9 @@ export function LmsAddForm({ code, label, busy, onSave, onCancel }: Props) {
   function set(name: string, value: string) {
     setValues((prev) => ({ ...prev, [name]: value }));
   }
+
+  const selectable = roster.filter((s) => Boolean(s.studentId));
+  const audienceSelected = /selected/i.test(values.Audience || "");
 
   return (
     <section className="mh-teacher-card mh-lms-addform">
@@ -76,6 +93,43 @@ export function LmsAddForm({ code, label, busy, onSave, onCancel }: Props) {
             {section.fields.map((field) => (
               <Field key={field.name} field={field} value={values[field.name] || ""} onChange={set} />
             ))}
+            {isOnlineClass && section.title === "Publish to students" && audienceSelected ? (
+              <div className="mh-lms-online-roster">
+                <p className="mh-teacher-muted">Select students to notify ({selectedIds.length} selected)</p>
+                {selectable.length === 0 ? (
+                  <p className="mh-teacher-muted">No enrolled students on this section roster.</p>
+                ) : (
+                  <ul className="mh-lms-online-roster__list">
+                    {selectable.map((s) => {
+                      const id = s.studentId!;
+                      const checked = selectedIds.includes(id);
+                      return (
+                        <li key={id}>
+                          <label className="mh-lms-check">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) =>
+                                setSelectedIds((prev) =>
+                                  e.target.checked ? [...prev, id] : prev.filter((x) => x !== id),
+                                )
+                              }
+                            />
+                            <span>
+                              {s.name}
+                              <span className="mh-teacher-muted">
+                                {" "}
+                                · {s.studentNumber || s.email}
+                              </span>
+                            </span>
+                          </label>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            ) : null}
           </div>
         </details>
       ))}
@@ -93,11 +147,20 @@ export function LmsAddForm({ code, label, busy, onSave, onCancel }: Props) {
               setError("Name is required.");
               return;
             }
+            if (isOnlineClass && audienceSelected && selectedIds.length === 0) {
+              setError("Select at least one student, or choose All enrolled students.");
+              return;
+            }
             setError("");
-            onSave(values);
+            const publishMeeting = /yes/i.test(values["Publish meeting"] || "Yes") ? "yes" : "no";
+            onSave({
+              ...values,
+              PublishMeeting: publishMeeting,
+              NotifyStudentIds: audienceSelected ? selectedIds.join(",") : "",
+            });
           }}
         >
-          Save and return to course
+          {isOnlineClass ? "Publish online class" : "Save and return to course"}
         </button>
         <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary" onClick={onCancel}>
           Cancel

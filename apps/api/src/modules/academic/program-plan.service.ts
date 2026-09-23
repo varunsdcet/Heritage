@@ -91,19 +91,49 @@ export async function getProgramPlan(institutionId: string, studentId: string) {
     };
   }
 
-  const mapItem = (item: (typeof plan.items)[number]) => ({
-    id: item.id,
-    courseCode: item.courseCode,
-    title: item.title,
-    credits: item.credits,
-    category: item.category,
-    status: item.status,
-    startsOn: item.startsOn,
-    endsOn: item.endsOn,
-    scheduleText: item.scheduleText,
-    sectionId: item.sectionId,
-    sortOrder: item.sortOrder,
+  const courseIds = [...new Set(plan.items.map((i) => i.courseId).filter(Boolean))] as string[];
+  const courseCodes = [...new Set(plan.items.map((i) => i.courseCode).filter(Boolean))];
+  const courses = await prisma.course.findMany({
+    where: {
+      institutionId,
+      OR: [
+        ...(courseIds.length ? [{ id: { in: courseIds } }] : []),
+        ...(courseCodes.length ? [{ code: { in: courseCodes } }] : []),
+      ],
+    },
+    select: { id: true, code: true, title: true },
   });
+  const courseById = new Map(courses.map((c) => [c.id, c]));
+  const courseByCode = new Map(courses.map((c) => [c.code, c]));
+
+  const looksLikeId = (value: string) =>
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.trim()) ||
+    value.trim().length > 40;
+
+  const mapItem = (item: (typeof plan.items)[number]) => {
+    const fromCourse =
+      (item.courseId ? courseById.get(item.courseId) : undefined) || courseByCode.get(item.courseCode);
+    const rawTitle = (item.title || "").trim();
+    const title =
+      fromCourse?.title ||
+      (!rawTitle || looksLikeId(rawTitle) || rawTitle === item.courseCode || rawTitle === item.courseId
+        ? fromCourse?.title || item.courseCode
+        : rawTitle);
+    const courseCode = fromCourse?.code || item.courseCode;
+    return {
+      id: item.id,
+      courseCode,
+      title,
+      credits: item.credits,
+      category: item.category,
+      status: item.status,
+      startsOn: item.startsOn,
+      endsOn: item.endsOn,
+      scheduleText: item.scheduleText,
+      sectionId: item.sectionId,
+      sortOrder: item.sortOrder,
+    };
+  };
 
   const main = plan.items.filter((i) => i.category === "main").map(mapItem);
   const practicum = plan.items.filter((i) => i.category === "practicum").map(mapItem);
@@ -262,6 +292,7 @@ export async function getTranscriptSummary(institutionId: string, studentId: str
     const letter = displayLetter(r);
     return {
       enrolmentId: r.enrolmentId,
+      sectionId: r.sectionId,
       courseCode: r.courseCode,
       title: r.title,
       credits: r.credits,

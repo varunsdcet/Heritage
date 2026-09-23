@@ -53,7 +53,7 @@ const SEARCH_PALETTE = [
 ];
 
 function NavIcon({ name, active }: { name: string; active?: boolean }) {
-  const stroke = active ? "#017F3F" : "#8D928A";
+  const stroke = active ? "#2563EB" : "#8D928A";
   const common = {
     width: 16,
     height: 16,

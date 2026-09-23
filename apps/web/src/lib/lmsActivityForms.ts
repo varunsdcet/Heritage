@@ -94,10 +94,18 @@ export const LMS_ACTIVITY_FORMS: Record<string, { heading: string; error?: strin
     ],
   },
   bigbluebutton: {
-    heading: "Adding a new BigBlueButton",
+    heading: "Adding a new Online Class (Jitsi Meet)",
     sections: [
       { title: "Instance", fields: [sel("Instance type", "Instance type", ["Room with recordings", "Room only", "Recordings only"])] },
-      { title: "General", fields: [text("Name", "Room name", true, "Class Link")] },
+      { title: "General", fields: [text("Name", "Room name", true, "Online Class Link")] },
+      {
+        title: "Publish to students",
+        fields: [
+          sel("Audience", "Audience", ["All enrolled students", "Selected students"]),
+          sel("Publish meeting", "Publish meeting", ["Yes — notify students now", "No — save room only"]),
+          dt("Open date/time", "Open date/time"),
+        ],
+      },
       {
         title: "Room settings",
         fields: [area("Welcome message", "Welcome message"), chk("Wait for moderator", "Wait for moderator"), chk("The session may be recorded", "The session may be recorded")],
@@ -117,7 +125,7 @@ export const LMS_ACTIVITY_FORMS: Record<string, { heading: string; error?: strin
           stat("Non-editing teacher", "Non-editing teacher", "Moderator"),
         ],
       },
-      { title: "Session timing", fields: [dt("Open date/time", "Open date/time"), dt("Close date/time", "Close date/time")] },
+      { title: "Session timing", fields: [dt("Close date/time", "Close date/time")] },
       ...COMMON,
     ],
   },
@@ -375,13 +383,28 @@ export const LMS_ACTIVITY_FORMS: Record<string, { heading: string; error?: strin
   },
   survey: {
     heading: "Adding a new Survey",
-    error: "No survey templates found!",
-    sections: [],
+    sections: [
+      { title: "General", fields: [text("Name", "Name", true), area("Description", "Description"), displayOnPage] },
+      {
+        title: "Survey type",
+        fields: [sel("Template", "Template", ["ATTLS", "COLLES (Preferred)", "COLLES (Actual)", "Critical incidents"])],
+      },
+      ...COMMON,
+    ],
   },
   certificate: {
-    heading: "Certificate",
-    error: "No Activity / unavailable-module context",
-    sections: [],
+    heading: "Adding a new Certificate",
+    sections: [
+      { title: "General", fields: [text("Name", "Name", true), area("Description", "Description"), displayOnPage] },
+      {
+        title: "Issue options",
+        fields: [
+          sel("Delivery", "Delivery", ["Download PDF", "Email student", "View in browser"]),
+          text("Required grade", "Required grade"),
+        ],
+      },
+      ...COMMON,
+    ],
   },
   turnitin: {
     heading: "Adding a new Turnitin Assignment",

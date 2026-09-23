@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Plus_Jakarta_Sans, Source_Serif_4 } from "next/font/google";
+import { Cormorant_Garamond, Playfair_Display, Plus_Jakarta_Sans, Source_Serif_4 } from "next/font/google";
 import "@myheritage/tokens/css";
 import "./globals.css";
 
@@ -17,6 +17,20 @@ const display = Source_Serif_4({
   variable: "--font-display",
 });
 
+const certBody = Cormorant_Garamond({
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+  display: "swap",
+  variable: "--font-cert-body",
+});
+
+const certDisplay = Playfair_Display({
+  subsets: ["latin"],
+  weight: ["600", "700", "800"],
+  display: "swap",
+  variable: "--font-cert-display",
+});
+
 export const metadata: Metadata = {
   title: "MyHeritage",
   description: "MyHeritage — Heritage Community College",
@@ -24,7 +38,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${sans.variable} ${display.variable}`}>
+    <html lang="en" className={`${sans.variable} ${display.variable} ${certBody.variable} ${certDisplay.variable}`}>
       <body>{children}</body>
     </html>
   );

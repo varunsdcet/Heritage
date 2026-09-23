@@ -783,7 +783,19 @@ export function mergeCourseLmsOverlay(
       summary: topicSummaries[topic.id] ?? topic.summary,
       activities: [...topic.activities, ...(topicEdits[topic.id] || [])]
         .filter((activity) => !deletedActivityIds.has(activity.id))
-        .map((activity) => ({ ...activity, hidden: hiddenActivityIds.has(activity.id) || activity.hidden })),
+        .map((activity) => {
+          const type = String(activity.type || "").toUpperCase();
+          const hidden = hiddenActivityIds.has(activity.id) || activity.hidden;
+          if (type === "BIGBLUEBUTTON") {
+            return {
+              ...activity,
+              hidden,
+              joinUrl: activity.joinUrl || lms.joinUrl || null,
+              note: activity.note || "This room is ready. You can join the session now.",
+            };
+          }
+          return { ...activity, hidden };
+        }),
     }),
   );
 

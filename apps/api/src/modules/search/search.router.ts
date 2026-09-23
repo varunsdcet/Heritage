@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { prisma } from "@myheritage/db";
 import { requireAuth, type AuthedRequest } from "../../middleware/auth.js";
-import { lifecycleFromStudent } from "../../lib/lifecycle-status.js";
 import {
   SEARCH_CAMPUS_OPTIONS,
   SEARCH_DELIVERY_OPTIONS,
@@ -319,16 +318,24 @@ searchRouter.get("/", requireAuth, async (req, res, next) => {
       const institution = await prisma.institution.findFirst({
         where: { institutionId: user.institutionId },
       });
-      const sections = await prisma.section.findMany({
-        where: { institutionId: user.institutionId, instructorPersonId: user.personId },
-        include: {
-          course: true,
-          enrolments: {
-            where: { status: { in: ["enrolled", "completed", "withdrawn"] } },
-            include: { student: { include: { person: true } } },
+      // Same pool as Student List (t12): all institution students — not just section enrolments.
+      const [directoryStudents, sections] = await Promise.all([
+        prisma.student.findMany({
+          where: { institutionId: user.institutionId },
+          include: { person: true },
+          orderBy: [{ person: { familyName: "asc" } }, { person: { givenName: "asc" } }],
+          take: 5000,
+        }),
+        prisma.section.findMany({
+          where: { institutionId: user.institutionId, instructorPersonId: user.personId },
+          include: {
+            course: true,
+            enrolments: {
+              where: { status: { in: ["enrolled", "completed", "withdrawn"] } },
+            },
           },
-        },
-      });
+        }),
+      ]);
 
       const campusHay = [
         institution?.name || "",
@@ -340,129 +347,122 @@ searchRouter.get("/", requireAuth, async (req, res, next) => {
         .join(" ")
         .toLowerCase();
 
-      const studentHits = sections.flatMap((s) =>
-        s.enrolments
-          .filter((e) => {
-            const given = e.student.person.givenName || "";
-            const family = e.student.person.familyName || "";
-            const name = `${given} ${family}`.toLowerCase();
-            const email = (e.student.person.email || "").toLowerCase();
-            const program = (e.student.programName || "").toLowerCase();
-            const standing = (e.student.standing || "").toLowerCase();
-            const status = e.status.toLowerCase();
-            const number = e.student.studentNumber.toLowerCase();
-            const dob = (e.student.person.dateOfBirth || "").trim();
-            const lifecycle = normalizeLifecycleLabel(
-              lifecycleFromStudent({
-                standing: e.student.standing,
-                enrolmentStatuses: [e.status],
-              }),
-            );
-            const hay = `${name} ${email} ${program} ${standing} ${status} ${number} ${dob} ${s.course.code} ${s.course.title} ${campusHay}`.toLowerCase();
+      const studentHits = directoryStudents
+        .filter((st) => {
+          const given = st.person.givenName || "";
+          const family = st.person.familyName || "";
+          const name = `${given} ${family}`.toLowerCase();
+          const email = (st.person.email || "").toLowerCase();
+          const program = (st.programName || "").toLowerCase();
+          const standingRaw = st.standing || "";
+          // Match Student List status labels (directory standing), not section enrolment status.
+          const lifecycle = normalizeLifecycleLabel(standingRaw);
+          const standing = standingRaw.toLowerCase();
+          const number = st.studentNumber.toLowerCase();
+          const dob = (st.person.dateOfBirth || "").trim();
+          const hay = `${name} ${email} ${program} ${standing} ${lifecycle} ${number} ${dob} ${campusHay}`.toLowerCase();
 
-            if (q) {
-              const tokens = q.split(/\s+/).filter(Boolean);
-              if (!tokens.every((t) => hay.includes(t))) return false;
+          if (q) {
+            const tokens = q.split(/\s+/).filter(Boolean);
+            if (!tokens.every((t) => hay.includes(t))) return false;
+          }
+          if (advanced.studentNumber && !number.includes(advanced.studentNumber.toLowerCase())) return false;
+          // Name fields match full name (first/last often swapped in advanced search).
+          if (advanced.firstName) {
+            const fn = advanced.firstName.toLowerCase();
+            if (!given.toLowerCase().includes(fn) && !family.toLowerCase().includes(fn) && !name.includes(fn)) {
+              return false;
             }
-            if (advanced.studentNumber && !number.includes(advanced.studentNumber.toLowerCase())) return false;
-            if (advanced.firstName && !given.toLowerCase().includes(advanced.firstName.toLowerCase())) return false;
-            if (advanced.lastName && !family.toLowerCase().includes(advanced.lastName.toLowerCase())) return false;
-            if (advanced.middleName && !hay.includes(advanced.middleName.toLowerCase())) return false;
-            if (advanced.preferredName && !hay.includes(advanced.preferredName.toLowerCase())) return false;
-            if (advanced.email && !email.includes(advanced.email.toLowerCase())) return false;
-            if (advanced.sisEmail && !email.includes(advanced.sisEmail.toLowerCase())) return false;
-            if (advanced.program) {
-              const p = advanced.program.toLowerCase();
-              if (!program.includes(p) && !hay.includes(p.split(":")[0]?.trim() || p)) return false;
+          }
+          if (advanced.lastName) {
+            const ln = advanced.lastName.toLowerCase();
+            if (!family.toLowerCase().includes(ln) && !given.toLowerCase().includes(ln) && !name.includes(ln)) {
+              return false;
             }
-            if (advanced.status) {
-              const want = normalizeLifecycleLabel(advanced.status);
-              if (want && lifecycle !== want) return false;
+          }
+          if (advanced.middleName && !hay.includes(advanced.middleName.toLowerCase())) return false;
+          if (advanced.preferredName && !hay.includes(advanced.preferredName.toLowerCase())) return false;
+          if (advanced.email && !email.includes(advanced.email.toLowerCase())) return false;
+          if (advanced.sisEmail && !email.includes(advanced.sisEmail.toLowerCase())) return false;
+          if (advanced.program) {
+            const p = advanced.program.toLowerCase();
+            if (!program.includes(p) && !hay.includes(p.split(":")[0]?.trim() || p)) return false;
+          }
+          if (advanced.status) {
+            const want = normalizeLifecycleLabel(advanced.status);
+            if (want && lifecycle !== want && !lifecycle.toLowerCase().includes(want.toLowerCase())) return false;
+          }
+          if (advanced.dobYear || advanced.dobMonth || advanced.dobDay) {
+            if (!dob) return false;
+            const parts = dob.replace(/[./]/g, "-").split("-");
+            let y = "";
+            let m = "";
+            let d = "";
+            if (parts[0]?.length === 4) {
+              y = parts[0];
+              m = parts[1] || "";
+              d = parts[2] || "";
+            } else {
+              m = parts[0] || "";
+              d = parts[1] || "";
+              y = parts[2] || "";
             }
-            if (advanced.dobYear || advanced.dobMonth || advanced.dobDay) {
-              if (!dob) return false;
-              const parts = dob.replace(/[./]/g, "-").split("-");
-              // accept YYYY-MM-DD or MM-DD-YYYY
-              let y = "";
-              let m = "";
-              let d = "";
-              if (parts[0]?.length === 4) {
-                y = parts[0];
-                m = parts[1] || "";
-                d = parts[2] || "";
-              } else {
-                m = parts[0] || "";
-                d = parts[1] || "";
-                y = parts[2] || "";
-              }
-              if (advanced.dobYear && y !== advanced.dobYear) return false;
-              if (advanced.dobMonth && m.padStart(2, "0") !== advanced.dobMonth) return false;
-              if (advanced.dobDay && d.padStart(2, "0") !== advanced.dobDay) return false;
+            if (advanced.dobYear && y !== advanced.dobYear) return false;
+            if (advanced.dobMonth && m.padStart(2, "0") !== advanced.dobMonth) return false;
+            if (advanced.dobDay && d.padStart(2, "0") !== advanced.dobDay) return false;
+          }
+          if (advanced.city) {
+            const city = (institution?.city || "").toLowerCase();
+            if (!city.includes(advanced.city.toLowerCase()) && !hay.includes(advanced.city.toLowerCase())) return false;
+          }
+          if (advanced.postalCode) {
+            const postal = (institution?.postalCode || "").toLowerCase();
+            if (!postal.includes(advanced.postalCode.toLowerCase()) && !hay.includes(advanced.postalCode.toLowerCase())) {
+              return false;
             }
-            if (advanced.city) {
-              const city = (institution?.city || "").toLowerCase();
-              if (!city.includes(advanced.city.toLowerCase()) && !hay.includes(advanced.city.toLowerCase())) return false;
+          }
+          if (advanced.streetAddress && !hay.includes(advanced.streetAddress.toLowerCase())) return false;
+          if (advanced.phoneNumber && !hay.includes(advanced.phoneNumber.toLowerCase())) return false;
+          if (advanced.discountCode && !hay.includes(advanced.discountCode.toLowerCase())) return false;
+          if (advanced.campus) {
+            const c = advanced.campus.toLowerCase();
+            if (!campusHay.includes(c) && !hay.includes(c)) {
+              if (!(c.includes("surrey") && campusHay.includes("surrey"))) return false;
             }
-            if (advanced.postalCode) {
-              const postal = (institution?.postalCode || "").toLowerCase();
-              if (!postal.includes(advanced.postalCode.toLowerCase()) && !hay.includes(advanced.postalCode.toLowerCase())) {
-                return false;
-              }
+          }
+          if (advanced.deliveryMethod) {
+            const dm = advanced.deliveryMethod.toLowerCase();
+            const campus = advanced.campus.toLowerCase();
+            if (
+              (dm === "online" || dm === "distance") &&
+              !campus.includes(dm) &&
+              !hay.includes(dm) &&
+              !campusHay.includes(dm)
+            ) {
+              return false;
             }
-            if (advanced.streetAddress && !hay.includes(advanced.streetAddress.toLowerCase())) return false;
-            if (advanced.phoneNumber && !hay.includes(advanced.phoneNumber.toLowerCase())) return false;
-            if (advanced.discountCode && !hay.includes(advanced.discountCode.toLowerCase())) return false;
-            if (advanced.campus) {
-              const c = advanced.campus.toLowerCase();
-              if (!campusHay.includes(c) && !hay.includes(c)) {
-                // Surrey campus is default for seeded college
-                if (!(c.includes("surrey") && campusHay.includes("surrey"))) return false;
-              }
+            if ((dm === "in-person" || dm === "hybrid") && /online|distance/i.test(advanced.campus)) {
+              return false;
             }
-            if (advanced.deliveryMethod) {
-              const dm = advanced.deliveryMethod.toLowerCase();
-              const campus = advanced.campus.toLowerCase();
-              if (
-                (dm === "online" || dm === "distance") &&
-                !campus.includes(dm) &&
-                !hay.includes(dm) &&
-                !campusHay.includes(dm)
-              ) {
-                return false;
-              }
-              if ((dm === "in-person" || dm === "hybrid") && /online|distance/i.test(advanced.campus)) {
-                return false;
-              }
-            }
-            if (advanced.domesticInternational) {
-              const di = advanced.domesticInternational.toLowerCase();
-              const intlHint = /intl|international|offshore|visa/i.test(`${standing} ${program} ${e.student.standing}`);
-              if (di === "international" && !intlHint) return false;
-              if (di === "domestic" && intlHint) return false;
-            }
-            return true;
-          })
-          .map((e) => {
-            const lifecycle = normalizeLifecycleLabel(
-              lifecycleFromStudent({
-                standing: e.student.standing,
-                enrolmentStatuses: [e.status],
-              }),
-            );
-            return {
-              id: e.studentId,
-              label: `${e.student.person.givenName} ${e.student.person.familyName}`.trim(),
-              sub: `${e.student.studentNumber} · ${lifecycle} · ${s.course.code} · ${e.student.programName || "—"}`,
-              href: `/instructor/f/t22-student-detail-full-page?studentId=${encodeURIComponent(e.studentId)}`,
-            };
-          }),
-      );
-      const seen = new Set<string>();
-      const students = studentHits.filter((item) => {
-        if (seen.has(item.id)) return false;
-        seen.add(item.id);
-        return true;
-      });
+          }
+          if (advanced.domesticInternational) {
+            const di = advanced.domesticInternational.toLowerCase();
+            const intlHint = /intl|international|offshore|visa/i.test(`${standing} ${program} ${standingRaw}`);
+            if (di === "international" && !intlHint) return false;
+            if (di === "domestic" && intlHint) return false;
+          }
+          return true;
+        })
+        .map((st) => {
+          const lifecycle = normalizeLifecycleLabel(st.standing || "");
+          return {
+            id: st.id,
+            label: `${st.person.givenName} ${st.person.familyName}`.trim(),
+            sub: `${st.studentNumber} · ${lifecycle} · ${st.programName || "—"}`,
+            href: `/instructor/f/t22-student-detail-full-page?studentId=${encodeURIComponent(st.id)}`,
+          };
+        });
+
       const courses = !hasAdvanced
         ? sections
             .filter(
@@ -481,7 +481,7 @@ searchRouter.get("/", requireAuth, async (req, res, next) => {
         : [];
       res.json({
         groups: [
-          { type: "students", items: students.slice(0, 40) },
+          { type: "students", items: studentHits.slice(0, 100) },
           { type: "courses", items: courses.slice(0, 8) },
         ].filter((group) => group.items.length > 0),
       });

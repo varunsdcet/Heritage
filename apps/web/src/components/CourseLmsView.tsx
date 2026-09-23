@@ -3,7 +3,7 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { AddActivityChooser } from "@/components/AddActivityChooser";
-import { LmsAddForm, LmsModuleError } from "@/components/lms/LmsAddForm";
+import { LmsAddForm } from "@/components/lms/LmsAddForm";
 import {
   ActionMenu,
   ActivityCompetenciesPanel,
@@ -472,15 +472,13 @@ export function CourseLmsView({ config }: Props) {
   function lmsBody() {
     if (!lms || !c) return null;
 
-    if (actionParam === "add-activity" && atypeParam === "certificate") {
-      return <LmsModuleError title="No Activity / unavailable-module context" onContinue={() => go({ tab: "Course", action: null })} />;
-    }
     if (actionParam === "add-activity" && atypeParam && topicParam) {
       return (
         <LmsAddForm
           code={atypeParam}
           label={atypeParam}
           busy={Boolean(live?.busy)}
+          roster={c.roster ?? []}
           onSave={(values) => {
             void (async () => {
               const ok = await live?.runAction?.(
@@ -493,7 +491,10 @@ export function CourseLmsView({ config }: Props) {
                   ...values,
                 }),
               );
-              if (ok) go({ tab: "Course", action: null, atype: null, topic: null });
+              if (ok) {
+                await live?.refresh?.();
+                go({ tab: "Course", action: null, atype: null, topic: null });
+              }
             })();
           }}
           onCancel={() => go({ tab: "Course", action: null, atype: null, topic: null })}
@@ -556,6 +557,8 @@ export function CourseLmsView({ config }: Props) {
         <ResourceView
           activity={viewedActivity}
           evaluationRows={lms.evaluationRows}
+          roster={c.roster ?? []}
+          sectionId={c.sectionId}
           onEdit={() => go({ tab: "Course", action: "edit-activity", aid: viewedActivity.id })}
           onMore={(which) =>
             go({
@@ -564,6 +567,7 @@ export function CourseLmsView({ config }: Props) {
               aid: viewedActivity.id,
             })
           }
+          onPublished={() => void live?.refresh?.()}
         />
       );
     }
@@ -724,7 +728,9 @@ export function CourseLmsView({ config }: Props) {
       return <AddCourseBadgePanel lms={lms} onCancel={() => go({ tab: "Badges", more: null, action: null })} />;
     }
     if (tab === "Class List") return <ClassListPanel roster={c.roster ?? []} />;
-    if (tab === "Attendance") return <AttendancePanel lms={lms} />;
+    if (tab === "Attendance") {
+      return <AttendancePanel lms={lms} attendance={c.attendance} sectionId={c.sectionId} />;
+    }
     if (tab === "Grades") {
       return (
         <GradesBoard

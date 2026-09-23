@@ -424,6 +424,7 @@ export const ALL_SCREENS: ScreenEntry[] = [
   { id: "HUB-IN-39", role: "instructor", path: "/instructor/submissions", title: "Submissions", group: "Instructor" },
   { id: "AD-ASK", role: "admin", path: "/admin/ai/ask", title: "Ask Heritage", group: "Admin" },
   { id: "IN-ASK", role: "instructor", path: "/instructor/ask", title: "Ask Heritage", group: "Instructor" },
+  { id: "IN-AI-DRAFT", role: "instructor", path: "/instructor/ai-draft", title: "AI Draft", group: "Instructor" },
   { id: "IN-SRC", role: "instructor", path: "/instructor/search", title: "Search", group: "Instructor" },
 ];
 

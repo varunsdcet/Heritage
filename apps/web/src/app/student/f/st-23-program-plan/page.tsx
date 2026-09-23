@@ -163,24 +163,58 @@ export default function ProgramPlanPage() {
                     filtered.map((item) => {
                       const planIndex = allItems.findIndex((x) => x.id === item.id);
                       const num = String((planIndex >= 0 ? planIndex : 0) + 1).padStart(2, "0");
+                      const href = item.sectionId
+                        ? `/student/courses/${item.sectionId}`
+                        : `/student/courses?q=${encodeURIComponent(item.courseCode)}`;
+                      const clickable = Boolean(item.sectionId);
                       return (
-                      <tr key={item.id}>
-                        <td>{formatPlanDates(item)}</td>
-                        <td>
-                          <strong>
-                            ({num}) {item.courseCode} {item.title}
-                          </strong>
-                        </td>
-                        <td>
-                          {formatScheduleLines(item.scheduleText).map((line) => (
-                            <div key={line}>{line}</div>
-                          ))}
-                        </td>
-                        <td>
-                          <span className={statusClass(item.status)}>{statusLabel(item.status)}</span>
-                        </td>
-                      </tr>
-                    );
+                        <tr
+                          key={item.id}
+                          className={clickable ? "is-click" : undefined}
+                          tabIndex={clickable ? 0 : undefined}
+                          role={clickable ? "link" : undefined}
+                          onClick={() => {
+                            if (clickable) router.push(href);
+                          }}
+                          onKeyDown={(e) => {
+                            if (!clickable) return;
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              router.push(href);
+                            }
+                          }}
+                        >
+                          <td>{formatPlanDates(item)}</td>
+                          <td>
+                            <div className="mh-hcc-plan-course">
+                              <span className="mh-hcc-plan-course__num">({num})</span>
+                              {clickable ? (
+                                <button
+                                  type="button"
+                                  className="mh-hcc-plan-course__name"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    router.push(href);
+                                  }}
+                                >
+                                  {item.title || item.courseCode}
+                                </button>
+                              ) : (
+                                <strong className="mh-hcc-plan-course__name">{item.title || item.courseCode}</strong>
+                              )}
+                              <span className="mh-hcc-plan-course__code">{item.courseCode}</span>
+                            </div>
+                          </td>
+                          <td>
+                            {formatScheduleLines(item.scheduleText).map((line) => (
+                              <div key={line}>{line}</div>
+                            ))}
+                          </td>
+                          <td>
+                            <span className={statusClass(item.status)}>{statusLabel(item.status)}</span>
+                          </td>
+                        </tr>
+                      );
                     })
                   )}
                 </tbody>

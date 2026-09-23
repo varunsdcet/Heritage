@@ -26,6 +26,12 @@ const css = `:root {
   --mh-danger-soft: ${tokens.color.dangerSoft};
   --mh-ai: ${tokens.color.ai};
   --mh-ai-soft: ${tokens.color.aiSoft};
+  --mh-sidebar: ${tokens.color.sidebar};
+  --mh-sidebar-muted: ${tokens.color.sidebarMuted};
+  --mh-sidebar-text: ${tokens.color.sidebarText};
+  --mh-sidebar-active: ${tokens.color.sidebarActive};
+  --mh-success: ${tokens.color.success};
+  --mh-success-soft: ${tokens.color.successSoft};
   --mh-radius-sm: ${tokens.radius.sm}px;
   --mh-radius-md: ${tokens.radius.md}px;
   --mh-radius-lg: ${tokens.radius.lg}px;

@@ -4,31 +4,108 @@ import { useMemo, useState } from "react";
 import type { CourseLmsState } from "@/lib/teacherCatalog";
 import { useOptionalTeacherLive } from "@/lib/useTeacherSisLive";
 
-export function AttendancePanel({ lms }: { lms: CourseLmsState }) {
-  const dates = lms.attendanceDates?.length
-    ? lms.attendanceDates
-    : ["Apr 27, 2026 (Mon)", "Apr 28, 2026 (Tue)", "Apr 29, 2026 (Wed)", "Apr 30, 2026 (Thu)"];
-  const [date, setDate] = useState(dates[0]);
+export function AttendancePanel({
+  lms,
+  attendance,
+  sectionId,
+}: {
+  lms: CourseLmsState;
+  attendance?: {
+    meetings: Array<{
+      label: string;
+      present: number;
+      absent: number;
+      late: number;
+      excused: number;
+      total: number;
+    }>;
+    rows: Array<{
+      studentId: string;
+      name: string;
+      studentNumber: string;
+      status: string;
+      meetingLabel: string;
+      recordedAt: string;
+    }>;
+    markHref?: string;
+    emptyMessage?: string;
+  };
+  sectionId?: string;
+}) {
+  const meetings = attendance?.meetings ?? [];
+  const dates =
+    meetings.length > 0
+      ? meetings.map((m) => m.label)
+      : lms.attendanceDates?.length
+        ? lms.attendanceDates
+        : [];
+  const [date, setDate] = useState(dates[0] || "");
+  const activeMeeting = meetings.find((m) => m.label === date) || meetings[0];
+  const rows = (attendance?.rows ?? []).filter((r) => !date || r.meetingLabel === (activeMeeting?.label || date));
+  const markHref =
+    attendance?.markHref ||
+    (sectionId ? `/instructor/attendance?sectionId=${encodeURIComponent(sectionId)}` : "/instructor/attendance");
+
   return (
     <section className="mh-teacher-card">
-      <div className="mh-lms-toolbar">
-        <label>
-          <span className="mh-teacher-sr-only">Attendance date</span>
-          <select className="mh-teacher-field" value={date} onChange={(e) => setDate(e.target.value)}>
-            {dates.map((d) => (
-              <option key={d}>{d}</option>
-            ))}
-          </select>
-        </label>
-        <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary">
+      <div className="mh-lms-toolbar" style={{ flexWrap: "wrap", gap: 8 }}>
+        {dates.length ? (
+          <label>
+            <span className="mh-teacher-sr-only">Attendance date</span>
+            <select className="mh-teacher-field" value={date || dates[0]} onChange={(e) => setDate(e.target.value)}>
+              {dates.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+        <a className="mh-teacher-btn" href={markHref}>
+          Mark attendance
+        </a>
+        <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary" onClick={() => window.print()}>
           PRINT ROSTER
-        </button>
-        <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary">
-          EXPORT ATTENDANCE
         </button>
       </div>
       <h2>Attendance</h2>
-      <p className="mh-teacher-muted">No attendance/students were found</p>
+      {activeMeeting ? (
+        <p className="mh-teacher-muted">
+          {activeMeeting.label} · Present {activeMeeting.present} · Absent {activeMeeting.absent}
+          {activeMeeting.late ? ` · Late ${activeMeeting.late}` : ""}
+          {activeMeeting.excused ? ` · Excused ${activeMeeting.excused}` : ""} · Total {activeMeeting.total}
+        </p>
+      ) : null}
+      {rows.length === 0 ? (
+        <p className="mh-teacher-muted">
+          {attendance?.emptyMessage || "No attendance/students were found. Submit attendance first, then open this tab."}
+        </p>
+      ) : (
+        <div className="mh-teacher-list">
+          {rows.map((r) => (
+            <div key={`${r.meetingLabel}-${r.studentId}`} className="mh-teacher-list__item">
+              <div>
+                <strong>{r.name}</strong>
+                <span>
+                  {r.studentNumber}
+                  {r.meetingLabel ? ` · ${r.meetingLabel}` : ""}
+                </span>
+              </div>
+              <span
+                className={
+                  /absent/i.test(r.status)
+                    ? "mh-teacher-badge mh-teacher-badge--danger"
+                    : /late/i.test(r.status)
+                      ? "mh-teacher-badge mh-teacher-badge--warning"
+                      : "mh-teacher-badge mh-teacher-badge--ok"
+                }
+              >
+                {r.status}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -36,7 +113,14 @@ export function AttendancePanel({ lms }: { lms: CourseLmsState }) {
 export function ClassListPanel({
   roster,
 }: {
-  roster: Array<{ name: string; studentNumber: string; program: string; standing: string; email: string }>;
+  roster: Array<{
+    studentId?: string;
+    name: string;
+    studentNumber: string;
+    program: string;
+    standing: string;
+    email: string;
+  }>;
 }) {
   return (
     <section className="mh-teacher-card">
@@ -632,18 +716,37 @@ type Activity = {
   joinUrl?: string | null;
 };
 
+type RosterStudent = {
+  studentId?: string;
+  name: string;
+  studentNumber: string;
+  email: string;
+};
+
 export function ResourceView({
   activity,
   evaluationRows,
+  roster = [],
+  sectionId,
   onEdit,
   onMore,
+  onPublished,
 }: {
   activity: Activity;
   evaluationRows?: Array<{ component: string; weight: string }>;
+  roster?: RosterStudent[];
+  sectionId?: string;
   onEdit: () => void;
   onMore: (which: "filters" | "permissions") => void;
+  onPublished?: () => void;
 }) {
+  const live = useOptionalTeacherLive();
   const type = activity.type.toUpperCase();
+  const [audience, setAudience] = useState<"all" | "selected">("all");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [publishMsg, setPublishMsg] = useState("");
+  const [publishing, setPublishing] = useState(false);
+
   function openJoin() {
     const url = activity.joinUrl;
     if (url?.startsWith("http")) {
@@ -652,6 +755,43 @@ export function ResourceView({
     }
     window.alert("Jitsi Meet room is not linked yet for this section.");
   }
+
+  async function publishMeeting() {
+    if (!live?.runAction) {
+      setPublishMsg("Live actions unavailable.");
+      return;
+    }
+    if (audience === "selected" && selectedIds.length === 0) {
+      setPublishMsg("Select at least one student, or choose All.");
+      return;
+    }
+    setPublishing(true);
+    setPublishMsg("");
+    try {
+      const ok = await live.runAction(
+        "Publish online class",
+        JSON.stringify({
+          ActivityId: activity.id || "",
+          Name: activity.name || "Online Class",
+          Audience: audience === "all" ? "All enrolled students" : "Selected students",
+          NotifyStudentIds: audience === "selected" ? selectedIds.join(",") : "",
+          JoinUrl: activity.joinUrl || "",
+          SectionId: sectionId || "",
+        }),
+      );
+      if (ok) {
+        setPublishMsg("Published — students notified. Both of you can Join session now.");
+        onPublished?.();
+      } else {
+        setPublishMsg("Publish failed. Try again.");
+      }
+    } finally {
+      setPublishing(false);
+    }
+  }
+
+  const selectable = roster.filter((s) => Boolean(s.studentId));
+
   return (
     <section className="mh-teacher-card mh-lms-resource">
       <p className="mh-lms-crumb">Course / {activity.name}</p>
@@ -691,9 +831,68 @@ export function ResourceView({
               {activity.joinUrl}
             </p>
           ) : null}
-          <button type="button" className="mh-teacher-btn" onClick={openJoin}>
-            Join session
-          </button>
+          <div className="mh-lms-online-publish">
+            <h4>Publish meeting</h4>
+            <p className="mh-teacher-muted">Notify students and open the same Jitsi room for teacher + students.</p>
+            <div className="mh-lms-toolbar" style={{ flexWrap: "wrap", gap: 8 }}>
+              <label className="mh-lms-check">
+                <input
+                  type="radio"
+                  name="mh-online-audience"
+                  checked={audience === "all"}
+                  onChange={() => setAudience("all")}
+                />
+                All enrolled students
+              </label>
+              <label className="mh-lms-check">
+                <input
+                  type="radio"
+                  name="mh-online-audience"
+                  checked={audience === "selected"}
+                  onChange={() => setAudience("selected")}
+                />
+                Selected students
+              </label>
+            </div>
+            {audience === "selected" ? (
+              <ul className="mh-lms-online-roster__list">
+                {selectable.map((s) => {
+                  const id = s.studentId!;
+                  return (
+                    <li key={id}>
+                      <label className="mh-lms-check">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.includes(id)}
+                          onChange={(e) =>
+                            setSelectedIds((prev) =>
+                              e.target.checked ? [...prev, id] : prev.filter((x) => x !== id),
+                            )
+                          }
+                        />
+                        {s.name}
+                        <span className="mh-teacher-muted"> · {s.studentNumber || s.email}</span>
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
+            <div className="mh-lms-toolbar">
+              <button
+                type="button"
+                className="mh-teacher-btn"
+                disabled={publishing || Boolean(live?.busy)}
+                onClick={() => void publishMeeting()}
+              >
+                {publishing ? "Publishing…" : "Publish meeting"}
+              </button>
+              <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary" onClick={openJoin}>
+                Join session
+              </button>
+            </div>
+            {publishMsg ? <p className="mh-teacher-muted">{publishMsg}</p> : null}
+          </div>
         </div>
       ) : type === "FILE" && /evaluation/i.test(activity.name) ? (
         <EvaluationTable rows={evaluationRows || []} />

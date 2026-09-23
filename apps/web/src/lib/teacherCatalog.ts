@@ -453,6 +453,9 @@ export type TeacherScreenConfig = {
       schedule: string;
       href: string;
       term?: string;
+      attendanceLabel?: string;
+      attendanceTone?: "ok" | "warn" | "muted";
+      attendanceHref?: string;
     }>;
   };
   hccEvaluations?: {
@@ -523,7 +526,10 @@ export type TeacherScreenConfig = {
     centerLabel?: string;
     prevLabel?: string;
     nextLabel?: string;
+    primaryAction?: string;
+    secondaryAction?: string;
     groups: Array<{
+      sectionId?: string;
       course: string;
       title: string;
       offering: string;
@@ -744,6 +750,7 @@ export type TeacherScreenConfig = {
     }>;
   };
   courseDetail?: {
+    sectionId?: string;
     code: string;
     title: string;
     meta: string;
@@ -753,7 +760,34 @@ export type TeacherScreenConfig = {
     overview: Array<{ label: string; value: string }>;
     modules: Array<{ title: string; items: number; status: string }>;
     team: Array<{ name: string; role: string; initials: string }>;
-    roster?: Array<{ name: string; studentNumber: string; program: string; standing: string; email: string }>;
+    roster?: Array<{
+      studentId?: string;
+      name: string;
+      studentNumber: string;
+      program: string;
+      standing: string;
+      email: string;
+    }>;
+    attendance?: {
+      meetings: Array<{
+        label: string;
+        present: number;
+        absent: number;
+        late: number;
+        excused: number;
+        total: number;
+      }>;
+      rows: Array<{
+        studentId: string;
+        name: string;
+        studentNumber: string;
+        status: string;
+        meetingLabel: string;
+        recordedAt: string;
+      }>;
+      markHref?: string;
+      emptyMessage?: string;
+    };
     assessments?: Array<{ title: string; due: string; maxScore: string; weight: string }>;
     lectures?: Array<{ title: string; when: string; location: string; joinUrl?: string }>;
     labs?: Array<{ title: string; when: string; location: string }>;
@@ -1067,6 +1101,7 @@ export type TeacherScreenConfig = {
       studentName: string;
       studentNumber: string;
       workshop: string;
+      workshopId?: string;
       status: string;
       statusTone?: TeacherBadgeTone;
       enrolledOn: string;

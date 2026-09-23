@@ -181,9 +181,13 @@ export function mergeTeacherLive(
     if (chrome.workshopEnrolments) (base as TeacherScreenConfig).workshopEnrolments = chrome.workshopEnrolments;
     if (chrome.workshopAttendance) (base as TeacherScreenConfig).workshopAttendance = chrome.workshopAttendance;
     if (chrome.workshops) (base as TeacherScreenConfig).workshops = chrome.workshops;
-    if (chrome.courseDetail) (base as TeacherScreenConfig).courseDetail = chrome.courseDetail;
-    if (chrome.courseTextbooks) (base as TeacherScreenConfig).courseTextbooks = chrome.courseTextbooks;
-    if (chrome.contentRepository) (base as TeacherScreenConfig).contentRepository = chrome.contentRepository;
+    if (chrome.courseDetail && !loading) (base as TeacherScreenConfig).courseDetail = chrome.courseDetail;
+    if (chrome.courseTextbooks && !loading) (base as TeacherScreenConfig).courseTextbooks = chrome.courseTextbooks;
+    if (chrome.contentRepository && !loading) (base as TeacherScreenConfig).contentRepository = chrome.contentRepository;
+    if (loading) {
+      base.title = "Loading section…";
+      base.subtitle = "Loading live Heritage course data…";
+    }
     const helpSupport = mergeHelpSupport(chrome.helpSupport, undefined);
     if (helpSupport) (base as TeacherScreenConfig).helpSupport = helpSupport;
     return base;

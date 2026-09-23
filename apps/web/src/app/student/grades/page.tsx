@@ -8,6 +8,7 @@ import { formatHccDateRange } from "@/lib/hccCourseFormat";
 
 type FinalCourse = {
   enrolmentId: string;
+  sectionId?: string | null;
   courseCode: string;
   title: string;
   credits: number;
@@ -159,19 +160,46 @@ export default function StudentGradesPage() {
                     <td colSpan={6}>No final marks match these filters.</td>
                   </tr>
                 ) : (
-                  filtered.map((row) => (
-                    <tr key={row.enrolmentId}>
-                      <td>
-                        <strong className="mh-hcc-course-link">{row.courseCode}</strong>
-                        <div className="mh-hcc-course-title">{row.title}</div>
-                      </td>
-                      <td>{formatHccDateRange(row.startsOn, row.endsOn) || "—"}</td>
-                      <td>{fmtCredits(row.credits)}</td>
-                      <td>{fmtGp(row.gradePoints)}</td>
-                      <td>{fmtPct(row.averagePercent)}</td>
-                      <td>{row.letter}</td>
-                    </tr>
-                  ))
+                  filtered.map((row) => {
+                    const href = row.sectionId
+                      ? `/student/courses/${row.sectionId}`
+                      : `/student/courses?q=${encodeURIComponent(row.courseCode)}`;
+                    const openCourse = () => router.push(href);
+                    return (
+                      <tr
+                        key={row.enrolmentId}
+                        className="is-click"
+                        tabIndex={0}
+                        role="link"
+                        onClick={openCourse}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            openCourse();
+                          }
+                        }}
+                      >
+                        <td>
+                          <button
+                            type="button"
+                            className="mh-hcc-plan-course__name"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openCourse();
+                            }}
+                          >
+                            {row.title || row.courseCode}
+                          </button>
+                          <div className="mh-hcc-plan-course__code">{row.courseCode}</div>
+                        </td>
+                        <td>{formatHccDateRange(row.startsOn, row.endsOn) || "—"}</td>
+                        <td>{fmtCredits(row.credits)}</td>
+                        <td>{fmtGp(row.gradePoints)}</td>
+                        <td>{fmtPct(row.averagePercent)}</td>
+                        <td>{row.letter}</td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

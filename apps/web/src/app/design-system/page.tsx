@@ -53,7 +53,7 @@ export default function DesignSystemPage() {
 
         <Panel title="Colour tokens">
           <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
-            {swatch("var(--mh-brand)", "brand #017F3F")}
+            {swatch("var(--mh-brand)", "brand #2563EB")}
             {swatch("var(--mh-brand-dark)", "brand-dark")}
             {swatch("var(--mh-olive)", "olive")}
             {swatch("var(--mh-accent-olive, var(--mh-olive))", "accent olive")}

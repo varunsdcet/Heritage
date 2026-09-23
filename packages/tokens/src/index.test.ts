@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 import { designTokens } from "./index.js";
 
 describe("tokens", () => {
-  it("uses corrected warning and border-strong", () => {
-    expect(designTokens.color.warning).toBe("#8A5A00");
-    expect(designTokens.color.borderStrong).toBe("#C9CEC2");
-    expect(designTokens.color.olive).toBe("#5F7A1F");
+  it("uses Classtrack blue brand and navy sidebar", () => {
+    expect(designTokens.color.brand).toBe("#2563EB");
+    expect(designTokens.color.sidebar).toBe("#1E1E2D");
+    expect(designTokens.color.borderStrong).toBe("#D1D5DB");
+    expect(designTokens.color.olive).toBe("#0369A1");
   });
 });

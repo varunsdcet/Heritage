@@ -1,0 +1,502 @@
+{
+  "topics": [
+    {
+      "id": "cab",
+      "title": "Computer applications in business"
+    },
+    {
+      "id": "hrm",
+      "title": "Introduction to HRM"
+    }
+  ],
+  "lessons": [
+    {
+      "id": "disaster-87-96",
+      "topicId": "cab",
+      "topicTitle": "Computer applications in business",
+      "title": "disaster management in india 87 96",
+      "minutes": 6,
+      "contentType": "Text article",
+      "order": 0,
+      "seedContent": "<div style=\"background:#f4ede0;border:1px solid #e7e2d6;border-radius:12px;padding:20px;display:flex;align-items:center;gap:16px;margin:0 0 16px;\"><div style=\"font-size:36px;line-height:1;\">📄</div><div style=\"flex:1;\"><div style=\"font-weight:600;font-size:15px;color:#1c1d1c;margin-bottom:2px;\">disaster_management_in_india-87-96.pdf</div><div style=\"font-size:13px;color:#6b6b6b;\">10 pages · 0.3 MB · Original textbook PDF</div></div><a href=\"#\" style=\"background:#1f3a2c;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600;white-space:nowrap;\">Open PDF</a></div><p style=\"color:#6b6b6b;font-size:13px;font-style:italic;margin:0 0 8px;\">This lesson is currently shown as the original PDF. To convert it into a readable, editable lesson with text, your instructor can use the <strong>Convert PDF</strong> action in the curriculum builder.</p>",
+      "content": "<p>Effective disaster management is essential for keeping people, data, and businesses safe, and as a future business professional you need to understand both the human and technological sides of this critical topic.</p>\n\n<h2>Why this matters</h2>\n<p>In business, a disaster is not only a flood, fire, or earthquake; it can also be a cyberattack, a massive software failure, or a power outage that shuts down operations. For companies in India, Canada, and around the world, disasters can lead to lost revenue, data loss, reputational damage, and even closure.</p>\n<p>From the mid‑1980s to the late‑1990s—roughly the period 1987 to 1996—India experienced several major natural disasters and industrial accidents. At the same time, businesses were starting to rely heavily on computer applications for accounting, inventory, and communication. This combination made it clear that <strong>disaster management</strong> had to include both physical safety and information technology (IT) resilience.</p>\n<p>In Canada, events like the 1998 <strong>Ice Storm</strong> in Quebec and Ontario showed how vulnerable power grids and communication systems can be. Many businesses that had no backup systems or data protection struggled to recover, while those with well‑planned <strong>business continuity</strong> and <strong>disaster recovery</strong> strategies resumed operations more quickly.</p>\n<p>As you learn computer applications in business, you are also learning how to protect information systems so that your organization can continue serving customers even when something goes wrong.</p>\n\n<h2>Core concepts</h2>\n<p><strong>Disaster management</strong> is a coordinated approach to preventing, preparing for, responding to, and recovering from disasters. In a business context, this includes protecting people, buildings, equipment, and especially information systems.</p>\n<p>Key components include:</p>\n<ul>\n  <li><strong>Risk assessment</strong> – identifying potential threats (for example, flood, fire, cyberattack, hardware failure) and estimating their likelihood and impact.</li>\n  <li><strong>Mitigation</strong> – actions that reduce the chance of a disaster or limit damage, such as installing firewalls, surge protectors, or off‑site backups.</li>\n  <li><strong>Preparedness</strong> – planning and training so that people know what to do and systems are ready. This includes evacuation plans, backup procedures, and communication templates.</li>\n  <li><strong>Response</strong> – immediate actions taken during and right after the disaster, such as switching to backup servers, contacting emergency services, and informing staff and customers.</li>\n  <li><strong>Recovery</strong> – restoring operations to normal or better, which may involve data restoration, repairs, and post‑incident reviews to improve future planning.</li>\n</ul>\n<p>In India, the evolution of disaster management from 1987–1996 was influenced by major events like cyclones, floods, and industrial accidents. These highlighted the need for:</p>\n<ul>\n  <li>Central coordination between government, local authorities, and businesses.</li>\n  <li>Early warning systems and better data sharing.</li>\n  <li>Stronger building standards and safety regulations.</li>\n  <li>Growing use of computer systems to track resources, manage communication, and analyze risk.</li>\n</ul>\n<p>For businesses using computer applications, an important concept is the <strong>Disaster Recovery Plan (DRP)</strong>. This is a documented, step‑by‑step plan for restoring IT systems and data after a disruption.</p>\n<p>A basic DRP typically includes:</p>\n<ol>\n  <li>An inventory of critical systems and applications (for example, accounting software, customer database, point‑of‑sale systems).</li>\n  <li>Data backup procedures (frequency, storage location, responsible staff).</li>\n  <li>Alternative work arrangements (remote work options, backup office locations).</li>\n  <li>Contact lists for staff, vendors, emergency services, and key customers.</li>\n  <li>A communication plan (who informs whom, using which channels, and when).</li>\n</ol>\n\n<h2>Worked example: small business scenario</h2>\n<blockquote>\n  <p>Imagine a small retail company in Mumbai in 1996 that has recently computerized its inventory and sales system using a basic database and accounting program. The shop is located in a low‑lying area that is prone to monsoon flooding.</p>\n</blockquote>\n<p>The owner wants to protect the business against disasters while making good use of computer applications. Here is how a simple disaster management approach might look:</p>\n<ol>\n  <li><strong>Risk assessment</strong></li>\n</ol>\n<ul>\n  <li>Identify main threats: seasonal flooding, power cuts, and hardware failure.</li>\n  <li>Recognize that the new computer system holds essential data on inventory and sales; losing it would make it much harder to claim insurance or restock.</li>\n</ul>\n<ol start=\"2\">\n  <li><strong>Mitigation and preparedness</strong></li>\n</ol>\n<ul>\n  <li>Place computer hardware on raised desks or shelves to keep it above typical water levels.</li>\n  <li>Use an <strong>Uninterruptible Power Supply (UPS)</strong> to reduce damage from power surges and give time to shut down safely.</li>\n  <li>Schedule daily data backups at closing time to removable media (such as tapes or disks in that era), stored in a safe, dry location at home.</li>\n  <li>Document basic operating procedures: how to back up data, how to shut down equipment, and who is responsible.</li>\n</ul>\n<ol start=\"3\">\n  <li><strong>Response</strong></li>\n</ol>\n<ul>\n  <li>When heavy rain starts and flooding is forecast, staff follow a checklist: perform a manual backup, shut down the computer, cover equipment with plastic sheeting, and move portable items to higher shelves.</li>\n  <li>Record current inventory levels to help with any insurance claims.</li>\n</ul>\n<ol start=\"4\">\n  <li><strong>Recovery</strong></li>\n</ol>\n<ul>\n  <li>After the flood, the owner assesses damage, replaces any ruined hardware, and uses the most recent backup to restore the inventory and sales records.</li>\n  <li>The owner updates the plan after learning from experience (for example, switching to more frequent backups during monsoon season).</li>\n</ul>\n<p>A Canadian parallel example can be seen in small businesses in Calgary affected by the 2013 floods. Many that used cloud‑based accounting and point‑of‑sale systems, along with off‑site data backups, were able to resume core operations quickly from temporary locations, even while their physical premises were still being repaired.</p>\n\n<h2>Try it yourself: outline a simple IT disaster plan</h2>\n<p>Using what you know about computer applications in business, draft a basic IT‑focused disaster management outline for a small company (for example, a local bakery, a campus print shop, or a small consulting firm in Toronto).</p>\n<ol>\n  <li><strong>Identify key systems</strong></li>\n</ol>\n<ul>\n  <li>List 3–5 core applications the business depends on (for example, accounting software, email, customer files, payment terminals).</li>\n</ul>\n<ol start=\"2\">\n  <li><strong>Identify main threats</strong></li>\n</ol>\n<ul>\n  <li>Choose at least two physical threats (such as fire or flood) and two digital threats (such as malware or data corruption).</li>\n</ul>\n<ol start=\"3\">\n  <li><strong>Describe simple mitigation steps</strong></li>\n</ol>\n<ul>\n  <li>For each threat, write one preventive or protective action (for example, install antivirus software, use cloud backups, keep equipment off the floor).</li>\n</ul>\n<ol start=\"4\">\n  <li><strong>Plan a basic response</strong></li>\n</ol>\n<ul>\n  <li>Explain what staff should do in the first 24 hours after a major disruption to keep the business functioning as much as possible.</li>\n</ul>\n<ol start=\"5\">\n  <li><strong>Plan for recovery</strong></li>\n</ol>\n<ul>\n  <li>Outline how the business would restore its systems, communicate with customers, and return to normal operations.</li>\n</ul>\n<p>This exercise helps you connect disaster management principles to your practical knowledge of computer applications and business processes.</p>\n\n<h2>Key takeaways</h2>\n<ul>\n  <li>Disaster management in business includes planning for both physical events (like floods and fires) and digital events (like cyberattacks and system failures).</li>\n  <li>The period 1987–1996 in India highlighted the importance of coordinated disaster management and the growing role of computer systems in preparedness and response.</li>\n  <li>Effective business disaster management relies on risk assessment, mitigation, preparedness, response, and recovery, all supported by a clear Disaster Recovery Plan.</li>\n  <li>Protecting IT systems with backups, power protection, and clear procedures helps organizations in India, Canada, and worldwide recover faster from disruptions.</li>\n  <li>As a beginner in computer applications in business, learning to think about resilience and continuity will make you more valuable in any workplace.</li>\n</ul>",
+      "storyboard": {
+        "title": "Disaster Management in India",
+        "estimated_duration_sec": 360,
+        "slides": [
+          {
+            "number": 1,
+            "heading": "Disaster Management in India",
+            "bullets": [
+              "Understanding disasters in the Indian context",
+              "Role of government and agencies",
+              "Links to business continuity planning"
+            ],
+            "narration": "This lesson introduces disaster management in India and why it matters for business. You will explore the types of disasters India faces and how government and specialized agencies respond. We will connect these ideas to business continuity planning, so you can see how organizations protect people, data, and operations when disasters occur."
+          },
+          {
+            "number": 2,
+            "heading": "Learning Objectives",
+            "bullets": [
+              "Define disasters and disaster management",
+              "Identify major disasters affecting India",
+              "Explain India’s disaster management framework",
+              "Relate disaster management to business continuity"
+            ],
+            "narration": "By the end of this lesson, you should be able to clearly define what a disaster is and what disaster management involves. You will be able to identify major types of disasters affecting India and describe the key parts of India’s disaster management framework. You will also relate these concepts to business continuity in modern organizations."
+          },
+          {
+            "number": 3,
+            "heading": "What Is a Disaster?",
+            "bullets": [
+              "Serious disruption beyond normal coping capacity",
+              "Caused by natural, human-made, or mixed hazards",
+              "Leads to loss of life, property, and services"
+            ],
+            "narration": "A disaster is a serious disruption of community or societal functioning that exceeds a community’s ability to cope using its own resources. Disasters may be triggered by natural hazards, human-made incidents, or a combination of both. They typically result in loss of life, damage to property and infrastructure, and interruption of essential services such as power, water, communications, and transportation."
+          },
+          {
+            "number": 4,
+            "heading": "Types of Disasters in India",
+            "bullets": [
+              "Natural: floods, cyclones, earthquakes, droughts",
+              "Human-made: industrial, chemical, nuclear accidents",
+              "Biological: epidemics and pandemics",
+              "India as one of the most disaster-prone countries"
+            ],
+            "narration": "India experiences a wide range of disasters because of its geography, climate, and population density. Natural disasters include floods, cyclones along the coasts, earthquakes, landslides, and periodic droughts. Human-made disasters arise from industrial, chemical, and nuclear accidents, as well as transportation mishaps. Biological disasters, such as epidemics and pandemics, also pose recurring risks. Together, these make India one of the world’s most disaster-prone countries."
+          },
+          {
+            "number": 5,
+            "heading": "Disaster Management: Key Stages",
+            "bullets": [
+              "Prevention and mitigation to reduce risk",
+              "Preparedness through planning and training",
+              "Response: immediate actions during disaster",
+              "Recovery and reconstruction after disaster"
+            ],
+            "narration": "Disaster management is a continuous process with four main stages. Prevention and mitigation aim to reduce risk before a disaster strikes, for example through better land use or stronger building codes. Preparedness focuses on planning, training, drills, and early warning systems. Response refers to the immediate actions taken during and right after a disaster to save lives and protect property. Recovery and reconstruction involve restoring services, rebuilding infrastructure, and supporting affected communities over the longer term."
+          },
+          {
+            "number": 6,
+            "heading": "Institutional Framework in India",
+            "bullets": [
+              "Disaster Management Act, 2005",
+              "National Disaster Management Authority (NDMA)",
+              "State and District Disaster Management Authorities",
+              "National and state disaster response forces"
+            ],
+            "narration": "India’s approach to disasters is guided by the Disaster Management Act of 2005. This law created a structured system to manage disasters at all levels. The National Disaster Management Authority, chaired by the Prime Minister, provides policy and strategic direction. Each state and district has its own Disaster Management Authority to plan and coordinate local efforts. Specialized response forces, such as the National Disaster Response Force and state units, carry out rescue, relief, and support operations on the ground."
+          },
+          {
+            "number": 7,
+            "heading": "From Relief to Risk Reduction",
+            "bullets": [
+              "Shift from reactive relief to proactive risk reduction",
+              "Focus on building resilience and safer communities",
+              "Use of early warning and technology tools",
+              "Community participation as a core strategy"
+            ],
+            "narration": "India’s disaster policy has shifted from a mainly reactive focus on relief after events to a proactive emphasis on reducing risk. The goal is to build safer, more resilient communities that can withstand hazards better. This involves using early warning systems, satellite and information technology, risk mapping, and stronger infrastructure. Community participation is central: local people are involved in planning, training, awareness campaigns, and decision-making, since they are the first to be affected and the first to respond."
+          },
+          {
+            "number": 8,
+            "heading": "Disaster Management and Business",
+            "bullets": [
+              "Business continuity and disaster recovery planning",
+              "Protection of data, assets, and supply chains",
+              "Compliance with safety and environmental rules",
+              "Cooperation with public authorities and communities"
+            ],
+            "narration": "For businesses operating in India, disaster management is closely linked to business continuity and disaster recovery planning. Organizations must identify critical processes, protect data and physical assets, and plan for alternate sites and supply routes. They must also comply with workplace safety, environmental, and industrial risk regulations. Effective disaster management requires close cooperation with government agencies, emergency services, and local communities to ensure coordinated responses and faster recovery."
+          },
+          {
+            "number": 9,
+            "heading": "Case Insight: Learning from Past Disasters",
+            "bullets": [
+              "Major events highlight gaps and improvements",
+              "Examples: cyclones, floods, industrial accidents",
+              "Better early warning, evacuation, and planning",
+              "Businesses revising risk and continuity plans"
+            ],
+            "narration": "High-impact events such as severe cyclones, large floods, and notable industrial accidents in India have exposed weaknesses but also driven improvements. Over time, early warning systems and evacuation planning have become more effective, saving many lives. Government agencies now coordinate more closely with NGOs and private firms. Businesses, especially in high-risk sectors, have had to re-examine their risk assessments, invest in safer technology, and strengthen their continuity and recovery strategies."
+          },
+          {
+            "number": 10,
+            "heading": "Recap and Key Takeaways",
+            "bullets": [
+              "India faces diverse natural and human-made disasters",
+              "Disaster management covers prevention to recovery",
+              "India’s legal and institutional framework guides action",
+              "Businesses must integrate disaster risk into planning",
+              "Resilience grows through technology and community roles"
+            ],
+            "narration": "To review, India faces a wide range of natural, human-made, and biological disasters that significantly affect people, infrastructure, and businesses. Disaster management is a continuous process, from prevention and preparedness to response and long-term recovery. The Disaster Management Act and related institutions provide structure and direction. Businesses are expected to integrate disaster risk into their continuity plans. Building resilience depends on effective use of technology, strong institutions, and active participation from communities and the private sector."
+          }
+        ]
+      }
+    },
+    {
+      "id": "ch1-cab",
+      "topicId": "cab",
+      "topicTitle": "Computer applications in business",
+      "title": "Chapter 1 - Computer applications in business",
+      "minutes": 6,
+      "contentType": "Text article",
+      "order": 1,
+      "seedContent": "<p></p>",
+      "content": "<p>Computers have become essential tools for almost every business in Canada, from small local shops to large national companies.</p>\n\n<h2>Why this matters</h2>\n<p>Whether you plan to work in an office, start your own business, or manage a team, understanding <strong>computer applications in business</strong> will help you work more efficiently and make better decisions.</p>\n<p>Modern Canadian workplaces expect employees to be comfortable with digital tools for communication, record-keeping, data analysis, and customer service. Government services such as the Canada Revenue Agency (CRA) also require many business processes, like filing GST/HST returns, to be completed online. Knowing the basics of business computer applications is now a core job skill, not a bonus.</p>\n<p>This lesson will introduce the main types of computer applications used in business, show how they connect to everyday tasks, and give you a chance to practice thinking about which tools are best for different business needs.</p>\n\n<h2>Core concepts</h2>\n<p>In business, a <strong>computer application</strong> (or “app”) is a software program designed to help people complete specific work tasks. These applications can run on desktop computers, laptops, tablets, or smartphones.</p>\n\n<h3>Main categories of business applications</h3>\n<p>Most business computer applications fall into a few major categories:</p>\n<ul>\n  <li><strong>Productivity software</strong>: Helps people create and manage documents and information. This includes word processing, spreadsheets, presentation software, and note-taking tools.</li>\n  <li><strong>Communication and collaboration tools</strong>: Support teamwork with email, calendars, video conferencing, team chat, and cloud storage.</li>\n  <li><strong>Accounting and finance applications</strong>: Track money, generate invoices, prepare reports, and support payroll and tax calculations.</li>\n  <li><strong>Customer relationship management (CRM)</strong>: Store customer information and manage sales, marketing, and service.</li>\n  <li><strong>Industry-specific applications</strong>: POS systems, booking systems, electronic medical records, inventory and logistics tools.</li>\n</ul>\n\n<h3>Cloud-based vs. local applications</h3>\n<p>Many modern business applications are <strong>cloud-based</strong>, accessed through the internet. Benefits include remote access, easier updates, and real-time collaboration. They also require careful attention to <strong>digital security</strong> and privacy under laws such as PIPEDA.</p>\n\n<h2>Worked example</h2>\n<p>Consider a small independent coffee shop in Halifax that wants to modernize operations with POS, spreadsheets, scheduling tools, and basic accounting software connected to CRA filing needs.</p>\n\n<h2>Key takeaways</h2>\n<ul>\n  <li>Computer applications in business support communication, record-keeping, decision-making, and compliance.</li>\n  <li>Main categories include productivity, communication, accounting, CRM, and industry-specific tools.</li>\n  <li>Cloud-based applications enable remote access but require strong security and privacy practices.</li>\n  <li>Choosing the right mix of applications helps small Canadian businesses become more efficient and competitive.</li>\n</ul>",
+      "storyboard": {
+        "title": "Chapter 1 – Computer Applications in Business",
+        "estimated_duration_sec": 360,
+        "slides": [
+          {
+            "number": 1,
+            "heading": "Computer Applications in Canadian Business",
+            "bullets": [
+              "Computers are essential in almost every Canadian business",
+              "Used by small shops and large national companies",
+              "Digital skills are core workplace expectations"
+            ],
+            "narration": "In today’s Canadian economy, computers are central to how businesses operate, from family-owned stores to large corporations. Almost every job now involves using digital tools to complete daily tasks. Employers expect workers to be comfortable with basic computer applications so that work is done accurately, efficiently, and in line with Canadian business practices."
+          },
+          {
+            "number": 2,
+            "heading": "Learning Objectives",
+            "bullets": [
+              "Explain what a business computer application is",
+              "Identify major categories of business applications",
+              "Describe how apps support key business functions",
+              "Recognize why these skills matter in Canada"
+            ],
+            "narration": "By the end of this lesson, you should be able to clearly explain what a computer application is in a business context. You will be able to identify and compare major categories of business software and describe how they support functions like accounting and marketing. You will also connect these skills to expectations in Canadian workplaces and government services."
+          },
+          {
+            "number": 3,
+            "heading": "What Is a Computer Application?",
+            "bullets": [
+              "Software designed to perform specific work tasks",
+              "Runs on desktops, laptops, tablets, or smartphones",
+              "Used for creating, storing, and sharing information",
+              "Core tool in most office and business roles"
+            ],
+            "narration": "A computer application, or app, is software created to help people complete particular work tasks. These applications can run on many devices, including desktop computers, laptops, tablets, and smartphones. In business settings, employees rely on applications to create documents, store records, and share information. Knowing which application to use is now a basic skill for most office and business jobs."
+          },
+          {
+            "number": 4,
+            "heading": "Productivity and Communication Tools",
+            "bullets": [
+              "Productivity: word processing, spreadsheets, presentations",
+              "Note-taking tools support planning and brainstorming",
+              "Communication: email, calendars, video meetings",
+              "Collaboration: chat, shared files, cloud storage"
+            ],
+            "narration": "Productivity software helps workers create and manage information. Word processors are used for letters and reports, while spreadsheets support budgeting, sales tracking, and inventory. Presentation tools are common in meetings and training, and note-taking apps assist with planning. Communication and collaboration tools, such as email, shared calendars, video conferencing, team chat, and cloud storage, make it easier for teams across Canada to work together, even at a distance."
+          },
+          {
+            "number": 5,
+            "heading": "Finance, CRM, and Industry-Specific Apps",
+            "bullets": [
+              "Accounting apps track sales, expenses, and payroll",
+              "Automate invoices, receipts, and financial reports",
+              "CRM systems manage customer data and interactions",
+              "Industry tools: POS, booking, medical records, logistics"
+            ],
+            "narration": "Accounting and finance applications help businesses record money coming in and going out, generate invoices and receipts, prepare financial statements, and support payroll and tax calculations. Customer relationship management, or CRM systems, store customer details and support sales, marketing, and service. Many sectors use specialized tools, such as point-of-sale systems in retail, booking systems in hospitality, electronic medical records in healthcare, and logistics software in manufacturing and distribution."
+          },
+          {
+            "number": 6,
+            "heading": "How Applications Support Business Functions",
+            "bullets": [
+              "Support functions like accounting, marketing, HR",
+              "Collect, store, and analyze business information",
+              "Automate routine tasks and reminders",
+              "Improve communication with staff and customers"
+            ],
+            "narration": "Businesses are often organized by functions such as accounting, marketing, operations, and human resources. Each function depends on computer applications to collect and store information safely, organize and analyze data, and generate reports to support decisions. Applications can automate routine tasks, such as sending reminders or regular reports, and make communication with staff, customers, suppliers, and regulators faster and more reliable."
+          },
+          {
+            "number": 7,
+            "heading": "Integration and Canadian Context",
+            "bullets": [
+              "Different departments share data across systems",
+              "Gives a consistent view of business performance",
+              "Supports compliance with Canadian regulations",
+              "Example: online filing with the CRA"
+            ],
+            "narration": "In many organizations, separate applications are connected so that departments can share accurate data. For example, accounting software and sales systems might exchange information to provide a consistent picture of business performance. Integrated applications also help meet Canadian legal and regulatory requirements, such as keeping proper records for audits and filing taxes online with the Canada Revenue Agency using systems for GST and HST reporting."
+          },
+          {
+            "number": 8,
+            "heading": "Recap: Key Takeaways",
+            "bullets": [
+              "Computer applications are essential tools in business",
+              "Different categories support different work tasks",
+              "Apps enable data management, automation, and teamwork",
+              "Digital skills are core expectations in Canada",
+              "Understanding tools helps you choose the right app"
+            ],
+            "narration": "Computer applications are now fundamental to how Canadian businesses operate every day. Different categories of software, from productivity tools to accounting and CRM systems, support specific work tasks and departments. These tools help manage data, automate routine work, and improve collaboration. Building strong digital skills prepares you to meet workplace expectations and choose the right applications for various business needs."
+          }
+        ]
+      }
+    },
+    {
+      "id": "ch2-cab",
+      "topicId": "cab",
+      "topicTitle": "Computer applications in business",
+      "title": "Ch 2 - Choosing the Right Computer Application for a Business Task",
+      "minutes": 6,
+      "contentType": "Text article",
+      "order": 2,
+      "seedContent": "<p></p>",
+      "content": "<p>Choosing the right computer application for a business task can save time, reduce errors, and help a company make better decisions.</p>\n\n<h2>Why this matters</h2>\n<p>In modern Canadian workplaces, almost every business process depends on the right digital tools. From recording sales in a small Halifax café to tracking inventory in a Toronto warehouse, computer applications shape how efficiently work is done.</p>\n<p>Employers across Canada expect new hires to select appropriate applications that support accuracy, collaboration, and data security.</p>\n\n<h2>Core concepts</h2>\n<p><strong>Business task</strong>: A specific activity that helps an organization operate or reach its goals.</p>\n<p><strong>Computer application</strong>: Software designed to help perform a particular type of task.</p>\n<p><strong>General-purpose applications</strong>: Word processors, spreadsheets, and presentation software.</p>\n<p><strong>Specialized applications</strong>: Payroll, POS, or CRM tools.</p>\n<p>Decision factors: task type, data volume, accuracy and control, collaboration needs, and security and privacy.</p>\n\n<h2>Worked example</h2>\n<p>A Winnipeg outdoor clothing retailer moving from paper forms to a specialized POS system for inventory and sales tracking, with Canadian sales tax and privacy considerations.</p>\n\n<h2>Key takeaways</h2>\n<ul>\n  <li>Always start by clearly defining the business task before selecting a computer application.</li>\n  <li>Use decision factors such as task type, data volume, accuracy, collaboration, and security.</li>\n  <li>Specialized software is usually better for complex, high-volume, or regulated tasks.</li>\n  <li>Being able to justify your choice of application is a valuable workplace skill.</li>\n</ul>",
+      "storyboard": {
+        "title": "Choosing the Right Computer Application for a Business Task",
+        "estimated_duration_sec": 360,
+        "slides": [
+          {
+            "number": 1,
+            "heading": "Choosing the Right Business Application",
+            "bullets": [
+              "Digital tools shape almost every business process",
+              "The right application saves time and reduces errors",
+              "Skill valued in Canadian workplaces"
+            ],
+            "narration": "In today’s Canadian workplaces, almost every task is supported by digital tools. Choosing the right computer application can save time, reduce errors, and lead to better business decisions. In this lesson, you’ll see how to match common business tasks with appropriate software tools, a skill that employers across Canada increasingly expect from new hires."
+          },
+          {
+            "number": 2,
+            "heading": "Learning Objectives",
+            "bullets": [
+              "Explain key terms: business task and application",
+              "Distinguish general-purpose and specialized tools",
+              "Apply five decision factors to choose software",
+              "Match common business tasks to applications"
+            ],
+            "narration": "By the end of this lesson, you should be able to clearly explain what we mean by a business task and a computer application. You will distinguish between general-purpose and specialized tools, apply five decision factors when choosing software, and practice matching typical business activities with the most suitable applications for a Canadian business context."
+          },
+          {
+            "number": 3,
+            "heading": "Five Factors for Choosing Software",
+            "bullets": [
+              "Task type: writing, calculating, tracking, analyzing",
+              "Data volume: small lists or large datasets",
+              "Accuracy and control: impact of mistakes",
+              "Collaboration and security needs"
+            ],
+            "narration": "When selecting an application, start by asking what type of work is involved: writing, calculating, tracking, analyzing, designing, or communicating. Consider how much data you will manage, and how serious mistakes could be, including whether you need checks or approvals. Think about who needs to collaborate and from where, and whether the information includes personal or financial data that must be protected under Canadian privacy laws."
+          },
+          {
+            "number": 4,
+            "heading": "Common General-Purpose Tools",
+            "bullets": [
+              "Word processors for text-based documents",
+              "Spreadsheets for calculations and simple data",
+              "Presentation software for visual communication",
+              "Collaboration tools for sharing and messaging"
+            ],
+            "narration": "General-purpose tools are flexible and used in almost every business. Word processors are ideal for letters, reports, and policies that are mostly text. Spreadsheets handle calculations, basic budgets, and simple lists or data analysis. Presentation software supports visual communication in meetings and pitches. Collaboration tools, such as Teams or Google Workspace, help groups share files, message, and coordinate work across locations."
+          },
+          {
+            "number": 5,
+            "heading": "Specialized Business Applications",
+            "bullets": [
+              "Databases for large, structured datasets",
+              "Accounting software for finances and payroll",
+              "POS systems for sales in retail settings",
+              "CRM tools for managing customer relations"
+            ],
+            "narration": "Specialized applications are built for specific business functions. Databases are best when you manage large, structured datasets and need to search, filter, and relate information from multiple tables. Accounting software tracks income, expenses, payroll, and taxes, and produces financial statements. Point-of-sale systems support sales transactions, while customer relationship management tools help organize customer information and interactions."
+          },
+          {
+            "number": 6,
+            "heading": "Worked Example: Winnipeg Retail Store",
+            "bullets": [
+              "Retailer selling outdoor clothing in Winnipeg",
+              "Needs better inventory tracking and reporting",
+              "Considers data volume, accuracy, and access",
+              "Chooses tools that support growth and control"
+            ],
+            "narration": "Imagine a small outdoor clothing retailer in Winnipeg that wants to improve its inventory tracking. The owner must consider how many products are tracked, how often stock changes, and how important accuracy is for ordering and customer service. They may move from a basic spreadsheet to a database or integrated POS system that links sales with inventory, providing better reports and control as the business grows."
+          },
+          {
+            "number": 7,
+            "heading": "Recap and Key Takeaways",
+            "bullets": [
+              "Business tasks drive software choices",
+              "Know core application types and their strengths",
+              "Apply the five decision factors consistently",
+              "Select tools that support accuracy and security",
+              "These skills increase employability in Canada"
+            ],
+            "narration": "Business needs should always guide your software choices. Understanding different application types, from word processors to accounting systems, helps you select the right tool for each task. By consistently applying the five decision factors, you support accuracy, collaboration, and data protection. Building this decision-making skill will make you more confident and more employable in Canadian business environments."
+          }
+        ]
+      }
+    },
+    {
+      "id": "intro-hrm",
+      "topicId": "hrm",
+      "topicTitle": "Introduction to HRM",
+      "title": "Introduction to HRM",
+      "minutes": 4,
+      "contentType": "Text article",
+      "order": 0,
+      "seedContent": "<p></p>",
+      "content": "<p>Human Resource Management (HRM) is the backbone of how organizations in Canada attract, support, and grow the people who make their work possible.</p>\n\n<h2>Why this matters</h2>\n<p>Every organization that hires people relies on HRM to help employees succeed and to keep the workplace fair, safe, and productive. In Canada, HRM must follow federal and provincial/territorial laws related to employment, human rights, and occupational health and safety.</p>\n\n<h2>Core concepts</h2>\n<p><strong>Human Resource Management (HRM)</strong> is the strategic approach to managing people at work so that both the organization and its employees can achieve their goals.</p>\n<ul>\n  <li><strong>Strategic HRM</strong>: Aligning people practices with long-term goals.</li>\n  <li><strong>Recruitment and selection</strong>: Attracting applicants and choosing the best candidate fairly.</li>\n  <li><strong>Onboarding and orientation</strong>: Helping new employees contribute effectively and safely.</li>\n  <li><strong>Training and development</strong>: Building skills for current and future roles.</li>\n  <li><strong>Performance management</strong>: Setting expectations, feedback, and evaluation.</li>\n  <li><strong>Compensation and benefits</strong>: Competitive, equitable, and compliant rewards.</li>\n  <li><strong>Employee relations</strong>: Positive relationships, conflict resolution, and unions when relevant.</li>\n  <li><strong>Occupational health and safety (OHS)</strong>: Safe and healthy workplaces.</li>\n</ul>\n\n<h2>Key takeaways</h2>\n<ul>\n  <li>HRM is a strategic, organized approach to managing people.</li>\n  <li>Core activities span recruitment through health and safety.</li>\n  <li>Canadian employment standards, human rights, and OHS laws shape HRM.</li>\n  <li>Understanding HRM helps you navigate your own career more confidently.</li>\n</ul>",
+      "storyboard": {
+        "title": "Introduction to Human Resource Management (HRM)",
+        "estimated_duration_sec": 360,
+        "slides": [
+          {
+            "number": 1,
+            "heading": "Introduction to HRM",
+            "bullets": [
+              "HRM as the backbone of Canadian workplaces",
+              "Focus on people, performance, and well-being",
+              "Applies to all sectors and organization sizes"
+            ],
+            "narration": "Human Resource Management, or HRM, is the backbone of how organizations across Canada attract, support, and grow their people. It’s about creating workplaces where employees can perform well and feel supported. From small family businesses to national corporations, every employer relies on HRM practices."
+          },
+          {
+            "number": 2,
+            "heading": "Learning Objectives",
+            "bullets": [
+              "Define HRM and its strategic role",
+              "Recognize key HRM functions in workplaces",
+              "Understand the Canadian legal context for HRM",
+              "Connect HRM to your own work experiences"
+            ],
+            "narration": "By the end of this lesson, you will be able to explain what Human Resource Management is and describe its strategic role in organizations. You will recognize the main HRM functions that operate in most workplaces. You will also understand how Canadian laws shape HR practices."
+          },
+          {
+            "number": 3,
+            "heading": "What Is Human Resource Management?",
+            "bullets": [
+              "Strategic approach to managing people at work",
+              "Focus on both organizational and employee goals",
+              "More than paperwork or hiring tasks"
+            ],
+            "narration": "Human Resource Management is a strategic approach to managing people at work so both the organization and its employees can achieve their goals. It goes far beyond basic paperwork or processing job applications."
+          },
+          {
+            "number": 4,
+            "heading": "Key HRM Functions",
+            "bullets": [
+              "Recruitment and selection",
+              "Onboarding, training, and development",
+              "Performance management and rewards",
+              "Employee relations and OHS"
+            ],
+            "narration": "Core HRM functions follow employees through their work life: recruitment and selection, onboarding, training and development, performance management, compensation and benefits, employee relations, and occupational health and safety."
+          },
+          {
+            "number": 5,
+            "heading": "Canadian Legal Framework for HRM",
+            "bullets": [
+              "Employment standards: wages, hours, leaves, vacations",
+              "Human rights laws: no discrimination, duty to accommodate",
+              "OHS laws: employers must keep workers safe",
+              "HR ensures compliance across provinces and territories"
+            ],
+            "narration": "In Canada, HRM operates within a strong legal framework. Employment standards set minimum rules for wages, hours, vacation, and leaves. Human rights legislation prohibits discrimination and requires accommodation. Occupational health and safety laws require employers to take reasonable steps to keep workers safe."
+          },
+          {
+            "number": 6,
+            "heading": "Recap: Key Takeaways on HRM",
+            "bullets": [
+              "HRM is a strategic, people-focused function",
+              "Core activities span the full employee lifecycle",
+              "Canadian laws strongly shape HRM decisions",
+              "Effective HRM supports fairness, safety, and success"
+            ],
+            "narration": "To recap, Human Resource Management is a strategic, people-focused function that supports both organizational success and employee well-being. Wherever you work, you will interact with HR processes, so understanding HRM helps you navigate and contribute to your workplace more effectively."
+          }
+        ]
+      }
+    },
+    {
+      "id": "strategic-hrm",
+      "topicId": "hrm",
+      "topicTitle": "Introduction to HRM",
+      "title": "Strategic Human Resource Management",
+      "minutes": 2,
+      "contentType": "Text article",
+      "order": 1,
+      "seedContent": "<p></p>",
+      "content": "<p>Strategic Human Resource Management links people decisions to business goals so that the right talent is in the right place at the right time to drive organizational success.</p>\n\n<h2>Why this matters</h2>\n<p>In today’s Canadian workplaces, HR is no longer just about hiring and payroll—it is about shaping the workforce so organizations can compete, innovate, and serve their communities responsibly.</p>\n<p>Strategic HRM balances business results with legal, ethical, and social responsibilities, including human rights, health and safety, and diversity, equity, and inclusion.</p>\n\n<h2>Core concepts</h2>\n<p><strong>Strategic Human Resource Management</strong> aligns HR policies and practices with overall organizational strategy.</p>\n<ul>\n  <li><strong>Administrative HR</strong>: payroll, records, basic compliance.</li>\n  <li><strong>Strategic HR</strong>: future skills, talent attraction, competitive advantage.</li>\n  <li><strong>Vertical alignment</strong>: HR practices support overall strategy.</li>\n  <li><strong>Horizontal alignment</strong>: HR practices reinforce each other.</li>\n</ul>\n<p>The strategic HRM cycle: environmental scanning, workforce analysis and planning, HR strategy development, program design and implementation, evaluation and adjustment.</p>\n\n<h2>Key takeaways</h2>\n<ul>\n  <li>SHRM aligns people practices with organizational goals.</li>\n  <li>Vertical and horizontal alignment are critical.</li>\n  <li>The HRM cycle is plan–implement–evaluate.</li>\n  <li>Canadian laws and values shape HR strategy.</li>\n</ul>",
+      "storyboard": {
+        "title": "Strategic Human Resource Management",
+        "estimated_duration_sec": 360,
+        "slides": [
+          {
+            "number": 1,
+            "heading": "Strategic Human Resource Management",
+            "bullets": [
+              "Linking people decisions to business strategy",
+              "Right talent in the right place, right time",
+              "Driving organizational success in Canada"
+            ],
+            "narration": "This lesson introduces Strategic Human Resource Management, or SHRM. Strategic HRM is about connecting people decisions directly to an organization’s strategy so that the right talent is in the right roles at the right time."
+          },
+          {
+            "number": 2,
+            "heading": "Learning objectives",
+            "bullets": [
+              "Explain what makes HR “strategic”",
+              "Distinguish HR strategy and administration",
+              "Describe vertical and horizontal alignment",
+              "Outline the strategic HRM cycle in Canada"
+            ],
+            "narration": "By the end of this lesson, you should be able to explain what makes human resource management strategic rather than purely administrative. You will also learn vertical and horizontal alignment, and walk through the strategic HRM cycle."
+          },
+          {
+            "number": 3,
+            "heading": "HR strategy vs. administration",
+            "bullets": [
+              "Administrative HR: day-to-day operations",
+              "Strategic HR: long-term, future-focused",
+              "From processing to problem-solving",
+              "Gives HR a voice at the leadership table"
+            ],
+            "narration": "Administrative HR focuses on daily tasks such as processing payroll and maintaining records. Strategic HR looks ahead and asks what skills and roles will be needed in three to five years."
+          },
+          {
+            "number": 4,
+            "heading": "Vertical and horizontal alignment",
+            "bullets": [
+              "Vertical: HR supports business strategy",
+              "Example: HR for innovation in tech firms",
+              "Horizontal: HR practices support each other",
+              "Consistent signals about values and behaviour"
+            ],
+            "narration": "Vertical alignment means HR practices clearly support the organization’s overall strategy. Horizontal alignment means different HR practices all reinforce the same behaviours and values instead of sending mixed messages."
+          },
+          {
+            "number": 5,
+            "heading": "The strategic HRM cycle",
+            "bullets": [
+              "Environmental scanning",
+              "Workforce analysis and planning",
+              "HR strategy and program design",
+              "Evaluation and continuous adjustment"
+            ],
+            "narration": "The strategic HRM cycle includes scanning the environment, planning the workforce, developing HR priorities, implementing programs, and evaluating outcomes using metrics such as turnover, engagement, and diversity."
+          },
+          {
+            "number": 6,
+            "heading": "Recap: Key SHRM takeaways",
+            "bullets": [
+              "SHRM links people decisions to strategy",
+              "HR must be both administrative and strategic",
+              "Vertical and horizontal alignment are critical",
+              "Canadian laws and values shape HR strategy"
+            ],
+            "narration": "To recap, Strategic Human Resource Management connects people-related decisions directly to organizational strategy. In Canada, HR strategy must also reflect employment laws, human rights, health and safety, and commitments to diversity, equity, and inclusion."
+          }
+        ]
+      }
+    }
+  ]
+}
