@@ -21,6 +21,7 @@ import { locationRouter } from "./location.router.js";
 import { sysconfigRouter } from "./sysconfig.router.js";
 import { requestsRouter } from "./requests.router.js";
 import { workshopsRouter } from "./workshops.router.js";
+import { programsRouter } from "./programs.router.js";
 import { dashboardRouter } from "./dashboard.router.js";
 
 export const heritageRouter: Router = Router();
@@ -31,6 +32,7 @@ heritageRouter.use("/location", locationRouter);
 heritageRouter.use("/sysconfig", sysconfigRouter);
 heritageRouter.use("/requests", requestsRouter);
 heritageRouter.use("/workshops", workshopsRouter);
+heritageRouter.use("/programs", programsRouter);
 
 const DataBody = z.object({ ctx: z.string().max(200).optional(), data: z.record(z.unknown()).default({}) });
 const ActionBody = z.object({

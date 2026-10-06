@@ -219,11 +219,11 @@ const ROOTS: Array<{ label: string; icon: string; gate?: ModuleGate; count?: str
     icon: "award",
     gate: { modules: ["programManagement"] },
     entries: [
-      { label: "Faculties & Programs", screen: "PR01" },
-      { label: "Program Types", screen: "PR13" },
-      { label: "Manage Terms", screen: "PR14" },
-      { label: "Academic Calendars", screen: "PR16" },
-      { label: "Master Scheduling", screen: "PR17" },
+      { label: "Faculties & Programs", screen: "PR01", href: "/admin/program-management/faculties" },
+      { label: "Program Types", screen: "PR13", href: "/admin/program-management/program-types" },
+      { label: "Manage Terms", screen: "PR14", href: "/admin/program-management/terms" },
+      { label: "Academic Calendars", screen: "PR16", href: "/admin/program-management/calendars" },
+      { label: "Master Scheduling", screen: "PR17", href: "/admin/program-management/scheduling" },
     ],
   },
   {
