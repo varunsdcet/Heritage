@@ -68,7 +68,7 @@ const progressFixture = vi.hoisted(() => ({
 const db = vi.hoisted(() => ({
   idempotencyKey: { findUnique: vi.fn() },
   aiInteraction: { count: vi.fn(), findMany: vi.fn() },
-  student: { findFirst: vi.fn() },
+  student: { findFirst: vi.fn(), findMany: vi.fn() },
   $transaction: vi.fn(),
 }));
 
@@ -95,6 +95,12 @@ vi.mock("./ai.service.js", async (importOriginal) => {
 vi.mock("../academic/degree-progress.service.js", () => ({
   computeDegreeProgress: progress.computeDegreeProgress,
   impactIfDropCourse: progress.impactIfDropCourse,
+}));
+// Keep the suite offline: the router falls back to the grounded answer when the LLM is unavailable.
+vi.mock("../../lib/ask.js", () => ({
+  askHeritageAi: vi.fn(async () => {
+    throw new Error("LLM disabled in tests");
+  }),
 }));
 import { errorHandler } from "../../middleware/error-handler.js";
 import { aiRouter } from "./ai.router.js";
@@ -128,6 +134,9 @@ beforeEach(() => {
   db.idempotencyKey.findUnique.mockResolvedValue(null);
   db.aiInteraction.count.mockResolvedValue(0);
   db.aiInteraction.findMany.mockResolvedValue([]);
+  db.student.findMany.mockResolvedValue([
+    { id: "10000000-0000-4000-8000-000000000001", _count: { enrolments: 1 } },
+  ]);
   db.student.findFirst.mockResolvedValue({
     id: "10000000-0000-4000-8000-000000000001",
     programVersionId: "pv-1",

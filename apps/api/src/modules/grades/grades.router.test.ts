@@ -18,7 +18,7 @@ const testClaims = vi.hoisted(
 );
 
 const db = vi.hoisted(() => ({
-  student: { findFirst: vi.fn() },
+  student: { findFirst: vi.fn(), findMany: vi.fn() },
   enrolment: { findMany: vi.fn() },
   person: { findMany: vi.fn() },
   auditEvent: { create: vi.fn() },
@@ -43,8 +43,23 @@ import { errorHandler } from "../../middleware/error-handler.js";
 import { buildPortalView } from "../portal/portal.service.js";
 import { gradesRouter } from "./grades.router.js";
 
+const midtermAssignment = {
+  id: "50000000-0000-4000-8000-000000000001",
+  title: "Midterm Exam",
+  weightPercent: 30,
+  maxScore: 100,
+};
+
+const projectAssignment = {
+  id: "50000000-0000-4000-8000-000000000002",
+  title: "Programming Project",
+  weightPercent: 40,
+  maxScore: 100,
+};
+
 const publishedGrade = {
   id: "10000000-0000-4000-8000-000000000001",
+  assignmentId: midtermAssignment.id,
   score: 88,
   maxScore: 100,
   letter: "A-",
@@ -59,6 +74,7 @@ const publishedGrade = {
 
 const draftGrade = {
   id: "10000000-0000-4000-8000-000000000002",
+  assignmentId: projectAssignment.id,
   score: 92,
   maxScore: 100,
   letter: "A",
@@ -93,6 +109,9 @@ afterAll(async () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  db.student.findMany.mockResolvedValue([
+    { id: "20000000-0000-4000-8000-000000000001", _count: { enrolments: 1 } },
+  ]);
   db.student.findFirst.mockResolvedValue({ id: "20000000-0000-4000-8000-000000000001", standing: "good" });
   db.enrolment.findMany.mockResolvedValue([
     {
@@ -100,6 +119,7 @@ beforeEach(() => {
       section: {
         instructorPersonId: "40000000-0000-4000-8000-000000000001",
         course: { code: "CS301", title: "Algorithms", credits: 3 },
+        assignments: [midtermAssignment, projectAssignment],
       },
       // Deliberately include a draft to prove the response guard does not trust
       // only the ORM relation filter.
@@ -122,9 +142,21 @@ describe("ST-07 student grade visibility", () => {
 
     const payload: StudentGradesPayload = StudentGradesResponse.parse(await response.json());
     expect(payload.courses).toHaveLength(1);
-    expect(payload.courses[0]?.items.map((item) => item.title)).toEqual(["Midterm Exam"]);
-    expect(JSON.stringify(payload)).not.toContain("Programming Project");
-    expect(JSON.stringify(payload)).not.toContain('"status":"draft"');
+    const course = payload.courses[0]!;
+    expect(course.items.map((item) => item.title)).toEqual(["Midterm Exam", "Programming Project"]);
+    expect(course.items[0]).toMatchObject({ id: publishedGrade.id, score: 88, letter: "A-", status: "published" });
+    expect(course.items[1]).toEqual(
+      expect.objectContaining({
+        id: projectAssignment.id,
+        score: null,
+        letter: null,
+        status: "draft",
+        publishedAt: null,
+      }),
+    );
+    expect(course.currentPercent).toBe(88);
+    expect(JSON.stringify(payload)).not.toContain(draftGrade.id);
+    expect(JSON.stringify(payload)).not.toContain('"score":92');
     expect(db.enrolment.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
@@ -133,7 +165,7 @@ describe("ST-07 student grade visibility", () => {
         }),
         include: expect.objectContaining({
           gradeItems: expect.objectContaining({
-            where: { institutionId: testClaims.institutionId, status: "published" },
+            where: expect.objectContaining({ institutionId: testClaims.institutionId }),
           }),
         }),
       }),
@@ -141,7 +173,7 @@ describe("ST-07 student grade visibility", () => {
   });
 
   it("never falls back to draft grades on the generic student portal", async () => {
-    const view = await buildPortalView(testClaims, "/student/assessments");
+    const view = await buildPortalView(testClaims, "/student/grades");
 
     expect(view.sections[0]?.rows.map((row) => row.primary)).toEqual(["CS301 · Midterm Exam"]);
     expect(JSON.stringify(view)).not.toContain("Programming Project");

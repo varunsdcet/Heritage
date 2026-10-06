@@ -28,7 +28,7 @@ const tx = vi.hoisted(() => ({
 }));
 
 const db = vi.hoisted(() => ({
-  student: { findFirst: vi.fn() },
+  student: { findFirst: vi.fn(), findMany: vi.fn() },
   assignment: { findMany: vi.fn() },
   fileObject: { findFirst: vi.fn() },
   $transaction: vi.fn(),
@@ -110,6 +110,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  db.student.findMany.mockResolvedValue([{ id: studentId, _count: { enrolments: 1 } }]);
   db.student.findFirst.mockResolvedValue({ id: studentId });
   db.assignment.findMany.mockResolvedValue([assignment]);
   db.fileObject.findFirst.mockResolvedValue(null);

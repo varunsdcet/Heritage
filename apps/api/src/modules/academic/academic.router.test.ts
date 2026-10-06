@@ -65,7 +65,7 @@ const tx = vi.hoisted(() => ({
 }));
 
 const db = vi.hoisted(() => ({
-  student: { findFirst: vi.fn() },
+  student: { findFirst: vi.fn(), findMany: vi.fn() },
   $transaction: vi.fn(),
 }));
 
@@ -118,6 +118,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  db.student.findMany.mockResolvedValue([{ id: "student-1", _count: { enrolments: 1 } }]);
   db.student.findFirst.mockResolvedValue({ id: "student-1", programVersionId: "pv-1" });
   progress.computeDegreeProgress.mockResolvedValue(progressFixture);
   progress.impactIfDropCourse.mockResolvedValue({
