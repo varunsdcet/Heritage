@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AdminSisShell } from "@/components/AdminSisShell";
+import { AdminQuickAccess, type AdminTodo } from "@/components/dashboard/AdminQuickAccess";
 import { DashboardContent } from "@/components/dashboard/DashboardContent";
 import { SisActionBtn } from "@/components/SisActionBtn";
 import { SisLiveProvider, useSisLive } from "@/lib/useAdminSisLive";
@@ -90,10 +91,26 @@ function AdminHomeBody({ stats }: { stats: CampusOverview | null }) {
   const router = useRouter();
   const live = useSisLive();
   const loading = stats === null;
+  const todos: AdminTodo[] | null = stats
+    ? [
+        { count: stats.pendingApprovals, label: "pending approvals", href: "/admin/approvals" },
+        { count: stats.pendingGrades, label: "grades awaiting publish", href: "/admin/f/ac-13-pending-grades" },
+        { count: stats.pendingLoa, label: "leave of absence requests", href: "/admin/f/ac-18-loa-requests" },
+        { count: stats.atRisk, label: "at-risk students", href: "/admin/f/ss-02-alert-queue" },
+        { count: stats.pendingEvaluations, label: "pending evaluations", href: "/admin/f/ac-15-course-evaluations" },
+      ]
+        .filter((t) => t.count > 0)
+        .map((t) => ({ label: `${t.count} ${t.label}`, href: t.href }))
+    : null;
 
   return (
     <div className="mh-sis-dash" data-figma-id="168:10">
-      <DashboardContent />
+      <div className="mh-ct-dash">
+        <div className="mh-ct-dash__main">
+          <DashboardContent />
+        </div>
+        <AdminQuickAccess todos={todos} />
+      </div>
       <div className="mh-sis-dash__welcome">
         <div className="mh-sis-dash__welcome-text">
           <h1>Welcome back, Administrator</h1>
