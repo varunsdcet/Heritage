@@ -1911,6 +1911,7 @@ export async function runSisAction(
       await applyApproval({
         approvalId,
         institutionId: user.institutionId,
+        actorId: user.accountId,
         applyFn: async (diff, tx) => {
           const d = diff as {
             gradeItemIds?: string[];

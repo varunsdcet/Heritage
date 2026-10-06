@@ -140,7 +140,7 @@ approvalsRouter.post(
     try {
       const user = (req as AuthedRequest).user;
       const id = z.string().uuid().parse(req.params.id);
-      const updated = await applyApprovedRequest(user.institutionId, id);
+      const updated = await applyApprovedRequest(user.institutionId, id, user.accountId);
       res.json({ id: updated.id, status: updated.status });
     } catch (err) {
       next(err);

@@ -1,5 +1,6 @@
 import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
+import { writeAuditAndOutbox } from "@myheritage/events";
 import { STUDENT_PROGRAMS, STUDENT_STATUSES, assertPermission, patchStudentMeta, studentMetaMap } from "../superAdmin.service.js";
 import { applyStudentProfileChange } from "../registrar-gaps.service.js";
 import { audit } from "./service.js";
@@ -553,11 +554,30 @@ async function closeApproval(tx: Tx, user: SessionClaims, approvalId: string | n
   if (!approvalId) return;
   const row = await tx.approvalRequest.findFirst({ where: { id: approvalId, institutionId: user.institutionId } });
   if (!row || !["pending", "approved"].includes(row.status)) return;
-  const decisions = parse<unknown[]>(row.decisionsJson, []);
-  decisions.push({ actorId: user.accountId, decision, comment: comment || undefined, decidedAt: new Date().toISOString(), source: "user-requests" });
-  await tx.approvalRequest.update({
-    where: { id: row.id },
-    data: { status: decision === "approve" ? "applied" : "rejected", decisionsJson: JSON.stringify(decisions), rowVersion: { increment: 1 } },
+  if (decision === "approve" && row.requestedBy === user.accountId) {
+    throw httpError(403, "You cannot approve your own request; another approver must decide it", "FORBIDDEN");
+  }
+  const decisions = parse<Array<{ actorId?: string }>>(row.decisionsJson, []);
+  if (row.status === "pending" && decisions.some((d) => d.actorId === user.accountId)) {
+    throw httpError(409, "You have already decided this request", "CONFLICT");
+  }
+  decisions.push({ actorId: user.accountId, decision, comment: comment || undefined, decidedAt: new Date().toISOString(), source: "user-requests" } as { actorId: string });
+  const status = decision === "approve" ? "applied" : "rejected";
+  const claimed = await tx.approvalRequest.updateMany({
+    where: { id: row.id, rowVersion: row.rowVersion, status: row.status },
+    data: { status, decisionsJson: JSON.stringify(decisions), rowVersion: { increment: 1 } },
+  });
+  if (claimed.count !== 1) throw httpError(409, "This request was decided by someone else. Reload and try again.", "CONFLICT");
+  await writeAuditAndOutbox(tx, {
+    institutionId: user.institutionId,
+    actorId: user.accountId,
+    eventName: decision === "approve" ? "ApprovalRequest.applied" : "ApprovalRequest.decided",
+    purpose: "approval",
+    before: { status: row.status },
+    after: { status, decision },
+    source: "user-requests",
+    correlationId: row.id,
+    outboxPayload: { approvalId: row.id, type: row.type, subjectRef: row.subjectRef, decision, status },
   });
 }
 
@@ -597,18 +617,32 @@ export async function decideRequest(user: SessionClaims, number: number, decisio
     const settings = approve ? validSettings(body.settings) : undefined;
     const loa = await prisma.leaveOfAbsenceRequest.findFirst({ where: { id: item.sourceId, institutionId: inst } });
     if (!loa) throw httpError(404, "Leave of absence request not found", "NOT_FOUND");
-    let withdrawn = 0;
+    let withdrawnIds: string[] = [];
     await prisma.$transaction(async (tx) => {
-      await tx.leaveOfAbsenceRequest.update({
-        where: { id: loa.id },
+      const claimed = await tx.leaveOfAbsenceRequest.updateMany({
+        where: { id: loa.id, rowVersion: loa.rowVersion, status: "pending" },
         data: { status: approve ? "approved" : "rejected", decidedAt: new Date(), decisionNote: comments || null, rowVersion: { increment: 1 } },
       });
+      if (claimed.count !== 1) throw httpError(409, "This request has already been decided", "CONFLICT");
       await closeApproval(tx, user, loa.approvalRequestId, approve ? "approve" : "reject", comments);
       if (settings?.enrolmentsAction === "Withdraw from active enrolments") {
-        const r = await tx.enrolment.updateMany({ where: { institutionId: inst, studentId: loa.studentId, status: "enrolled" }, data: { status: "withdrawn", rowVersion: { increment: 1 } } });
-        withdrawn = r.count;
+        // Only enrolments whose term overlaps the leave; past terms and terms after the return date stay untouched.
+        const overlapping = await tx.enrolment.findMany({
+          where: {
+            institutionId: inst,
+            studentId: loa.studentId,
+            status: "enrolled",
+            section: { term: { endsOn: { gte: settings.absenceStart }, ...(settings.returning ? { startsOn: { lt: settings.returning } } : {}) } },
+          },
+          select: { id: true },
+        });
+        withdrawnIds = overlapping.map((e) => e.id);
+        if (withdrawnIds.length) {
+          await tx.enrolment.updateMany({ where: { id: { in: withdrawnIds }, status: "enrolled" }, data: { status: "withdrawn", rowVersion: { increment: 1 } } });
+        }
       }
     });
+    const withdrawn = withdrawnIds.length;
     if (settings) {
       patch.loa = settings;
       await patchStudentMeta(inst, loa.studentId, {
@@ -619,7 +653,7 @@ export async function decideRequest(user: SessionClaims, number: number, decisio
       });
       message += ` — student status set to ${settings.changeStatus}${withdrawn ? `, ${withdrawn} active enrolment${withdrawn === 1 ? "" : "s"} withdrawn` : ""}`;
     }
-    await audit(user, "R02", item.ref, `request.${verb}`, { recordId: loa.id, after: { comments, settings }, note: comments || null });
+    await audit(user, "R02", item.ref, `request.${verb}`, { recordId: loa.id, after: { comments, settings, withdrawnEnrolmentIds: withdrawnIds }, note: comments || null });
   } else if (item.kind === "profile") {
     const approval = await prisma.approvalRequest.findFirst({ where: { id: item.sourceId, institutionId: inst } });
     if (!approval) throw httpError(404, "Profile change request not found", "NOT_FOUND");

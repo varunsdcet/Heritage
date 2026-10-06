@@ -810,7 +810,7 @@ export const RUN: Partial<Record<EntityKey, Record<string, (ctx: Ctx, row: Row) 
     async approve(ctx, row) {
       const updated = await decideApproval({ approvalId: row.id, institutionId: ctx.inst, actorId: ctx.user.accountId, actorRoles: ctx.user.roles as RoleName[], decision: "approve", comment: "Approved from Workflows" });
       if (updated.status !== "approved") return `Approval recorded (${updated.status}); more approvals are required`;
-      await applyApprovedRequest(ctx.inst, row.id);
+      await applyApprovedRequest(ctx.inst, row.id, ctx.user.accountId);
       return "Approved and applied";
     },
     async reject(ctx, row) {
@@ -819,7 +819,7 @@ export const RUN: Partial<Record<EntityKey, Record<string, (ctx: Ctx, row: Row) 
       return "Request rejected";
     },
     async apply(ctx, row) {
-      await applyApprovedRequest(ctx.inst, row.id);
+      await applyApprovedRequest(ctx.inst, row.id, ctx.user.accountId);
       return "Change applied";
     },
   },

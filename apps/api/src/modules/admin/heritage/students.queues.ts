@@ -327,6 +327,7 @@ export async function approveGradeSubmission(user: SessionClaims, approvalId: st
     await applyApproval({
       approvalId,
       institutionId: inst,
+      actorId: user.accountId,
       applyFn: async (diff, tx) => {
         const ids = arr<string>((diff as Data).gradeItemIds);
         if (ids.length) await tx.gradeItem.updateMany({ where: { id: { in: ids }, institutionId: inst }, data: { status: "published", publishedAt: new Date() } });

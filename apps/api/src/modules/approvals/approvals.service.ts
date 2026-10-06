@@ -17,11 +17,12 @@ export async function settleRejectedApproval(institutionId: string, approvalId: 
 }
 
 /** Applies an approved request's proposed change (grades, profile changes, leave, service requests). */
-export async function applyApprovedRequest(institutionId: string, approvalId: string) {
+export async function applyApprovedRequest(institutionId: string, approvalId: string, actorId?: string) {
   const approvalRow = await prisma.approvalRequest.findFirst({ where: { id: approvalId, institutionId } });
   return applyApproval({
     approvalId,
     institutionId,
+    actorId,
     applyFn: async (diff, tx) => {
       const payload = diff as { gradeItemIds?: string[]; type?: string };
       if (Array.isArray(payload.gradeItemIds) && payload.gradeItemIds.length) {
