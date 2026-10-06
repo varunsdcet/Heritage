@@ -3,6 +3,16 @@ import { z } from "zod";
 import { prisma } from "@myheritage/db";
 import { hashPassword } from "@myheritage/auth";
 import type { RoleName, SessionClaims } from "@myheritage/contracts";
+import {
+  DELIVERY_OPTIONS,
+  PROGRAM_GROUPS,
+  RESIDENCY_OPTIONS,
+  STATUS_OPTIONS,
+  admissionTermOptions,
+  deliveryMatches,
+  key as catalogKey,
+  termMatches,
+} from "./studentSearchCatalog.js";
 
 /* ------------------------------------------------------------------ */
 /* Key-value store on SisScreenState (paths never start with /admin,  */
@@ -733,15 +743,14 @@ export async function patchStudentMeta(institutionId: string, studentId: string,
 }
 
 export async function studentSearchOptions(institutionId: string) {
-  const terms = await prisma.term.findMany({ where: { institutionId }, orderBy: { startsOn: "desc" }, select: { name: true } });
-  const admissionTerms = [...new Set(["3rd Term 2026", "2nd Term 2026", "1st Term 2026", ...terms.map((t) => t.name)])];
+  const terms = await prisma.term.findMany({ where: { institutionId }, orderBy: { startsOn: "desc" }, select: { name: true, startsOn: true, endsOn: true } });
   return {
-    statuses: STUDENT_STATUSES,
+    statuses: STATUS_OPTIONS,
     campuses: CAMPUSES,
-    programs: STUDENT_PROGRAMS,
-    deliveryMethods: DELIVERY_METHODS,
-    residency: RESIDENCY,
-    admissionTerms,
+    programGroups: PROGRAM_GROUPS,
+    deliveryMethods: DELIVERY_OPTIONS,
+    residency: RESIDENCY_OPTIONS,
+    admissionTerms: admissionTermOptions(terms),
   };
 }
 
@@ -802,7 +811,7 @@ export async function searchStudents(institutionId: string, query: z.infer<typeo
         const q = norm(query.q);
         if (!norm(s.studentNumber).includes(q) && !norm(p.familyName).startsWith(q)) return false;
       }
-      if (query.status && query.status !== status) return false;
+      if (query.status && catalogKey(query.status) !== catalogKey(status)) return false;
       if (!has(p.email, query.sisEmail)) return false;
       if (!has(p.familyName, query.lastName)) return false;
       if (!has(p.givenName, query.firstName)) return false;
@@ -819,12 +828,12 @@ export async function searchStudents(institutionId: string, query: z.infer<typeo
       if (query.email && !has(p.personalEmail, query.email) && !has(p.email, query.email)) return false;
       if (query.discountCode && norm(m.discountCode) !== norm(query.discountCode)) return false;
       if (query.campus && m.campus !== query.campus) return false;
-      if (query.delivery && m.delivery !== query.delivery) return false;
+      if (query.delivery && !deliveryMatches(m.delivery, query.delivery)) return false;
       if (programFilter) {
         const prog = norm(s.programName);
         if (!prog.includes(norm(programFilter.name)) && !prog.includes(norm(programFilter.code))) return false;
       }
-      if (query.admissionTerm && m.admissionTerm !== query.admissionTerm) return false;
+      if (query.admissionTerm && !termMatches(m.admissionTerm, query.admissionTerm)) return false;
       return true;
     })
     .sort((a, b) => a.s.person.familyName.localeCompare(b.s.person.familyName));

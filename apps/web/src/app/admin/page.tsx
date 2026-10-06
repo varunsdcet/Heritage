@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AdminSisShell } from "@/components/AdminSisShell";
+import { DashboardContent } from "@/components/dashboard/DashboardContent";
 import { SisActionBtn } from "@/components/SisActionBtn";
 import { SisLiveProvider, useSisLive } from "@/lib/useAdminSisLive";
 import { api, loadSession } from "@/lib/api";
@@ -92,6 +93,7 @@ function AdminHomeBody({ stats }: { stats: CampusOverview | null }) {
 
   return (
     <div className="mh-sis-dash" data-figma-id="168:10">
+      <DashboardContent />
       <div className="mh-sis-dash__welcome">
         <div className="mh-sis-dash__welcome-text">
           <h1>Welcome back, Administrator</h1>
@@ -206,8 +208,8 @@ function AdminHomeBody({ stats }: { stats: CampusOverview | null }) {
         <section className="mh-sis-dash__card mh-sis-dash__activity">
           <h2>Recent Administrative Activity</h2>
           <div className="mh-sis-dash__feed">
-            {(stats?.activity || []).map((row) => (
-              <div key={row.actor + row.when + row.detail} className="mh-sis-dash__feed-row">
+            {(stats?.activity || []).map((row, index) => (
+              <div key={`${index}:${row.actor}${row.when}${row.detail}`} className="mh-sis-dash__feed-row">
                 <div className="mh-sis-dash__feed-detail">
                   <span className="mh-sis-dash__dot" />
                   <div className="mh-sis-dash__actor-meta">

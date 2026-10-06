@@ -697,6 +697,167 @@ button.mh-admin-table__row {
   width: 208px;
 }
 
+.mh-sis__brand {
+  display: block;
+  width: 208px;
+  text-decoration: none;
+}
+
+.mh-sis__brand-mark {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 6px 10px;
+  overflow: hidden;
+  background: #fff;
+  border-radius: 8px;
+}
+
+.mh-sis__brand-mark img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: 40px;
+  object-fit: contain;
+  object-position: left center;
+}
+
+/* Collapsed sidebar: icon rail; the logo is clipped to its crest. */
+.mh-sis.is-collapsed .mh-sis__sidebar {
+  width: 72px;
+  padding: 24px 12px;
+  align-items: center;
+}
+
+.mh-sis.is-collapsed .mh-sis__brand {
+  width: 36px;
+}
+
+.mh-sis.is-collapsed .mh-sis__brand-mark {
+  padding: 5px 6px;
+}
+
+.mh-sis.is-collapsed .mh-sis__brand-mark img {
+  max-width: none;
+  height: 26px;
+}
+
+.mh-sis.is-collapsed .mh-sis__nav,
+.mh-sis.is-collapsed .mh-sis__nav-group {
+  width: 48px;
+}
+
+.mh-sis.is-collapsed .mh-sis__nav-item {
+  width: 48px;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.mh-sis.is-collapsed .mh-sis__nav-label,
+.mh-sis.is-collapsed .mh-sis__nav-text,
+.mh-sis.is-collapsed .mh-sis__nav-count,
+.mh-sis.is-collapsed .mh-sis__nav-chevron {
+  display: none;
+}
+
+.mh-sis.is-collapsed .mh-sis__search-backdrop {
+  left: 72px;
+}
+
+.mh-sis__header-lead {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.mh-sis__toggle {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: #4f8a2b;
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+
+.mh-sis__toggle:hover {
+  background: #3f7321;
+}
+
+.mh-sis__toggle:focus-visible,
+.mh-sis__shortcut:focus-visible,
+.mh-sis__search-go:focus-visible {
+  outline: 2px solid var(--mh-brand);
+  outline-offset: 2px;
+}
+
+.mh-sis__search-go {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin-right: -6px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--mh-text-muted);
+  cursor: pointer;
+}
+
+.mh-sis__search-go:hover {
+  background: var(--mh-border);
+  color: var(--mh-text);
+}
+
+.mh-sis__shortcuts {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mh-sis__shortcut {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: var(--mh-bg);
+  color: var(--mh-text-muted);
+  cursor: pointer;
+}
+
+.mh-sis__shortcut:hover {
+  background: var(--mh-border);
+  color: var(--mh-text);
+}
+
+.mh-sis__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 32px;
+  border-top: 1px solid var(--mh-border);
+  background: #fff;
+  color: var(--mh-text-subtle);
+  font-size: 12px;
+}
+
+.mh-sis__footer strong {
+  color: var(--mh-text-muted);
+}
+
 .mh-sis__nav-label {
   padding: 12px 0 4px 8px;
   font-weight: 700;
@@ -3763,6 +3924,19 @@ button.mh-admin-table__row {
 
   .mh-sis__nav {
     width: 100%;
+  }
+
+  .mh-sis.is-collapsed .mh-sis__sidebar {
+    width: 100%;
+    align-items: flex-start;
+  }
+
+  .mh-sis.is-collapsed .mh-sis__nav {
+    display: none;
+  }
+
+  .mh-sis__shortcuts {
+    display: none;
   }
 
   .mh-sis__nav-item {

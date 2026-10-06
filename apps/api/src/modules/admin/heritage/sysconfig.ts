@@ -117,7 +117,7 @@ function emptyOf(f: Field): unknown {
   return "";
 }
 
-function sanitizeHtml(html: string) {
+export function sanitizeHtml(html: string) {
   const blocked = "script|style|iframe|object|embed|link|meta|template|form|input|button|textarea|select|svg|math";
   return html
     .replace(new RegExp(`<\\s*(${blocked})\\b[^>]*>[\\s\\S]*?<\\s*\\/\\s*\\1\\s*>`, "gi"), "")

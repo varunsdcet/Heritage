@@ -9,6 +9,9 @@ import { NoModuleAccess, allows, useMyAccess, type MyAccess } from "@/lib/access
 import { AskHeritageFab } from "@/components/AskHeritageFab";
 import { clearSession } from "@/lib/api";
 import { useNavCounts } from "@/lib/navCounts";
+import { version as APP_VERSION } from "../../package.json";
+
+const SIDEBAR_KEY = "mh.sis.sidebar";
 
 const SEARCH_PALETTE = [
   {
@@ -198,6 +201,60 @@ function NavIcon({ name, active }: { name: string; active?: boolean }) {
   }
 }
 
+function HeaderIcon({ name }: { name: "menu" | "search" | "mail" | "home" | "exit" }) {
+  const common = {
+    width: 16,
+    height: 16,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 2,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true as const,
+  };
+  switch (name) {
+    case "menu":
+      return (
+        <svg {...common}>
+          <path d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      );
+    case "search":
+      return (
+        <svg {...common}>
+          <circle cx="11" cy="11" r="7" />
+          <path d="m20 20-3.5-3.5" />
+        </svg>
+      );
+    case "mail":
+      return (
+        <svg {...common}>
+          <rect x="3" y="5" width="18" height="14" rx="2" />
+          <path d="m3 7 9 6 9-6" />
+        </svg>
+      );
+    case "home":
+      return (
+        <svg {...common}>
+          <path d="M3 10.5 12 3l9 7.5" />
+          <path d="M5 9.5V21h14V9.5" />
+        </svg>
+      );
+    case "exit":
+      return (
+        <svg {...common}>
+          <path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4" />
+          <path d="M10 17l-5-5 5-5M5 12h11" />
+        </svg>
+      );
+  }
+}
+
+function footerDate() {
+  return new Date().toLocaleDateString("en-CA", { year: "numeric", month: "long", day: "numeric" });
+}
+
 function visibleSidebar(access: MyAccess | null | undefined): AdminSidebarEntry[] {
   const items: AdminSidebarEntry[] = [];
   for (const entry of ADMIN_SIDEBAR) {
@@ -246,6 +303,8 @@ export function AdminSisShell({
   const [searchQ, setSearchQ] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [openGroup, setOpenGroup] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
+  const [today, setToday] = useState("");
   const access = useMyAccess();
   const sidebar = useMemo(() => visibleSidebar(access), [access]);
   const blocked = pageBlocked(pathname, access);
@@ -258,6 +317,22 @@ export function AdminSisShell({
     );
     setOpenGroup(match?.type === "item" ? match.item.href : null);
   }, [pathname]);
+
+  useEffect(() => {
+    setCollapsed(window.localStorage.getItem(SIDEBAR_KEY) === "collapsed");
+    setToday(footerDate());
+  }, []);
+
+  function toggleSidebar(next = !collapsed) {
+    setCollapsed(next);
+    window.localStorage.setItem(SIDEBAR_KEY, next ? "collapsed" : "expanded");
+  }
+
+  function submitSearch() {
+    const q = searchQ.trim();
+    router.push(q ? `/admin/student-search?q=${encodeURIComponent(q)}` : "/admin/student-search");
+    setSearchOpen(false);
+  }
 
   const paletteSections = useMemo(() => {
     const q = searchQ.trim().toLowerCase();
@@ -276,7 +351,7 @@ export function AdminSisShell({
   }
 
   return (
-    <div className="mh-sis" data-figma="01-Admin-Dashboard">
+    <div className={`mh-sis${collapsed ? " is-collapsed" : ""}`} data-figma="01-Admin-Dashboard">
       {showPalette ? (
         <button
           type="button"
@@ -285,14 +360,12 @@ export function AdminSisShell({
           onClick={() => setSearchOpen(false)}
         />
       ) : null}
-      <aside className="mh-sis__sidebar">
-        <div className="mh-sis__logo">
-          <span className="mh-sis__logo-icon">H</span>
-          <span className="mh-sis__logo-text">
-            <span className="mh-sis__logo-title">Heritage</span>
-            <span className="mh-sis__logo-sub">SIS Admin</span>
+      <aside className="mh-sis__sidebar" id="mh-sis-sidebar">
+        <Link href="/admin" className="mh-sis__brand" aria-label="Heritage Community College — Home">
+          <span className="mh-sis__brand-mark">
+            <img src="/brand/login_logo.png" alt="Heritage Community College" width={261} height={64} />
           </span>
-        </div>
+        </Link>
 
         <nav className="mh-sis__nav" aria-label="Admin">
           {sidebar.map((entry, idx) => {
@@ -312,8 +385,14 @@ export function AdminSisShell({
                   type="button"
                   className={`mh-sis__nav-item${active ? " is-active" : ""}`}
                   aria-expanded={item.children ? expanded : undefined}
+                  title={collapsed ? item.label : undefined}
                   onClick={() => {
                     if (item.children) {
+                      if (collapsed) {
+                        toggleSidebar(false);
+                        setOpenGroup(item.href);
+                        return;
+                      }
                       setOpenGroup((value) => (value === item.href ? null : item.href));
                       return;
                     }
@@ -337,7 +416,7 @@ export function AdminSisShell({
                     />
                   ) : null}
                 </button>
-                {item.children && expanded ? (
+                {item.children && expanded && !collapsed ? (
                   <div className="mh-sis__nav-sub">
                     {item.children.map((child, ci) => (
                       <div key={child.href + child.label}>
@@ -365,27 +444,39 @@ export function AdminSisShell({
 
       <div className="mh-sis__main">
         <header className="mh-sis__header">
-          <div className="mh-sis__crumbs">
-            {breadcrumbs.map((crumb, i) => (
-              <span key={crumb} className="mh-sis__crumb">
-                {i > 0 ? (
-                  <img src="/brand/icons/chevron-right.svg" alt="" width={12} height={12} className="mh-sis__crumb-chevron" />
-                ) : null}
-                {breadcrumbHrefs?.[i] && i < breadcrumbs.length - 1 ? (
-                  <Link href={breadcrumbHrefs[i]!} className="mh-sis__crumb-link">
-                    {crumb}
-                  </Link>
-                ) : (
-                  <span className={i === breadcrumbs.length - 1 ? "is-current" : undefined}>{crumb}</span>
-                )}
-              </span>
-            ))}
+          <div className="mh-sis__header-lead">
+            <button
+              type="button"
+              className="mh-sis__toggle"
+              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-controls="mh-sis-sidebar"
+              aria-expanded={!collapsed}
+              title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              onClick={() => toggleSidebar()}
+            >
+              <HeaderIcon name="menu" />
+            </button>
+            <div className="mh-sis__crumbs">
+              {breadcrumbs.map((crumb, i) => (
+                <span key={crumb} className="mh-sis__crumb">
+                  {i > 0 ? (
+                    <img src="/brand/icons/chevron-right.svg" alt="" width={12} height={12} className="mh-sis__crumb-chevron" />
+                  ) : null}
+                  {breadcrumbHrefs?.[i] && i < breadcrumbs.length - 1 ? (
+                    <Link href={breadcrumbHrefs[i]!} className="mh-sis__crumb-link">
+                      {crumb}
+                    </Link>
+                  ) : (
+                    <span className={i === breadcrumbs.length - 1 ? "is-current" : undefined}>{crumb}</span>
+                  )}
+                </span>
+              ))}
+            </div>
           </div>
 
           <div className="mh-sis__header-actions">
             <div className="mh-sis__search-wrap">
               <label className={`mh-sis__search mh-sis__search--input${showPalette ? " is-open" : ""}`}>
-                <img src="/brand/icons/search.svg" alt="" width={14} height={14} />
                 <input
                   value={searchQ}
                   onChange={(e) => {
@@ -394,11 +485,7 @@ export function AdminSisShell({
                   }}
                   onFocus={() => setSearchOpen(true)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      const q = searchQ.trim();
-                      router.push(q ? `/admin/student-search?q=${encodeURIComponent(q)}` : "/admin/student-search");
-                      setSearchOpen(false);
-                    }
+                    if (e.key === "Enter") submitSearch();
                     if (e.key === "Escape") setSearchOpen(false);
                   }}
                   placeholder="Student # or last name"
@@ -419,6 +506,16 @@ export function AdminSisShell({
                     ×
                   </button>
                 ) : null}
+                <button
+                  type="button"
+                  className="mh-sis__search-go"
+                  aria-label="Search"
+                  title="Search"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={submitSearch}
+                >
+                  <HeaderIcon name="search" />
+                </button>
               </label>
               {showPalette ? (
                 <div className="mh-sis__search-palette" role="listbox" data-figma-id="178:5">
@@ -471,6 +568,17 @@ export function AdminSisShell({
             <button type="button" className="mh-sis__logout-link" onClick={() => router.push("/admin/student-search")}>
               Advanced Search
             </button>
+            <div className="mh-sis__shortcuts">
+              <button type="button" className="mh-sis__shortcut" aria-label="Messages" title="Messages" onClick={() => router.push("/admin/notifications")}>
+                <HeaderIcon name="mail" />
+              </button>
+              <button type="button" className="mh-sis__shortcut" aria-label="Home" title="Home" onClick={() => router.push("/admin")}>
+                <HeaderIcon name="home" />
+              </button>
+              <button type="button" className="mh-sis__shortcut" aria-label="Switch portal" title="Switch portal" onClick={() => router.push("/role-select")}>
+                <HeaderIcon name="exit" />
+              </button>
+            </div>
             <button type="button" className="mh-sis__copilot" onClick={() => router.push("/admin/ai/ask")}>
               <img src="/brand/icons/sparkle.svg" alt="" width={14} height={14} />
               <span>Ask Heritage AI</span>
@@ -504,6 +612,19 @@ export function AdminSisShell({
         </header>
 
         <div className="mh-sis__scroll">{blocked ? access === undefined ? null : <NoModuleAccess /> : children}</div>
+        <footer className="mh-sis__footer">
+          <span>Version {APP_VERSION}</span>
+          <span aria-hidden>|</span>
+          <span>
+            Powered by <strong>MySIS</strong>
+          </span>
+          {today ? (
+            <>
+              <span aria-hidden>|</span>
+              <span>{today}</span>
+            </>
+          ) : null}
+        </footer>
         <AskHeritageFab role="admin" />
       </div>
     </div>

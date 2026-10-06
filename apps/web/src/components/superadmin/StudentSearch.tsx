@@ -46,6 +46,8 @@ export function SuperStudentSearch() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const quick = params.get("q") ?? "";
+  const [simple, setSimple] = useState(params.get("mode") === "simple");
+  const [simpleQ, setSimpleQ] = useState(quick);
 
   useEffect(() => {
     saApi<StudentSearchOptions>("/students/options")
@@ -91,17 +93,55 @@ export function SuperStudentSearch() {
     router.replace("/admin/student-search");
   }
 
+  function onSimpleSubmit(e: FormEvent) {
+    e.preventDefault();
+    const q = simpleQ.trim();
+    lastQuery.current = null;
+    if (!q) {
+      setResults(null);
+      return;
+    }
+    runSearch({ q });
+    window.history.replaceState(null, "", `/admin/student-search${qs({ mode: "simple", q })}`);
+  }
+
+  function switchMode(next: boolean) {
+    setSimple(next);
+    setResults(null);
+    lastQuery.current = null;
+    window.history.replaceState(null, "", next ? "/admin/student-search?mode=simple" : "/admin/student-search");
+  }
+
   const years = Array.from({ length: 80 }, (_, i) => String(new Date().getFullYear() - 14 - i));
 
   return (
     <SuperFrame breadcrumbs={["Home", "Students", "Search Results"]} activeHref="/admin/student-search" title="Search Students">
       {error ? <SaNotice tone="error" onClose={() => setError(null)}>{error}</SaNotice> : null}
-      {quick ? (
+      {quick && !simple ? (
         <p className="mh-sa__muted">
           Quick search for <strong>“{quick}”</strong> (student # or last name).
         </p>
       ) : null}
 
+      {simple ? (
+        <form onSubmit={onSimpleSubmit} className="mh-sa__stack">
+          <SaCard title="Simple Search">
+            <div className="mh-sa__grid">
+              <SaField label="Student # or Last Name" wide>
+                <input className="mh-sa__input" value={simpleQ} onChange={(e) => setSimpleQ(e.target.value)} autoFocus />
+              </SaField>
+            </div>
+          </SaCard>
+          <div className="mh-sa__actions">
+            <button type="button" className="mh-sa__btn" onClick={() => switchMode(false)}>
+              Advanced Search
+            </button>
+            <button type="submit" className="mh-sa__btn mh-sa__btn--primary" disabled={busy}>
+              {busy ? "Searching…" : "Search Students"}
+            </button>
+          </div>
+        </form>
+      ) : (
       <form onSubmit={onSubmit} className="mh-sa__stack">
         <SaCard title="Status">
           <div className="mh-sa__grid">
@@ -109,7 +149,9 @@ export function SuperStudentSearch() {
               <select className="mh-sa__input" value={filters.status} onChange={(e) => set("status", e.target.value)}>
                 <option value="">All Statuses</option>
                 {options?.statuses.map((s) => (
-                  <option key={s}>{s}</option>
+                  <option key={s.value} value={s.value}>
+                    {s.indent ? `\u00a0\u00a0\u00a0\u00a0${s.label}` : s.label}
+                  </option>
                 ))}
               </select>
             </SaField>
@@ -163,7 +205,9 @@ export function SuperStudentSearch() {
               <select className="mh-sa__input" value={filters.residency} onChange={(e) => set("residency", e.target.value)}>
                 <option value="">All</option>
                 {options?.residency.map((r) => (
-                  <option key={r}>{r}</option>
+                  <option key={r.value} value={r.value}>
+                    {r.label}
+                  </option>
                 ))}
               </select>
             </SaField>
@@ -217,25 +261,33 @@ export function SuperStudentSearch() {
               <select className="mh-sa__input" value={filters.delivery} onChange={(e) => set("delivery", e.target.value)}>
                 <option value="">All</option>
                 {options?.deliveryMethods.map((d) => (
-                  <option key={d}>{d}</option>
+                  <option key={d.value} value={d.value}>
+                    {d.label}
+                  </option>
                 ))}
               </select>
             </SaField>
             <SaField label="Program" wide>
               <select className="mh-sa__input" value={filters.program} onChange={(e) => set("program", e.target.value)}>
                 <option value="">All Programs</option>
-                {options?.programs.map((p) => (
-                  <option key={p.code} value={p.code}>
-                    {p.code} — {p.name}
-                  </option>
+                {options?.programGroups.map((g) => (
+                  <optgroup key={g.group} label={g.group}>
+                    {g.options.map((p) => (
+                      <option key={p.value} value={p.value}>
+                        {p.label}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
             </SaField>
-            <SaField label="Admission Term">
+            <SaField label="Admission Term" wide>
               <select className="mh-sa__input" value={filters.admissionTerm} onChange={(e) => set("admissionTerm", e.target.value)}>
-                <option value="">All</option>
+                <option value="">All Terms</option>
                 {options?.admissionTerms.map((t) => (
-                  <option key={t}>{t}</option>
+                  <option key={t.value} value={t.value}>
+                    {t.label}
+                  </option>
                 ))}
               </select>
             </SaField>
@@ -246,11 +298,15 @@ export function SuperStudentSearch() {
           <button type="button" className="mh-sa__btn" onClick={onReset}>
             Reset
           </button>
+          <button type="button" className="mh-sa__btn" onClick={() => switchMode(true)}>
+            Simple Search
+          </button>
           <button type="submit" className="mh-sa__btn mh-sa__btn--primary" disabled={busy}>
             {busy ? "Searching…" : "Search Students"}
           </button>
         </div>
       </form>
+      )}
 
       {results ? (
         <SaCard title={`Search Results (${results.total.toLocaleString()})`}>

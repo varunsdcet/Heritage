@@ -21,9 +21,11 @@ import { locationRouter } from "./location.router.js";
 import { sysconfigRouter } from "./sysconfig.router.js";
 import { requestsRouter } from "./requests.router.js";
 import { workshopsRouter } from "./workshops.router.js";
+import { dashboardRouter } from "./dashboard.router.js";
 
 export const heritageRouter: Router = Router();
 
+heritageRouter.use("/dashboard", dashboardRouter);
 heritageRouter.use("/reports", reportsRouter);
 heritageRouter.use("/location", locationRouter);
 heritageRouter.use("/sysconfig", sysconfigRouter);

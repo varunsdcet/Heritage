@@ -52,6 +52,9 @@ export const STORE_ALIAS: Record<string, string> = {
 
 /* Screens already built as dedicated pages earlier; the registry screen links to them. */
 export const DEDICATED: Record<string, string> = {
+  G01: "/admin",
+  G02: "/admin/dashboard/edit",
+  G03: "/admin/dashboard/edit?block=new",
   G04: "/admin/student-search",
   P01: "/admin/faculty-profile/biography",
   P04: "/admin/faculty-profile/topics",

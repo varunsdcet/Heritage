@@ -116,13 +116,15 @@ export type FacultyProfile = {
   contracts: { previous: Contract[]; current: Contract[] };
 };
 
+export type SearchOption = { label: string; value: string; indent?: boolean };
+
 export type StudentSearchOptions = {
-  statuses: string[];
+  statuses: SearchOption[];
   campuses: string[];
-  programs: Array<{ code: string; name: string }>;
-  deliveryMethods: string[];
-  residency: string[];
-  admissionTerms: string[];
+  programGroups: Array<{ group: string; options: SearchOption[] }>;
+  deliveryMethods: SearchOption[];
+  residency: SearchOption[];
+  admissionTerms: SearchOption[];
 };
 
 export type StudentHit = {
