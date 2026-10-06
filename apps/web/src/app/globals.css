@@ -1069,6 +1069,22 @@ button.mh-admin-table__row {
   min-width: 0;
   flex-wrap: nowrap;
   white-space: nowrap;
+  overflow: hidden;
+}
+
+.mh-sis__crumbs .mh-sis__crumb {
+  min-width: 0;
+}
+
+.mh-sis__crumbs .mh-sis__crumb:last-child {
+  flex-shrink: 0;
+}
+
+.mh-sis__crumb > span:not(.is-current),
+.mh-sis__crumb > a {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .mh-sis__crumb {
@@ -1099,6 +1115,10 @@ button.mh-admin-table__row {
   min-width: 0;
 }
 
+.mh-sis__header-actions > * {
+  flex-shrink: 0;
+}
+
 .mh-sis__search {
   display: flex;
   align-items: center;
@@ -1123,6 +1143,15 @@ button.mh-admin-table__row {
 .mh-sis__search-wrap {
   position: relative;
   z-index: 50;
+}
+
+.mh-sis__header-actions > .mh-sis__search-wrap {
+  flex-shrink: 1;
+  min-width: 150px;
+}
+
+.mh-sis__search-wrap > .mh-sis__search {
+  max-width: 100%;
 }
 
 .mh-sis__search--input {

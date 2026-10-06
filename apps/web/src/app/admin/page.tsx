@@ -93,14 +93,14 @@ function AdminHomeBody({ stats }: { stats: CampusOverview | null }) {
   const loading = stats === null;
   const todos: AdminTodo[] | null = stats
     ? [
-        { count: stats.pendingApprovals, label: "pending approvals", href: "/admin/approvals" },
-        { count: stats.pendingGrades, label: "grades awaiting publish", href: "/admin/f/ac-13-pending-grades" },
-        { count: stats.pendingLoa, label: "leave of absence requests", href: "/admin/f/ac-18-loa-requests" },
-        { count: stats.atRisk, label: "at-risk students", href: "/admin/f/ss-02-alert-queue" },
-        { count: stats.pendingEvaluations, label: "pending evaluations", href: "/admin/f/ac-15-course-evaluations" },
+        { count: stats.pendingApprovals, one: "pending approval", many: "pending approvals", href: "/admin/approvals" },
+        { count: stats.pendingGrades, one: "grade awaiting publish", many: "grades awaiting publish", href: "/admin/f/ac-13-pending-grades" },
+        { count: stats.pendingLoa, one: "leave of absence request", many: "leave of absence requests", href: "/admin/f/ac-18-loa-requests" },
+        { count: stats.atRisk, one: "at-risk student", many: "at-risk students", href: "/admin/f/ss-02-alert-queue" },
+        { count: stats.pendingEvaluations, one: "pending evaluation", many: "pending evaluations", href: "/admin/f/ac-15-course-evaluations" },
       ]
         .filter((t) => t.count > 0)
-        .map((t) => ({ label: `${t.count} ${t.label}`, href: t.href }))
+        .map((t) => ({ label: `${t.count} ${t.count === 1 ? t.one : t.many}`, href: t.href }))
     : null;
 
   return (
