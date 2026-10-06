@@ -18,7 +18,7 @@ COPY tools ./tools
 
 RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @myheritage/db generate
-RUN pnpm --filter @myheritage/contracts build && pnpm --filter @myheritage/db generate && pnpm --filter @myheritage/events build && pnpm --filter @myheritage/auth build && pnpm --filter @myheritage/ai build
+RUN pnpm --filter @myheritage/contracts build && pnpm --filter @myheritage/db build && pnpm --filter @myheritage/events build && pnpm --filter @myheritage/auth build && pnpm --filter @myheritage/ai build
 
 FROM base AS runner
 ENV NODE_ENV=production
