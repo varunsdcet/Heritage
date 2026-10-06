@@ -607,9 +607,15 @@ export function AdminStudentDocumentsView() {
 
   async function onDelete(id: string) {
     if (!session) return;
-    await api(`/admin/student-documents/${id}`, { method: "DELETE" }, session.accessToken);
-    setNotice("Document removed.");
-    await refresh();
+    if (!window.confirm("Remove this document from the student's record? This cannot be undone.")) return;
+    setError(null);
+    try {
+      await api(`/admin/student-documents/${id}`, { method: "DELETE" }, session.accessToken);
+      setNotice("Document removed.");
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Delete failed");
+    }
   }
 
   return (
@@ -697,9 +703,15 @@ export function AdminExtracurricularView() {
 
   async function onDelete(id: string) {
     if (!session) return;
-    await api(`/admin/extracurricular/${id}`, { method: "DELETE" }, session.accessToken);
-    setNotice("Record deleted.");
-    await refresh();
+    if (!window.confirm("Delete this extracurricular record? This cannot be undone.")) return;
+    setError(null);
+    try {
+      await api(`/admin/extracurricular/${id}`, { method: "DELETE" }, session.accessToken);
+      setNotice("Record deleted.");
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Delete failed");
+    }
   }
 
   return (

@@ -71,9 +71,9 @@ const CreateEnrolment = z.object({
 
 const CreateAssignment = z.object({
   sectionId: z.string().uuid(),
-  title: z.string().min(1),
-  maxScore: z.number().positive().default(100),
-  weightPercent: z.number().positive().default(10),
+  title: z.string().trim().min(1).max(200),
+  maxScore: z.number().positive().max(10_000).default(100),
+  weightPercent: z.number().positive().max(100).default(10),
   dueAt: z.string().datetime().optional(),
 });
 
@@ -200,12 +200,14 @@ adminRouter.post("/users", async (req, res, next) => {
       });
 
       if (role === "student") {
-        studentNumber =
-          body.studentNumber?.trim() ||
-          `ST-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
+        const requested = body.studentNumber?.trim();
+        studentNumber = requested || `ST-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
         const clash = await tx.student.findFirst({
           where: { institutionId: user.institutionId, studentNumber },
         });
+        if (clash && requested) {
+          throw Object.assign(new Error(`Student number ${requested} is already in use`), { status: 409, code: "CONFLICT" });
+        }
         if (clash) {
           studentNumber = `ST-${new Date().getFullYear()}-${randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase()}`;
         }
@@ -385,35 +387,6 @@ adminRouter.post("/sections", async (req, res, next) => {
       return;
     }
 
-    let term = await prisma.term.findFirst({
-      where: { institutionId: user.institutionId, code: body.termCode },
-    });
-    if (!term) {
-      term = await prisma.term.create({
-        data: {
-          institutionId: user.institutionId,
-          code: body.termCode,
-          name: body.termCode,
-          startsOn: "2026-09-01",
-          endsOn: "2026-12-18",
-        },
-      });
-    }
-
-    let course = await prisma.course.findFirst({
-      where: { institutionId: user.institutionId, code: body.courseCode.toUpperCase() },
-    });
-    if (!course) {
-      course = await prisma.course.create({
-        data: {
-          institutionId: user.institutionId,
-          code: body.courseCode.toUpperCase(),
-          title: body.courseTitle,
-          credits: body.credits,
-        },
-      });
-    }
-
     const existing = await prisma.section.findFirst({
       where: { institutionId: user.institutionId, code: body.sectionCode },
     });
@@ -422,14 +395,55 @@ adminRouter.post("/sections", async (req, res, next) => {
       return;
     }
 
-    const section = await prisma.section.create({
-      data: {
-        institutionId: user.institutionId,
-        courseId: course.id,
-        termId: term.id,
-        code: body.sectionCode,
-        instructorPersonId: instructor.personId,
-      },
+    const { section, course } = await prisma.$transaction(async (tx) => {
+      let term = await tx.term.findFirst({
+        where: { institutionId: user.institutionId, code: body.termCode },
+      });
+      if (!term) {
+        term = await tx.term.create({
+          data: {
+            institutionId: user.institutionId,
+            code: body.termCode,
+            name: body.termCode,
+            startsOn: "2026-09-01",
+            endsOn: "2026-12-18",
+          },
+        });
+      }
+      let course = await tx.course.findFirst({
+        where: { institutionId: user.institutionId, code: body.courseCode.toUpperCase() },
+      });
+      if (!course) {
+        course = await tx.course.create({
+          data: {
+            institutionId: user.institutionId,
+            code: body.courseCode.toUpperCase(),
+            title: body.courseTitle,
+            credits: body.credits,
+          },
+        });
+      }
+      const section = await tx.section.create({
+        data: {
+          institutionId: user.institutionId,
+          courseId: course.id,
+          termId: term.id,
+          code: body.sectionCode,
+          instructorPersonId: instructor.personId,
+        },
+      });
+      await tx.auditEvent.create({
+        data: {
+          institutionId: user.institutionId,
+          actorId: user.accountId,
+          eventName: "Section.created",
+          purpose: "admin_mutation",
+          afterJson: JSON.stringify({ sectionId: section.id, code: section.code, courseCode: course.code, termCode: term.code, instructorPersonId: instructor.personId }),
+          source: "admin.sections",
+          correlationId: randomUUID(),
+        },
+      });
+      return { section, course };
     });
 
     await prisma.notification.create({
@@ -544,13 +558,27 @@ adminRouter.post("/enrolments", async (req, res, next) => {
       res.status(409).json({ error: { message: "Already enrolled" } });
       return;
     }
-    const enrolment = await prisma.enrolment.create({
-      data: {
-        institutionId: user.institutionId,
-        sectionId: section.id,
-        studentId: student.id,
-        status: "enrolled",
-      },
+    const enrolment = await prisma.$transaction(async (tx) => {
+      const created = await tx.enrolment.create({
+        data: {
+          institutionId: user.institutionId,
+          sectionId: section.id,
+          studentId: student.id,
+          status: "enrolled",
+        },
+      });
+      await tx.auditEvent.create({
+        data: {
+          institutionId: user.institutionId,
+          actorId: user.accountId,
+          eventName: "Enrolment.created",
+          purpose: "admin_mutation",
+          afterJson: JSON.stringify({ enrolmentId: created.id, sectionId: section.id, studentId: student.id }),
+          source: "admin.enrolments",
+          correlationId: randomUUID(),
+        },
+      });
+      return created;
     });
     await prisma.notification.create({
       data: {
@@ -584,15 +612,29 @@ adminRouter.post("/assignments", async (req, res, next) => {
       res.status(404).json({ error: { message: "Section not found" } });
       return;
     }
-    const assignment = await prisma.assignment.create({
-      data: {
-        institutionId: user.institutionId,
-        sectionId: body.sectionId,
-        title: body.title,
-        maxScore: body.maxScore,
-        weightPercent: body.weightPercent,
-        dueAt: body.dueAt ? new Date(body.dueAt) : null,
-      },
+    const assignment = await prisma.$transaction(async (tx) => {
+      const created = await tx.assignment.create({
+        data: {
+          institutionId: user.institutionId,
+          sectionId: body.sectionId,
+          title: body.title,
+          maxScore: body.maxScore,
+          weightPercent: body.weightPercent,
+          dueAt: body.dueAt ? new Date(body.dueAt) : null,
+        },
+      });
+      await tx.auditEvent.create({
+        data: {
+          institutionId: user.institutionId,
+          actorId: user.accountId,
+          eventName: "Assignment.created",
+          purpose: "admin_mutation",
+          afterJson: JSON.stringify({ assignmentId: created.id, sectionId: created.sectionId, title: created.title, maxScore: created.maxScore, weightPercent: created.weightPercent }),
+          source: "admin.assignments",
+          correlationId: randomUUID(),
+        },
+      });
+      return created;
     });
     res.status(201).json({ assignmentId: assignment.id, title: assignment.title, sectionId: assignment.sectionId });
   } catch (err) {

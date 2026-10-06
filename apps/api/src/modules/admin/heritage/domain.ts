@@ -860,12 +860,13 @@ export const WRITE_THROUGH: Record<string, (user: SessionClaims, data: Data, con
         ...(str(d.emergency_contact_phone_number) ? { emergencyContactPhone: str(d.emergency_contact_phone_number) } : {}),
       },
     });
+    const cleared = (key: string) => (key in d && !str(d[key]) ? null : str(d[key]));
     await patchStudentMeta(user.institutionId, s.id, {
-      street: str(d.street_address),
-      city: str(d.city),
-      postal: str(d.postal_zip_code),
-      residency: str(d.domestic_international),
-      campus: str(d.campus),
+      street: cleared("street_address"),
+      city: cleared("city"),
+      postal: cleared("postal_zip_code"),
+      residency: cleared("domestic_international"),
+      campus: cleared("campus"),
     });
     return { message: "Student profile updated" };
   },

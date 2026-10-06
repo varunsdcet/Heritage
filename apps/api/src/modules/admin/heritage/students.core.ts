@@ -7,6 +7,7 @@ import { audit } from "./service.js";
 import { ensureSeed, entityRecords, type Rec } from "./sysconfig.js";
 import { add, arr, getSingle, httpError, nextNumber, putSingle, rows, s, type Data, type Row } from "./finance.core.js";
 import { STATUS_TREE, STU, auditScreen, type AuditSection } from "./students.spec.js";
+import { bytesMatchMime, decodeBase64 } from "../../../lib/fileSniff.js";
 
 export { add, arr, drop, getSingle, httpError, putSingle, row, rows, s, save, day, today, DATE_RE, type Data, type Row } from "./finance.core.js";
 
@@ -229,6 +230,7 @@ export async function storeFile(user: SessionClaims, studentId: string, body: { 
   const size = Math.floor((b64.length * 3) / 4) - (b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0);
   if (!size) throw httpError(400, "The file is empty");
   if (size > FILE_MAX) throw httpError(400, "Files must be 8 MB or smaller");
+  if (!bytesMatchMime(decodeBase64(b64), mime)) throw httpError(400, "The file's contents do not match its type. Upload a genuine PDF, image, Word, Excel or text file.");
   const rec = await add(user, STU.FILE, { name, mime, size, base64: b64 }, studentId);
   return { id: rec.id, name, size, mime };
 }

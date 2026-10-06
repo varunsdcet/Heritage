@@ -794,11 +794,19 @@ export async function studentMetaMap(institutionId: string) {
   return kvGet<Record<string, StudentMeta>>(institutionId, "student-meta", {});
 }
 
-export async function patchStudentMeta(institutionId: string, studentId: string, patch: StudentMeta) {
-  const map = await studentMetaMap(institutionId);
-  map[studentId] = { ...(map[studentId] ?? {}), ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined && v !== "")) };
-  await kvSet(institutionId, "student-meta", map);
-  return map[studentId];
+/** Merges a patch into a student's meta. Empty strings and undefined leave a field as is; null clears it. */
+export async function patchStudentMeta(institutionId: string, studentId: string, patch: { [K in keyof StudentMeta]?: StudentMeta[K] | null }) {
+  return withBlobLock(`student-meta:${institutionId}`, async () => {
+    const map = await studentMetaMap(institutionId);
+    const next: Record<string, string | undefined> = { ...(map[studentId] ?? {}) };
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === null) delete next[k];
+      else if (v !== undefined && v !== "") next[k] = v;
+    }
+    map[studentId] = next as StudentMeta;
+    await kvSet(institutionId, "student-meta", map);
+    return map[studentId];
+  });
 }
 
 export async function studentSearchOptions(institutionId: string) {

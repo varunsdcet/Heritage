@@ -13,6 +13,7 @@ import {
 } from "../superAdmin.service.js";
 import { rawRegistry, screenSchema, screenSchemas, type ContextType, type FieldDef, type ScreenSchema } from "./registry.js";
 import { DOMAIN_SOURCES, WRITE_THROUGH, domainStatus, type DomainRow } from "./domain.js";
+import { bytesMatchMime, decodeBase64 } from "../../../lib/fileSniff.js";
 
 type Data = Record<string, unknown>;
 
@@ -508,7 +509,7 @@ export async function getScreen(user: SessionClaims, id: string, query: ScreenQu
 
 const MAX_FILE = 3_000_000;
 
-function coerce(schema: ScreenSchema, input: Data, partial: boolean): Data {
+function coerce(schema: ScreenSchema, input: Data, partial: boolean, previous?: Data): Data {
   const out: Data = {};
   const missing: string[] = [];
   for (const f of schema.fields) {
@@ -518,7 +519,9 @@ function coerce(schema: ScreenSchema, input: Data, partial: boolean): Data {
       if (!partial && f.required) missing.push(f.label);
       continue;
     }
-    out[f.key] = coerceValue(f, v);
+    // Records saved before option checks existed may hold legacy values; resubmitting them unchanged stays allowed.
+    const unchangedChoice = (f.kind === "select" || f.kind === "multiselect") && previous && JSON.stringify(previous[f.key]) === JSON.stringify(v);
+    out[f.key] = unchangedChoice ? v : coerceValue(f, v);
     if (f.required && (out[f.key] === "" || out[f.key] === null || (Array.isArray(out[f.key]) && !(out[f.key] as unknown[]).length))) missing.push(f.label);
   }
   let extras = 0;
@@ -543,8 +546,22 @@ function coerceValue(f: FieldDef, v: unknown): unknown {
       if (!Number.isFinite(n)) throw httpError(400, `${f.label} must be a number`);
       return n;
     }
-    case "multiselect":
-      return Array.isArray(v) ? v.map(String).slice(0, 200) : String(v ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+    case "select": {
+      const s = typeof v === "string" ? v.trim() : v === null || v === undefined ? "" : String(v);
+      if (!s || !f.options?.length || f.ref) return s;
+      const hit = f.options.find((o) => o.toLowerCase() === s.toLowerCase());
+      if (!hit) throw httpError(400, `${f.label} must be one of: ${f.options.join(", ")}`);
+      return hit;
+    }
+    case "multiselect": {
+      const list = Array.isArray(v) ? v.map(String).slice(0, 200) : String(v ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+      if (!f.options?.length || f.ref) return list;
+      return list.map((s) => {
+        const hit = f.options!.find((o) => o.toLowerCase() === s.toLowerCase());
+        if (!hit) throw httpError(400, `${f.label} must only contain: ${f.options!.join(", ")}`);
+        return hit;
+      });
+    }
     case "email": {
       const s = String(v ?? "").trim();
       if (s && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)) throw httpError(400, `${f.label} must be a valid e-mail address`);
@@ -560,6 +577,11 @@ function coerceValue(f: FieldDef, v: unknown): unknown {
       if (typeof v === "object" && v && "dataUrl" in (v as Data)) {
         const file = v as { name?: string; size?: number; type?: string; dataUrl?: string };
         if ((file.dataUrl?.length ?? 0) > MAX_FILE * 1.4) throw httpError(400, `${f.label} must be under 3 MB`);
+        const dataUrl = String(file.dataUrl ?? "");
+        const mime = (/^data:([^;,]+)/.exec(dataUrl)?.[1] ?? String(file.type ?? "")).toLowerCase();
+        if (dataUrl && !bytesMatchMime(decodeBase64(dataUrl), mime)) {
+          throw httpError(400, `${f.label} must be a genuine image, PDF, Word, Excel or text file`);
+        }
         return { name: String(file.name ?? "file"), size: Number(file.size ?? 0), type: String(file.type ?? ""), dataUrl: String(file.dataUrl ?? "") };
       }
       return typeof v === "object" ? v : String(v);
@@ -688,14 +710,15 @@ export async function updateRecord(user: SessionClaims, id: string, recordId: st
   await guard(user, schema, "edit");
   const store = storeOf(schema);
   const ctx = parseCtx(schema, body.ctx);
-  const data = coerce(schema, body.data ?? {}, true);
   if (isDomainId(recordId)) {
+    const data = coerce(schema, body.data ?? {}, true);
     const o = await upsertOverlay(user, store, ctx.key, recordId, data);
     await audit(user, store, ctx.key, "update", { recordId, after: { ...data, _overlayId: o.id } });
     return { ok: true, id: recordId, message: "Updated" };
   }
   const rec = await loadRecord(user, store, recordId);
   const before = parseData(rec.dataJson);
+  const data = coerce(schema, body.data ?? {}, true, before);
   const after = { ...before, ...data };
   await prisma.heritageRecord.update({
     where: { id: rec.id },

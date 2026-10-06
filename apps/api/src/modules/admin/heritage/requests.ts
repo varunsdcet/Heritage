@@ -648,7 +648,7 @@ export async function decideRequest(user: SessionClaims, number: number, decisio
       await patchStudentMeta(inst, loa.studentId, {
         status: settings.changeStatus,
         loaStartDate: settings.absenceStart,
-        loaReturnDate: settings.returning,
+        loaReturnDate: settings.returning || null,
         loaReturnStatus: settings.returningStatus,
       });
       message += ` — student status set to ${settings.changeStatus}${withdrawn ? `, ${withdrawn} active enrolment${withdrawn === 1 ? "" : "s"} withdrawn` : ""}`;

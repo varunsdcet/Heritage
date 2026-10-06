@@ -764,6 +764,12 @@ export async function createRetake(user: SessionClaims, body: z.infer<typeof Ret
     },
     orderBy: { attemptNumber: "desc" },
   });
+  if (prior.some((e) => e.sectionId === body.sectionId && e.status === "enrolled")) {
+    throw httpError("This student is already actively enrolled in this section", "CONFLICT", 409);
+  }
+  if (body.originalEnrolmentId && !prior.some((e) => e.id === body.originalEnrolmentId)) {
+    throw httpError("Original enrolment must be an earlier attempt of this course by the same student", "VALIDATION_ERROR", 400);
+  }
   const attemptNumber = (prior[0]?.attemptNumber ?? 0) + 1;
   const originalEnrolmentId = body.originalEnrolmentId ?? prior[prior.length - 1]?.id ?? null;
 
