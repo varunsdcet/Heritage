@@ -1,10 +1,16 @@
-export type AdminNavChild = { label: string; href: string };
+import type { ModuleGate } from "./access";
+import { HERITAGE_SIDEBAR } from "./heritageNav";
+
+/** `count` names a live badge value served by `useNavCounts` (e.g. "requests:Student Requests"). */
+export type AdminNavChild = { label: string; href: string; gate?: ModuleGate; section?: string; indent?: boolean; count?: string };
 
 export type AdminNavItem = {
   label: string;
   href: string;
   icon: string;
   children?: AdminNavChild[];
+  gate?: ModuleGate;
+  count?: string;
 };
 
 export type AdminSidebarEntry = { type: "label"; label: string } | { type: "item"; item: AdminNavItem };
@@ -238,69 +244,98 @@ export const GLOBAL_NAV: AdminNavChild[] = [
   { label: "Audit", href: "/admin/audit" },
 ];
 
+export const MY_PROFILE_NAV: AdminNavChild[] = [
+  { label: "Manage My Profile", href: "/admin/faculty-profile" },
+  { label: "Accomplishments", href: "/admin/account/accomplishments" },
+  { label: "Security Settings", href: "/admin/account/security" },
+  { label: "Change Time Zone", href: "/admin/account/timezone" },
+];
+
+export const USER_MANAGEMENT_NAV: AdminNavChild[] = [
+  { label: "User Directory", href: "/admin/user-management" },
+  { label: "Add User", href: "/admin/user-management/new", gate: { modules: ["userManagement"], edit: true } },
+  { label: "Manage Access Levels", href: "/admin/access-levels" },
+];
+
 export const ADMIN_SIDEBAR: AdminSidebarEntry[] = [
   { type: "item", item: { label: "Dashboard", href: "/admin", icon: "home" } },
   { type: "item", item: { label: "Workspace", href: "/admin/search", icon: "file-text", children: GLOBAL_NAV } },
+  { type: "label", label: "HERITAGE SIS" },
+  { type: "item", item: { label: "Screen Index", href: "/admin/heritage", icon: "list" } },
+  ...HERITAGE_SIDEBAR.map((item): AdminSidebarEntry => ({ type: "item", item })),
+  { type: "item", item: { label: "Search Students", href: "/admin/student-search", icon: "school", gate: { modules: ["studentRecords"] } } },
   { type: "label", label: "RECRUIT" },
   {
     type: "item",
-    item: { label: "Admissions", href: "/admin/f/ad-01-admissions-dashboard", icon: "bar-chart", children: ADMISSIONS_NAV },
+    item: { label: "Admissions", href: "/admin/f/ad-01-admissions-dashboard", icon: "bar-chart", children: ADMISSIONS_NAV, gate: { modules: ["studentRecords"] } },
   },
-  { type: "item", item: { label: "CRM", href: "/admin/f/crm-01-dashboard", icon: "users", children: CRM_NAV } },
+  { type: "item", item: { label: "CRM", href: "/admin/f/crm-01-dashboard", icon: "users", children: CRM_NAV, gate: { modules: ["agentManagement"] } } },
   { type: "label", label: "STUDENTS" },
   {
     type: "item",
-    item: { label: "Student Success", href: "/admin/f/ss-01-success-dashboard", icon: "bell", children: SUCCESS_NAV },
+    item: { label: "Student Success", href: "/admin/f/ss-01-success-dashboard", icon: "bell", children: SUCCESS_NAV, gate: { modules: ["studentRecords"] } },
   },
   {
     type: "item",
-    item: { label: "Registrar", href: "/admin/f/rg-00-registrar-dashboard", icon: "school", children: REGISTRAR_NAV },
+    item: { label: "Registrar", href: "/admin/f/rg-00-registrar-dashboard", icon: "school", children: REGISTRAR_NAV, gate: { modules: ["studentRecords"] } },
   },
   { type: "label", label: "ACADEMICS" },
   {
     type: "item",
-    item: { label: "Academics", href: "/admin/f/ac-03-programs", icon: "book", children: ACADEMICS_NAV },
+    item: { label: "Academics", href: "/admin/f/ac-03-programs", icon: "book", children: ACADEMICS_NAV, gate: { modules: ["programManagement", "courseManagement"] } },
   },
-  { type: "item", item: { label: "Labs", href: "/admin/f/lb-01-lab-dashboard", icon: "flask", children: LABS_NAV } },
+  { type: "item", item: { label: "Labs", href: "/admin/f/lb-01-lab-dashboard", icon: "flask", children: LABS_NAV, gate: { modules: ["courseManagement", "locationManagement"] } } },
   {
     type: "item",
-    item: { label: "Practicum", href: "/admin/f/pr-01-practicum-dashboard", icon: "briefcase", children: PRACTICUM_NAV },
+    item: { label: "Practicum", href: "/admin/f/pr-01-practicum-dashboard", icon: "briefcase", children: PRACTICUM_NAV, gate: { modules: ["studentRecords"] } },
   },
   { type: "label", label: "FINANCE" },
   {
     type: "item",
-    item: { label: "Finance", href: "/admin/f/fn-01-finance-dashboard", icon: "pie", children: FINANCE_NAV },
+    item: { label: "Finance", href: "/admin/f/fn-01-finance-dashboard", icon: "pie", children: FINANCE_NAV, gate: { modules: ["financialManagement"] } },
   },
   { type: "label", label: "SYSTEM" },
-  { type: "item", item: { label: "AI Hub", href: "/admin/f/ai-01-ai-dashboard", icon: "sparkle", children: AI_NAV } },
+  { type: "item", item: { label: "AI Hub", href: "/admin/f/ai-01-ai-dashboard", icon: "sparkle", children: AI_NAV, gate: { modules: ["reporting"] } } },
   {
     type: "item",
-    item: { label: "Compliance", href: "/admin/f/cp-01-compliance-dashboard", icon: "shield", children: COMPLIANCE_NAV },
+    item: { label: "Compliance", href: "/admin/f/cp-01-compliance-dashboard", icon: "shield", children: COMPLIANCE_NAV, gate: { modules: ["reporting"] } },
   },
-  { type: "item", item: { label: "Forms", href: "/admin/f/fm-01-form-list", icon: "file-text", children: FORMS_NAV } },
-  { type: "item", item: { label: "Rules", href: "/admin/f/rl-01-rule-sets", icon: "list", children: RULES_NAV } },
+  { type: "item", item: { label: "Forms", href: "/admin/f/fm-01-form-list", icon: "file-text", children: FORMS_NAV, gate: { modules: ["userRequests"] } } },
+  { type: "item", item: { label: "Rules", href: "/admin/f/rl-01-rule-sets", icon: "list", children: RULES_NAV, gate: { modules: ["systemConfiguration"] } } },
   {
     type: "item",
-    item: { label: "Workflows", href: "/admin/f/wf-01-workflow-list", icon: "briefcase", children: WORKFLOW_NAV },
+    item: { label: "Workflows", href: "/admin/f/wf-01-workflow-list", icon: "briefcase", children: WORKFLOW_NAV, gate: { modules: ["systemConfiguration"] } },
   },
   {
     type: "item",
-    item: { label: "Platform", href: "/admin/f/pl-07-institution-settings", icon: "settings", children: PLATFORM_NAV },
+    item: { label: "Platform", href: "/admin/f/pl-07-institution-settings", icon: "settings", children: PLATFORM_NAV, gate: { modules: ["systemConfiguration", "locationManagement", "housingManagement", "emailMessaging"] } },
   },
 ];
 
 export function adminHrefMatches(pathname: string, href: string) {
-  if (href === "/admin") return pathname === "/admin";
-  return pathname === href || pathname.startsWith(`${href}/`);
+  const path = href.split("?")[0];
+  if (path === "/admin" || path === "/admin/heritage") return pathname === path;
+  return pathname === path || pathname.startsWith(`${path}/`);
 }
 
-export function adminChildActive(pathname: string, child: AdminNavChild) {
-  return adminHrefMatches(pathname, child.href);
+function filterQuery(qs: string) {
+  return [...new URLSearchParams(qs).entries()]
+    .filter(([k]) => k.startsWith("f."))
+    .map(([k, v]) => `${k}=${v}`)
+    .sort()
+    .join("&");
+}
+
+export function adminChildActive(pathname: string, child: AdminNavChild, siblings?: AdminNavChild[], search = "") {
+  if (!adminHrefMatches(pathname, child.href)) return false;
+  const [path, qs = ""] = child.href.split("?");
+  if (siblings?.some((s) => s !== child && s.href.split("?")[0] === path)) return filterQuery(qs) === filterQuery(search);
+  return !siblings?.some((s) => s.href.split("?")[0].length > path.length && adminHrefMatches(pathname, s.href));
 }
 
 export function adminGroupActive(pathname: string, item: AdminNavItem) {
   if (item.children?.length) {
-    if (item.children.some((child) => adminChildActive(pathname, child))) return true;
+    if (item.children.some((child) => adminHrefMatches(pathname, child.href))) return true;
     const prefix = item.href.match(/^(\/admin\/f\/[a-z]+-)/);
     return Boolean(prefix && pathname.startsWith(prefix[1]));
   }

@@ -6,8 +6,9 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { AskHeritageFab } from "@/components/AskHeritageFab";
 import { api, loadSession } from "@/lib/api";
+import { NoModuleAccess, allows, useMyAccess, type ModuleGate, type MyAccess } from "@/lib/access";
 
-type NavChild = { label: string; href: string; match?: string[]; section?: string; countKey?: string };
+type NavChild = { label: string; href: string; match?: string[]; section?: string; countKey?: string; gate?: ModuleGate };
 type NavItem = {
   label: string;
   href: string;
@@ -15,6 +16,7 @@ type NavItem = {
   badge?: string;
   match?: string[];
   children?: NavChild[];
+  gate?: ModuleGate;
 };
 
 const NAV: NavItem[] = [
@@ -51,6 +53,7 @@ const NAV: NavItem[] = [
   {
     label: "My Courses",
     href: "/instructor/sections",
+    gate: { modules: ["courseManagement"] },
     icon: "book",
     children: [
       { label: "All My Courses / Schedule", href: "/instructor/sections", match: ["/instructor/f/t08-my-courses-detail"] },
@@ -65,11 +68,13 @@ const NAV: NavItem[] = [
   {
     label: "AI Draft",
     href: "/instructor/ai-draft",
+    gate: { modules: ["courseManagement"] },
     icon: "sparkles",
   },
   {
     label: "Workshops",
     href: "/instructor/f/t40-workshop-enrollment-status?status=pending",
+    gate: { modules: ["courseManagement"] },
     icon: "school",
     children: [
       { section: "ENROLMENTS", label: "Pending", href: "/instructor/f/t40-workshop-enrollment-status?status=pending", countKey: "pending" },
@@ -85,6 +90,7 @@ const NAV: NavItem[] = [
   {
     label: "Students",
     href: "/instructor/f/t12-students-view",
+    gate: { modules: ["studentRecords"] },
     icon: "users",
     children: [
       { section: "STUDENTS BY STATUS", label: "New Inquiry", href: "/instructor/f/t12-students-view?status=New%20Inquiry", countKey: "st_New Inquiry" },
@@ -109,7 +115,7 @@ const NAV: NavItem[] = [
       { section: "STUDENTS BY STATUS", label: "File not Logged (Offshore student)", href: "/instructor/f/t12-students-view?status=File%20not%20Logged%20(Offshore%20student)", countKey: "st_File not Logged (Offshore student)" },
       { section: "STUDENTS BY STATUS", label: "Prospective Student (Marketing team)", href: "/instructor/f/t12-students-view?status=Prospective%20Student%20(Marketing%20team)", countKey: "st_Prospective Student (Marketing team)" },
       { section: "STUDENT MANAGEMENT", label: "Browse All Students", href: "/instructor/f/t12-students-view" },
-      { section: "STUDENT MANAGEMENT", label: "Create Student Profile", href: "/instructor/f/t43-create-student-profile" },
+      { section: "STUDENT MANAGEMENT", label: "Create Student Profile", href: "/instructor/f/t43-create-student-profile", gate: { modules: ["studentRecords"], edit: true } },
       { section: "STUDENT MANAGEMENT", label: "Academic Alerts", href: "/instructor/f/t44-academic-alerts", countKey: "alerts" },
       { section: "STUDENT MANAGEMENT", label: "Student Flags", href: "/instructor/f/t45-student-flags", countKey: "flags" },
       { section: "STUDENT MANAGEMENT", label: "Student Assessments", href: "/instructor/f/t46-student-assessments" },
@@ -126,10 +132,11 @@ const NAV: NavItem[] = [
   {
     label: "Program Management",
     href: "/instructor/f/t13-program-management",
+    gate: { modules: ["programManagement"] },
     icon: "briefcase",
     children: [
       { label: "Faculties & Programs", href: "/instructor/f/t13-program-management", match: ["/instructor/f/t81-add-faculty", "/instructor/f/t74-add-program", "/instructor/f/t83-program-settings"] },
-      { label: "Add Program", href: "/instructor/f/t74-add-program" },
+      { label: "Add Program", href: "/instructor/f/t74-add-program", gate: { modules: ["programManagement"], edit: true } },
       { label: "Program Types", href: "/instructor/f/t50-program-types", match: ["/instructor/f/t75-add-program-type"] },
       { label: "Manage Terms", href: "/instructor/f/t51-manage-terms", match: ["/instructor/f/t76-add-term", "/instructor/f/t84-review-term"] },
       { label: "Academic Calendars", href: "/instructor/f/t52-academic-calendars", match: ["/instructor/f/t73-create-academic-calendar"] },
@@ -140,6 +147,7 @@ const NAV: NavItem[] = [
   {
     label: "Course Management",
     href: "/instructor/f/t14-course-management",
+    gate: { modules: ["courseManagement"] },
     icon: "settings",
     children: [
       {
@@ -198,6 +206,7 @@ const NAV: NavItem[] = [
   {
     label: "Communication",
     href: "/instructor/messages",
+    gate: { modules: ["emailMessaging"] },
     icon: "bell",
     children: [
       { label: "Message Center", href: "/instructor/messages", match: ["/instructor/f/t16-teacher-messages-chat", "/instructor/mail"] },
@@ -336,6 +345,23 @@ function isActive(pathname: string, item: NavItem, search: URLSearchParams) {
   return pathMatches(pathname, item.href, item.match);
 }
 
+function visibleNav(items: NavItem[], access: MyAccess | null | undefined) {
+  return items
+    .filter((item) => allows(access, item.gate))
+    .map((item) => (item.children ? { ...item, children: item.children.filter((c) => allows(access, c.gate)) } : item));
+}
+
+function pageBlocked(pathname: string, search: URLSearchParams, access: MyAccess | null | undefined) {
+  if (access === null) return false;
+  for (const item of NAV) {
+    if (!isActive(pathname, item, search) && !pathMatches(pathname, item.href)) continue;
+    if (!allows(access, item.gate)) return true;
+    const child = item.children?.find((c) => childMatches(pathname, c, search, item.children));
+    return Boolean(child && !allows(access, child.gate));
+  }
+  return false;
+}
+
 export function TeacherSisShell({
   children,
   activeHref = "/instructor",
@@ -412,14 +438,16 @@ export function TeacherSisShell({
     };
   }, []);
 
+  const access = useMyAccess();
+  const blocked = pageBlocked(current, searchParams, access);
   const navItems = useMemo(
     () =>
-      NAV.map((item) =>
+      visibleNav(NAV, access).map((item) =>
         item.href === "/instructor/f/t12-students-view" && studentCount != null
           ? { ...item, badge: studentCount.toLocaleString() }
           : item,
       ),
-    [studentCount],
+    [studentCount, access],
   );
 
   const initials = useMemo(
@@ -722,7 +750,7 @@ export function TeacherSisShell({
             </div>
           </div>
         </header>
-        <div className="mh-teacher__scroll">{children}</div>
+        <div className="mh-teacher__scroll">{blocked ? access === undefined ? null : <NoModuleAccess /> : children}</div>
         <AskHeritageFab role="instructor" />
       </div>
     </div>

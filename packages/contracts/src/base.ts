@@ -10,6 +10,15 @@ export const Uuid = z
   }, "Invalid uuid");
 export const InstitutionId = Uuid;
 export const IsoDateTime = z.string().datetime({ offset: true }).or(z.string().datetime());
+/** External HTTPS meeting link, or the in-app live classroom launcher (`/live/<sectionId>`). */
+export const JoinUrl = z
+  .string()
+  .refine(
+    (value) =>
+      /^\/live\/[0-9a-zA-Z][0-9a-zA-Z-]{7,62}$/.test(value) ||
+      (value.startsWith("https://") && z.string().url().safeParse(value).success),
+    "Join links must be HTTPS or an in-app live class link",
+  );
 export const MoneyCad = z.object({
   amountCents: z.number().int(),
   currency: z.literal("CAD"),

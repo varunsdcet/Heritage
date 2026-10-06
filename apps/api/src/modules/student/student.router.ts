@@ -53,6 +53,7 @@ import {
   submitCourseEvaluation,
   updateMailboxSettings,
 } from "./wave3.service.js";
+import { sessionJoinUrl } from "../../lib/liveClass.js";
 
 export const studentRouter: Router = Router();
 
@@ -473,7 +474,7 @@ studentRouter.get("/courses/:sectionId/content", requireAuth, requireRoles("stud
           title: session.title,
           detail: `${session.startsAt.toISOString()}${session.location ? ` · ${session.location}` : ""}`,
           href: detailHref,
-          joinUrl: session.joinUrl?.startsWith("https://") ? session.joinUrl : null,
+          joinUrl: sessionJoinUrl(session.sectionId, session.joinUrl),
           completed: completed.has(`session:${session.id}`),
         };
       }),

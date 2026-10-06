@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IsoDateTime, MoneyCad, Uuid } from "./base.js";
+import { IsoDateTime, JoinUrl, MoneyCad, Uuid } from "./base.js";
 
 export const StudentModuleId = z.enum([
   "ST-01",
@@ -153,7 +153,7 @@ export const StudentCalendarEvent = z.object({
   startsAt: IsoDateTime,
   endsAt: IsoDateTime.nullable(),
   location: z.string().nullable(),
-  joinUrl: z.string().url().refine((value) => value.startsWith("https://")).nullable(),
+  joinUrl: JoinUrl.nullable(),
 });
 
 export const StudentCalendarResponse = z.object({
@@ -383,7 +383,7 @@ export const StudentLectureSummary = z.object({
   startsAt: IsoDateTime,
   endsAt: IsoDateTime.nullable(),
   location: z.string().nullable(),
-  joinUrl: z.string().url().refine((value) => value.startsWith("https://")).nullable(),
+  joinUrl: JoinUrl.nullable(),
   sessionKind: z.enum(["lecture", "lab"]),
   deliveryMode: z.string().min(1),
 });
@@ -426,7 +426,7 @@ export const StudentServiceRequest = z.object({
   type: StudentServiceRequestType,
   subject: z.string().min(1),
   details: z.string().min(1),
-  status: z.enum(["open", "pending_approval", "resolved", "rejected"]),
+  status: z.enum(["open", "pending_approval", "resolved", "rejected", "cancelled"]),
   approvalRequestId: Uuid.nullable(),
   createdAt: IsoDateTime,
 });

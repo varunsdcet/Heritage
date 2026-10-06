@@ -25,7 +25,7 @@ import {
   mergeCourseLmsOverlay,
   studentQuizQuestionsForActivity,
 } from "../instructor/courseLmsScreens.js";
-import { jitsiMeetUrl, isJitsiMeetUrl } from "../../lib/jitsiMeet.js";
+import { liveClassUrl } from "../../lib/liveClass.js";
 import { requireStudent } from "./surfaces.service.js";
 
 function httpError(message: string, code: string, status: number) {
@@ -221,11 +221,7 @@ export async function getStudentCourseLms(user: SessionClaims, sectionId: string
   const location =
     enrolment.section.classSessions.map((s) => s.location?.trim()).find(Boolean) ||
     "#110 Heritage College - Surrey";
-  const storedJoin =
-    enrolment.section.classSessions.map((s) => s.joinUrl).find((u) => typeof u === "string" && u.startsWith("http")) ||
-    null;
-  const joinUrl =
-    storedJoin && isJitsiMeetUrl(storedJoin) ? storedJoin : jitsiMeetUrl(code, enrolment.section.code);
+  const joinUrl = liveClassUrl(sectionId);
   const startsOn = block?.startsOn || null;
   const endsOn = block?.endsOn || null;
   const sessionLabel = sessionLabelFor(code, enrolment.section.code, startsOn, endsOn);
@@ -262,7 +258,7 @@ export async function getStudentCourseLms(user: SessionClaims, sectionId: string
           modified: a.modified,
           note: a.note,
           hidden: false,
-          joinUrl: type === "BIGBLUEBUTTON" ? a.joinUrl || joinUrl || lms.joinUrl || null : null,
+          joinUrl: type === "BIGBLUEBUTTON" ? a.joinUrl || joinUrl : null,
           gradingMethod: /final\s*exam/i.test(a.name) ? "Highest grade" : a.note?.includes("Grading method") ? a.note : undefined,
         };
         if (type === "QUIZ") {

@@ -94,7 +94,7 @@ export const LMS_ACTIVITY_FORMS: Record<string, { heading: string; error?: strin
     ],
   },
   bigbluebutton: {
-    heading: "Adding a new Online Class (Jitsi Meet)",
+    heading: "Adding a new Online Class (BigBlueButton)",
     sections: [
       { title: "Instance", fields: [sel("Instance type", "Instance type", ["Room with recordings", "Room only", "Recordings only"])] },
       { title: "General", fields: [text("Name", "Room name", true, "Online Class Link")] },

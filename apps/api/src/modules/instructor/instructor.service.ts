@@ -127,7 +127,7 @@ import {
   mergeCourseLmsOverlay,
   questionFromFields,
 } from "./courseLmsScreens.js";
-import { isJitsiMeetUrl, jitsiMeetUrl } from "../../lib/jitsiMeet.js";
+import { classJoinUrl, liveClassUrl, sessionJoinUrl } from "../../lib/liveClass.js";
 import { createClassSessionWithNotifications } from "../campusCompliance/sessions.js";
 
 export type InstructorLivePayload = Record<string, unknown>;
@@ -504,7 +504,7 @@ async function loadCtx(user: SessionClaims): Promise<InstructorCtx> {
       location: c.location,
       sectionCode: c.section.code,
       courseCode: c.section.course.code,
-      joinUrl: c.joinUrl,
+      joinUrl: sessionJoinUrl(c.sectionId, c.joinUrl),
     })),
     programs,
   };
@@ -1061,10 +1061,7 @@ async function publishOnlineClassSession(
     `${sec.courseCode} Online Class`;
   const openRaw = (fields["Open date/time"] || fields.StartsAt || fields.startsAt || "").trim();
   const startsAt = openRaw ? new Date(openRaw) : new Date();
-  const joinUrl =
-    (fields.JoinUrl || fields.joinUrl || "").trim().startsWith("http")
-      ? (fields.JoinUrl || fields.joinUrl || "").trim()
-      : jitsiMeetUrl(sec.courseCode, sec.code);
+  const joinUrl = classJoinUrl(sec.id, fields.JoinUrl || fields.joinUrl);
   const notifyStudentIds = parseNotifyStudentIds(fields);
   const published = await createClassSessionWithNotifications({
     institutionId: ctx.user.institutionId,
@@ -1250,12 +1247,7 @@ async function buildCourseDetail(ctx: InstructorCtx, path: string): Promise<Inst
   );
   const location = "#110 Heritage College- Surrey";
   const namesLive = instructorNameParts(ctx.displayName);
-  const liveJoinRaw =
-    sectionSessions.map((s) => s.joinUrl).find((u) => typeof u === "string" && u.startsWith("http")) || null;
-  const liveJoin =
-    liveJoinRaw && isJitsiMeetUrl(liveJoinRaw)
-      ? liveJoinRaw
-      : jitsiMeetUrl(sec.courseCode, sec.code);
+  const liveJoin = liveClassUrl(sec.id);
 
   const payload: InstructorLivePayload = {
     title: `${sec.courseCode}: ${sec.courseTitle}`.toUpperCase().includes(sec.courseCode)
@@ -8992,7 +8984,7 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
             message = `Online class ready · ${name} · ${published.notified} student(s) notified`;
           } else {
             const sec = resolveSectionFromPath(ctx, path);
-            activity.joinUrl = sec ? jitsiMeetUrl(sec.courseCode, sec.code) : null;
+            activity.joinUrl = sec ? liveClassUrl(sec.id) : null;
             activity.note = "Room ready — publish to notify students.";
             result = { topicId, activity };
             message = `Added ${type} · ${name}`;

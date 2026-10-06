@@ -17,6 +17,7 @@ body {
   font-size: var(--mh-body);
   line-height: 1.5;
   overflow-x: hidden;
+  overflow-x: clip;
   max-width: 100vw;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -830,6 +831,51 @@ button.mh-admin-table__row {
 
 .mh-sis__nav-subitem.is-active .mh-sis__nav-dot {
   background: var(--mh-brand);
+}
+
+.mh-sis__nav-subitem.is-indented {
+  padding-left: 32px;
+}
+
+.mh-sis__nav-count {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #e5e7eb;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.mh-sis__nav-item.is-active .mh-sis__nav-count {
+  background: var(--mh-brand);
+  color: #fff;
+}
+
+.mh-sis__nav-count + .mh-sis__nav-chevron {
+  margin-left: 0;
+}
+
+.mh-sis__crumb-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.mh-sis__crumb-link:hover {
+  text-decoration: underline;
+}
+
+.mh-sis__nav-subsection {
+  padding: 10px 10px 4px 16px;
+  color: var(--mh-text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .mh-sis__main {
@@ -24533,4 +24579,26 @@ button.mh-sis-tax__download:disabled {
   .sp-lesson {
     padding: 20px 16px 64px;
   }
+}
+
+.mh-noaccess {
+  margin: 32px auto;
+  max-width: 560px;
+  padding: 28px 32px;
+  border: 1px solid #fecaca;
+  border-radius: 12px;
+  background: #fff7f7;
+  color: #7f1d1d;
+  text-align: center;
+}
+
+.mh-noaccess strong {
+  display: block;
+  font-size: 17px;
+  margin-bottom: 6px;
+}
+
+.mh-noaccess p {
+  margin: 0;
+  color: #991b1b;
 }

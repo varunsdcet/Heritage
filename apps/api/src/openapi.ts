@@ -7,6 +7,7 @@ export const openApiDocument = {
     "/auth/reset-password": { post: { summary: "Reset password with token", security: [], "x-idempotent": false } },
     "/me/home": { get: { summary: "Role-aware home feed", security: [{ bearer: [] }] } },
     "/me/profile": { get: { summary: "Student profile", security: [{ bearer: [] }] } },
+    "/me/access": { get: { summary: "Effective access level and module permissions", security: [{ bearer: [] }] } },
     "/me/preferences": { patch: { summary: "Update student preferences", security: [{ bearer: [] }] } },
     "/me/profile-change-requests": {
       post: { summary: "Request an official profile change", security: [{ bearer: [] }] },
@@ -17,6 +18,20 @@ export const openApiDocument = {
       patch: { summary: "Mark own notification read", security: [{ bearer: [] }], "x-idempotent": true },
     },
     "/calendar/me": { get: { summary: "Calendar events", security: [{ bearer: [] }] } },
+    "/live/config": { get: { summary: "Live classroom provider (bigbluebutton | jitsi)", security: [{ bearer: [] }] } },
+    "/live/sections/{sectionId}": {
+      get: { summary: "Live class status for a section (role, running, participants)", security: [{ bearer: [] }] },
+    },
+    "/live/sections/{sectionId}/join": {
+      post: {
+        summary: "Signed BigBlueButton join URL — instructor joins as moderator, enrolled students as viewers",
+        security: [{ bearer: [] }],
+      },
+    },
+    "/live/sections/{sectionId}/end": { post: { summary: "End the live class for everyone (instructor)", security: [{ bearer: [] }] } },
+    "/live/sections/{sectionId}/recordings": {
+      get: { summary: "BigBlueButton recordings (students see published only)", security: [{ bearer: [] }] },
+    },
     "/grades/me": { get: { summary: "Student published grades", security: [{ bearer: [] }] } },
     "/gradebooks/{sectionId}": { get: { summary: "Instructor gradebook", security: [{ bearer: [] }] } },
     "/grade-items/{id}": { patch: { summary: "Upsert draft grade", security: [{ bearer: [] }], "x-concurrency": "row_version" } },

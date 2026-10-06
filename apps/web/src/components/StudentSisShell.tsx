@@ -5,6 +5,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { api, clearSession, loadSession } from "@/lib/api";
 import { AskHeritageFab } from "@/components/AskHeritageFab";
+import { NoModuleAccess, allows, useMyAccess, type ModuleGate, type MyAccess } from "@/lib/access";
 
 type NavChild = {
   label: string;
@@ -12,6 +13,7 @@ type NavChild = {
   match?: string[];
   section?: string;
   exact?: boolean;
+  gate?: ModuleGate;
 };
 
 type NavItem = {
@@ -19,6 +21,7 @@ type NavItem = {
   href: string;
   icon: string;
   children?: NavChild[];
+  gate?: ModuleGate;
 };
 
 type ActiveCourse = {
@@ -48,6 +51,7 @@ const BASE_NAV: NavItem[] = [
   {
     label: "My Courses",
     href: "/student/courses",
+    gate: { modules: ["courseManagement"] },
     icon: "book",
     children: [
       {
@@ -62,6 +66,7 @@ const BASE_NAV: NavItem[] = [
   {
     label: "Workshops",
     href: "/student/workshops",
+    gate: { modules: ["courseManagement"] },
     icon: "users",
     children: [
       { label: "My Workshops", href: "/student/workshops" },
@@ -72,27 +77,30 @@ const BASE_NAV: NavItem[] = [
   {
     label: "My Records",
     href: "/student/grades",
+    gate: { modules: ["studentRecords", "financialManagement"] },
     icon: "briefcase",
     children: [
-      { label: "Final Marks / Grades", href: "/student/grades" },
-      { label: "My Accomplishments & Badges", href: "/student/accomplishments" },
-      { label: "Extracurricular Records", href: "/student/f/st-25-extracurricular" },
-      { label: "Program Plan", href: "/student/f/st-23-program-plan" },
-      { label: "Pending Required Tasks", href: "/student/f/st-27-required-tasks" },
-      { label: "My Documents", href: "/student/documents" },
-      { label: "Tax Documents / Forms", href: "/student/f/st-26-tax-documents" },
-      { label: "Financial Statements", href: "/student/fees" },
+      { label: "Final Marks / Grades", href: "/student/grades", gate: { modules: ["studentRecords"] } },
+      { label: "My Accomplishments & Badges", href: "/student/accomplishments", gate: { modules: ["studentRecords"] } },
+      { label: "Extracurricular Records", href: "/student/f/st-25-extracurricular", gate: { modules: ["studentRecords"] } },
+      { label: "Program Plan", href: "/student/f/st-23-program-plan", gate: { modules: ["studentRecords"] } },
+      { label: "Pending Required Tasks", href: "/student/f/st-27-required-tasks", gate: { modules: ["studentRecords"] } },
+      { label: "My Documents", href: "/student/documents", gate: { modules: ["studentRecords"] } },
+      { label: "Tax Documents / Forms", href: "/student/f/st-26-tax-documents", gate: { modules: ["financialManagement"] } },
+      { label: "Financial Statements", href: "/student/fees", gate: { modules: ["financialManagement"] } },
     ],
   },
   {
     label: "Request Forms",
     href: "/student/leave-of-absence",
+    gate: { modules: ["userRequests"] },
     icon: "school",
     children: [{ label: "Leave of Absence Application", href: "/student/leave-of-absence" }],
   },
   {
     label: "Communication",
     href: "/student/messages",
+    gate: { modules: ["emailMessaging"] },
     icon: "bell",
     children: [
       { label: "Message Center", href: "/student/messages" },
@@ -213,8 +221,22 @@ function NavIcon({ name, active }: { name: string; active?: boolean }) {
   }
 }
 
-function buildNav(activeCourses: ActiveCourse[]): NavItem[] {
-  return BASE_NAV.map((item) => {
+function pageBlocked(pathname: string, search: URLSearchParams, access: MyAccess | null | undefined) {
+  if (access === null) return false;
+  for (const item of BASE_NAV) {
+    if (!isActive(pathname, item, search) && !pathMatches(pathname, item.href)) continue;
+    if (!allows(access, item.gate)) return true;
+    const child = item.children?.find((c) => childMatches(pathname, c, search, item.children));
+    return Boolean(child && !allows(access, child.gate));
+  }
+  return false;
+}
+
+function buildNav(activeCourses: ActiveCourse[], access: MyAccess | null | undefined): NavItem[] {
+  return BASE_NAV.filter((item) => allows(access, item.gate)).map((item) => {
+    if (item.children && item.href !== "/student/courses") {
+      return { ...item, children: item.children.filter((c) => allows(access, c.gate)) };
+    }
     if (item.href !== "/student/courses") return item;
     const courseLinks: NavChild[] = activeCourses.map((c) => ({
       section: "ACTIVE COURSES",
@@ -263,7 +285,9 @@ function StudentSisShellInner({
   const [resolvedNumber, setResolvedNumber] = useState(studentNumber);
   const [activeCourses, setActiveCourses] = useState<ActiveCourse[]>([]);
 
-  const nav = useMemo(() => buildNav(activeCourses), [activeCourses]);
+  const access = useMyAccess();
+  const nav = useMemo(() => buildNav(activeCourses, access), [activeCourses, access]);
+  const blocked = pageBlocked(current, searchParams, access);
 
   const initials = useMemo(
     () =>
@@ -515,7 +539,7 @@ function StudentSisShellInner({
             </div>
           </div>
         </header>
-        <div className="mh-teacher__scroll">{children}</div>
+        <div className="mh-teacher__scroll">{blocked ? access === undefined ? null : <NoModuleAccess /> : children}</div>
         <AskHeritageFab role="student" />
       </div>
     </div>

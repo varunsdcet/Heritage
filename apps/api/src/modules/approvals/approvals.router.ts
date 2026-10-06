@@ -98,6 +98,18 @@ approvalsRouter.post(
         decision: body.decision,
         comment: body.comment,
       });
+      if (updated.status === "rejected") {
+        await prisma.$transaction([
+          prisma.leaveOfAbsenceRequest.updateMany({
+            where: { institutionId: user.institutionId, approvalRequestId: id, status: "pending" },
+            data: { status: "rejected", decidedAt: new Date(), decisionNote: body.comment || "Declined from approvals inbox" },
+          }),
+          prisma.serviceRequest.updateMany({
+            where: { institutionId: user.institutionId, approvalRequestId: id, status: { in: ["open", "pending", "submitted", "in_review"] } },
+            data: { status: "rejected" },
+          }),
+        ]);
+      }
       res.json({ id: updated.id, status: updated.status });
     } catch (err) {
       next(err);
@@ -142,9 +154,9 @@ approvalsRouter.post(
             where: { institutionId: user.institutionId, approvalRequestId: id },
             data: { status: "resolved" },
           });
-          if (approvalRow?.type === "leave_of_absence" && approvalRow.subjectRef) {
+          if (approvalRow?.type === "leave_of_absence") {
             await tx.leaveOfAbsenceRequest.updateMany({
-              where: { id: approvalRow.subjectRef, institutionId: user.institutionId },
+              where: { approvalRequestId: id, institutionId: user.institutionId },
               data: { status: "approved", decidedAt: new Date(), decisionNote: "Applied from approvals inbox" },
             });
           }

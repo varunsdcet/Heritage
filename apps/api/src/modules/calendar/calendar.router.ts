@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { prisma } from "@myheritage/db";
 import { requireAuth, type AuthedRequest } from "../../middleware/auth.js";
+import { sessionJoinUrl } from "../../lib/liveClass.js";
 
 export const calendarRouter: Router = Router();
 
@@ -79,7 +80,7 @@ calendarRouter.get("/me", requireAuth, async (req, res, next) => {
       courseCode: session.section.course.code,
       type: "class" as const,
       sessionKind: session.sessionKind === "lab" ? ("lab" as const) : ("lecture" as const),
-      joinUrl: session.joinUrl?.startsWith("https://") ? session.joinUrl : null,
+      joinUrl: sessionJoinUrl(session.sectionId, session.joinUrl),
     }));
 
     const items = [...classEvents, ...deadlineEvents].sort((a, b) =>

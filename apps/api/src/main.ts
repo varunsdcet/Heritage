@@ -22,6 +22,7 @@ import { applicantRouter } from "./modules/applicant/applicant.router.js";
 import { employerRouter } from "./modules/employer/employer.router.js";
 import { mailRouter } from "./modules/mail/mail.router.js";
 import { campusComplianceRouter } from "./modules/campusCompliance/campusCompliance.router.js";
+import { liveRouter } from "./modules/live/live.router.js";
 import { errorHandler } from "./middleware/error-handler.js";
 
 const app: Express = express();
@@ -53,6 +54,8 @@ app.use(
   }),
 );
 app.use("/student", express.json({ limit: "15mb" }));
+app.use("/admin/super", express.json({ limit: "2mb" }));
+app.use("/admin/heritage", express.json({ limit: "12mb" }));
 app.use(express.json());
 app.use((req, _res, next) => {
   (req as express.Request & { correlationId: string }).correlationId =
@@ -119,6 +122,7 @@ app.use("/approvals", approvalsRouter);
 app.use("/messages", messagesRouter);
 app.use("/mail", mailRouter);
 app.use("/compliance", campusComplianceRouter);
+app.use("/live", liveRouter);
 app.use("/search", searchRouter);
 app.use("/ai", aiRouter);
 app.use("/catalog", catalogRouter);
@@ -180,6 +184,15 @@ if (process.env.NODE_ENV !== "test") {
       })
       .catch((err) => console.error("compliance sweep failed", err));
   }, Math.max(30_000, sweepMs));
+
+  setInterval(() => {
+    void import("./modules/admin/heritage/reports.js")
+      .then(({ runDueReportSchedules }) => runDueReportSchedules())
+      .then((summary) => {
+        if (summary.ran) console.log("report schedule sweep", summary);
+      })
+      .catch((err) => console.error("report schedule sweep failed", err));
+  }, Math.max(60_000, Number(process.env.REPORT_SWEEP_MS ?? 120_000)));
 }
 
 export { app };

@@ -58,6 +58,22 @@ export function hasRole(roles: RoleName[], needed: RoleName | RoleName[]) {
   return list.some((r) => roles.includes(r));
 }
 
+/** "User Login" names configured by super admins live in the super:user-meta store (accountId → { login }). */
+async function findAccountIdByUserLogin(login: string) {
+  const rows = await prisma.sisScreenState.findMany({ where: { path: "super:user-meta" } });
+  const needle = login.toLowerCase();
+  for (const row of rows) {
+    try {
+      const meta = JSON.parse(row.payloadJson) as Record<string, { login?: string }>;
+      const hit = Object.entries(meta).find(([, m]) => m.login?.toLowerCase() === needle);
+      if (hit) return hit[0];
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
 export async function loginWithPassword(input: {
   email: string;
   password: string;
@@ -89,9 +105,14 @@ export async function loginWithPassword(input: {
     }
   }
 
-  // Fallback: some clients still send student number in email field with wrong casing via email path
-  if (!account && looksLikeEmail === false) {
-    // already tried student number above
+  if (!account && !looksLikeEmail) {
+    const accountId = await findAccountIdByUserLogin(identifier);
+    if (accountId) {
+      account = await prisma.account.findFirst({
+        where: { id: accountId },
+        include: { person: true },
+      });
+    }
   }
 
   if (!account || (account.status !== "active" && account.status !== "paused")) {

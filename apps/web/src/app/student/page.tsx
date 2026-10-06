@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { StudentSisShell } from "@/components/StudentSisShell";
 import { api, loadSession } from "@/lib/api";
+import { allows, useMyAccess, type ModuleGate } from "@/lib/access";
 
 type HomePayload = {
   standing?: string;
@@ -180,6 +181,7 @@ function QuickAccessIcon({ name }: { name: string }) {
 
 export default function StudentHomePage() {
   const router = useRouter();
+  const access = useMyAccess();
   const [name, setName] = useState("Student");
   const [studentNumber, setStudentNumber] = useState("");
   const [home, setHome] = useState<HomePayload | null>(null);
@@ -310,17 +312,22 @@ export default function StudentHomePage() {
     { id: "info", label: "Student Info" },
   ] as const;
 
-  const quickAccess = [
-    { label: "Settings", href: "/student/profile", tone: "navy", icon: "settings" },
-    { label: "My Courses", href: "/student/courses", tone: "rose", icon: "plus" },
-    { label: "Calendar", href: "/student/calendar", tone: "cyan", icon: "clock" },
-    { label: "Messages", href: "/student/messages", tone: "red", icon: "mail" },
-    { label: "Workshop", href: "/student/workshops", tone: "sky", icon: "board" },
-    { label: "Grades", href: "/student/grades", tone: "blue", icon: "clipboard" },
-    { label: "Program Plan", href: "/student/f/st-23-program-plan", tone: "violet", icon: "books" },
-    { label: "Ask AI", href: "/student/ask", tone: "indigo", icon: "sparkles" },
-    { label: "Documents", href: "/student/documents", tone: "navy", icon: "check" },
-  ] as const;
+  const coursesGate: ModuleGate = { modules: ["courseManagement"] };
+  const recordsGate: ModuleGate = { modules: ["studentRecords"] };
+
+  const quickAccess = (
+    [
+      { label: "Settings", href: "/student/profile", tone: "navy", icon: "settings" },
+      { label: "My Courses", href: "/student/courses", tone: "rose", icon: "plus", gate: coursesGate },
+      { label: "Calendar", href: "/student/calendar", tone: "cyan", icon: "clock" },
+      { label: "Messages", href: "/student/messages", tone: "red", icon: "mail", gate: { modules: ["emailMessaging"] } },
+      { label: "Workshop", href: "/student/workshops", tone: "sky", icon: "board", gate: coursesGate },
+      { label: "Grades", href: "/student/grades", tone: "blue", icon: "clipboard", gate: recordsGate },
+      { label: "Program Plan", href: "/student/f/st-23-program-plan", tone: "violet", icon: "books", gate: recordsGate },
+      { label: "Ask AI", href: "/student/ask", tone: "indigo", icon: "sparkles" },
+      { label: "Documents", href: "/student/documents", tone: "navy", icon: "check", gate: recordsGate },
+    ] as const
+  ).filter((q) => allows(access, "gate" in q ? (q.gate as ModuleGate) : undefined));
 
   const stats = [
     {
@@ -328,12 +335,14 @@ export default function StudentHomePage() {
       value: home?.enrolledCourses ?? courses.length,
       icon: "book",
       href: "/student/courses",
+      gate: coursesGate,
     },
     {
       label: "GPA",
       value: home?.gpa != null ? home.gpa.toFixed(2) : "—",
       icon: "user",
       href: "/student/grades",
+      gate: recordsGate,
     },
     {
       label: "Attendance",
@@ -346,8 +355,9 @@ export default function StudentHomePage() {
       value: openAssignments.length || alerts.length,
       icon: "users",
       href: "/student/assignments",
+      gate: undefined as ModuleGate | undefined,
     },
-  ];
+  ].filter((s) => allows(access, s.gate));
 
   const designation = home?.standing || "Student";
   const studentMeta = [studentNumber, home?.programName].filter(Boolean).join(" · ");

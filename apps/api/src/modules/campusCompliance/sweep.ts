@@ -8,6 +8,7 @@ import {
   notifyAccount,
   notifyAccounts,
 } from "./notify.js";
+import { notificationJoinUrl, sessionJoinUrl } from "../../lib/liveClass.js";
 
 async function upsertOpenCase(input: {
   institutionId: string;
@@ -411,7 +412,7 @@ export async function sendPreclassReminders(institutionId: string) {
       const instructorAccountId = await accountIdForPerson(institutionId, session.section.instructorPersonId);
       const when = session.startsAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
       const title = `Class in ${minutes} minutes`;
-      const body = `${session.section.course.code}: ${session.title} starts at ${when}.${session.joinUrl ? ` Join: ${session.joinUrl}` : ""}\n${marker}`;
+      const body = `${session.section.course.code}: ${session.title} starts at ${when}.${session.joinUrl ? ` Join: ${notificationJoinUrl(sessionJoinUrl(session.sectionId, session.joinUrl))}` : ""}\n${marker}`;
       await notifyAccounts({
         institutionId,
         accountIds: studentAccounts,

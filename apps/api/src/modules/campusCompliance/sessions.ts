@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { prisma } from "@myheritage/db";
-import { jitsiMeetUrl } from "../../lib/jitsiMeet.js";
+import { classJoinUrl, notificationJoinUrl, sessionJoinUrl } from "../../lib/liveClass.js";
 import { detectClientKind } from "./policy.js";
 import {
   accountIdForPerson,
@@ -34,10 +34,7 @@ export async function createClassSessionWithNotifications(input: {
     throw Object.assign(new Error("Section not found"), { status: 404, code: "NOT_FOUND" });
   }
 
-  const joinUrl =
-    input.joinUrl?.trim() ||
-    jitsiMeetUrl(section.course.code, section.code) ||
-    null;
+  const joinUrl = classJoinUrl(section.id, input.joinUrl);
 
   const session = await prisma.classSession.create({
     data: {
@@ -71,7 +68,7 @@ export async function createClassSessionWithNotifications(input: {
     institutionId: input.institutionId,
     accountIds: studentAccounts,
     title: `Class scheduled — ${section.course.code}`,
-    body: `${session.title} on ${when}.${joinUrl ? ` Join link: ${joinUrl}` : ""}`,
+    body: `${session.title} on ${when}. Join link: ${notificationJoinUrl(joinUrl)}`,
     templateKey: "compliance.class.created",
   });
 
@@ -120,7 +117,7 @@ export async function recordSessionJoin(input: {
     },
   });
 
-  return { event, clientKind, joinUrl: session.joinUrl };
+  return { event, clientKind, joinUrl: sessionJoinUrl(session.sectionId, session.joinUrl) };
 }
 
 export async function mobileJoinReport(institutionId: string, days = 7) {
@@ -218,7 +215,7 @@ export async function upcomingSessionsForPerson(input: {
       sectionCode: s.section.code,
       startsAt: s.startsAt.toISOString(),
       endsAt: s.endsAt?.toISOString() ?? null,
-      joinUrl: s.joinUrl,
+      joinUrl: sessionJoinUrl(s.sectionId, s.joinUrl),
       minutesUntil: mins,
       label:
         mins < 60

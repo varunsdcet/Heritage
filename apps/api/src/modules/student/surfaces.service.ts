@@ -29,6 +29,20 @@ import { requireApproval } from "@myheritage/auth";
 import { prisma } from "@myheritage/db";
 import { writeAuditAndOutbox } from "@myheritage/events";
 import { randomUUID } from "node:crypto";
+import { sessionJoinUrl } from "../../lib/liveClass.js";
+import {
+  SEAT_STATUSES,
+  feeFor,
+  institutionTimezone,
+  postWorkshopFee,
+  storedStatus,
+  studentMayRegister,
+  workshopPhase,
+  workshopSettings,
+  ymdIn,
+  type StudentAccess,
+} from "../../lib/workshopPolicy.js";
+import { studentMetaMap } from "../admin/superAdmin.service.js";
 
 function httpError(message: string, code: string, status: number) {
   return Object.assign(new Error(message), { code, status });
@@ -251,7 +265,7 @@ export async function listStudentSessions(user: SessionClaims, kind: "lecture" |
       startsAt: s.startsAt.toISOString(),
       endsAt: s.endsAt?.toISOString() ?? null,
       location: s.location,
-      joinUrl: s.joinUrl,
+      joinUrl: sessionJoinUrl(s.sectionId, s.joinUrl),
       sessionKind: kind,
       deliveryMode: s.deliveryMode,
     })),
@@ -447,7 +461,7 @@ export async function createStudentServiceRequest(
         type: created.type as typeof input.type,
         subject: created.subject,
         details: created.details,
-        status: created.status as "open" | "pending_approval" | "resolved" | "rejected",
+        status: created.status as "open" | "pending_approval" | "resolved" | "rejected" | "cancelled",
         approvalRequestId: created.approvalRequestId,
         createdAt: created.createdAt.toISOString(),
       },
@@ -885,16 +899,37 @@ function mapWorkshop(
   };
 }
 
+async function workshopAccess(institutionId: string, student: { id: string; programName: string; cohortId: string | null }) {
+  const [meta, cohort] = await Promise.all([
+    studentMetaMap(institutionId),
+    student.cohortId ? prisma.cohort.findFirst({ where: { id: student.cohortId }, select: { campus: true } }) : null,
+  ]);
+  const m = meta[student.id] ?? {};
+  const access: StudentAccess = { status: m.status ?? "", programName: student.programName, campus: m.campus || cohort?.campus || "" };
+  return { access, residency: m.residency };
+}
+
 export async function listStudentWorkshops(user: SessionClaims) {
   const student = await requireStudent(user);
-  const workshops = await prisma.workshop.findMany({
-    where: { institutionId: user.institutionId },
-    include: { registrations: true },
-    orderBy: { startsAt: "asc" },
+  const [workshops, tz, { access }] = await Promise.all([
+    prisma.workshop.findMany({
+      where: { institutionId: user.institutionId },
+      include: { registrations: true },
+      orderBy: { startsAt: "asc" },
+    }),
+    institutionTimezone(user.institutionId),
+    workshopAccess(user.institutionId, student),
+  ]);
+  const now = new Date();
+  const today = ymdIn(now, tz);
+  const open = new Set<string>();
+  const mapped = workshops.map((w) => {
+    const settings = workshopSettings(w, tz);
+    if (!studentMayRegister(w, settings, access, now, tz)) open.add(w.id);
+    return mapWorkshop({ ...w, status: storedStatus(workshopPhase(w, settings, today)) }, student.id);
   });
-  const mapped = workshops.map((w) => mapWorkshop(w, student.id));
   return StudentWorkshopsResponse.parse({
-    available: mapped.filter((w) => w.registrationStatus === "none" && (w.status === "upcoming" || w.status === "active")),
+    available: mapped.filter((w) => w.registrationStatus === "none" && open.has(w.id)),
     mine: mapped.filter((w) => w.registrationStatus === "registered"),
     completed: mapped.filter((w) => w.registrationStatus === "completed" || w.status === "completed"),
   });
@@ -908,25 +943,36 @@ export async function registerStudentWorkshop(user: SessionClaims, body: unknown
     include: { registrations: true },
   });
   if (!workshop) throw httpError("Workshop not found", "NOT_FOUND", 404);
-  if (workshop.status === "cancelled" || workshop.status === "completed") {
-    throw httpError("Workshop is not open for registration", "VALIDATION_ERROR", 400);
-  }
+  const tz = await institutionTimezone(user.institutionId);
+  const settings = workshopSettings(workshop, tz);
+  const { access, residency } = await workshopAccess(user.institutionId, student);
+  const blocked = studentMayRegister(workshop, settings, access, new Date(), tz);
+  if (blocked) throw httpError(blocked, "VALIDATION_ERROR", 400);
   const existing = workshop.registrations.find((r) => r.studentId === student.id);
   if (existing) return listStudentWorkshops(user);
-  const active = workshop.registrations.filter((r) =>
-    ["registered", "approved", "pending"].includes(r.status),
-  ).length;
+  const active = workshop.registrations.filter((r) => SEAT_STATUSES.includes(r.status)).length;
   if (active >= workshop.capacity) throw httpError("Workshop is full", "CONFLICT", 409);
+  const status = settings.approval === "Automatic Approval" ? "approved" : "pending";
+  const postFee = settings.feeCollection === "Immediately" || (settings.feeCollection === "Upon Approval" && status === "approved");
 
   await prisma.$transaction(async (tx) => {
-    await tx.workshopRegistration.create({
+    const reg = await tx.workshopRegistration.create({
       data: {
         institutionId: user.institutionId,
         workshopId: workshop.id,
         studentId: student.id,
-        status: "pending",
+        status,
       },
     });
+    if (postFee) {
+      await postWorkshopFee(tx, {
+        institutionId: user.institutionId,
+        registrationId: reg.id,
+        studentId: student.id,
+        workshop,
+        amount: feeFor(settings, residency),
+      });
+    }
     await writeAuditAndOutbox(tx, {
       institutionId: user.institutionId,
       actorId: user.accountId,

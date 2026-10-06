@@ -1187,14 +1187,47 @@ model Workshop {
   location      String?
   capacity      Int                    @default(30)
   status        String                 @default("upcoming")
+  categoryId    String?
+  /// Admin "Add Workshop" settings (schedule, fees, access, instructors, ...)
+  settingsJson  String                 @default("{}")
   createdAt     DateTime               @default(now())
   updatedAt     DateTime               @updatedAt
   rowVersion    Int                    @default(1)
+  category      WorkshopCategory?      @relation(fields: [categoryId], references: [id])
   registrations WorkshopRegistration[]
   attendance    WorkshopAttendance[]
 
   @@unique([institutionId, code])
   @@index([institutionId, status, startsAt])
+}
+
+model WorkshopCategory {
+  id            String     @id @default(uuid())
+  institutionId String
+  name          String
+  abbreviation  String     @default("")
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  rowVersion    Int        @default(1)
+  workshops     Workshop[]
+
+  @@unique([institutionId, name])
+}
+
+model WorkshopRole {
+  id               String   @id @default(uuid())
+  institutionId    String
+  name             String
+  /// Active | Inactive
+  status           String   @default("Active")
+  /// [{ value, grantsCompletion }]
+  outcomesJson     String   @default("[]")
+  competenciesJson String   @default("[]")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  rowVersion       Int      @default(1)
+
+  @@unique([institutionId, name])
 }
 
 model WorkshopRegistration {
@@ -1205,6 +1238,7 @@ model WorkshopRegistration {
   /// pending | approved | declined | dropped | registered | completed
   status        String   @default("pending")
   note          String   @default("")
+  roleId        String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   rowVersion    Int      @default(1)
@@ -1636,4 +1670,44 @@ model SessionJoinEvent {
   @@index([institutionId, joinedAt])
   @@index([classSessionId, joinedAt])
   @@index([studentId, joinedAt])
+}
+
+/// Record saved from a Heritage master screen (screenId = registry id such as F14). `contextKey` scopes
+/// records to a parent (e.g. `student:<id>`); `singletonKey` marks settings screens holding one record.
+model HeritageRecord {
+  id            String    @id @default(uuid())
+  institutionId String
+  screenId      String
+  contextKey    String    @default("")
+  singletonKey  String?
+  status        String    @default("active")
+  dataJson      String    @default("{}")
+  createdById   String
+  updatedById   String
+  deletedAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  rowVersion    Int       @default(1)
+
+  @@unique([institutionId, screenId, contextKey, singletonKey])
+  @@index([institutionId, screenId, contextKey])
+}
+
+model HeritageAuditEntry {
+  id            String   @id @default(uuid())
+  institutionId String
+  screenId      String
+  contextKey    String   @default("")
+  recordId      String?
+  action        String
+  actorId       String
+  actorName     String   @default("")
+  beforeJson    String?
+  afterJson     String?
+  note          String?
+  createdAt     DateTime @default(now())
+
+  @@index([institutionId, screenId, createdAt])
+  @@index([institutionId, contextKey, createdAt])
+  @@index([recordId])
 }

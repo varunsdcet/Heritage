@@ -5,6 +5,8 @@ import { prisma } from "@myheritage/db";
 import { hashPassword } from "@myheritage/auth";
 import { requireAuth, requireRoles, type AuthedRequest } from "../../middleware/auth.js";
 import { getSisScreen, runSisAction, seedAllSisScreens, getCampusOverview } from "./sis.service.js";
+import { superAdminRouter } from "./superAdmin.router.js";
+import { heritageRouter } from "./heritage/heritage.router.js";
 import {
   UpsertCohortBody,
   GeneratePlanBody,
@@ -75,6 +77,8 @@ const CreateAssignment = z.object({
 });
 
 adminRouter.use(requireAuth, requireRoles("admin", "registrar"));
+adminRouter.use("/super", superAdminRouter);
+adminRouter.use("/heritage", heritageRouter);
 
 adminRouter.get("/campus-overview", async (req, res, next) => {
   try {

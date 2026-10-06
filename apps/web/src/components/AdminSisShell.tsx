@@ -2,10 +2,13 @@
 
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ADMIN_SIDEBAR, adminChildActive, adminGroupActive } from "@/lib/adminNav";
+import { ADMIN_SIDEBAR, adminChildActive, adminGroupActive, type AdminSidebarEntry } from "@/lib/adminNav";
+import { NoModuleAccess, allows, useMyAccess, type MyAccess } from "@/lib/access";
 import { AskHeritageFab } from "@/components/AskHeritageFab";
 import { clearSession } from "@/lib/api";
+import { useNavCounts } from "@/lib/navCounts";
 
 const SEARCH_PALETTE = [
   {
@@ -195,16 +198,46 @@ function NavIcon({ name, active }: { name: string; active?: boolean }) {
   }
 }
 
+function visibleSidebar(access: MyAccess | null | undefined): AdminSidebarEntry[] {
+  const items: AdminSidebarEntry[] = [];
+  for (const entry of ADMIN_SIDEBAR) {
+    if (entry.type === "label") {
+      items.push(entry);
+      continue;
+    }
+    if (!allows(access, entry.item.gate)) continue;
+    const children = entry.item.children?.filter((c) => allows(access, c.gate));
+    items.push({ type: "item", item: { ...entry.item, ...(children ? { children } : {}) } });
+  }
+  return items.filter((entry, i) => entry.type === "item" || items[i + 1]?.type === "item");
+}
+
+function pageBlocked(pathname: string, access: MyAccess | null | undefined) {
+  if (access === null) return false;
+  for (const entry of ADMIN_SIDEBAR) {
+    if (entry.type !== "item" || !adminGroupActive(pathname, entry.item)) continue;
+    if (!allows(access, entry.item.gate)) return true;
+    const child = entry.item.children?.find((c) => adminChildActive(pathname, c, entry.item.children));
+    return Boolean(child && !allows(access, child.gate));
+  }
+  return false;
+}
+
 export function AdminSisShell({
   children,
   activeHref = "/admin",
+  activeSearch = "",
   breadcrumbs = ["Home", "System Admin", "Dashboard"],
+  breadcrumbHrefs,
   userName = "Admin User",
   userRole = "Registrar's Office",
 }: {
   children: ReactNode;
   activeHref?: string;
+  activeSearch?: string;
   breadcrumbs?: string[];
+  /** Optional link per breadcrumb, aligned by index. */
+  breadcrumbHrefs?: Array<string | null | undefined>;
   userName?: string;
   userRole?: string;
 }) {
@@ -213,6 +246,11 @@ export function AdminSisShell({
   const [searchQ, setSearchQ] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [openGroup, setOpenGroup] = useState<string | null>(null);
+  const access = useMyAccess();
+  const sidebar = useMemo(() => visibleSidebar(access), [access]);
+  const blocked = pageBlocked(pathname, access);
+  const wantsCounts = access !== undefined && sidebar.some((e) => e.type === "item" && (e.item.count || e.item.children?.some((c) => c.count)));
+  const counts = useNavCounts(wantsCounts, pathname);
 
   useEffect(() => {
     const match = ADMIN_SIDEBAR.find(
@@ -257,7 +295,7 @@ export function AdminSisShell({
         </div>
 
         <nav className="mh-sis__nav" aria-label="Admin">
-          {ADMIN_SIDEBAR.map((entry, idx) => {
+          {sidebar.map((entry, idx) => {
             if (entry.type === "label") {
               return (
                 <div key={`label-${entry.label}-${idx}`} className="mh-sis__nav-label">
@@ -288,6 +326,7 @@ export function AdminSisShell({
                     <NavIcon name={item.icon} active={active} />
                   </span>
                   <span className="mh-sis__nav-text">{item.label}</span>
+                  {item.count && counts[item.count] !== undefined ? <span className="mh-sis__nav-count">{counts[item.count]}</span> : null}
                   {item.children ? (
                     <img
                       src={`/brand/icons/chevron-${expanded ? "down" : "right"}.svg`}
@@ -300,16 +339,21 @@ export function AdminSisShell({
                 </button>
                 {item.children && expanded ? (
                   <div className="mh-sis__nav-sub">
-                    {item.children.map((child) => (
-                      <button
-                        key={child.href}
-                        type="button"
-                        className={`mh-sis__nav-subitem${adminChildActive(pathname, child) ? " is-active" : ""}`}
-                        onClick={() => router.push(child.href)}
-                      >
-                        <span className="mh-sis__nav-dot" />
-                        {child.label}
-                      </button>
+                    {item.children.map((child, ci) => (
+                      <div key={child.href + child.label}>
+                        {child.section && child.section !== item.children?.[ci - 1]?.section ? (
+                          <div className="mh-sis__nav-subsection">{child.section}</div>
+                        ) : null}
+                        <button
+                          type="button"
+                          className={`mh-sis__nav-subitem${adminChildActive(pathname, child, item.children, activeSearch) ? " is-active" : ""}${child.indent ? " is-indented" : ""}`}
+                          onClick={() => router.push(child.href)}
+                        >
+                          <span className="mh-sis__nav-dot" />
+                          {child.label}
+                          {child.count && counts[child.count] !== undefined ? <span className="mh-sis__nav-count">{counts[child.count]}</span> : null}
+                        </button>
+                      </div>
                     ))}
                   </div>
                 ) : null}
@@ -327,7 +371,13 @@ export function AdminSisShell({
                 {i > 0 ? (
                   <img src="/brand/icons/chevron-right.svg" alt="" width={12} height={12} className="mh-sis__crumb-chevron" />
                 ) : null}
-                <span className={i === breadcrumbs.length - 1 ? "is-current" : undefined}>{crumb}</span>
+                {breadcrumbHrefs?.[i] && i < breadcrumbs.length - 1 ? (
+                  <Link href={breadcrumbHrefs[i]!} className="mh-sis__crumb-link">
+                    {crumb}
+                  </Link>
+                ) : (
+                  <span className={i === breadcrumbs.length - 1 ? "is-current" : undefined}>{crumb}</span>
+                )}
               </span>
             ))}
           </div>
@@ -345,13 +395,14 @@ export function AdminSisShell({
                   onFocus={() => setSearchOpen(true)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
-                      router.push("/admin/search");
+                      const q = searchQ.trim();
+                      router.push(q ? `/admin/student-search?q=${encodeURIComponent(q)}` : "/admin/student-search");
                       setSearchOpen(false);
                     }
                     if (e.key === "Escape") setSearchOpen(false);
                   }}
-                  placeholder="Search SIS Admin..."
-                  aria-label="Search SIS Admin"
+                  placeholder="Student # or last name"
+                  aria-label="Search students by student number or last name"
                   aria-expanded={showPalette}
                 />
                 {searchQ ? (
@@ -415,8 +466,11 @@ export function AdminSisShell({
                     {`View all results for "${searchQ.trim()}" →`}
                   </button>
                 </div>
-              ) : null}
+                ) : null}
             </div>
+            <button type="button" className="mh-sis__logout-link" onClick={() => router.push("/admin/student-search")}>
+              Advanced Search
+            </button>
             <button type="button" className="mh-sis__copilot" onClick={() => router.push("/admin/ai/ask")}>
               <img src="/brand/icons/sparkle.svg" alt="" width={14} height={14} />
               <span>Ask Heritage AI</span>
@@ -435,15 +489,21 @@ export function AdminSisShell({
               </span>
               <span className="mh-sis__profile-meta">
                 <span className="mh-sis__profile-name">{userName}</span>
-                <button type="button" className="mh-sis__logout-link" onClick={signOut}>
-                  Log Out
-                </button>
+                <span>
+                  <button type="button" className="mh-sis__logout-link" onClick={() => router.push("/admin/faculty-profile/biography")}>
+                    My Profile
+                  </button>
+                  {" · "}
+                  <button type="button" className="mh-sis__logout-link" onClick={signOut}>
+                    Log Out
+                  </button>
+                </span>
               </span>
             </div>
           </div>
         </header>
 
-        <div className="mh-sis__scroll">{children}</div>
+        <div className="mh-sis__scroll">{blocked ? access === undefined ? null : <NoModuleAccess /> : children}</div>
         <AskHeritageFab role="admin" />
       </div>
     </div>

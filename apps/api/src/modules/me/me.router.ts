@@ -8,6 +8,7 @@ import {
 } from "@myheritage/contracts";
 import { requireApproval } from "@myheritage/auth";
 import { writeAuditAndOutbox } from "@myheritage/events";
+import { effectiveAccess } from "../admin/superAdmin.service.js";
 
 export const meRouter: Router = Router();
 
@@ -228,6 +229,15 @@ meRouter.get("/home", requireAuth, async (req, res, next) => {
           : []),
       ],
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+meRouter.get("/access", requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    res.json(await effectiveAccess(user.institutionId, user.accountId));
   } catch (err) {
     next(err);
   }

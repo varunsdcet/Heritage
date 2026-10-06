@@ -11,6 +11,7 @@ import {
   type TeacherScreenConfig,
 } from "@/lib/teacherCatalog";
 import { api, loadSession } from "@/lib/api";
+import { allows, useMyAccess, type ModuleGate } from "@/lib/access";
 import {
   TeacherLiveProvider,
   mergeTeacherLive,
@@ -630,24 +631,30 @@ function DashboardView({ config }: { config: TeacherScreenConfig }) {
     { id: "office", label: "Office Hours" },
   ] as const;
 
-  const quickAccess = [
-    { label: "Settings", href: "/instructor/f/t15-settings", tone: "navy", icon: "settings" },
-    { label: "My Courses", href: "/instructor/sections", tone: "rose", icon: "plus" },
-    { label: "Availability", href: "/instructor/f/t04-profile-availability", tone: "cyan", icon: "clock" },
-    { label: "Messages", href: "/instructor/messages", tone: "red", icon: "mail" },
-    { label: "Workshop", href: "/instructor/f/t11-workshops?list=mine", tone: "sky", icon: "board" },
-    { label: "Student", href: "/instructor/f/t12-students-view", tone: "blue", icon: "megaphone" },
-    { label: "AI Draft", href: "/instructor/ai-draft", tone: "violet", icon: "books" },
-    { label: "Ask AI", href: "/instructor/ask", tone: "indigo", icon: "sparkles" },
-    { label: "Submit Grade", href: "/instructor/gradebook", tone: "sky", icon: "clipboard" },
-  ] as const;
+  const access = useMyAccess();
+  const courses: ModuleGate = { modules: ["courseManagement"] };
+  const students: ModuleGate = { modules: ["studentRecords"] };
+
+  const quickAccess = (
+    [
+      { label: "Settings", href: "/instructor/f/t15-settings", tone: "navy", icon: "settings" },
+      { label: "My Courses", href: "/instructor/sections", tone: "rose", icon: "plus", gate: courses },
+      { label: "Availability", href: "/instructor/f/t04-profile-availability", tone: "cyan", icon: "clock" },
+      { label: "Messages", href: "/instructor/messages", tone: "red", icon: "mail" },
+      { label: "Workshop", href: "/instructor/f/t11-workshops?list=mine", tone: "sky", icon: "board", gate: courses },
+      { label: "Student", href: "/instructor/f/t12-students-view", tone: "blue", icon: "megaphone", gate: students },
+      { label: "AI Draft", href: "/instructor/ai-draft", tone: "violet", icon: "books", gate: courses },
+      { label: "Ask AI", href: "/instructor/ask", tone: "indigo", icon: "sparkles" },
+      { label: "Submit Grade", href: "/instructor/gradebook", tone: "sky", icon: "clipboard", gate: courses },
+    ] as const
+  ).filter((q) => allows(access, "gate" in q ? q.gate : undefined));
 
   const stats = [
-    { label: "Students", value: studentCount, icon: "users", href: "/instructor/f/t12-students-view" },
-    { label: "Courses", value: courseCount, icon: "book", href: "/instructor/sections" },
-    { label: "Active Sections", value: sectionCount, icon: "signal", href: "/instructor/sections" },
-    { label: "Draft Grades", value: draftGradeCount, icon: "user", href: "/instructor/gradebook" },
-  ];
+    { label: "Students", value: studentCount, icon: "users", href: "/instructor/f/t12-students-view", gate: students },
+    { label: "Courses", value: courseCount, icon: "book", href: "/instructor/sections", gate: courses },
+    { label: "Active Sections", value: sectionCount, icon: "signal", href: "/instructor/sections", gate: courses },
+    { label: "Draft Grades", value: draftGradeCount, icon: "user", href: "/instructor/gradebook", gate: courses },
+  ].filter((s) => allows(access, s.gate));
 
   return (
     <div className="mh-ct-dash" data-figma-id={config.figmaId}>

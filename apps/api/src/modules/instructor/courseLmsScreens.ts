@@ -1,7 +1,7 @@
 /** Course LMS — Question Bank, Groups, Competencies, course-level badge creation. */
 
 import { LMS_ACTIVITY_TYPES } from "../../lib/lifecycle-status.js";
-import { jitsiMeetUrl } from "../../lib/jitsiMeet.js";
+import { externalJoinUrl } from "../../lib/liveClass.js";
 
 export const COURSE_LMS_TABS = ["Course", "Class List", "Attendance", "Grades", "Badges", "More"] as const;
 
@@ -42,7 +42,7 @@ export type CourseLmsActivity = {
   fileName?: string;
   modified?: string;
   hidden?: boolean;
-  /** Live class join URL (Jitsi Meet) — same room for teacher + students. */
+  /** Live class launcher (`/live/<sectionId>`) or an external HTTPS meeting link. */
   joinUrl?: string | null;
 };
 
@@ -91,7 +91,7 @@ export type CourseLmsState = {
   endedMessage?: string;
   finalMarksLabel?: string;
   finalMarksHref?: string;
-  /** Shared Jitsi Meet room for this offering. */
+  /** Live classroom launcher for this offering — same room for teacher + students. */
   joinUrl?: string | null;
   moreMenu: Array<{ id: string; label: string }>;
   topics: Array<{
@@ -592,9 +592,7 @@ export function buildCourseLms(input: LmsInput): CourseLmsState {
     });
   }
   const quizCols = Array.from({ length: 13 }, (_, i) => `Chapter ${String(i + 1).padStart(2, "0")} Quiz`);
-  const meetUrl =
-    (input.joinUrl && input.joinUrl.startsWith("http") ? input.joinUrl : null) ||
-    jitsiMeetUrl(input.code, input.sectionCode || input.session.split(":")[0]?.trim() || input.code);
+  const meetUrl = input.joinUrl || null;
   const baseTopics = isAcsw500
     ? acsw500Topics()
     : isAcsw200
@@ -790,7 +788,7 @@ export function mergeCourseLmsOverlay(
             return {
               ...activity,
               hidden,
-              joinUrl: activity.joinUrl || lms.joinUrl || null,
+              joinUrl: externalJoinUrl(activity.joinUrl) || lms.joinUrl || null,
               note: activity.note || "This room is ready. You can join the session now.",
             };
           }

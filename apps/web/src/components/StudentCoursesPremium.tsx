@@ -6,6 +6,8 @@ import { EmptyState } from "@myheritage/ui";
 import { ApiError, api, loadSession, type Session } from "@/lib/api";
 import { StudentFrame } from "@/components/StudentSisShell";
 import { formatHccDateRange, statusLabel, statusTone } from "@/lib/hccCourseFormat";
+import { liveSectionId, openClassLink } from "@/lib/liveClass";
+import { LiveClassPanel } from "@/components/LiveClassPanel";
 
 type LoadState = "loading" | "ready" | "offline" | "forbidden" | "error";
 
@@ -615,11 +617,9 @@ export function StudentCourseDetailPremiumView({ sectionId }: { sectionId: strin
   const showingGrades = tab === "Grades" && !showingActivity;
 
   function joinSession(url: string | null | undefined) {
-    if (url?.startsWith("http")) {
-      window.open(url, "_blank", "noopener,noreferrer");
-      return;
+    if (!openClassLink(url)) {
+      window.alert("This room is ready. Your instructor will share the live join link when class begins.");
     }
-    window.alert("This room is ready. Your instructor will share the live join link when class begins.");
   }
 
   return (
@@ -784,10 +784,14 @@ export function StudentCourseDetailPremiumView({ sectionId }: { sectionId: strin
                     </div>
                   </div>
                 )}
-                {viewed.type === "BIGBLUEBUTTON" ? (
-                  /* Screen 4 — Jitsi Meet join (student + teacher same room) */
+                {viewed.type === "BIGBLUEBUTTON" && liveSectionId(viewed.joinUrl || joinUrl) ? (
+                  /* Screen 4 — BigBlueButton live class (student + teacher same room) */
+                  <div data-screen="bbb">
+                    <LiveClassPanel sectionId={liveSectionId(viewed.joinUrl || joinUrl)!} />
+                  </div>
+                ) : viewed.type === "BIGBLUEBUTTON" ? (
                   <div className="mh-lms-bbb mh-student-bbb" data-screen="bbb">
-                    <p className="mh-student-bbb__brand">JITSI MEET Online Class Link</p>
+                    <p className="mh-student-bbb__brand">Online Class Link</p>
                     <h3>Online Class Link</h3>
                     <p>{viewed.note || "This room is ready. You can join the session now."}</p>
                     {(viewed.joinUrl || joinUrl) ? (

@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import type { CourseLmsState } from "@/lib/teacherCatalog";
 import { useOptionalTeacherLive } from "@/lib/useTeacherSisLive";
+import { liveSectionId, openClassLink } from "@/lib/liveClass";
+import { LiveClassPanel } from "@/components/LiveClassPanel";
 
 export function AttendancePanel({
   lms,
@@ -747,13 +749,14 @@ export function ResourceView({
   const [publishMsg, setPublishMsg] = useState("");
   const [publishing, setPublishing] = useState(false);
 
+  const liveSection = liveSectionId(activity.joinUrl) || (activity.joinUrl ? null : sectionId) || null;
+
   function openJoin() {
-    const url = activity.joinUrl;
-    if (url?.startsWith("http")) {
-      window.open(url, "_blank", "noopener,noreferrer");
+    if (liveSection) {
+      openClassLink(`/live/${liveSection}`);
       return;
     }
-    window.alert("Jitsi Meet room is not linked yet for this section.");
+    if (!openClassLink(activity.joinUrl)) window.alert("The online class room is not linked yet for this section.");
   }
 
   async function publishMeeting() {
@@ -800,7 +803,7 @@ export function ResourceView({
         <nav className="mh-lms-resource__tabs">
           <span className="is-active">
             {type === "BIGBLUEBUTTON"
-              ? "Jitsi Meet"
+              ? "Online Class"
               : type === "FILE" || type === "FOLDER"
                 ? "Resource"
                 : "Page"}
@@ -823,17 +826,22 @@ export function ResourceView({
       </header>
       {type === "BIGBLUEBUTTON" ? (
         <div className="mh-lms-bbb">
-          <p className="mh-student-bbb__brand">JITSI MEET Online Class Link</p>
-          <h3>Online Class Link</h3>
-          <p>{activity.note || "This room is ready. You can join the session now."}</p>
-          {activity.joinUrl ? (
-            <p className="mh-teacher-muted" style={{ wordBreak: "break-all" }}>
-              {activity.joinUrl}
-            </p>
-          ) : null}
+          {liveSection ? (
+            <LiveClassPanel sectionId={liveSection} />
+          ) : (
+            <>
+              <h3>Online Class Link</h3>
+              <p>{activity.note || "This room is ready. You can join the session now."}</p>
+              {activity.joinUrl ? (
+                <p className="mh-teacher-muted" style={{ wordBreak: "break-all" }}>
+                  {activity.joinUrl}
+                </p>
+              ) : null}
+            </>
+          )}
           <div className="mh-lms-online-publish">
             <h4>Publish meeting</h4>
-            <p className="mh-teacher-muted">Notify students and open the same Jitsi room for teacher + students.</p>
+            <p className="mh-teacher-muted">Notify students that class is on — they join the same room from their course page.</p>
             <div className="mh-lms-toolbar" style={{ flexWrap: "wrap", gap: 8 }}>
               <label className="mh-lms-check">
                 <input

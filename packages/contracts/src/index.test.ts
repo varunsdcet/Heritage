@@ -61,8 +61,8 @@ describe("contracts", () => {
   });
 
   it("registers every student module", () => {
-    expect(StudentModuleId.options).toHaveLength(22);
-    expect(StudentModuleId.parse("ST-22")).toBe("ST-22");
+    expect(StudentModuleId.options).toHaveLength(27);
+    expect(StudentModuleId.parse("ST-27")).toBe("ST-27");
   });
 
   it("rejects oversized student submission files", () => {
@@ -108,6 +108,23 @@ describe("contracts", () => {
         joinUrl: "http://unsafe.example.test/class",
       }),
     ).toThrow();
+  });
+
+  it("accepts the in-app live classroom launcher as a join link", () => {
+    const event = {
+      id: "class-1",
+      kind: "class",
+      sectionId: "00000000-0000-4000-8000-000000000001",
+      title: "Clinical Practice",
+      startsAt: "2026-01-01T17:00:00.000Z",
+      endsAt: "2026-01-01T18:00:00.000Z",
+      location: "Online",
+    };
+    expect(
+      StudentCalendarEvent.parse({ ...event, joinUrl: "/live/00000000-0000-4000-8000-000000000001" }).joinUrl,
+    ).toBe("/live/00000000-0000-4000-8000-000000000001");
+    expect(() => StudentCalendarEvent.parse({ ...event, joinUrl: "/live/../admin" })).toThrow();
+    expect(() => StudentCalendarEvent.parse({ ...event, joinUrl: "//evil.example.test/live/x" })).toThrow();
   });
 
   it("validates a cited read-only Coach answer", () => {
