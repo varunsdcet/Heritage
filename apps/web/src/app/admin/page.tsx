@@ -9,28 +9,6 @@ import { SisActionBtn } from "@/components/SisActionBtn";
 import { SisLiveProvider, useSisLive } from "@/lib/useAdminSisLive";
 import { api, loadSession } from "@/lib/api";
 
-const MODULE_DIRECTORY = [
-  { label: "Admissions", href: "/admin/f/ad-01-admissions-dashboard", hint: "11 screens" },
-  { label: "CRM", href: "/admin/f/crm-01-dashboard", hint: "8 screens" },
-  { label: "Registrar", href: "/admin/f/rg-00-registrar-dashboard", hint: "10 screens" },
-  { label: "Student Success", href: "/admin/f/ss-01-success-dashboard", hint: "7 screens" },
-  { label: "Academics", href: "/admin/f/ac-03-programs", hint: "20 screens" },
-  { label: "Labs", href: "/admin/f/lb-01-lab-dashboard", hint: "12 screens" },
-  { label: "Practicum", href: "/admin/f/pr-01-practicum-dashboard", hint: "9 screens" },
-  { label: "Finance", href: "/admin/f/fn-01-finance-dashboard", hint: "8 screens" },
-  { label: "AI Hub", href: "/admin/f/ai-01-ai-dashboard", hint: "12 screens" },
-  { label: "Compliance", href: "/admin/f/cp-01-compliance-dashboard", hint: "10 screens" },
-  { label: "Platform", href: "/admin/f/pl-07-institution-settings", hint: "8 screens" },
-  { label: "Forms", href: "/admin/f/fm-01-form-list", hint: "4 screens" },
-  { label: "Rules", href: "/admin/f/rl-01-rule-sets", hint: "3 screens" },
-  { label: "Workflows", href: "/admin/f/wf-01-workflow-list", hint: "4 screens" },
-  { label: "Search", href: "/admin/search", hint: "Global" },
-  { label: "Analytics", href: "/admin/analytics", hint: "Global" },
-  { label: "Approvals", href: "/admin/approvals", hint: "Global" },
-  { label: "Security", href: "/admin/security", hint: "Global" },
-  { label: "Audit", href: "/admin/audit", hint: "Global" },
-];
-
 type CampusOverview = {
   institutionName: string;
   termName: string;
@@ -279,33 +257,6 @@ function AdminHomeBody({ stats }: { stats: CampusOverview | null }) {
           </div>
         </section>
       </div>
-
-      <section className="mh-sis-dash__card" style={{ marginTop: 20 }}>
-        <h2>Module directory</h2>
-        <p style={{ margin: "0 0 16px", color: "#5c635a", fontSize: 14 }}>
-          Jump into every admin module. Open a sidebar group to reach every screen in that module.
-        </p>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
-            gap: 12,
-          }}
-        >
-          {MODULE_DIRECTORY.map((mod) => (
-            <button
-              key={mod.href}
-              type="button"
-              className="mh-sis-dash__kpi mh-sis-dash__kpi--link"
-              style={{ textAlign: "left", minHeight: 88 }}
-              onClick={() => router.push(mod.href)}
-            >
-              <div className="mh-sis-dash__kpi-label">{mod.label}</div>
-              <div className="mh-sis-dash__kpi-hint">{mod.hint}</div>
-            </button>
-          ))}
-        </div>
-      </section>
     </div>
   );
 }
