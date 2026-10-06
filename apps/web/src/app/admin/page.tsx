@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AdminSisShell } from "@/components/AdminSisShell";
 import { AdminQuickAccess, type AdminTodo } from "@/components/dashboard/AdminQuickAccess";
@@ -65,10 +65,11 @@ function KpiButton({
   );
 }
 
-function AdminHomeBody({ stats }: { stats: CampusOverview | null }) {
+function AdminHomeBody({ stats, failed, onRetry }: { stats: CampusOverview | null; failed: boolean; onRetry: () => void }) {
   const router = useRouter();
   const live = useSisLive();
   const loading = stats === null;
+  const blank = failed ? "—" : "…";
   const todos: AdminTodo[] | null = stats
     ? [
         { count: stats.pendingApprovals, one: "pending approval", many: "pending approvals", href: "/admin/approvals" },
@@ -87,7 +88,7 @@ function AdminHomeBody({ stats }: { stats: CampusOverview | null }) {
         <div className="mh-ct-dash__main">
           <DashboardContent />
         </div>
-        <AdminQuickAccess todos={todos} />
+        <AdminQuickAccess todos={todos} failed={failed} />
       </div>
       <div className="mh-sis-dash__welcome">
         <div className="mh-sis-dash__welcome-text">
@@ -95,54 +96,64 @@ function AdminHomeBody({ stats }: { stats: CampusOverview | null }) {
           <p>
             {stats
               ? `${stats.institutionName} · ${stats.termName} · ${stats.pendingApprovals} pending approvals · ${stats.enrolments} enrolments`
-              : "Loading live campus data…"}
+              : failed
+                ? "Live campus data is unavailable."
+                : "Loading live campus data…"}
           </p>
         </div>
         <div className="mh-sis-dash__banner-actions">
           <SisActionBtn label="Student onboard" href="/admin/user-management/new?accessLevel=student" tone="secondary" />
           <SisActionBtn label="Instructor onboard" href="/admin/user-management/new?accessLevel=faculty" tone="secondary" />
-          <SisActionBtn label="Enrol student" href="/admin/user-management/new?accessLevel=student" />
+          <SisActionBtn label="Enrol student" href="/admin/enrolments" />
         </div>
       </div>
       {live.toast ? (
         <p style={{ color: "#0f766e", fontSize: 13, marginBottom: 8 }}>{live.toast}</p>
+      ) : null}
+      {failed ? (
+        <div className="mh-sis-dash__error" role="alert">
+          <span>Couldn&apos;t load dashboard figures.</span>
+          <button type="button" className="mh-sis-dash__link-btn" onClick={onRetry}>
+            Retry
+          </button>
+        </div>
       ) : null}
 
       <h2 className="mh-sis-dash__section-title">Campus scale</h2>
       <div className="mh-sis-dash__kpis mh-sis-dash__kpis--wrap">
         <KpiButton
           label="Students"
-          value={loading ? "…" : stats.students}
+          value={loading ? blank : stats.students}
           hint="Live roster"
           href="/admin/student-management/browse"
         />
         <KpiButton
           label="Teachers"
-          value={loading ? "…" : stats.teachers}
+          value={loading ? blank : stats.teachers}
           hint="Instructor accounts"
           href="/admin/user-management"
         />
         <KpiButton
           label="Programs"
-          value={loading ? "…" : stats.programs}
+          value={loading ? blank : stats.programs}
           hint="Catalogue"
           href="/admin/program-management/faculties"
         />
         <KpiButton
           label="Courses"
-          value={loading ? "…" : stats.courses}
+          value={loading ? blank : stats.courses}
           hint="Catalogue"
           href="/admin/course-management/courses"
         />
         <KpiButton
           label="Sections"
-          value={loading ? "…" : stats.sections}
+          value={loading ? blank : stats.sections}
           hint="Current offerings"
           href="/admin/course-management/courses"
         />
         <KpiButton
           label="Enrolments"
-          value={loading ? "…" : stats.enrolments}
+          value={loading ? blank : stats.enrolments}
           hint="Student ↔ section"
           href="/admin/enrolments"
         />
@@ -152,7 +163,7 @@ function AdminHomeBody({ stats }: { stats: CampusOverview | null }) {
       <div className="mh-sis-dash__kpis mh-sis-dash__kpis--wrap">
         <KpiButton
           label="Fees / AR open"
-          value={loading ? "…" : money(stats.feesOpenCad)}
+          value={loading ? blank : money(stats.feesOpenCad)}
           hint={
             loading
               ? "Finance"
@@ -165,34 +176,34 @@ function AdminHomeBody({ stats }: { stats: CampusOverview | null }) {
         />
         <KpiButton
           label="Pending approvals"
-          value={loading ? "…" : stats.pendingApprovals}
+          value={loading ? blank : stats.pendingApprovals}
           hint="Action required"
           href="/admin/approvals"
           danger
         />
         <KpiButton
           label="Pending grades"
-          value={loading ? "…" : stats.pendingGrades}
+          value={loading ? blank : stats.pendingGrades}
           hint={loading ? "Draft / publish" : `${stats.publishedGrades} published`}
           href="/admin/student-management/grades"
           danger={!loading && stats.pendingGrades > 0}
         />
         <KpiButton
           label="At-risk students"
-          value={loading ? "…" : stats.atRisk}
+          value={loading ? blank : stats.atRisk}
           hint="Standing alerts"
           href="/admin/ops/success/cases"
           danger={!loading && stats.atRisk > 0}
         />
         <KpiButton
           label="Pending evaluations"
-          value={loading ? "…" : stats.pendingEvaluations}
+          value={loading ? blank : stats.pendingEvaluations}
           hint="Course evals"
           href="/admin/course-management/evaluations"
         />
         <KpiButton
           label="Pending LOA"
-          value={loading ? "…" : stats.pendingLoa}
+          value={loading ? blank : stats.pendingLoa}
           hint={loading ? "Leave requests" : `${stats.pendingTasks} open tasks`}
           href="/admin/student-management/leave"
           danger={!loading && stats.pendingLoa > 0}
@@ -216,7 +227,7 @@ function AdminHomeBody({ stats }: { stats: CampusOverview | null }) {
               </div>
             ))}
             {!stats?.activity?.length ? (
-              <div className="mh-sis-dash__detail">No recent audit events yet.</div>
+              <div className="mh-sis-dash__detail">{failed ? "Activity unavailable." : "No recent audit events yet."}</div>
             ) : null}
           </div>
         </section>
@@ -234,12 +245,12 @@ function AdminHomeBody({ stats }: { stats: CampusOverview | null }) {
             <div className="mh-sis-dash__term">
               <div className="mh-sis-dash__progress-label">
                 <strong>{stats?.termName || "Current term"}</strong>
-                <span>{loading ? "…" : `${stats.termProgressPct}%`}</span>
+                <span>{loading ? blank : `${stats.termProgressPct}%`}</span>
               </div>
               <div className="mh-sis-dash__progress-track">
                 <div
                   className="mh-sis-dash__progress-fill"
-                  style={{ width: `${loading ? 50 : stats.termProgressPct}%` }}
+                  style={{ width: `${loading ? (failed ? 0 : 50) : stats.termProgressPct}%` }}
                 />
               </div>
             </div>
@@ -265,7 +276,16 @@ export default function AdminHomePage() {
   const router = useRouter();
   const [userName, setUserName] = useState("Admin User");
   const [stats, setStats] = useState<CampusOverview | null>(null);
+  const [failed, setFailed] = useState(false);
   const [allowed, setAllowed] = useState(false);
+
+  const loadStats = useCallback((accessToken: string) => {
+    setStats(null);
+    setFailed(false);
+    api<CampusOverview>("/admin/campus-overview", {}, accessToken)
+      .then(setStats)
+      .catch(() => setFailed(true));
+  }, []);
 
   useEffect(() => {
     const s = loadSession();
@@ -283,43 +303,21 @@ export default function AdminHomePage() {
     }
     setUserName(`${s.givenName} ${s.familyName}`.trim() || "Admin User");
     setAllowed(true);
+    loadStats(s.accessToken);
+  }, [router, loadStats]);
 
-    api<CampusOverview>("/admin/campus-overview", {}, s.accessToken)
-      .then(setStats)
-      .catch(() => {
-        setStats({
-          institutionName: "Heritage College",
-          termName: "Current term",
-          termProgressPct: 0,
-          students: 0,
-          teachers: 0,
-          programs: 0,
-          courses: 0,
-          sections: 0,
-          enrolments: 0,
-          accounts: 0,
-          pendingApprovals: 0,
-          pendingGrades: 0,
-          publishedGrades: 0,
-          atRisk: 0,
-          pendingEvaluations: 0,
-          pendingLoa: 0,
-          pendingTasks: 0,
-          feesPostedCad: 0,
-          feesOpenCad: 0,
-          feesPastDueCad: 0,
-          activity: [],
-          health: [{ label: "API", value: "Unavailable" }],
-        });
-      });
-  }, [router]);
+  const retry = useCallback(() => {
+    const s = loadSession();
+    if (s) loadStats(s.accessToken);
+    else router.replace("/login");
+  }, [loadStats, router]);
 
   if (!allowed) return null;
 
   return (
     <AdminSisShell activeHref="/admin" userName={userName} userRole="Registrar's Office">
       <SisLiveProvider path="/admin" onPayload={() => undefined}>
-        <AdminHomeBody stats={stats} />
+        <AdminHomeBody stats={stats} failed={failed} onRetry={retry} />
       </SisLiveProvider>
     </AdminSisShell>
   );

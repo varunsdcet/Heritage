@@ -4,6 +4,7 @@ import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
 import { CAMPUSES, assertPermission } from "../superAdmin.service.js";
 import { audit, refs } from "./service.js";
+import { bytesMatchMime, decodeBase64 } from "../../../lib/fileSniff.js";
 import {
   ANSWER_FIELDS,
   COURSE_FIELDS,
@@ -262,8 +263,17 @@ export async function courseMeta(user: SessionClaims) {
 /* Validation                                                           */
 /* ------------------------------------------------------------------ */
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** True for a real calendar date in YYYY-MM-DD form (rejects 2024-13-45, 2023-02-29). */
+export function isIsoDate(v: string) {
+  const m = DATE_RE.exec(v);
+  if (!m) return false;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d;
+}
 
 export function applies(f: Field, d: Data) {
   if (!f.when) return true;
@@ -292,10 +302,6 @@ export function sanitizeHtml(html: string) {
     .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
     .replace(/(href|src)\s*=\s*("|')\s*javascript:[^"']*\2/gi, '$1="#"')
     .replace(/(href|src)\s*=\s*("|')\s*data:(?!image\/(png|jpe?g|gif|webp))[^"']*\2/gi, '$1="#"');
-}
-
-async function fileExists(inst: string, id: string) {
-  return (await prisma.heritageRecord.count({ where: { id, institutionId: inst, screenId: S.file, deletedAt: null } })) > 0;
 }
 
 /** Validates `input` against the field list; unknown keys are dropped. Throws 400 with every problem found. */
@@ -349,8 +355,10 @@ export async function clean(user: SessionClaims, fields: Field[], input: Data, l
           break;
         }
         const ref = raw as Data;
-        if (!s(ref.id) || !(await fileExists(user.institutionId, s(ref.id)))) err(f, "upload was not found — upload the file again");
-        out[f.key] = { id: s(ref.id), name: s(ref.name).slice(0, 200), mime: s(ref.mime), size: num(ref.size) };
+        const stored = s(ref.id) ? await fileRef(user.institutionId, s(ref.id)) : null;
+        if (!stored) err(f, "upload was not found — upload the file again");
+        else if (!acceptsMime(f.accept, stored.mime)) err(f, acceptMessage(f.accept));
+        out[f.key] = stored ?? { id: s(ref.id), name: s(ref.name).slice(0, 200), mime: s(ref.mime), size: num(ref.size) };
         break;
       }
       case "rows": {
@@ -378,7 +386,7 @@ export async function clean(user: SessionClaims, fields: Field[], input: Data, l
           out[f.key] = "";
           break;
         }
-        if (f.kind === "date" && !DATE_RE.test(v)) err(f, "must be a date (YYYY-MM-DD)");
+        if (f.kind === "date" && !isIsoDate(v)) err(f, "must be a valid date (YYYY-MM-DD)");
         else if (f.kind === "time" && !TIME_RE.test(v)) err(f, "must be a time such as 09:30");
         else if (f.kind === "select") {
           const allowed = [...(f.dynExtra ?? []), ...(f.options ?? (f.dyn ? (lk.lists[f.dyn] ?? []) : []))];
@@ -403,17 +411,45 @@ export function changedLabels(fields: Field[], before: Data, after: Data) {
 
 const FILE_MAX = 8 * 1024 * 1024;
 const FILE_TYPES = /^(image\/(png|jpe?g|gif|webp)|application\/pdf|application\/msword|application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document|text\/plain)$/;
+const EXT_MIME: Record<string, string[]> = {
+  ".pdf": ["application/pdf"],
+  ".doc": ["application/msword"],
+  ".docx": ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+  ".txt": ["text/plain"],
+  ".png": ["image/png"],
+  ".jpg": ["image/jpeg", "image/jpg"],
+  ".jpeg": ["image/jpeg", "image/jpg"],
+  ".gif": ["image/gif"],
+  ".webp": ["image/webp"],
+};
 
-export async function uploadFile(user: SessionClaims, body: { name: string; mime: string; base64: string }) {
+/** Whether a stored file's MIME type satisfies a field's `accept` list (HTML input syntax); no list means any supported type. */
+function acceptsMime(accept: string | undefined, mime: string) {
+  const m = mime.toLowerCase();
+  if (!FILE_TYPES.test(m)) return false;
+  const tokens = (accept ?? "").split(",").map((t) => t.trim().toLowerCase()).filter(Boolean);
+  if (!tokens.length) return true;
+  return tokens.some((t) => (t.endsWith("/*") ? m.startsWith(t.slice(0, -1)) : t.startsWith(".") ? (EXT_MIME[t] ?? []).includes(m) : t === m));
+}
+
+function acceptMessage(accept: string | undefined) {
+  if (accept === "image/*") return "must be an image (PNG, JPEG, GIF or WebP)";
+  const kinds = (accept ?? "").split(",").map((t) => t.trim()).filter(Boolean).map((t) => (t === "image/*" ? "image" : t.replace(/^\./, "").toUpperCase()));
+  return kinds.length ? `must be one of these file types: ${kinds.join(", ")}` : "is not a supported file type";
+}
+
+export async function uploadFile(user: SessionClaims, body: { name: string; mime: string; base64: string; accept?: string }) {
   await edit(user);
   const name = s(body.name).replace(/[\\/]/g, "_").slice(0, 200);
   const mime = s(body.mime).toLowerCase();
   if (!name) throw httpError(400, "File name is required");
   if (!FILE_TYPES.test(mime)) throw httpError(400, "Unsupported file type. Upload a PDF, Word document, text file or image.");
+  if (body.accept && !acceptsMime(body.accept, mime)) throw httpError(400, `This file ${acceptMessage(body.accept)}`);
   const b64 = s(body.base64).replace(/^data:[^,]*,/, "");
   const size = Math.floor((b64.length * 3) / 4) - (b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0);
   if (!size) throw httpError(400, "The file is empty");
   if (size > FILE_MAX) throw httpError(400, "Files must be 8 MB or smaller");
+  if (!bytesMatchMime(decodeBase64(b64), mime)) throw httpError(400, "The file's contents do not match its type. Upload a genuine PDF, Word document, text file or image.");
   const rec = await insert(user, S.file, { name, mime, size, base64: b64 });
   return { id: rec.id, name, mime, size };
 }
@@ -685,7 +721,9 @@ export async function saveEntity(user: SessionClaims, key: string, id: string | 
     parentId = def.table === "transfer" ? s(before.equivalentCourse) : def.parent ? (await find(inst, def.screen, id, def.label)).contextKey : "";
   } else parentId = await parentCourse(inst, entity, s(body.parentId) || undefined);
   const base: Data = {};
-  if (before && !def.table) for (const [k, v] of Object.entries(before)) if (!k.startsWith("_") && !["id", "createdAt", "updatedAt"].includes(k)) base[k] = v;
+  if (before)
+    for (const [k, v] of Object.entries(before))
+      if (!k.startsWith("_") && !["id", "createdAt", "updatedAt"].includes(k) && (!def.table || def.fields.some((f) => f.key === k))) base[k] = v;
   const fields = id ? def.fields.filter((f) => !f.createOnly) : def.fields;
   const data = await clean(user, fields, body, lk, base);
   await assertUnique(user, entity, data, id, parentId);

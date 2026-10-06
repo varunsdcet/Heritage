@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { SaModal, SuperFrame } from "@/components/superadmin/shared";
+import { sanitizeDashboardHtml } from "@/lib/dashboard";
 import { ConfirmDelete } from "../location/shared";
 import { Directory, EntityFormPage, SC, SettingsBody, type Ctx } from "./directory";
 import { SysIcon, SysSections, errMsg, fmtDate, invalidateMeta, str, sx, useFlash, type Listing, type Row, type SysForm } from "./kit";
@@ -387,7 +388,7 @@ export function TemplateAudit() {
           }
         >
           {view.mode === "review" ? (
-            <div className="sx-doc-preview" dangerouslySetInnerHTML={{ __html: view.v.content || "<p><em>No content</em></p>" }} />
+            <div className="sx-doc-preview" dangerouslySetInnerHTML={{ __html: sanitizeDashboardHtml(view.v.content) || "<p><em>No content</em></p>" }} />
           ) : (
             <VersionDiff snapshot={view.v.snapshot} current={current} labels={view.v.labels ?? {}} currentLabels={view.v.currentLabels ?? {}} />
           )}

@@ -18,23 +18,8 @@ export default function AdminExecutivePage() {
       router.replace("/login");
       return;
     }
-    api<{ executiveMetrics?: ExecutiveMetricsSnapshot; answer: string }>(
-      "/ai/ask",
-      {
-        method: "POST",
-        headers: { "idempotency-key": `exec-${session.accountId}-${Date.now()}` },
-        body: JSON.stringify({
-          question: "Show executive enrollment and academic metrics",
-          contextPath: "/admin/ai/executive",
-          capability: "admin_ask_data",
-        }),
-      },
-      session.accessToken,
-    )
-      .then((payload) => {
-        if (payload.executiveMetrics) setData(payload.executiveMetrics);
-        else setError(payload.answer);
-      })
+    api<{ executiveMetrics: ExecutiveMetricsSnapshot }>("/ai/executive-metrics", {}, session.accessToken)
+      .then((payload) => setData(payload.executiveMetrics))
       .catch((err) => setError(err instanceof Error ? err.message : "Unable to load executive metrics"));
   }, [router]);
 

@@ -370,15 +370,20 @@ export function useFinList<T>(path: string, filters: FilterDef[]) {
   const [perPage, setPerPage] = useState(25);
   const [data, setData] = useState<Page<T> | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const seq = useRef(0);
   const load = useCallback(() => {
     const qs = new URLSearchParams({ page: String(pageNo), perPage: String(perPage) });
     for (const [k, v] of Object.entries(applied)) if (v) qs.set(k, v);
+    const mine = ++seq.current;
     fin<Page<T>>(`${path}?${qs.toString()}`)
       .then((r) => {
+        if (mine !== seq.current) return;
         setData(r);
         setError(null);
       })
-      .catch((e) => setError(errMsg(e, "Could not load records")));
+      .catch((e) => {
+        if (mine === seq.current) setError(errMsg(e, "Could not load records"));
+      });
   }, [path, applied, pageNo, perPage]);
   useEffect(load, [load]);
   return {

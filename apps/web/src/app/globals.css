@@ -3079,6 +3079,20 @@ button.mh-admin-table__row {
   color: var(--mh-brand);
 }
 
+.mh-sis-dash__error {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0 4px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid #fecaca;
+  background: var(--mh-danger-soft);
+  color: var(--mh-danger);
+  font-size: 14px;
+}
+
 .mh-sis-dash__kpi {
   display: flex;
   flex-direction: column;

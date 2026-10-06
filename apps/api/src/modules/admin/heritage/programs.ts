@@ -118,6 +118,11 @@ async function loadLists(inst: string): Promise<Lists> {
 /* ------------------------------------------------------------------ */
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const realDate = (v: string) => {
+  const [y, m, d] = v.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+};
 const DATETIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
@@ -202,8 +207,8 @@ async function clean(fields: Field[], input: Data, base: Data, ctx: Ctx, prefix 
         if (f.kind === "html") v = sanitizeHtml(v);
         if (!v) {
           if (f.required) err(f, "is required");
-        } else if (f.kind === "date" && (!DATE_RE.test(v) || Number.isNaN(Date.parse(v)))) err(f, "must be a valid date");
-        else if (f.kind === "datetime" && (!DATETIME_RE.test(v) || Number.isNaN(Date.parse(v)))) err(f, "must be a valid date and time");
+        } else if (f.kind === "date" && (!DATE_RE.test(v) || !realDate(v))) err(f, "must be a valid date");
+        else if (f.kind === "datetime" && (!DATETIME_RE.test(v) || !realDate(v.slice(0, 10)) || Number.isNaN(Date.parse(v)))) err(f, "must be a valid date and time");
         else if (f.kind === "select") {
           const allowed = f.options ? [...f.options] : f.dyn ? [...(f.dynExtra ?? []), ...((ctx.extra?.[f.dyn] ?? (await ctx.lists())[f.dyn]) ?? [])] : [];
           if (allowed.length && !allowed.includes(v)) err(f, `: "${v}" is not a valid choice`);
@@ -217,7 +222,7 @@ async function clean(fields: Field[], input: Data, base: Data, ctx: Ctx, prefix 
           out[f.key] = null;
           break;
         }
-        const n = Number(raw);
+        const n = typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() ? Number(raw.trim()) : NaN;
         if (!Number.isFinite(n)) err(f, "must be a number");
         else if (f.integer && !Number.isInteger(n)) err(f, "must be a whole number");
         else if (f.min !== undefined && n < f.min) err(f, `must be at least ${f.min}`);

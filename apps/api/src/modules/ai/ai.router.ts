@@ -128,6 +128,17 @@ aiRouter.get("/tools", async (_req, res) => {
   res.json({ tools: listAiTools() });
 });
 
+/** Read-only KPI snapshot for the executive page; unlike /ask it records no AI interaction per view. */
+aiRouter.get("/executive-metrics", async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    assertToolAllowed("get_enrollment_metrics", user.roles);
+    res.json({ executiveMetrics: await getExecutiveMetrics(user.institutionId) });
+  } catch (err) {
+    next(err);
+  }
+});
+
 aiRouter.get("/eval", async (req, res, next) => {
   try {
     const user = (req as AuthedRequest).user;

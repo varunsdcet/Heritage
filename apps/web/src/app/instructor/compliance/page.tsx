@@ -107,9 +107,11 @@ export default function ComplianceInboxPage() {
               {inbox?.policy.missPauseDays ?? 3}. Teacher attendance / grade SLAs lock until explained.
             </p>
           </div>
-          <button type="button" className="mh-teacher-btn" disabled={busy} onClick={() => void runSweep()}>
-            {busy ? "Running…" : "Run policy sweep"}
-          </button>
+          {session.roles?.some((r) => r === "admin" || r === "registrar") ? (
+            <button type="button" className="mh-teacher-btn" disabled={busy} onClick={() => void runSweep()}>
+              {busy ? "Running…" : "Run policy sweep"}
+            </button>
+          ) : null}
         </div>
 
         {inbox?.locked ? <p className="mh-teacher-warn">{inbox.lockMessage}</p> : null}

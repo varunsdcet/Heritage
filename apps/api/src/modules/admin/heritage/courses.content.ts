@@ -4,7 +4,7 @@ import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
 import { audit } from "./service.js";
 import { ALL_CAMPUSES, ALL_COURSE_TYPES, ENTITIES, type Data } from "./courses.spec.js";
-import { S, arr, edit, find, httpError, insert, list, lookups, num, readOverlay, s, settingsOf, softDelete, today, update, view, writeOverlay, type Lookups, type Rec } from "./courses.js";
+import { S, arr, edit, find, httpError, insert, isIsoDate, list, lookups, num, readOverlay, s, settingsOf, softDelete, today, update, view, writeOverlay, type Lookups, type Rec } from "./courses.js";
 import { loadSections, sessionRow, sessionWindow } from "./courses.catalog.js";
 
 const page = <T>(rows: T[], p?: number, per?: number) => {
@@ -256,14 +256,15 @@ export async function backupsList(user: SessionClaims, f: { campus?: string; cou
 /* Evaluation assignments & results                                      */
 /* ------------------------------------------------------------------ */
 
-const DT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+const DT_RE = /^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d/;
+const isDateTime = (v: string) => DT_RE.test(v) && isIsoDate(v.slice(0, 10));
 
 function windowOf(body: Data) {
   const from = s(body.availableFrom);
   const to = s(body.availableTo);
   const errors: string[] = [];
-  if (!DT_RE.test(from)) errors.push("Available From Date / Time is required");
-  if (!DT_RE.test(to)) errors.push("Available To Date / Time is required");
+  if (!isDateTime(from)) errors.push(from ? "Available From must be a valid date and time" : "Available From Date / Time is required");
+  if (!isDateTime(to)) errors.push(to ? "Available To must be a valid date and time" : "Available To Date / Time is required");
   if (!errors.length && to <= from) errors.push("Available To must be after Available From");
   if (errors.length) throw httpError(400, errors.join("; "));
   return { availableFrom: from.slice(0, 16), availableTo: to.slice(0, 16) };

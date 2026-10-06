@@ -61,7 +61,7 @@ const body = (req: Request) => Body.parse(req.body ?? {});
 coursesRouter.get("/meta", handle((req) => courseMeta(user(req))));
 coursesRouter.get("/counts", handle((req) => courseCounts(user(req))));
 
-coursesRouter.post("/files", handle((req) => uploadFile(user(req), z.object({ name: z.string().max(300), mime: z.string().max(200), base64: z.string().max(12_000_000) }).parse(req.body)), 201));
+coursesRouter.post("/files", handle((req) => uploadFile(user(req), z.object({ name: z.string().max(300), mime: z.string().max(200), base64: z.string().max(12_000_000), accept: z.string().max(300).optional() }).parse(req.body)), 201));
 coursesRouter.get("/files/:id", handle((req) => downloadFile(user(req), id(req))));
 
 /* Courses & Sessions */

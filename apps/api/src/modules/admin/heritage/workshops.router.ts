@@ -33,10 +33,10 @@ export const workshopsRouter: Router = Router();
 
 const user = (req: unknown) => (req as AuthedRequest).user;
 const handle =
-  (fn: (req: Request) => Promise<unknown>) =>
+  (fn: (req: Request) => Promise<unknown>, status = 200) =>
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      res.json(await fn(req));
+      res.status(status).json(await fn(req));
     } catch (err) {
       next(err);
     }
@@ -117,7 +117,7 @@ workshopsRouter.get("/counts", handle((req) => workshopCounts(user(req))));
 workshopsRouter.get("/students", handle((req) => searchStudents(user(req), String(req.query.q ?? "").slice(0, 120))));
 
 workshopsRouter.get("/enrolments", handle((req) => listEnrolments(user(req), EnrolmentQuery.parse(req.query))));
-workshopsRouter.post("/enrolments", handle((req) => createEnrolment(user(req), EnrolBody.parse(req.body))));
+workshopsRouter.post("/enrolments", handle((req) => createEnrolment(user(req), EnrolBody.parse(req.body)), 201));
 workshopsRouter.post(
   "/enrolments/:id/status",
   handle((req) => {
@@ -136,13 +136,13 @@ workshopsRouter.get("/attendance/week", handle((req) => attendanceWeek(user(req)
 workshopsRouter.put("/attendance", handle((req) => saveAttendance(user(req), AttendanceBody.parse(req.body))));
 
 workshopsRouter.get("/categories", handle((req) => listCategories(user(req))));
-workshopsRouter.post("/categories", handle((req) => saveCategory(user(req), null, CategoryBody.parse(req.body))));
+workshopsRouter.post("/categories", handle((req) => saveCategory(user(req), null, CategoryBody.parse(req.body)), 201));
 workshopsRouter.put("/categories/:id", handle((req) => saveCategory(user(req), id(req), CategoryBody.parse(req.body))));
 workshopsRouter.delete("/categories/:id", handle((req) => deleteCategory(user(req), id(req))));
 
 workshopsRouter.get("/roles", handle((req) => listRoles(user(req))));
 workshopsRouter.get("/roles/:id", handle((req) => getRole(user(req), id(req))));
-workshopsRouter.post("/roles", handle((req) => saveRole(user(req), null, RoleBody.parse(req.body))));
+workshopsRouter.post("/roles", handle((req) => saveRole(user(req), null, RoleBody.parse(req.body)), 201));
 workshopsRouter.put("/roles/:id", handle((req) => saveRole(user(req), id(req), RoleBody.parse(req.body))));
 workshopsRouter.delete("/roles/:id", handle((req) => deleteRole(user(req), id(req))));
 
@@ -150,7 +150,7 @@ workshopsRouter.get(
   "/catalog",
   handle((req) => adminWorkshops(user(req), { status: String(req.query.status ?? ""), completion: String(req.query.completion ?? ""), q: String(req.query.q ?? "").slice(0, 120) })),
 );
-workshopsRouter.post("/catalog", handle((req) => saveWorkshop(user(req), null, WorkshopBody.parse(req.body) as never)));
+workshopsRouter.post("/catalog", handle((req) => saveWorkshop(user(req), null, WorkshopBody.parse(req.body) as never), 201));
 workshopsRouter.get("/catalog/:id", handle((req) => getWorkshop(user(req), id(req))));
 workshopsRouter.get("/catalog/:id/image", handle((req) => getWorkshopImage(user(req), id(req))));
 workshopsRouter.put("/catalog/:id", handle((req) => saveWorkshop(user(req), id(req), WorkshopBody.parse(req.body) as never)));

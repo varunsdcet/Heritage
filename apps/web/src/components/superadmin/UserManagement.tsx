@@ -54,7 +54,10 @@ export function SuperUserDirectory() {
   useEffect(() => {
     setData(null);
     saApi<{ total: number; items: UserRow[] }>(`/users${qs({ q, accessLevel, letter, page, perPage })}`)
-      .then(setData)
+      .then((r) => {
+        setData(r);
+        setError(null);
+      })
       .catch((err) => setError(errorMessage(err, "Could not load users")));
   }, [q, accessLevel, letter, page, perPage]);
 
@@ -310,8 +313,9 @@ export function SuperUserForm() {
     }
   }
 
-  const assignAll = !access || access.superAdmin || access.accessLevelId === "admin";
-  const assignable = levels.filter((l) => assignAll || l.assignableByNonAdmins || l.id === form.accessLevelId);
+  const accessLoading = access === undefined;
+  const assignAll = Boolean(access && (access.superAdmin || access.accessLevelId === "admin"));
+  const assignable = levels.filter((l) => l.id === form.accessLevelId || (!accessLoading && (assignAll || l.assignableByNonAdmins)));
   const campuses = meta?.campuses ?? [];
   const allCampuses = campuses.length > 0 && campuses.every((c) => form.campuses.includes(c));
 
@@ -422,8 +426,14 @@ export function SuperUserForm() {
               Disable this Account
             </label>
             <SaField label="Access Level">
-              <select className="mh-sa__input mh-sa__input--auto" value={form.accessLevelId} onChange={(e) => changeLevel(e.target.value)} required>
-                <option value="">Select Access Level</option>
+              <select
+                className="mh-sa__input mh-sa__input--auto"
+                value={form.accessLevelId}
+                onChange={(e) => changeLevel(e.target.value)}
+                disabled={accessLoading}
+                required
+              >
+                <option value="">{accessLoading ? "Loading…" : "Select Access Level"}</option>
                 {assignable.map((l) => (
                   <option key={l.id} value={l.id}>
                     {l.name}
@@ -491,7 +501,7 @@ export function SuperUserForm() {
           <Link href="/admin/user-management" className="mh-sa__btn">
             Cancel
           </Link>
-          <button type="submit" className="mh-sa__btn mh-sa__btn--primary" disabled={busy}>
+          <button type="submit" className="mh-sa__btn mh-sa__btn--primary" disabled={busy || accessLoading}>
             {busy ? "Saving…" : "Save User"}
           </button>
         </div>

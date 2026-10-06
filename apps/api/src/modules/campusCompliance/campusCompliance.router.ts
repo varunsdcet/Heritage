@@ -18,7 +18,7 @@ export const campusComplianceRouter: Router = Router();
 campusComplianceRouter.post(
   "/sweep",
   requireAuth,
-  requireRoles("admin", "registrar", "instructor"),
+  requireRoles("admin", "registrar"),
   async (req, res, next) => {
     try {
       const user = (req as AuthedRequest).user;

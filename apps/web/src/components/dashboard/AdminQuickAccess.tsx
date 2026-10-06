@@ -8,7 +8,7 @@ type IconName = "user-plus" | "teacher" | "check" | "search" | "mail" | "clipboa
 const QUICK_ACCESS: Array<{ label: string; href: string; tone: Tone; icon: IconName }> = [
   { label: "Student onboard", href: "/admin/user-management/new?accessLevel=student", tone: "rose", icon: "user-plus" },
   { label: "Instructor onboard", href: "/admin/user-management/new?accessLevel=faculty", tone: "violet", icon: "teacher" },
-  { label: "Enrol student", href: "/admin/user-management/new?accessLevel=student", tone: "green", icon: "check" },
+  { label: "Enrol student", href: "/admin/enrolments", tone: "green", icon: "check" },
   { label: "Search Students", href: "/admin/student-search", tone: "cyan", icon: "search" },
   { label: "Messages", href: "/admin/messages", tone: "red", icon: "mail" },
   { label: "Approvals", href: "/admin/approvals", tone: "amber", icon: "clipboard" },
@@ -98,7 +98,7 @@ function QuickIcon({ name }: { name: IconName }) {
   }
 }
 
-export function AdminQuickAccess({ todos }: { todos: AdminTodo[] | null }) {
+export function AdminQuickAccess({ todos, failed = false }: { todos: AdminTodo[] | null; failed?: boolean }) {
   const router = useRouter();
   return (
     <aside className="mh-ct-dash__aside">
@@ -121,7 +121,7 @@ export function AdminQuickAccess({ todos }: { todos: AdminTodo[] | null }) {
       <details className="mh-ct-dash__acc" open={Boolean(todos?.length)}>
         <summary>To-do</summary>
         {todos === null ? (
-          <p className="mh-teacher-muted">Loading…</p>
+          <p className="mh-teacher-muted">{failed ? "Couldn't load to-dos." : "Loading…"}</p>
         ) : todos.length ? (
           <ul className="mh-ct-dash__todo">
             {todos.map((t) => (
