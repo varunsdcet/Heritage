@@ -80,6 +80,33 @@ const statusOf = (raw: string): EnrolmentStatus => {
 const statusLabel = (st: EnrolmentStatus) => (st.charAt(0).toUpperCase() + st.slice(1)) as (typeof ENROLMENT_STATUSES)[number];
 const money = (n: number) => `$${n.toFixed(2)}`;
 
+/**
+ * Instructor portal access: an instructor works with the workshops they teach, plus workshops that have
+ * no instructor assigned yet. Admin callers pass no scope and are checked against Course Management instead.
+ */
+export type WorkshopScope = { accountId: string; workshopIds: Set<string> };
+
+async function gate(user: SessionClaims, level: "view" | "edit", scope?: WorkshopScope) {
+  if (!scope) await assertPermission(user, "courseManagement", level);
+}
+
+function assertInScope(scope: WorkshopScope | undefined, workshopId: string) {
+  if (scope && !scope.workshopIds.has(workshopId)) throw httpError(403, "This workshop is not assigned to you", "FORBIDDEN");
+}
+
+const inScope = (scope: WorkshopScope | undefined, workshopId: string) => !scope || scope.workshopIds.has(workshopId);
+
+export async function instructorWorkshopScope(user: SessionClaims): Promise<WorkshopScope> {
+  const [ws, tz] = await Promise.all([prisma.workshop.findMany({ where: { institutionId: user.institutionId } }), institutionTimezone(user.institutionId)]);
+  const ids = ws
+    .filter((w) => {
+      const instructors = workshopSettings(w, tz).instructors;
+      return !instructors.length || instructors.includes(user.accountId);
+    })
+    .map((w) => w.id);
+  return { accountId: user.accountId, workshopIds: new Set(ids) };
+}
+
 function stripHtml(html: string) {
   return html
     .replace(/<(br|\/p|\/div|\/li)[^>]*>/gi, "\n")
@@ -252,17 +279,17 @@ export async function workshopMeta(user: SessionClaims) {
   };
 }
 
-export async function workshopCounts(user: SessionClaims) {
-  await assertPermission(user, "courseManagement", "view");
+export async function workshopCounts(user: SessionClaims, scope?: WorkshopScope) {
+  await gate(user, "view", scope);
   const inst = user.institutionId;
   const [regs, ws, ctx] = await Promise.all([
-    prisma.workshopRegistration.findMany({ where: { institutionId: inst }, select: { status: true } }),
+    prisma.workshopRegistration.findMany({ where: { institutionId: inst }, select: { status: true, workshopId: true } }),
     workshopsWithRegs(inst),
     context(inst),
   ]);
   const by = { pending: 0, approved: 0, declined: 0, dropped: 0 };
-  for (const r of regs) by[statusOf(r.status)] += 1;
-  const rows = ws.map((w) => summary(w, ctx));
+  for (const r of regs) if (inScope(scope, r.workshopId)) by[statusOf(r.status)] += 1;
+  const rows = ws.filter((w) => inScope(scope, w.id)).map((w) => summary(w, ctx));
   return {
     pending: by.pending,
     approved: by.approved,
@@ -276,8 +303,8 @@ export async function workshopCounts(user: SessionClaims) {
 /* Workshop listings                                                    */
 /* ------------------------------------------------------------------ */
 
-export async function myWorkshops(user: SessionClaims, filter: string) {
-  await assertPermission(user, "courseManagement", "view");
+export async function myWorkshops(user: SessionClaims, filter: string, scope?: WorkshopScope) {
+  await gate(user, "view", scope);
   const inst = user.institutionId;
   const [ws, ctx] = await Promise.all([workshopsWithRegs(inst), context(inst)]);
   const wanted: Phase[] =
@@ -289,18 +316,19 @@ export async function myWorkshops(user: SessionClaims, filter: string) {
   return { items };
 }
 
-export async function availableWorkshops(user: SessionClaims) {
-  await assertPermission(user, "courseManagement", "view");
+export async function availableWorkshops(user: SessionClaims, scope?: WorkshopScope) {
+  await gate(user, "view", scope);
   const inst = user.institutionId;
   const [ws, ctx] = await Promise.all([workshopsWithRegs(inst), context(inst)]);
-  return { items: ws.map((w) => summary(w, ctx)).filter(isAvailable) };
+  return { items: ws.filter((w) => inScope(scope, w.id)).map((w) => summary(w, ctx)).filter(isAvailable) };
 }
 
-export async function completedWorkshops(user: SessionClaims) {
-  await assertPermission(user, "courseManagement", "view");
+export async function completedWorkshops(user: SessionClaims, scope?: WorkshopScope) {
+  await gate(user, "view", scope);
   const inst = user.institutionId;
   const [ws, ctx] = await Promise.all([workshopsWithRegs(inst), context(inst)]);
   const items = ws
+    .filter((w) => inScope(scope, w.id))
     .map((w) => summary(w, ctx))
     .filter((x) => x.phase === "completed")
     .sort((a, b) => (b.endDate || b.startDate).localeCompare(a.endDate || a.startDate));
@@ -334,8 +362,9 @@ async function findWorkshop(inst: string, id: string) {
   return w;
 }
 
-export async function getWorkshop(user: SessionClaims, id: string) {
-  await assertPermission(user, "courseManagement", "view");
+export async function getWorkshop(user: SessionClaims, id: string, scope?: WorkshopScope) {
+  await gate(user, "view", scope);
+  assertInScope(scope, id);
   const inst = user.institutionId;
   const [w, ctx] = await Promise.all([findWorkshop(inst, id), context(inst)]);
   const settings = workshopSettings(w, ctx.tz);
@@ -799,8 +828,8 @@ export async function searchStudents(user: SessionClaims, q: string) {
 
 export type EnrolmentQuery = { student?: string; workshop?: string; status?: string; letter?: string; page: number; perPage: number };
 
-export async function listEnrolments(user: SessionClaims, q: EnrolmentQuery) {
-  await assertPermission(user, "courseManagement", "view");
+export async function listEnrolments(user: SessionClaims, q: EnrolmentQuery, scope?: WorkshopScope) {
+  await gate(user, "view", scope);
   const inst = user.institutionId;
   const [regs, roles] = await Promise.all([
     prisma.workshopRegistration.findMany({
@@ -816,6 +845,7 @@ export async function listEnrolments(user: SessionClaims, q: EnrolmentQuery) {
   const needle = lower(s(q.student));
   const letter = s(q.letter).toUpperCase();
   const rows = regs
+    .filter((r) => inScope(scope, r.workshopId))
     .map((r) => ({ r, st: statusOf(r.status), who: studentView(r.student) }))
     .filter((x) => !status || x.st === status)
     .filter((x) => !/^[A-Z]$/.test(letter) || x.who.familyName.toUpperCase().startsWith(letter))
@@ -852,13 +882,18 @@ async function residencyOf(inst: string, studentId: string) {
   return (await studentMetaMap(inst))[studentId]?.residency;
 }
 
-export async function createEnrolment(user: SessionClaims, body: { studentId?: string; workshopId?: string; roleId?: string; note?: string }) {
-  await assertPermission(user, "courseManagement", "edit");
+export async function createEnrolment(
+  user: SessionClaims,
+  body: { studentId?: string; workshopId?: string; roleId?: string; note?: string },
+  scope?: WorkshopScope,
+) {
+  await gate(user, "edit", scope);
   const inst = user.institutionId;
   const studentId = s(body.studentId);
   const workshopId = s(body.workshopId);
   if (!studentId) throw httpError(400, "Select a user from the search results");
   if (!workshopId) throw httpError(400, "Please select a workshop");
+  assertInScope(scope, workshopId);
   const [student, workshop, { tz, today }] = await Promise.all([
     prisma.student.findFirst({ where: { id: studentId, institutionId: inst }, include: studentInclude }),
     prisma.workshop.findFirst({ where: { id: workshopId, institutionId: inst }, include: { registrations: true } }),
@@ -909,11 +944,12 @@ const TRANSITIONS: Record<EnrolmentStatus, EnrolmentStatus[]> = {
   dropped: ["pending"],
 };
 
-export async function setEnrolmentStatus(user: SessionClaims, id: string, next: string, note?: string) {
-  await assertPermission(user, "courseManagement", "edit");
+export async function setEnrolmentStatus(user: SessionClaims, id: string, next: string, note?: string, scope?: WorkshopScope) {
+  await gate(user, "edit", scope);
   const inst = user.institutionId;
   const target = statusOf(next);
   const r = await loadEnrolment(inst, id);
+  assertInScope(scope, r.workshopId);
   const current = statusOf(r.status);
   if (!TRANSITIONS[current].includes(target)) throw httpError(409, `A ${statusLabel(current).toLowerCase()} enrolment cannot be changed to ${statusLabel(target).toLowerCase()}`, "CONFLICT");
   const tz = await institutionTimezone(inst);
@@ -963,21 +999,22 @@ export async function deleteEnrolment(user: SessionClaims, id: string) {
 /* Attendance                                                           */
 /* ------------------------------------------------------------------ */
 
-async function approvedRoster(inst: string, workshopFilter: string) {
-  return prisma.workshop.findMany({
+async function approvedRoster(inst: string, workshopFilter: string, scope?: WorkshopScope) {
+  const rows = await prisma.workshop.findMany({
     where: { institutionId: inst, ...(workshopFilter && workshopFilter !== "all" ? { id: workshopFilter } : {}) },
     include: { registrations: { where: { status: { in: ["approved", "registered", "completed"] } }, include: { student: { include: studentInclude } } } },
     orderBy: { title: "asc" },
   });
+  return rows.filter((w) => inScope(scope, w.id));
 }
 
-export async function attendanceDay(user: SessionClaims, q: { date?: string; student?: string; workshop?: string }) {
-  await assertPermission(user, "courseManagement", "view");
+export async function attendanceDay(user: SessionClaims, q: { date?: string; student?: string; workshop?: string }, scope?: WorkshopScope) {
+  await gate(user, "view", scope);
   const inst = user.institutionId;
   const { tz, today } = await clock(inst);
   const date = ISO.test(s(q.date)) ? s(q.date) : today;
   const needle = lower(s(q.student));
-  const ws = (await approvedRoster(inst, s(q.workshop))).filter((w) => {
+  const ws = (await approvedRoster(inst, s(q.workshop), scope)).filter((w) => {
     const st = workshopSettings(w, tz);
     return workshopPhase(w, st, date) !== "inactive" && meetsOn(st, date);
   });
@@ -1002,8 +1039,12 @@ export async function attendanceDay(user: SessionClaims, q: { date?: string; stu
   return { date, previous: addDays(date, -1), next: addDays(date, 1), groups, total: groups.reduce((n, g) => n + g.students.length, 0) };
 }
 
-export async function saveAttendance(user: SessionClaims, body: { date?: string; marks?: Array<{ workshopId?: string; studentId?: string; status?: string; note?: string }> }) {
-  await assertPermission(user, "courseManagement", "edit");
+export async function saveAttendance(
+  user: SessionClaims,
+  body: { date?: string; marks?: Array<{ workshopId?: string; studentId?: string; status?: string; note?: string }> },
+  scope?: WorkshopScope,
+) {
+  await gate(user, "edit", scope);
   const inst = user.institutionId;
   const date = s(body.date);
   if (!ISO.test(date)) throw httpError(400, "Choose a valid attendance date");
@@ -1011,7 +1052,7 @@ export async function saveAttendance(user: SessionClaims, body: { date?: string;
   if (!marks.length) throw httpError(400, "There is no attendance to save");
   const tz = await institutionTimezone(inst);
   const ids = [...new Set(marks.map((m) => m.workshopId))];
-  const ws = await approvedRoster(inst, "");
+  const ws = await approvedRoster(inst, "", scope);
   const byId = new Map(ws.filter((w) => ids.includes(w.id)).map((w) => [w.id, w]));
   for (const m of marks) {
     const w = byId.get(m.workshopId);
@@ -1042,15 +1083,15 @@ export async function saveAttendance(user: SessionClaims, body: { date?: string;
   return { message: `Attendance saved for ${date} — ${saved} student${saved === 1 ? "" : "s"} marked${cleared ? `, ${cleared} cleared` : ""}` };
 }
 
-export async function attendanceWeek(user: SessionClaims, q: { date?: string; student?: string; workshop?: string }) {
-  await assertPermission(user, "courseManagement", "view");
+export async function attendanceWeek(user: SessionClaims, q: { date?: string; student?: string; workshop?: string }, scope?: WorkshopScope) {
+  await gate(user, "view", scope);
   const inst = user.institutionId;
   const { tz, today } = await clock(inst);
   const date = ISO.test(s(q.date)) ? s(q.date) : today;
   const sunday = addDays(date, -new Date(`${date}T12:00:00Z`).getUTCDay());
   const days = Array.from({ length: 7 }, (_, i) => addDays(sunday, i));
   const needle = lower(s(q.student));
-  const ws = await approvedRoster(inst, s(q.workshop));
+  const ws = await approvedRoster(inst, s(q.workshop), scope);
   const marks = await prisma.workshopAttendance.findMany({ where: { institutionId: inst, attendedOn: { gte: days[0], lte: days[6] } } });
   const rows = ws
     .map((w) => {

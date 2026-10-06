@@ -1,5 +1,20 @@
-import { randomUUID } from "node:crypto";
 import { prisma } from "@myheritage/db";
+import type { SessionClaims } from "@myheritage/contracts";
+import {
+  attendanceDay,
+  availableWorkshops,
+  completedWorkshops,
+  createEnrolment,
+  getWorkshop,
+  instructorWorkshopScope,
+  listEnrolments,
+  myWorkshops,
+  saveAttendance,
+  setEnrolmentStatus,
+  workshopCounts,
+  type WorkshopScope,
+  type WorkshopSummary,
+} from "../admin/heritage/workshops.js";
 
 type InstructorLivePayload = Record<string, unknown>;
 
@@ -7,11 +22,8 @@ export type WorkshopEnrolmentStatus = "pending" | "approved" | "declined" | "dro
 export type WorkshopListKind = "mine" | "available" | "completed";
 
 const ENROLMENT_STATUSES: WorkshopEnrolmentStatus[] = ["pending", "approved", "declined", "dropped"];
-const SEAT_STATUSES = new Set(["pending", "approved", "registered", "completed"]);
 const MONTHS = ["Jan.", "Feb.", "Mar.", "Apr.", "May", "Jun.", "Jul.", "Aug.", "Sep.", "Oct.", "Nov.", "Dec."];
 const WEEKDAYS = ["Sun.", "Mon.", "Tue.", "Wed.", "Thu.", "Fri.", "Sat."];
-
-type WorkshopWithRegs = Awaited<ReturnType<typeof loadWorkshops>>[number];
 
 function pathQuery(path: string) {
   try {
@@ -42,228 +54,184 @@ export function parseWorkshopListKind(path: string): WorkshopListKind {
   return "mine";
 }
 
-function ymd(date: Date) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
-
-function parseYmd(value: string | null | undefined) {
-  if (value && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-  return ymd(new Date());
-}
+const errorMessage = (err: unknown, fallback: string) => (err instanceof Error && err.message ? err.message : fallback);
 
 function shiftYmd(value: string, days: number) {
-  const d = new Date(`${value}T12:00:00`);
-  d.setDate(d.getDate() + days);
-  return ymd(d);
+  const d = new Date(`${value}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
 }
 
 function formatShortDate(value: string) {
-  const d = new Date(`${value}T12:00:00`);
-  return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+  const d = new Date(`${value}T12:00:00Z`);
+  return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
 }
 
 function formatAttendanceHeading(value: string) {
-  const d = new Date(`${value}T12:00:00`);
-  return `ATTENDANCE FOR: ${MONTHS[d.getMonth()].toUpperCase()} ${d.getDate()}, ${d.getFullYear()} (${WEEKDAYS[d.getDay()].toUpperCase()})`;
+  const d = new Date(`${value}T12:00:00Z`);
+  return `ATTENDANCE FOR: ${MONTHS[d.getUTCMonth()].toUpperCase()} ${d.getUTCDate()}, ${d.getUTCFullYear()} (${WEEKDAYS[d.getUTCDay()].toUpperCase()})`;
 }
 
-function statusLabel(status: WorkshopEnrolmentStatus) {
-  return status.charAt(0).toUpperCase() + status.slice(1);
+function dateRange(w: Pick<WorkshopSummary, "startDate" | "endDate" | "continuous">) {
+  if (!w.startDate) return "—";
+  if (w.continuous) return `From ${formatShortDate(w.startDate)} (continuous intake)`;
+  if (!w.endDate || w.endDate === w.startDate) return formatShortDate(w.startDate);
+  return `${formatShortDate(w.startDate)} – ${formatShortDate(w.endDate)}`;
 }
 
-function statusTone(status: WorkshopEnrolmentStatus): "warning" | "success" | "danger" | "muted" {
-  if (status === "pending") return "warning";
-  if (status === "approved") return "success";
-  if (status === "declined") return "danger";
+function statusTone(status: string): "warning" | "success" | "danger" | "muted" {
+  if (status === "Pending") return "warning";
+  if (status === "Approved") return "success";
+  if (status === "Declined") return "danger";
   return "muted";
 }
 
-async function loadWorkshops(institutionId: string) {
-  return prisma.workshop.findMany({
-    where: { institutionId },
-    include: {
-      registrations: {
-        include: {
-          student: { include: { person: true } },
-        },
-      },
-    },
-    orderBy: { startsAt: "asc" },
+async function scopedWorkshops(institutionId: string, scope: WorkshopScope) {
+  const rows = await prisma.workshop.findMany({
+    where: { institutionId, id: { in: [...scope.workshopIds] } },
+    select: { id: true, title: true, code: true },
+    orderBy: { title: "asc" },
   });
-}
-
-export async function workshopNavCounts(institutionId: string) {
-  const [registrations, workshops] = await Promise.all([
-    prisma.workshopRegistration.findMany({
-      where: { institutionId },
-      select: { status: true },
-    }),
-    prisma.workshop.findMany({
-      where: { institutionId },
-      select: { status: true },
-    }),
-  ]);
-  const pending = registrations.filter((r) => normalizeEnrolmentStatus(r.status) === "pending").length;
-  const approved = registrations.filter((r) => normalizeEnrolmentStatus(r.status) === "approved").length;
-  const declined = registrations.filter((r) => normalizeEnrolmentStatus(r.status) === "declined").length;
-  const available = workshops.filter((w) => w.status === "upcoming" || w.status === "active").length;
-  const completed = workshops.filter((w) => w.status === "completed").length;
-  return { pending, approved, declined, available, completed };
+  return rows;
 }
 
 function workshopOptions(workshops: Array<{ id: string; title: string; code: string }>) {
-  return [
-    { label: "All Workshops", value: "" },
-    ...workshops.map((w) => ({ label: `${w.code} — ${w.title}`, value: w.id })),
-  ];
+  return [{ label: "All Workshops", value: "" }, ...workshops.map((w) => ({ label: `${w.code} — ${w.title}`, value: w.id }))];
 }
 
-function seatsTaken(workshop: WorkshopWithRegs) {
-  return workshop.registrations.filter((r) => SEAT_STATUSES.has(r.status)).length;
+export async function workshopNavCounts(user: SessionClaims) {
+  return workshopCounts(user, await instructorWorkshopScope(user));
 }
 
-export async function buildWorkshopList(institutionId: string, path: string): Promise<InstructorLivePayload> {
+function workshopCard(w: WorkshopSummary) {
+  return {
+    tag: w.status.toUpperCase(),
+    org: w.category || "Heritage Community College",
+    seats: `${w.seatsLeft} of ${w.capacity} seats left`,
+    title: w.title,
+    description: [w.code, w.schedule !== "—" ? w.schedule : "", w.length].filter(Boolean).join(" · "),
+    when: dateRange(w),
+    where: [w.campus, w.classroom].filter(Boolean).join(" · ") || "TBA",
+    href: `/instructor/f/t24-workshop-detail?workshopId=${encodeURIComponent(w.id)}`,
+  };
+}
+
+export async function buildWorkshopList(user: SessionClaims, path: string): Promise<InstructorLivePayload> {
   const list = parseWorkshopListKind(path);
-  const workshops = await loadWorkshops(institutionId);
-  const available = workshops.filter((w) => w.status === "upcoming" || w.status === "active");
-  const completed = workshops.filter((w) => w.status === "completed");
-  const mine = workshops;
-  const rows = list === "available" ? available : list === "completed" ? completed : mine;
-  const title =
-    list === "available" ? "Available Workshops" : list === "completed" ? "Completed Workshops" : "My Workshops";
-  const cards = rows.map((w) => {
-    const taken = seatsTaken(w);
-    return {
-      tag: w.status.toUpperCase(),
-      org: "Heritage Community College",
-      seats: `${Math.max(0, w.capacity - taken)} seats`,
-      title: w.title,
-      description: w.description || w.code,
-      when: w.startsAt.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }),
-      where: w.location || "TBA",
-      href: `/instructor/f/t24-workshop-detail?workshopId=${encodeURIComponent(w.id)}`,
-    };
-  });
+  const scope = await instructorWorkshopScope(user);
+  const [mine, available, completed] = await Promise.all([
+    myWorkshops(user, "Active & Upcoming Workshops", scope),
+    availableWorkshops(user, scope),
+    completedWorkshops(user, scope),
+  ]);
+  const rows = list === "available" ? available.items : list === "completed" ? completed.items : mine.items;
+  const title = list === "available" ? "Available Workshops" : list === "completed" ? "Completed Workshops" : "All My Workshops";
+  const tabs = [`My Workshops (${mine.items.length})`, `Available Workshops (${available.items.length})`, `Completed Workshops (${completed.items.length})`];
   return {
     title,
     subtitle: `${rows.length} workshop(s)`,
-    breadcrumbs: ["Home", title],
+    breadcrumbs: list === "mine" ? ["Home", "All My Workshops"] : ["Home", "All My Workshops", title],
     workshops: {
-      tabs: [
-        `My Workshops (${mine.length})`,
-        `Available Workshops (${available.length})`,
-        `Completed Workshops (${completed.length})`,
-      ],
-      activeTab:
-        list === "available"
-          ? `Available Workshops (${available.length})`
-          : list === "completed"
-            ? `Completed Workshops (${completed.length})`
-            : `My Workshops (${mine.length})`,
+      tabs,
+      activeTab: list === "available" ? tabs[1] : list === "completed" ? tabs[2] : tabs[0],
       credits: "",
-      cards,
-      registrations: mine.slice(0, 8).map((w) => ({
-        title: w.title,
-        when: w.startsAt.toLocaleDateString("en-CA"),
-      })),
+      cards: rows.map(workshopCard),
+      registrations: mine.items.slice(0, 8).map((w) => ({ title: w.title, when: dateRange(w) })),
     },
   };
 }
 
-export async function buildWorkshopDetail(institutionId: string, path: string): Promise<InstructorLivePayload> {
-  const workshopId = pathQuery(path).get("workshopId");
-  const workshops = await loadWorkshops(institutionId);
-  const workshop = workshops.find((w) => w.id === workshopId) || workshops[0];
-  if (!workshop) {
+export async function buildWorkshopDetail(user: SessionClaims, path: string): Promise<InstructorLivePayload> {
+  const scope = await instructorWorkshopScope(user);
+  const requested = pathQuery(path).get("workshopId") || "";
+  const fallback = requested ? null : (await scopedWorkshops(user.institutionId, scope))[0]?.id;
+  const id = requested || fallback;
+  if (!id || !scope.workshopIds.has(id)) {
     return {
       title: "Workshop Detail",
-      subtitle: "No workshop selected",
+      subtitle: id ? "This workshop is not assigned to you" : "No workshop selected",
+      breadcrumbs: ["Home", "All My Workshops", "Workshop"],
       workshopDetail: {
         title: "Workshop",
         status: "Unavailable",
         when: "—",
         where: "—",
         seats: "—",
-        description: "No workshops are available yet.",
+        description: id ? "This workshop is not assigned to you." : "No workshops are assigned to you yet.",
         agenda: [],
         materials: [],
       },
     };
   }
-  const taken = seatsTaken(workshop);
+  const w = await getWorkshop(user, id, scope);
+  const st = w.settings;
+  const agenda =
+    st.scheduleType === "Daily Schedule"
+      ? [`Daily ${st.dailyStart}–${st.dailyEnd}`]
+      : st.sessions.map((x) => `${x.day} ${x.start}–${x.end}`);
+  const fee =
+    st.feeCollection === "Do Not Collect" || !(st.defaultFee || st.domesticFee || st.internationalFee)
+      ? "No fee"
+      : `$${st.defaultFee.toFixed(2)} default · $${st.domesticFee.toFixed(2)} domestic · $${st.internationalFee.toFixed(2)} international`;
+  const description = [st.introduction, w.settings.descriptionHtml ? w.settings.descriptionHtml.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim() : ""]
+    .filter(Boolean)
+    .join("\n\n");
   return {
-    title: workshop.title,
-    subtitle: workshop.code,
-    breadcrumbs: ["Home", "Workshops", workshop.title],
+    title: w.title,
+    subtitle: w.code,
+    breadcrumbs: ["Home", "All My Workshops", w.title],
     workshopDetail: {
-      title: workshop.title,
-      status: workshop.status === "completed" ? "Completed" : "Open for Enrollment",
-      when: workshop.startsAt.toLocaleString("en-CA", { dateStyle: "long", timeStyle: "short" }),
-      where: workshop.location || "TBA",
-      seats: `${Math.max(0, workshop.capacity - taken)} of ${workshop.capacity} seats remaining`,
-      description: workshop.description || workshop.title,
-      agenda: ["Welcome and outcomes", "Facilitated session", "Practice activity", "Close and next steps"],
-      materials: [{ label: `${workshop.code} outline`, meta: "PDF" }],
+      title: w.title,
+      status: w.status,
+      when: dateRange(w),
+      where: [w.campus, w.classroom].filter(Boolean).join(" · ") || "TBA",
+      seats: `${w.seatsLeft} of ${w.capacity} seats remaining`,
+      description: description || "No description provided.",
+      agenda: agenda.length ? agenda : ["No schedule set"],
+      materials: [
+        { label: "Enrolments", meta: `${w.counts.approved} approved · ${w.counts.pending} pending · ${w.counts.declined} declined · ${w.counts.dropped} dropped` },
+        { label: "Instructor(s)", meta: w.instructors.join(", ") || "Not assigned" },
+        { label: "Enrolment Approval", meta: st.approval },
+        { label: "Workshop Privacy", meta: st.privacy },
+        { label: "Enrolment Cut-off", meta: st.enrolmentCutoff ? st.enrolmentCutoff.replace("T", " ") : "None" },
+        { label: "Fees", meta: fee },
+        { label: "Length", meta: w.length },
+      ],
     },
   };
 }
 
-export async function buildWorkshopEnrolments(institutionId: string, path: string): Promise<InstructorLivePayload> {
+export async function buildWorkshopEnrolments(user: SessionClaims, path: string): Promise<InstructorLivePayload> {
   const q = pathQuery(path);
   const statusFilter = parseEnrolmentStatusFilter(path);
-  const studentQ = (q.get("student") || "").trim().toLowerCase();
   const workshopId = q.get("workshop") || "";
   const letter = (q.get("letter") || "ALL").trim().toUpperCase();
-  const workshops = await loadWorkshops(institutionId);
-  const rows = workshops.flatMap((w) =>
-    w.registrations.map((r) => {
-      const status = normalizeEnrolmentStatus(r.status);
-      const family = r.student.person.familyName;
-      const given = r.student.person.givenName;
-      const name = `${family}, ${given}`;
-      const login = r.student.person.email.split("@")[0] || "";
-      return {
-        id: r.id,
-        studentId: r.student.id,
-        studentNumber: r.student.studentNumber,
-        login,
-        name,
-        familyName: family,
-        givenName: given,
-        workshopId: w.id,
-        workshopTitle: w.title,
-        workshopCode: w.code,
-        status,
-        statusLabel: statusLabel(status),
-        enrolledOn: r.createdAt.toISOString().slice(0, 10),
-        note: r.note || "",
-      };
-    }),
-  );
-  const filtered = rows.filter((row) => {
-    if (statusFilter !== "all" && row.status !== statusFilter) return false;
-    if (workshopId && row.workshopId !== workshopId) return false;
-    if (letter && letter !== "ALL" && !row.familyName.toUpperCase().startsWith(letter)) return false;
-    if (studentQ) {
-      const hay = `${row.studentNumber} ${row.login} ${row.familyName} ${row.givenName} ${row.name}`.toLowerCase();
-      if (!hay.includes(studentQ)) return false;
-    }
-    return true;
-  });
-  filtered.sort((a, b) => a.familyName.localeCompare(b.familyName) || a.givenName.localeCompare(b.givenName));
+  const scope = await instructorWorkshopScope(user);
+  const [workshops, result] = await Promise.all([
+    scopedWorkshops(user.institutionId, scope),
+    listEnrolments(
+      user,
+      {
+        student: (q.get("student") || "").trim(),
+        workshop: workshopId,
+        status: statusFilter,
+        letter: letter === "ALL" ? "" : letter,
+        page: 1,
+        perPage: 500,
+      },
+      scope,
+    ),
+  ]);
   return {
     title: "WORKSHOP ENROLMENTS",
-    subtitle: statusFilter === "all" ? "All statuses" : statusLabel(statusFilter),
+    subtitle: statusFilter === "all" ? "All statuses" : statusFilter.charAt(0).toUpperCase() + statusFilter.slice(1),
     breadcrumbs: ["Home", "Workshop Enrolments"],
     workshopEnrolments: {
       studentPlaceholder: "Student #, login or last name",
       studentValue: q.get("student") || "",
       workshopValue: workshopId,
       workshopOptions: workshopOptions(workshops),
-      statusValue: statusFilter === "all" ? "all" : statusFilter,
+      statusValue: statusFilter,
       statusOptions: [
         { label: "All Statuses", value: "all" },
         { label: "Pending", value: "pending" },
@@ -274,69 +242,45 @@ export async function buildWorkshopEnrolments(institutionId: string, path: strin
       letter,
       searchLabel: "Search Workshops",
       emptyMessage: "No workshop enrolments were found.",
-      rows: filtered.map((row) => ({
+      rows: result.items.map((row) => ({
         id: row.id,
-        studentName: row.name,
-        studentNumber: row.studentNumber,
-        workshop: `${row.workshopCode} — ${row.workshopTitle}`,
-        workshopId: row.workshopId,
-        status: row.statusLabel,
+        studentName: row.student.name,
+        studentNumber: row.student.studentNumber,
+        workshop: `${row.workshop.code} — ${row.workshop.title}${row.role ? ` (${row.role})` : ""}`,
+        workshopId: row.workshop.id,
+        status: row.status,
         statusTone: statusTone(row.status),
-        enrolledOn: row.enrolledOn,
-        note: row.note,
+        enrolledOn: row.enrolledAt.slice(0, 10),
+        note: row.note || "",
       })),
     },
   };
 }
 
-export async function buildWorkshopAttendance(institutionId: string, path: string): Promise<InstructorLivePayload> {
+export async function buildWorkshopAttendance(user: SessionClaims, path: string): Promise<InstructorLivePayload> {
   const q = pathQuery(path);
-  const date = parseYmd(q.get("date"));
-  const studentQ = (q.get("student") || "").trim().toLowerCase();
   const workshopId = q.get("workshop") || "";
-  const workshops = await loadWorkshops(institutionId);
-  const matchingWorkshops = workshops.filter((w) => {
-    if (workshopId && w.id !== workshopId) return false;
-    return ymd(w.startsAt) === date || Boolean(workshopId);
-  });
-  const saved = matchingWorkshops.length
-    ? await prisma.workshopAttendance.findMany({
-        where: {
-          institutionId,
-          attendedOn: date,
-          workshopId: { in: matchingWorkshops.map((w) => w.id) },
-        },
-      })
-    : [];
-  const savedByKey = new Map(saved.map((s) => [`${s.workshopId}:${s.studentId}`, s]));
-  const students = matchingWorkshops.flatMap((w) =>
-    w.registrations
-      .filter((r) => normalizeEnrolmentStatus(r.status) === "approved")
-      .map((r) => {
-        const mark = savedByKey.get(`${w.id}:${r.student.id}`);
-        const family = r.student.person.familyName;
-        const given = r.student.person.givenName;
-        return {
-          id: `${w.id}:${r.student.id}`,
-          studentId: r.student.id,
-          workshopId: w.id,
-          workshopTitle: w.title,
-          name: `${given} ${family}`,
-          studentNumber: r.student.studentNumber,
-          familyName: family,
-          status: (mark?.status === "absent" ? "Absent" : "Present") as "Present" | "Absent",
-          note: mark?.note || "",
-          avatar: "",
-        };
-      }),
+  const scope = await instructorWorkshopScope(user);
+  const [workshops, day] = await Promise.all([
+    scopedWorkshops(user.institutionId, scope),
+    attendanceDay(user, { date: q.get("date") || "", student: q.get("student") || "", workshop: workshopId }, scope),
+  ]);
+  const date = day.date;
+  const students = day.groups.flatMap((g) =>
+    g.students.map((s) => ({
+      id: `${g.workshop.id}:${s.student.id}`,
+      studentId: s.student.id,
+      workshopId: g.workshop.id,
+      workshopTitle: `${g.workshop.code} — ${g.workshop.title}${g.workshop.time ? ` · ${g.workshop.time}` : ""}`,
+      name: s.student.name,
+      studentNumber: s.student.studentNumber,
+      familyName: s.student.familyName,
+      status: (s.status === "absent" ? "Absent" : "Present") as "Present" | "Absent",
+      note: s.note,
+      avatar: "",
+    })),
   );
-  const filtered = students.filter((s) => {
-    if (!studentQ) return true;
-    const hay = `${s.studentNumber} ${s.familyName} ${s.name}`.toLowerCase();
-    return hay.includes(studentQ);
-  });
-  const prev = shiftYmd(date, -1);
-  const next = shiftYmd(date, 1);
+  const sunday = shiftYmd(date, -new Date(`${date}T12:00:00Z`).getUTCDay());
   return {
     title: "WORKSHOP ATTENDANCE",
     subtitle: formatAttendanceHeading(date),
@@ -349,82 +293,77 @@ export async function buildWorkshopAttendance(institutionId: string, path: strin
       workshopOptions: workshopOptions(workshops),
       loadLabel: "Load Attendance",
       heading: formatAttendanceHeading(date),
-      previousLabel: `« ${formatShortDate(prev)}`,
-      previousDate: prev,
-      nextLabel: `${formatShortDate(next)} »`,
-      nextDate: next,
+      previousLabel: `« ${formatShortDate(day.previous)}`,
+      previousDate: day.previous,
+      nextLabel: `${formatShortDate(day.next)} »`,
+      nextDate: day.next,
       emptyMessage: "No students were found. Please change the filters above to see other possibilities.",
-      totalLabel: `Total Students: ${filtered.length}`,
+      totalLabel: `Total Students: ${students.length}`,
       saveLabel: "Save Attendance",
       weekDates: Array.from({ length: 7 }, (_, i) => {
-        const start = new Date(`${date}T12:00:00`);
-        const sunday = new Date(start);
-        sunday.setDate(start.getDate() - start.getDay());
-        const day = new Date(sunday);
-        day.setDate(sunday.getDate() + i);
-        const value = ymd(day);
-        return {
-          value,
-          label: `${WEEKDAYS[i]} ${MONTHS[day.getMonth()]} ${day.getDate()}`,
-          active: value === date,
-        };
+        const value = shiftYmd(sunday, i);
+        const d = new Date(`${value}T12:00:00Z`);
+        return { value, label: `${WEEKDAYS[i]} ${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`, active: value === date };
       }),
-      students: filtered,
+      students,
     },
   };
 }
 
-export async function buildNewWorkshopEnrolmentForm(institutionId: string): Promise<InstructorLivePayload> {
-  const workshops = await prisma.workshop.findMany({
-    where: { institutionId, status: { in: ["upcoming", "active"] } },
-    orderBy: { startsAt: "asc" },
-  });
+export async function buildNewWorkshopEnrolmentForm(user: SessionClaims): Promise<InstructorLivePayload> {
+  const scope = await instructorWorkshopScope(user);
+  const open = (await availableWorkshops(user, scope)).items;
+  const roleIds = new Set<string>();
+  if (open.length) {
+    const rows = await prisma.workshop.findMany({ where: { id: { in: open.map((w) => w.id) } }, select: { settingsJson: true } });
+    for (const r of rows) {
+      try {
+        const st = JSON.parse(r.settingsJson) as { rolesMode?: string; roleIds?: string[] };
+        if (st.rolesMode === "Enabled") for (const id of st.roleIds ?? []) roleIds.add(id);
+      } catch {
+        /* legacy row without settings */
+      }
+    }
+  }
+  const roles = roleIds.size
+    ? await prisma.workshopRole.findMany({ where: { institutionId: user.institutionId, id: { in: [...roleIds] } }, orderBy: { name: "asc" } })
+    : [];
   return {
     title: "NEW WORKSHOP ENROLMENT",
-    subtitle: "Register a student into a workshop offering",
+    subtitle: "Enrol a student into one of your workshops",
     breadcrumbs: ["Home", "Workshop Enrolments", "New Workshop Enrolment"],
     form: {
       submitLabel: "Save Enrolment",
       groups: [
         {
-          title: "Student",
+          title: "Workshop Enrolment Details",
           fields: [
-            {
-              label: "Student",
-              value: "",
-              type: "text",
-              hint: "Student #, login or last name",
-            },
-          ],
-        },
-        {
-          title: "Workshop",
-          fields: [
+            { label: "Student", value: "", type: "text", hint: "Student #, login or last name" },
             {
               label: "Workshop",
-              value: workshops[0]?.id || "",
-              type: "select",
-              options: workshops.length
-                ? workshops.map((w) => ({ label: `${w.code} — ${w.title}`, value: w.id }))
-                : [{ label: "No open workshops", value: "" }],
-            },
-            {
-              label: "Status",
-              value: "pending",
+              value: "",
               type: "select",
               options: [
-                { label: "Pending", value: "pending" },
-                { label: "Approved", value: "approved" },
-                { label: "Declined", value: "declined" },
-                { label: "Dropped", value: "dropped" },
+                { label: open.length ? "--- Please Select Workshop ---" : "No available workshops", value: "" },
+                ...open.map((w) => ({
+                  label: `${w.code} — ${w.title} (${w.seatsLeft} seat${w.seatsLeft === 1 ? "" : "s"} left · ${w.approval === "Automatic Approval" ? "auto-approved" : "needs approval"})`,
+                  value: w.id,
+                })),
               ],
             },
-            {
-              label: "Note",
-              value: "",
-              type: "textarea",
-              optional: true,
-            },
+            ...(roles.length
+              ? [
+                  {
+                    label: "Workshop Role",
+                    value: "",
+                    type: "select",
+                    optional: true,
+                    hint: "Required when the workshop uses roles",
+                    options: [{ label: "--- Not applicable ---", value: "" }, ...roles.map((r) => ({ label: r.name, value: r.id }))],
+                  },
+                ]
+              : []),
+            { label: "Note", value: "", type: "textarea", optional: true },
           ],
         },
       ],
@@ -435,20 +374,30 @@ export async function buildNewWorkshopEnrolmentForm(institutionId: string): Prom
 async function findStudentForEnrolment(institutionId: string, raw: string) {
   const q = raw.trim();
   if (!q) return null;
+  const include = { person: { include: { accounts: { select: { email: true } } } } } as const;
   const byNumber = await prisma.student.findFirst({
     where: { institutionId, studentNumber: { equals: q, mode: "insensitive" } },
-    include: { person: true },
+    include,
   });
   if (byNumber) return byNumber;
   const lowered = q.toLowerCase();
   const candidates = await prisma.student.findMany({
-    where: { institutionId },
-    include: { person: true },
-    take: 200,
+    where: {
+      institutionId,
+      OR: [
+        { person: { email: { contains: q, mode: "insensitive" } } },
+        { person: { accounts: { some: { email: { contains: q, mode: "insensitive" } } } } },
+        { person: { familyName: { contains: q, mode: "insensitive" } } },
+        { person: { givenName: { contains: q.split(" ")[0] ?? q, mode: "insensitive" } } },
+      ],
+    },
+    include,
+    take: 50,
   });
+  const emails = (s: (typeof candidates)[number]) => [s.person.email, ...s.person.accounts.map((a) => a.email)].map((e) => e.toLowerCase());
   return (
-    candidates.find((s) => s.person.email.toLowerCase() === lowered) ||
-    candidates.find((s) => s.person.email.split("@")[0]?.toLowerCase() === lowered) ||
+    candidates.find((s) => emails(s).includes(lowered)) ||
+    candidates.find((s) => emails(s).some((e) => e.split("@")[0] === lowered)) ||
     candidates.find((s) => s.person.familyName.toLowerCase() === lowered) ||
     candidates.find((s) => `${s.person.givenName} ${s.person.familyName}`.toLowerCase() === lowered) ||
     candidates.find((s) => s.person.familyName.toLowerCase().startsWith(lowered)) ||
@@ -456,83 +405,48 @@ async function findStudentForEnrolment(institutionId: string, raw: string) {
   );
 }
 
-export async function saveWorkshopEnrolment(
-  institutionId: string,
-  fields: Record<string, string>,
-): Promise<{ ok: boolean; message: string }> {
+export async function saveWorkshopEnrolment(user: SessionClaims, fields: Record<string, string>): Promise<{ ok: boolean; message: string }> {
   const studentRaw = (fields.Student || fields["Student #, login or last name"] || "").trim();
   const workshopId = (fields.Workshop || "").trim();
-  const status = normalizeEnrolmentStatus(fields.Status || "pending");
-  const note = (fields.Note || "").trim();
   if (!studentRaw) return { ok: false, message: "Enter a student #, login or last name." };
-  if (!workshopId) return { ok: false, message: "Select a workshop." };
-  const workshop = await prisma.workshop.findFirst({ where: { id: workshopId, institutionId } });
-  if (!workshop) return { ok: false, message: "Workshop not found." };
-  const student = await findStudentForEnrolment(institutionId, studentRaw);
+  if (!workshopId) return { ok: false, message: "Please select a workshop." };
+  const student = await findStudentForEnrolment(user.institutionId, studentRaw);
   if (!student) return { ok: false, message: `No student matched “${studentRaw}”.` };
-  await prisma.workshopRegistration.upsert({
-    where: { workshopId_studentId: { workshopId, studentId: student.id } },
-    create: {
-      id: randomUUID(),
-      institutionId,
-      workshopId,
-      studentId: student.id,
-      status,
-      note,
-    },
-    update: { status, note },
-  });
-  return {
-    ok: true,
-    message: `Enrolment ${status} · ${student.person.familyName}, ${student.person.givenName} · ${workshop.title}`,
-  };
+  try {
+    const saved = await createEnrolment(
+      user,
+      { studentId: student.id, workshopId, roleId: (fields["Workshop Role"] || "").trim(), note: (fields.Note || "").trim() || "Enrolled by instructor" },
+      await instructorWorkshopScope(user),
+    );
+    return { ok: true, message: saved.message };
+  } catch (err) {
+    return { ok: false, message: errorMessage(err, "Could not save the enrolment.") };
+  }
 }
 
-export async function updateWorkshopEnrolmentStatus(
-  institutionId: string,
-  registrationId: string,
-  status: WorkshopEnrolmentStatus,
-) {
-  const row = await prisma.workshopRegistration.findFirst({
-    where: { id: registrationId, institutionId },
-    include: { student: { include: { person: true } }, workshop: true },
-  });
-  if (!row) return { ok: false, message: "Enrolment not found." };
-  await prisma.workshopRegistration.update({ where: { id: row.id }, data: { status } });
-  return {
-    ok: true,
-    message: `${statusLabel(status)} · ${row.student.person.familyName}, ${row.student.person.givenName}`,
-  };
+export async function updateWorkshopEnrolmentStatus(user: SessionClaims, registrationId: string, status: WorkshopEnrolmentStatus, note?: string) {
+  if (!registrationId) return { ok: false, message: "Enrolment not found." };
+  try {
+    const saved = await setEnrolmentStatus(user, registrationId, status, note, await instructorWorkshopScope(user));
+    return { ok: true, message: saved.message };
+  } catch (err) {
+    return { ok: false, message: errorMessage(err, "Could not update the enrolment.") };
+  }
 }
 
 export async function saveWorkshopAttendance(
-  institutionId: string,
+  user: SessionClaims,
   date: string,
   roster: Array<{ studentId: string; workshopId: string; status: string; note?: string }>,
 ) {
-  const attendedOn = parseYmd(date);
-  for (const row of roster) {
-    if (!row.studentId || !row.workshopId) continue;
-    const status = /absent/i.test(row.status) ? "absent" : "present";
-    await prisma.workshopAttendance.upsert({
-      where: {
-        workshopId_studentId_attendedOn: {
-          workshopId: row.workshopId,
-          studentId: row.studentId,
-          attendedOn,
-        },
-      },
-      create: {
-        id: randomUUID(),
-        institutionId,
-        workshopId: row.workshopId,
-        studentId: row.studentId,
-        attendedOn,
-        status,
-        note: row.note || "",
-      },
-      update: { status, note: row.note || "" },
-    });
+  try {
+    const saved = await saveAttendance(
+      user,
+      { date, marks: roster.map((r) => ({ workshopId: r.workshopId, studentId: r.studentId, status: /absent/i.test(r.status) ? "absent" : "present", note: r.note || "" })) },
+      await instructorWorkshopScope(user),
+    );
+    return { ok: true, message: saved.message };
+  } catch (err) {
+    return { ok: false, message: errorMessage(err, "Could not save attendance.") };
   }
-  return { ok: true, message: `Attendance saved for ${attendedOn} · ${roster.length} student(s)` };
 }

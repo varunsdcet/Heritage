@@ -5008,6 +5008,10 @@ function WorkshopEnrolmentsView({ config }: { config: TeacherScreenConfig }) {
                     <button type="button" className="mh-teacher-link mh-teacher-link--danger" disabled={live?.busy} onClick={() => void live?.runAction?.("Drop Enrolment", row.id)}>
                       DROP
                     </button>
+                  ) : row.status === "Declined" || row.status === "Dropped" ? (
+                    <button type="button" className="mh-teacher-link" disabled={live?.busy} onClick={() => void live?.runAction?.("Reinstate Enrolment", row.id)}>
+                      REINSTATE
+                    </button>
                   ) : null}
                 </span>
               </div>

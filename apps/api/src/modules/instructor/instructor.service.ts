@@ -4036,16 +4036,16 @@ async function routePayload(
     ]);
   }
   if (p.includes("t42") || p.includes("new-workshop-enrollment") || p.includes("new-workshop-enrolment")) {
-    return buildNewWorkshopEnrolmentForm(ctx.user.institutionId);
+    return buildNewWorkshopEnrolmentForm(ctx.user);
   }
   if (p.includes("t40") || p.includes("workshop-enrollment-status") || p.includes("workshop-enrolment")) {
-    return buildWorkshopEnrolments(ctx.user.institutionId, path);
+    return buildWorkshopEnrolments(ctx.user, path);
   }
   if (p.includes("t41") || p.includes("workshop-attendance")) {
-    return buildWorkshopAttendance(ctx.user.institutionId, path);
+    return buildWorkshopAttendance(ctx.user, path);
   }
   if (p.includes("t24") || p.includes("workshop-detail")) {
-    return buildWorkshopDetail(ctx.user.institutionId, path);
+    return buildWorkshopDetail(ctx.user, path);
   }
   // Studio archetypes before the generic `studio` course-list catch-all
   if (p.includes("in-15") || p.includes("question-generator")) {
@@ -4277,7 +4277,7 @@ async function routePayload(
     return buildCalendar(ctx);
   }
   if (p.includes("workshop") || p.includes("t11") || p.includes("in-20")) {
-    return buildWorkshopList(ctx.user.institutionId, path);
+    return buildWorkshopList(ctx.user, path);
   }
   if (p.includes("t29") || p.includes("t30") || p.includes("t31") || p.includes("password") || p.includes("mfa")) {
     return {
@@ -4319,7 +4319,7 @@ export async function buildInstructorScreen(
   if (overlay?._lastAction) {
     (payload as Record<string, unknown>)._lastAction = overlay._lastAction;
   }
-  const workshopCounts = await workshopNavCounts(user.institutionId);
+  const workshopCounts = await workshopNavCounts(user);
   const statusCounts = await loadStudentStatusCounts(user.institutionId);
   return {
     path,
@@ -4343,7 +4343,7 @@ export async function buildInstructorScreen(
 
 export async function buildInstructorBootstrap(user: SessionClaims) {
   const ctx = await loadCtx(user);
-  const workshopCounts = await workshopNavCounts(user.institutionId);
+  const workshopCounts = await workshopNavCounts(user);
   const statusCounts = await loadStudentStatusCounts(user.institutionId);
   return {
     displayName: ctx.displayName,
@@ -7581,19 +7581,21 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
       path.includes("new-workshop-enrolment")
     ) {
       const fields = parseActionFields(input.rowKey) || {};
-      const saved = await saveWorkshopEnrolment(user.institutionId, fields);
+      const saved = await saveWorkshopEnrolment(user, fields);
       message = saved.message;
       result = { ...saved, error: !saved.ok };
     } else if (
       (path.includes("t40") || path.includes("workshop-enrollment-status")) &&
-      (lower.includes("approve") || lower.includes("decline") || lower.includes("drop"))
+      (lower.includes("approve") || lower.includes("decline") || lower.includes("drop") || lower.includes("reinstate"))
     ) {
-      const status: WorkshopEnrolmentStatus = lower.includes("approve")
-        ? "approved"
-        : lower.includes("drop")
-          ? "dropped"
-          : "declined";
-      const saved = await updateWorkshopEnrolmentStatus(user.institutionId, input.rowKey || "", status);
+      const status: WorkshopEnrolmentStatus = lower.includes("reinstate")
+        ? "pending"
+        : lower.includes("approve")
+          ? "approved"
+          : lower.includes("drop")
+            ? "dropped"
+            : "declined";
+      const saved = await updateWorkshopEnrolmentStatus(user, input.rowKey || "", status);
       message = saved.message;
       result = { ...saved, error: !saved.ok };
     } else if (
@@ -7612,7 +7614,7 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
       } catch {
         roster = [];
       }
-      const saved = await saveWorkshopAttendance(user.institutionId, date, roster);
+      const saved = await saveWorkshopAttendance(user, date, roster);
       message = saved.message;
       result = { ...saved, error: !saved.ok };
     } else if (
