@@ -366,7 +366,6 @@ type ProfileFields = {
   preferredName: string;
   phone: string;
   primaryEmail: string;
-  sinMasked: string;
   emergencyContactName: string;
   emergencyContactPhone: string;
 };
@@ -380,7 +379,6 @@ async function personFields(personId: string): Promise<ProfileFields> {
     preferredName: p?.preferredName ?? "",
     phone: p?.phone ?? "",
     primaryEmail: p?.email ?? "",
-    sinMasked: p?.sinMasked ?? "",
     emergencyContactName: p?.emergencyContactName ?? "",
     emergencyContactPhone: p?.emergencyContactPhone ?? "",
   };
@@ -395,7 +393,6 @@ function requestedFields(diff: Record<string, unknown>, current: ProfileFields):
     preferredName: pick("preferredName"),
     phone: pick("phone"),
     primaryEmail: pick("primaryEmail"),
-    sinMasked: pick("sinMasked"),
     emergencyContactName: pick("emergencyContactName"),
     emergencyContactPhone: pick("emergencyContactPhone"),
   };
@@ -470,14 +467,6 @@ export type EditBody = {
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function maskSin(raw: string) {
-  const v = raw.trim();
-  const digits = v.replace(/[\s-]/g, "");
-  if (/^\d{9}$/.test(digits)) return `***-***-${digits.slice(6)}`;
-  if (/^\*{3}-\*{3}-\d{3}$/.test(v)) return v;
-  throw httpError(400, "Social Insurance Number must be 9 digits");
-}
-
 function requirePending(item: Item) {
   if (item.status !== "Pending") throw httpError(409, `This request has already been ${item.status.toLowerCase()} and can no longer be changed.`, "CONFLICT");
 }
@@ -495,7 +484,6 @@ export async function updateRequest(user: SessionClaims, number: number, body: E
       ["givenName", "First Name"],
       ["phone", "Phone Number"],
       ["primaryEmail", "E-mail Address"],
-      ["sinMasked", "Social Insurance Number"],
       ["emergencyContactName", "Emergency Contact Name"],
       ["emergencyContactPhone", "Emergency Contact Phone Number"],
     ];
@@ -505,15 +493,15 @@ export async function updateRequest(user: SessionClaims, number: number, body: E
     const approval = await prisma.approvalRequest.findFirst({ where: { id: item.sourceId, institutionId: inst } });
     if (!approval) throw httpError(404, "Profile change request not found", "NOT_FOUND");
     const before = parse<Record<string, unknown>>(approval.proposedDiffJson, {});
+    const { sinMasked: _dropSin, ...kept } = before;
     const after = {
-      ...before,
+      ...kept,
       familyName: input.familyName!.trim(),
       givenName: input.givenName!.trim(),
       middleName: (input.middleName ?? "").trim(),
       preferredName: (input.preferredName ?? "").trim(),
       phone: input.phone!.trim(),
       primaryEmail: input.primaryEmail!.trim(),
-      sinMasked: maskSin(input.sinMasked!),
       emergencyContactName: input.emergencyContactName!.trim(),
       emergencyContactPhone: input.emergencyContactPhone!.trim(),
     };

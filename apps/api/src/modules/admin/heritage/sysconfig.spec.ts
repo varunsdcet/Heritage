@@ -1152,7 +1152,6 @@ export const SEED_CORRESPONDENCE: Record<string, string[]> = {
   "LOA and Fees Receipt": ["Fees Receipt", "Payment Plan Agreement"],
   "Permits and PPR": ["Study Permit", "Passport Request (PPR)", "Work Permit"],
   "Scanned Documents": ["Passport Copy", "Prior Transcripts", "Photo ID"],
-  "SIN NUMBER": ["SIN Confirmation Letter"],
   "TRANSCRIPT RECORD": ["Official Transcript", "Unofficial Transcript"],
 };
 export const SEED_CORRESPONDENCE_MISC = ["General Correspondence", "Phone Call Note"];

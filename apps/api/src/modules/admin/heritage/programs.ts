@@ -71,9 +71,9 @@ async function write(actorId: string, id: string, data: Data, contextKey?: strin
   await prisma.heritageRecord.update({ where: { id }, data: { dataJson: JSON.stringify(data), updatedById: actorId, rowVersion: { increment: 1 }, ...(contextKey !== undefined ? { contextKey } : {}) } });
 }
 
-async function remove(actorId: string, ids: string[]) {
+async function remove(inst: string, actorId: string, ids: string[]) {
   if (!ids.length) return;
-  await prisma.heritageRecord.updateMany({ where: { id: { in: ids } }, data: { deletedAt: new Date(), updatedById: actorId, status: "deleted" } });
+  await prisma.heritageRecord.updateMany({ where: { id: { in: ids }, institutionId: inst }, data: { deletedAt: new Date(), updatedById: actorId, status: "deleted" } });
 }
 
 /* ------------------------------------------------------------------ */
@@ -777,7 +777,7 @@ export async function deleteEntity(user: SessionClaims, entity: EntityKey, id: s
     if (prismaId) {
       const sections = await prisma.section.count({ where: { institutionId: inst, termId: prismaId } });
       if (sections) block(`The term "${name}" cannot be deleted while ${sections} course section(s) are scheduled in it.`);
-      await prisma.term.delete({ where: { id: prismaId } }).catch(() => undefined);
+      await prisma.term.deleteMany({ where: { id: prismaId, institutionId: inst } }).catch(() => undefined);
     }
   }
   if (isSchedule(entity)) for (const sc of [PM.session, PM.scheduleFeeTerm, PM.scheduleFee]) cascade.push(...(await list(inst, sc, id)).map((r) => r.id));
@@ -785,11 +785,11 @@ export async function deleteEntity(user: SessionClaims, entity: EntityKey, id: s
     const sch = await find(inst, PM.schedule, rec.contextKey, "Schedule");
     if (sch.data._status === "draft" && rec.data._origin === "copied") await write(user.accountId, sch.id, { ...sch.data, _removed: (Number(sch.data._removed) || 0) + 1 });
   }
-  await remove(user.accountId, [id, ...cascade]);
+  await remove(inst, user.accountId, [id, ...cascade]);
   if (entity === "programs" && s(rec.data._prismaId)) {
     const pid = s(rec.data._prismaId);
     const [cohorts, versions] = await Promise.all([prisma.cohort.count({ where: { programId: pid } }), prisma.programVersion.count({ where: { programId: pid } })]);
-    if (!cohorts && !versions) await prisma.program.delete({ where: { id: pid } }).catch(() => undefined);
+    if (!cohorts && !versions) await prisma.program.deleteMany({ where: { id: pid, institutionId: inst } }).catch(() => undefined);
   }
   await audit(user, def.audit, entity === "programs" ? id : rec.contextKey, `delete ${def.label.toLowerCase()}`, { recordId: id, before: rec.data, note: cascade.length ? `${cascade.length} related record(s) removed` : undefined });
   return { ok: true, message: `${def.label.replace(/^\w/, (c) => c.toUpperCase())} "${name}" deleted` };

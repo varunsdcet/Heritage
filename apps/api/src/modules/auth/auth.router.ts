@@ -5,7 +5,7 @@ import { prisma } from "@myheritage/db";
 import { hashPassword, loginWithPassword, changePassword } from "@myheritage/auth";
 import { LoginRequest, LoginResponse } from "@myheritage/contracts";
 import { sendMailViaHumanitix, mailConfigured } from "../../lib/mailer.js";
-import { requireAuth, type AuthedRequest } from "../../middleware/auth.js";
+import { forgetSessionRevocation, requireAuth, type AuthedRequest } from "../../middleware/auth.js";
 
 export const authRouter: Router = Router();
 
@@ -166,6 +166,7 @@ authRouter.post("/logout", requireAuth, async (req, res, next) => {
     await prisma.session.deleteMany({
       where: { id: user.sessionId, accountId: user.accountId, institutionId: user.institutionId },
     });
+    forgetSessionRevocation(user.sessionId);
     await prisma.auditEvent.create({
       data: {
         institutionId: user.institutionId,

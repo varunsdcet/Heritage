@@ -18,6 +18,12 @@ type UserRow = {
 
 const ROLE_OPTIONS = ["instructor", "student", "applicant", "employer", "admin", "registrar"] as const;
 
+function temporaryPassword() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  return `${Array.from(bytes, (b) => alphabet[b % alphabet.length]).join("")}!7`;
+}
+
 function CreateUserInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -33,7 +39,7 @@ function CreateUserInner() {
     givenName: "",
     familyName: "",
     role: initialRole,
-    password: "Heritage!2026",
+    password: "",
     studentNumber: "",
     programName: "Computer Science",
   });
@@ -81,6 +87,10 @@ function CreateUserInner() {
   }
 
   useEffect(() => {
+    setForm((f) => (f.password ? f : { ...f, password: temporaryPassword() }));
+  }, []);
+
+  useEffect(() => {
     const s = loadSession();
     if (!s) {
       router.replace("/login");
@@ -96,10 +106,10 @@ function CreateUserInner() {
     setError(null);
     setNote(null);
     try {
+      const password = form.password;
       const created = await api<{
         email: string;
         role: string;
-        temporaryPassword: string;
         portalHref?: string;
         studentNumber?: string | null;
         loginHint?: string;
@@ -132,13 +142,13 @@ function CreateUserInner() {
       setLastLogin({
         email: created.email,
         role: created.role,
-        temporaryPassword: created.temporaryPassword,
+        temporaryPassword: password,
         portalHref,
         studentNumber: created.studentNumber ?? null,
         loginHint,
       });
-      setNote(`Created ${created.role} ${created.email} · password ${created.temporaryPassword}`);
-      setForm((f) => ({ ...f, email: "", givenName: "", familyName: "", studentNumber: "" }));
+      setNote(`Created ${created.role} ${created.email}`);
+      setForm((f) => ({ ...f, email: "", givenName: "", familyName: "", studentNumber: "", password: temporaryPassword() }));
       await refresh(s.accessToken);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Create failed");

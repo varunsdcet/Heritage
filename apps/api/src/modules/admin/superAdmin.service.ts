@@ -228,7 +228,34 @@ function slug(name: string) {
     .slice(0, 48) || "level";
 }
 
-export async function upsertAccessLevel(user: SessionClaims, id: string | null, body: z.infer<typeof AccessLevelBody>) {
+async function assertAdministrator(user: SessionClaims, what: string) {
+  const actor = await effectiveAccess(user.institutionId, user.accountId);
+  if (!actor.administrator) throw httpError(403, `Only administrators can ${what}`, "FORBIDDEN");
+  return actor;
+}
+
+/** The KV blobs are read-modify-write; concurrent saves on one API process must not drop each other's changes. */
+const blobLocks = new Map<string, Promise<unknown>>();
+function withBlobLock<T>(key: string, run: () => Promise<T>): Promise<T> {
+  const prev = blobLocks.get(key) ?? Promise.resolve();
+  const next = prev.catch(() => undefined).then(run);
+  const tail = next.catch(() => undefined);
+  blobLocks.set(key, tail);
+  void tail.then(() => {
+    if (blobLocks.get(key) === tail) blobLocks.delete(key);
+  });
+  return next;
+}
+
+/** Built-in levels the platform depends on; only their name can change so nobody can lock administrators out. */
+const PROTECTED_LEVELS = new Set(["admin", "system-administrator"]);
+
+export function upsertAccessLevel(user: SessionClaims, id: string | null, body: z.infer<typeof AccessLevelBody>) {
+  return withBlobLock(`access-levels:${user.institutionId}`, () => upsertAccessLevelLocked(user, id, body));
+}
+
+async function upsertAccessLevelLocked(user: SessionClaims, id: string | null, body: z.infer<typeof AccessLevelBody>) {
+  await assertAdministrator(user, "change access levels");
   const levels = await listAccessLevels(user.institutionId);
   const clash = levels.find((l) => l.name.toLowerCase() === body.name.toLowerCase() && l.id !== id);
   if (clash) throw httpError(409, "An access level with this name already exists", "CONFLICT");
@@ -236,7 +263,7 @@ export async function upsertAccessLevel(user: SessionClaims, id: string | null, 
   if (id) {
     const idx = levels.findIndex((l) => l.id === id);
     if (idx < 0) throw httpError(404, "Access level not found", "NOT_FOUND");
-    saved = { ...levels[idx], ...body, id };
+    saved = PROTECTED_LEVELS.has(id) ? { ...levels[idx], name: body.name, id } : { ...levels[idx], ...body, id };
     levels[idx] = saved;
   } else {
     let newId = slug(body.name);
@@ -249,10 +276,16 @@ export async function upsertAccessLevel(user: SessionClaims, id: string | null, 
   return saved;
 }
 
-export async function deleteAccessLevel(user: SessionClaims, id: string) {
+export function deleteAccessLevel(user: SessionClaims, id: string) {
+  return withBlobLock(`access-levels:${user.institutionId}`, () => deleteAccessLevelLocked(user, id));
+}
+
+async function deleteAccessLevelLocked(user: SessionClaims, id: string) {
+  await assertAdministrator(user, "delete access levels");
   const levels = await listAccessLevels(user.institutionId);
   const level = levels.find((l) => l.id === id);
   if (!level) throw httpError(404, "Access level not found", "NOT_FOUND");
+  if (PROTECTED_LEVELS.has(id)) throw httpError(409, `${level.name} is a built-in access level and cannot be deleted`, "CONFLICT");
   const { assigned } = await accessLevelAssignments(user.institutionId);
   const inUse = assigned.get(id) ?? 0;
   if (inUse > 0) {
@@ -335,6 +368,8 @@ export type EffectiveAccess = {
   accessLevel: string | null;
   profileType: string | null;
   superAdmin: boolean;
+  /** Holds the admin role (not just an admin-like access level); only these may grant admin-only levels. */
+  administrator: boolean;
   permissions: PermissionMap;
   campuses: string[];
 };
@@ -377,6 +412,7 @@ export async function effectiveAccess(institutionId: string, accountId: string):
     accessLevel: level?.name ?? null,
     profileType: level?.profileType ?? null,
     superAdmin,
+    administrator: roles.includes("admin") && (superAdmin || level?.id === "admin"),
     permissions,
     campuses: m.customizeRegional ? m.campuses ?? [] : [...CAMPUSES],
   };
@@ -534,7 +570,11 @@ export const UserBody = z.object({
   campuses: z.array(z.enum(CAMPUSES)).default([]),
 });
 
-export async function saveUser(user: SessionClaims, accountId: string | null, body: z.infer<typeof UserBody>) {
+export function saveUser(user: SessionClaims, accountId: string | null, body: z.infer<typeof UserBody>) {
+  return withBlobLock(`user-meta:${user.institutionId}`, () => saveUserLocked(user, accountId, body));
+}
+
+async function saveUserLocked(user: SessionClaims, accountId: string | null, body: z.infer<typeof UserBody>) {
   const institutionId = user.institutionId;
   const email = body.email.toLowerCase();
   const [levels, meta] = await Promise.all([listAccessLevels(institutionId), loadUserMeta(institutionId)]);
@@ -554,18 +594,36 @@ export async function saveUser(user: SessionClaims, accountId: string | null, bo
   if (accountId === user.accountId && body.disabled) throw httpError(400, "You cannot disable your own account");
 
   const actor = await effectiveAccess(institutionId, user.accountId);
-  const actorIsAdmin = actor.superAdmin || actor.accessLevelId === "admin";
-  if (!actorIsAdmin) {
-    if (!level.assignableByNonAdmins) throw httpError(403, `Only administrators can assign the ${level.name} access level`, "FORBIDDEN");
+  const target = accountId
+    ? await prisma.account.findFirst({ where: { id: accountId, institutionId }, select: { rolesJson: true } })
+    : null;
+  if (accountId && !target) throw httpError(404, "User not found", "NOT_FOUND");
+  const targetRoles = safeRoles(target?.rolesJson ?? "[]");
+  const roles = rolesFor(level, body.instructing);
+  if (!actor.administrator) {
+    if (!level.assignableByNonAdmins || roles.includes("admin")) {
+      throw httpError(403, `Only administrators can assign the ${level.name} access level`, "FORBIDDEN");
+    }
     if (accountId) {
-      const current = levels.find((l) => l.id === meta[accountId]?.accessLevelId);
-      if (current && !current.assignableByNonAdmins) {
-        throw httpError(403, `Only administrators can edit users with the ${current.name} access level`, "FORBIDDEN");
+      const currentId = meta[accountId]?.accessLevelId ?? derivedAccessLevelId(targetRoles);
+      const current = levels.find((l) => l.id === currentId);
+      if (targetRoles.includes("admin") || (current && !current.assignableByNonAdmins)) {
+        throw httpError(403, `Only administrators can edit users with the ${current?.name ?? "Admin"} access level`, "FORBIDDEN");
+      }
+    }
+    if (body.customizeAccess && body.permissions) {
+      for (const mod of PERMISSION_MODULES) {
+        const wanted = body.permissions[mod.key];
+        if (!wanted.override) continue;
+        const own = actor.permissions[mod.key];
+        if ((canEdit(wanted) && !canEdit(own)) || (canView(wanted) && !canView(own))) {
+          throw httpError(403, `You cannot grant more ${mod.label} access than you have`, "FORBIDDEN");
+        }
       }
     }
   }
+  const rolesChanged = Boolean(target) && [...new Set(roles)].sort().join() !== targetRoles.filter((r) => r !== "applicant" && r !== "employer").sort().join();
 
-  const roles = rolesFor(level, body.instructing);
   const passwordHash = body.password ? await hashPassword(body.password) : null;
   let id = accountId;
 
@@ -595,7 +653,7 @@ export async function saveUser(user: SessionClaims, accountId: string | null, bo
           rowVersion: { increment: 1 },
         },
       });
-      if (body.disabled || passwordHash) {
+      if (body.disabled || passwordHash || rolesChanged) {
         await tx.session.deleteMany({ where: { accountId } });
       }
     } else {

@@ -17,6 +17,7 @@ TOKEN="$(
     -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\",\"deviceFingerprint\":\"advisor-smoke-device-01\"}" \
     | python3 -c 'import sys,json; print(json.load(sys.stdin)["accessToken"])'
 )"
+trap 'curl -sS -o /dev/null -X POST "$API_URL/auth/logout" -H "authorization: Bearer $TOKEN" || true' EXIT
 echo OK
 
 echo "==> Degree progress"

@@ -40,7 +40,7 @@ approvalsRouter.get("/", requireAuth, requireRoles("admin", "registrar"), async 
         : [],
       requesterIds.length
         ? prisma.account.findMany({
-            where: { id: { in: requesterIds } },
+            where: { institutionId: user.institutionId, id: { in: requesterIds } },
             select: { id: true, email: true, person: { select: { givenName: true, familyName: true } } },
           })
         : [],
@@ -69,7 +69,6 @@ approvalsRouter.get("/", requireAuth, requireRoles("admin", "registrar"), async 
                 dateOfBirth: student.person.dateOfBirth,
                 emergencyContactName: student.person.emergencyContactName,
                 emergencyContactPhone: student.person.emergencyContactPhone,
-                sinMasked: student.person.sinMasked,
               }
             : null;
           return {

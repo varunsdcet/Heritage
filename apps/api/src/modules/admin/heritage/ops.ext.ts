@@ -905,7 +905,7 @@ export const DASH: Partial<Record<ModuleKey, (ctx: Ctx) => Promise<{ kpis: Kpi[]
     const st = await ctx.labels("students");
     const gaps = students.map((x) => ({
       label: `${personName(x.person)} (${x.studentNumber})`,
-      missing: [!x.person.phone && "phone", !x.person.dateOfBirth && "date of birth", !x.person.emergencyContactName && "emergency contact", !x.person.sinMasked && "SIN"].filter(Boolean) as string[],
+      missing: [!x.person.phone && "phone", !x.person.dateOfBirth && "date of birth", !x.person.emergencyContactName && "emergency contact"].filter(Boolean) as string[],
     }));
     const complete = gaps.filter((g) => !g.missing.length).length;
     const overdue = privacy.filter((p) => p._due === "Overdue");
@@ -920,7 +920,7 @@ export const DASH: Partial<Record<ModuleKey, (ctx: Ctx) => Promise<{ kpis: Kpi[]
         { label: "Complete student profiles", value: pct(complete, students.length), hint: `${complete} of ${students.length}` },
       ],
       panels: [
-        { title: "Record completeness", kind: "bars", bars: bars(["phone", "date of birth", "emergency contact", "SIN"], (k) => gaps.filter((g) => g.missing.includes(k)).length).map((b) => ({ ...b, label: `Missing ${b.label}` })) },
+        { title: "Record completeness", kind: "bars", bars: bars(["phone", "date of birth", "emergency contact"], (k) => gaps.filter((g) => g.missing.includes(k)).length).map((b) => ({ ...b, label: `Missing ${b.label}` })) },
         { title: "Students with incomplete profiles", kind: "table", columns: ["Student", "Missing"], rows: take(gaps.filter((g) => g.missing.length), 8).map((g) => [g.label, g.missing.join(", ")]), empty: "Every student profile is complete." },
         { title: "Privacy requests by due date", slug: "privacy-requests", kind: "table", columns: ["Requester", "Request", "Due", "Deadline"], rows: take(openPrivacy).map((p) => [st.get(s(p.studentId)) ?? "—", s(p.type), s(p.dueOn), s(p._due)]), empty: "No open privacy requests." },
         { title: "Evidence by status", slug: "evidence", kind: "bars", bars: bars(["Needed", "In Review", "Accepted"], (k) => evidence.filter((e) => e.status === k).length) },

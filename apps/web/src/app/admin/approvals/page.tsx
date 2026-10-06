@@ -27,7 +27,6 @@ const PROFILE_FIELDS: Record<string, string> = {
   dateOfBirth: "Date of birth",
   emergencyContactName: "Emergency contact",
   emergencyContactPhone: "Emergency contact phone",
-  sinMasked: "SIN",
 };
 
 const TYPE_LABELS: Record<string, string> = {

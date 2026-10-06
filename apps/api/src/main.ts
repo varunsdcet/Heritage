@@ -101,7 +101,6 @@ app.get("/api/docs", (_req, res) => {
     <li>POST /admin/assignments</li>
     <li>GET /admin/sis/screen?path=</li>
     <li>POST /admin/sis/action</li>
-    <li>POST /admin/sis/seed</li>
     <li>GET /instructor/sis/bootstrap</li>
     <li>GET /instructor/sis/screen?path=</li>
     <li>POST /instructor/sis/action</li>

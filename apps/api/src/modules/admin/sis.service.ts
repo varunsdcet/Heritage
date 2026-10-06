@@ -1901,20 +1901,6 @@ export async function runSisAction(
   const action = input.action.trim();
   const lower = action.toLowerCase();
 
-  if (path.includes("pending") && (lower.includes("approve") || lower === "approve selected")) {
-    const pending = await prisma.approvalRequest.findMany({
-      where: { institutionId: user.institutionId, status: "pending" },
-    });
-    for (const a of pending) {
-      const decisions = JSON.parse(a.decisionsJson || "[]") as unknown[];
-      decisions.push({ accountId: user.accountId, decision: "approved", at: new Date().toISOString() });
-      await prisma.approvalRequest.update({
-        where: { id: a.id },
-        data: { status: "approved", decisionsJson: JSON.stringify(decisions) },
-      });
-    }
-  }
-
   if (
     (path.includes("approval") || path.includes("inbox") || path.includes("wf-")) &&
     input.rowKey &&
@@ -2106,7 +2092,3 @@ export async function runSisAction(
 }
 
 /** Clears fixture SisScreenState; screens now compose live from domain tables. */
-export async function seedAllSisScreens(institutionId: string) {
-  await prisma.sisScreenState.deleteMany({ where: { institutionId } });
-  return 0;
-}

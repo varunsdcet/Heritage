@@ -861,8 +861,6 @@ export async function applyStudentProfileChange(
   if (typeof diff.dateOfBirth === "string") personData.dateOfBirth = diff.dateOfBirth;
   if (typeof diff.emergencyContactName === "string") personData.emergencyContactName = diff.emergencyContactName;
   if (typeof diff.emergencyContactPhone === "string") personData.emergencyContactPhone = diff.emergencyContactPhone;
-  if (typeof diff.sinMasked === "string") personData.sinMasked = diff.sinMasked;
-
   if (Object.keys(personData).length) {
     await tx.person.update({
       where: { id: student.personId },

@@ -354,7 +354,6 @@ meRouter.get("/profile", requireAuth, async (req, res, next) => {
         dateOfBirth: student.person.dateOfBirth,
         emergencyContactName: student.person.emergencyContactName,
         emergencyContactPhone: student.person.emergencyContactPhone,
-        sinMasked: student.person.sinMasked,
         programName: student.programName,
         standing: student.standing,
         timezone: account.timezone,

@@ -378,8 +378,6 @@ export async function createStudent(user: SessionClaims, body: Data) {
   if (phone.replace(/\D/g, "").length < 7) throw httpError(400, "Phone Number must contain at least 7 digits");
   const email = required(body.email, "E-mail Address", 200).toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw httpError(400, "E-mail Address is not valid");
-  const sin = required(body.sin, "Social Insurance Number", 20).replace(/[\s-]/g, "");
-  if (!/^\d{9}$/.test(sin)) throw httpError(400, "Social Insurance Number must be 9 digits");
   const emergencyName = required(body.emergencyName, "Emergency Contact Name", 120);
   const emergencyPhone = required(body.emergencyPhone, "Emergency Contact Phone Number", 40);
   const visaStatus = oneOf(body.visaStatus, VISA_STATUSES, "Visa Status");
@@ -414,7 +412,6 @@ export async function createStudent(user: SessionClaims, body: Data) {
       email,
       personalEmail: email,
       phone,
-      sinMasked: `***-***-${sin.slice(-3)}`,
       emergencyContactName: emergencyName,
       emergencyContactPhone: emergencyPhone,
       dateOfBirth: birth,

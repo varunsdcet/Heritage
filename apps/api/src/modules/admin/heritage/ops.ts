@@ -600,6 +600,18 @@ export async function updateOps(user: SessionClaims, entity: EntityKey, id: stri
   await can(user, entity, "edit");
   const e = ENTITIES[entity];
   if (e.edit === false) throw httpError(405, `${e.plural} cannot be edited here`, "NOT_ALLOWED");
+  const current = await findRow(user, entity, id);
+  for (const [k, v] of Object.entries(body)) {
+    const steps = (e.actions ?? []).filter((a) => a.set && k in a.set);
+    if (!steps.length || s(v) === s(current[k])) continue;
+    const reachable = steps.some(
+      (a) => s(token(a.set![k])) === s(v) && Object.entries(a.when ?? {}).every(([wk, vals]) => vals.includes(current[wk] as string | boolean)),
+    );
+    if (!reachable) {
+      const label = e.fields.find((f) => f.key === k)?.label ?? k;
+      throw httpError(409, `${label} cannot change from "${s(current[k])}" to "${s(v)}" — use the ${e.label.toLowerCase()}'s actions instead`, "CONFLICT");
+    }
+  }
   await applyUpdate(user, entity, id, body, "update", entity === "standing" ? s(body.reason) : undefined);
   return { ok: true, id, message: `${e.label} saved` };
 }

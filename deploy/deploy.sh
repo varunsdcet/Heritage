@@ -9,7 +9,8 @@ cd "$ROOT"
 COMPOSE=(docker compose -f deploy/docker-compose.prod.yml --project-directory "$ROOT")
 ENV_FILE="${ENV_FILE:-$ROOT/.env.production}"
 WITH_NGINX="${WITH_NGINX:-1}"
-SEED="${SEED:-1}"
+# The seed wipes every table first; only pass SEED=1 on a brand-new database.
+SEED="${SEED:-0}"
 
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "Missing $ENV_FILE"
@@ -91,6 +92,7 @@ if [[ -n "${SMOKE_TOKEN}" ]]; then
   if [[ -x deploy/smoke-advisor-e2e.sh ]]; then
     API_URL=http://127.0.0.1:4000 WEB_URL=http://127.0.0.1:3000 ./deploy/smoke-advisor-e2e.sh || echo "WARN: advisor smoke failed"
   fi
+  curl -sS -o /dev/null -X POST "http://127.0.0.1:4000/auth/logout" -H "authorization: Bearer ${SMOKE_TOKEN}" || true
 else
   echo "WARN: could not login for SIS smoke (seed may be off)"
 fi
@@ -99,4 +101,4 @@ echo "Deploy complete."
 echo "  Web:  http://46.202.163.202:3000  (or :80 with nginx profile)"
 echo "  API:  http://46.202.163.202:4000"
 echo "  Docs: http://46.202.163.202:4000/api/docs"
-echo "  Admin: http://46.202.163.202:3000/admin  (admin@heritage.edu / Heritage!2026)"
+echo "  Admin: http://46.202.163.202:3000/admin"

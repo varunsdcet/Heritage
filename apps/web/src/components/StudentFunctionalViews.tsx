@@ -970,7 +970,6 @@ type Profile = {
   dateOfBirth: string | null;
   emergencyContactName?: string | null;
   emergencyContactPhone?: string | null;
-  sinMasked?: string | null;
   programName: string;
   standing: string;
   timezone: string;

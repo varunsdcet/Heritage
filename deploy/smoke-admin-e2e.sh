@@ -24,6 +24,8 @@ TOKEN="$(
     -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\",\"deviceFingerprint\":\"deploy-smoke-device-01\"}" \
     | python3 -c 'import sys,json; print(json.load(sys.stdin)["accessToken"])'
 )"
+# Sign out at the end so the smoke login does not push a real admin past the concurrent-session limit.
+trap 'curl -sS -o /dev/null -X POST "$API_URL/auth/logout" -H "authorization: Bearer $TOKEN" || true' EXIT
 echo OK
 
 PATHS=(

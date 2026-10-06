@@ -63,9 +63,9 @@ async function update(actorId: string, id: string, data: Data, contextKey?: stri
   await prisma.heritageRecord.update({ where: { id }, data: { dataJson: JSON.stringify(data), updatedById: actorId, rowVersion: { increment: 1 }, ...(contextKey !== undefined ? { contextKey } : {}) } });
 }
 
-async function remove(actorId: string, ids: string[]) {
+async function remove(inst: string, actorId: string, ids: string[]) {
   if (!ids.length) return;
-  await prisma.heritageRecord.updateMany({ where: { id: { in: ids } }, data: { deletedAt: new Date(), updatedById: actorId, status: "deleted" } });
+  await prisma.heritageRecord.updateMany({ where: { id: { in: ids }, institutionId: inst }, data: { deletedAt: new Date(), updatedById: actorId, status: "deleted" } });
 }
 
 /* ------------------------------------------------------------------ */
@@ -121,7 +121,7 @@ function applies(f: Field, d: Data) {
 
 type RefLookup = (target: RefTarget, id: string) => Promise<boolean>;
 
-async function clean(fields: Field[], input: Data, base: Data, lookup: RefLookup): Promise<Data> {
+async function clean(inst: string, fields: Field[], input: Data, base: Data, lookup: RefLookup): Promise<Data> {
   const out: Data = { ...base };
   for (const f of fields) {
     if (f.key in input) out[f.key] = input[f.key];
@@ -205,7 +205,7 @@ async function clean(fields: Field[], input: Data, base: Data, lookup: RefLookup
         for (const it of items.slice(0, 20)) {
           const id = s(it?.id);
           if (!id) continue;
-          const exists = await prisma.heritageRecord.count({ where: { id, screenId: LOC.file, deletedAt: null } });
+          const exists = await prisma.heritageRecord.count({ where: { id, institutionId: inst, screenId: LOC.file, deletedAt: null } });
           if (!exists) {
             errors.push(`${f.label}: an attached file is no longer available, please upload it again`);
             continue;
@@ -882,7 +882,7 @@ export async function createEntity(user: SessionClaims, entity: EntityKey, body:
     if (!body.parentId) throw httpError(400, `${def.parent.label} is required`);
     await find(inst, def.parent.screen, s(body.parentId), def.parent.label);
   }
-  const data = await clean(def.fields, body, {}, lookupFor(inst));
+  const data = await clean(inst, def.fields, body, {}, lookupFor(inst));
   validateCross(entity, data);
   const ctx = parentKeyFor(entity, data, s(body.parentId));
   await assertUnique(inst, def, data, ctx);
@@ -896,7 +896,7 @@ export async function updateEntity(user: SessionClaims, entity: EntityKey, id: s
   const def = ENTITIES[entity];
   const inst = user.institutionId;
   const rec = await find(inst, def.screen, id, def.label);
-  const data = await clean(def.fields, body, rec.data, lookupFor(inst));
+  const data = await clean(inst, def.fields, body, rec.data, lookupFor(inst));
   validateCross(entity, data);
   const ctx = entity === "classrooms" ? s(data.campus) : rec.contextKey;
   await assertUnique(inst, def, data, ctx, id);
@@ -947,7 +947,7 @@ export async function deleteEntity(user: SessionClaims, entity: EntityKey, id: s
   if (entity === "campuses") cascade.push(...(await list(inst, LOC.classroom, id)).map((r) => r.id));
   if (entity === "institutions")
     for (const sc of [LOC.agreement, LOC.bridge, LOC.transferCourse]) cascade.push(...(await list(inst, sc, id)).map((r) => r.id));
-  await remove(user.accountId, [id, ...cascade]);
+  await remove(inst, user.accountId, [id, ...cascade]);
   await audit(user, def.audit, rec.contextKey, `delete ${def.label.toLowerCase()}`, { recordId: id, before: publicData(entity, rec.data), note: cascade.length ? `${cascade.length} related record(s) removed` : undefined });
   const extra =
     entity === "campuses" && cascade.length
@@ -983,7 +983,7 @@ export async function saveBrandSettings(user: SessionClaims, brandId: string, ta
   const t = SETTINGS_TABS[tab];
   const row = await prisma.heritageRecord.findFirst({ where: { institutionId: inst, screenId: LOC.brandSettings, contextKey: brandId, singletonKey: tab } });
   const before = row ? parse(row.dataJson) : {};
-  const data = await clean(t.fields, body, before, lookupFor(inst));
+  const data = await clean(inst, t.fields, body, before, lookupFor(inst));
   if (tab === "academic" && Number(data.weightFrom) > Number(data.weightTo)) throw httpError(400, "Grading Weight Threshold: From % must not be greater than To %");
   if (row) await update(user.accountId, row.id, data);
   else

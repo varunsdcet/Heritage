@@ -35,7 +35,6 @@ const EditBody = z.object({
       preferredName: text(100),
       phone: text(30),
       primaryEmail: text(200),
-      sinMasked: text(20),
       emergencyContactName: text(120),
       emergencyContactPhone: text(30),
     })

@@ -813,7 +813,6 @@ export const WRITE_THROUGH: Record<string, (user: SessionClaims, data: Data, con
         email,
         personalEmail: str(d.e_mail_address) || null,
         phone: str(d.phone_number) || null,
-        sinMasked: str(d.social_insurance_number) ? `***-***-${str(d.social_insurance_number).slice(-3)}` : null,
         emergencyContactName: str(d.emergency_contact_name) || null,
         emergencyContactPhone: str(d.emergency_contact_phone_number) || null,
         dateOfBirth: str(d.date_of_birth) || null,

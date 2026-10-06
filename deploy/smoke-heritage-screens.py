@@ -400,7 +400,7 @@ if hra:
         c, v = req("GET", f"{S}/document-templates/{hra['id']}/history/{hi[-1]['id']}", token=T)
         check("SC12 original version differs + element labels", c == 200 and v["snapshot"].get("header") == "None" and bool(v.get("currentLabels", {}).get("headerElement")))
 check("SC11 inputs / elements / fonts", len(sitems("documentInputs")) >= 10 and len(sitems("runningElements")) >= 6 and len(sitems("documentFonts")) >= 4)
-check("SC13 correspondence categories", {"Admissions Documents", "SIN NUMBER", "TRANSCRIPT RECORD"} <= {x["name"] for x in sitems("correspondenceCategories")})
+check("SC13 correspondence categories", {"Admissions Documents", "TRANSCRIPT RECORD"} <= {x["name"] for x in sitems("correspondenceCategories")})
 forms = sitems("forms")
 check("SC14 forms (11)", len(forms) >= 11 and by(forms, "name", "General Inquiry Form").get("visibility") == "Public")
 check("SC15 sections (15)", len(sitems("sections")) >= 15)

@@ -4,8 +4,9 @@ import { z } from "zod";
 import { prisma } from "@myheritage/db";
 import { hashPassword } from "@myheritage/auth";
 import { requireAuth, requireRoles, type AuthedRequest } from "../../middleware/auth.js";
-import { getSisScreen, runSisAction, seedAllSisScreens, getCampusOverview } from "./sis.service.js";
+import { getSisScreen, runSisAction, getCampusOverview } from "./sis.service.js";
 import { superAdminRouter } from "./superAdmin.router.js";
+import { assertPermission, type PermissionModuleKey } from "./superAdmin.service.js";
 import { heritageRouter } from "./heritage/heritage.router.js";
 import {
   UpsertCohortBody,
@@ -49,7 +50,7 @@ const CreateUser = z.object({
   givenName: z.string().min(1),
   familyName: z.string().min(1),
   role: z.enum(["student", "instructor", "admin", "registrar", "applicant", "employer"]),
-  password: z.string().min(8).default("Heritage!2026"),
+  password: z.string().min(8).max(200),
   studentNumber: z.string().optional(),
   programName: z.string().optional(),
 });
@@ -79,6 +80,27 @@ const CreateAssignment = z.object({
 adminRouter.use(requireAuth, requireRoles("admin", "registrar"));
 adminRouter.use("/super", superAdminRouter);
 adminRouter.use("/heritage", heritageRouter);
+
+/** Access-level module behind each legacy route: GET needs view, any other method needs edit. */
+const LEGACY_PERMISSIONS: Array<[RegExp, PermissionModuleKey]> = [
+  [/^\/users(\/|$)/, "userManagement"],
+  [/^\/(sections|sections-lite|assignments)(\/|$)/, "courseManagement"],
+  [/^\/(programs-lite|cohorts)(\/|$)/, "programManagement"],
+  [/^\/(enrolments|students-lite|extracurricular|student-documents|retakes)(\/|$)/, "studentRecords"],
+  [/^\/(financial-terms|finance|tax-documents)(\/|$)/, "financialManagement"],
+  [/^\/mail-policy(\/|$)/, "emailMessaging"],
+];
+
+adminRouter.use(async (req, _res, next) => {
+  const hit = LEGACY_PERMISSIONS.find(([pattern]) => pattern.test(req.path));
+  if (!hit) return next();
+  try {
+    await assertPermission((req as AuthedRequest).user, hit[1], req.method === "GET" ? "view" : "edit");
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
 
 adminRouter.get("/campus-overview", async (req, res, next) => {
   try {
@@ -121,6 +143,11 @@ adminRouter.post("/users", async (req, res, next) => {
   try {
     const user = (req as AuthedRequest).user;
     const body = CreateUser.parse(req.body);
+    const access = await assertPermission(user, "userManagement", "edit");
+    if ((body.role === "admin" || body.role === "registrar") && !access.administrator) {
+      res.status(403).json({ error: { code: "FORBIDDEN", message: "Only administrators can create admin or registrar accounts" } });
+      return;
+    }
     const email = body.email.trim().toLowerCase();
     const existing = await prisma.account.findFirst({
       where: { institutionId: user.institutionId, email },
@@ -299,7 +326,6 @@ adminRouter.post("/users", async (req, res, next) => {
       role,
       studentId,
       studentNumber,
-      temporaryPassword: body.password,
       portalHref,
       loginHint:
         role === "student" && studentNumber
@@ -606,16 +632,6 @@ adminRouter.post("/sis/action", async (req, res, next) => {
     }
     const view = await runSisAction(user, body);
     res.json(view);
-  } catch (err) {
-    next(err);
-  }
-});
-
-adminRouter.post("/sis/seed", async (req, res, next) => {
-  try {
-    const user = (req as AuthedRequest).user;
-    const n = await seedAllSisScreens(user.institutionId);
-    res.json({ ok: true, screens: n });
   } catch (err) {
     next(err);
   }

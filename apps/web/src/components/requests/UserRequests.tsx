@@ -28,7 +28,6 @@ type ProfileFields = {
   preferredName: string;
   phone: string;
   primaryEmail: string;
-  sinMasked: string;
   emergencyContactName: string;
   emergencyContactPhone: string;
 };
@@ -573,7 +572,6 @@ export function UserRequestReview({ number }: { number: number }) {
                       ["First Name", "givenName"],
                       ["Phone Number", "phone"],
                       ["E-mail Address", "primaryEmail"],
-                      ["Social Insurance Number", "sinMasked"],
                     ] as Array<[string, keyof ProfileFields]>
                   ).map(([label, k]) => [label, <Changed key={k} field={k} profile={detail.profile!} />])}
                 />
@@ -677,7 +675,6 @@ const PROFILE_FIELDS: Array<{ key: keyof ProfileFields; label: string; required:
   { key: "preferredName", label: "Preferred Name", required: false, group: "contact" },
   { key: "phone", label: "Phone Number", required: true, type: "tel", group: "contact" },
   { key: "primaryEmail", label: "E-mail Address", required: true, type: "email", group: "contact" },
-  { key: "sinMasked", label: "Social Insurance Number", required: true, group: "contact" },
   { key: "emergencyContactName", label: "Emergency Contact Name", required: true, group: "emergency" },
   { key: "emergencyContactPhone", label: "Emergency Contact Phone Number", required: true, type: "tel", group: "emergency" },
 ];
@@ -736,7 +733,6 @@ export function UserRequestEdit({ number }: { number: number }) {
         type={f.type ?? "text"}
         required={f.required}
         value={profile?.[f.key] ?? ""}
-        placeholder={f.key === "sinMasked" ? "9 digits, stored masked" : undefined}
         onChange={(e) => setProfile((p) => (p ? { ...p, [f.key]: e.target.value } : p))}
       />
     </label>

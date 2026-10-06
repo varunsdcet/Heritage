@@ -28,6 +28,7 @@ import { myCoursesRouter } from "./myCourses.router.js";
 import { coursesRouter } from "./courses.router.js";
 import { studentsRouter } from "./students.router.js";
 import { opsRouter } from "./ops.router.js";
+import { canView, effectiveAccess } from "../superAdmin.service.js";
 
 export const heritageRouter: Router = Router();
 
@@ -72,9 +73,15 @@ heritageRouter.get("/registry", (_req, res) => {
   res.json(registryOverview());
 });
 
+async function canSeeStudents(u: AuthedRequest["user"]) {
+  const access = await effectiveAccess(u.institutionId, u.accountId);
+  return canView(access.permissions.studentRecords);
+}
+
 heritageRouter.get("/refs", async (req, res, next) => {
   try {
-    res.json(await refs(user(req)));
+    const [out, students] = await Promise.all([refs(user(req)), canSeeStudents(user(req))]);
+    res.json(students ? out : { ...out, students: [] });
   } catch (err) {
     next(err);
   }
@@ -82,7 +89,12 @@ heritageRouter.get("/refs", async (req, res, next) => {
 
 heritageRouter.get("/context-options", async (req, res, next) => {
   try {
-    res.json({ items: await contextOptions(user(req), String(req.query.type ?? ""), String(req.query.q ?? "")) });
+    const type = String(req.query.type ?? "");
+    if (type === "student" && !(await canSeeStudents(user(req)))) {
+      res.json({ items: [] });
+      return;
+    }
+    res.json({ items: await contextOptions(user(req), type, String(req.query.q ?? "")) });
   } catch (err) {
     next(err);
   }

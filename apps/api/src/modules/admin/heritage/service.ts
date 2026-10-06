@@ -6,6 +6,8 @@ import {
   STUDENT_PROGRAMS,
   STUDENT_STATUSES,
   assertPermission,
+  canView,
+  effectiveAccess,
   listAccessLevels,
   type PermissionModuleKey,
 } from "../superAdmin.service.js";
@@ -203,6 +205,23 @@ function requireSchema(id: string) {
 async function guard(user: SessionClaims, schema: ScreenSchema, mode: "view" | "edit") {
   const key = MODULE_PERMISSION[schema.module];
   if (key) await assertPermission(user, key, mode);
+}
+
+/** Context ids come from the client; write-through hooks trust them, so confirm they belong to this institution. */
+async function assertContextOwned(inst: string, ctx: { id: string | null; type: ContextType | null }) {
+  if (!ctx.id || !ctx.type) return;
+  const where = { id: ctx.id, institutionId: inst };
+  const found =
+    ctx.type === "student"
+      ? await prisma.student.count({ where })
+      : ctx.type === "course"
+        ? await prisma.course.count({ where })
+        : ctx.type === "program"
+          ? await prisma.program.count({ where })
+          : ctx.type === "term"
+            ? await prisma.term.count({ where })
+            : await prisma.heritageRecord.count({ where: { ...where, deletedAt: null } });
+  if (!found) throw httpError(404, `That ${ctx.type} was not found`, "NOT_FOUND");
 }
 
 function storeOf(schema: ScreenSchema) {
@@ -502,8 +521,10 @@ function coerce(schema: ScreenSchema, input: Data, partial: boolean): Data {
     out[f.key] = coerceValue(f, v);
     if (f.required && (out[f.key] === "" || out[f.key] === null || (Array.isArray(out[f.key]) && !(out[f.key] as unknown[]).length))) missing.push(f.label);
   }
+  let extras = 0;
   for (const [k, v] of Object.entries(input)) {
     if (k in out || schema.fields.some((f) => f.key === k)) continue;
+    if (!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(k) || k === "__proto__" || /social_insurance|^sin(_|$)|_sin$|ssn|social_security|passport_(no|number)/i.test(k) || ++extras > 50) continue;
     if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") out[k] = typeof v === "string" ? v.slice(0, 20000) : v;
   }
   if (missing.length) throw httpError(400, `Required: ${missing.join(", ")}`);
@@ -557,6 +578,7 @@ export async function createRecord(user: SessionClaims, id: string, body: { ctx?
   const ctx = parseCtx(schema, body.ctx);
   const data = coerce(schema, body.data ?? {}, false);
   if (schema.context && !ctx.key && WRITE_THROUGH[schema.id]) throw httpError(400, `Select a ${schema.context} first`);
+  await assertContextOwned(user.institutionId, ctx);
 
   const hook = WRITE_THROUGH[schema.id];
   const result = hook ? await hook(user, body.data ?? {}, ctx.id) : null;
@@ -598,6 +620,7 @@ export async function saveSingleton(user: SessionClaims, id: string, body: { ctx
   const store = storeOf(schema);
   const ctx = parseCtx(schema, body.ctx);
   if (schema.context && !ctx.key) throw httpError(400, `Select a ${schema.context} first`);
+  await assertContextOwned(user.institutionId, ctx);
   const data = coerce(schema, body.data ?? {}, false);
   const hook = WRITE_THROUGH[schema.id];
   const result = hook ? await hook(user, body.data ?? {}, ctx.id) : null;
@@ -764,10 +787,20 @@ export async function listAudit(user: SessionClaims, id: string, query: { ctx?: 
   const store = storeOf(schema);
   const ctx = parseCtx(schema, query.ctx);
   const domainRecord = Boolean(query.recordId?.includes(":"));
+  let screenScope: { screenId: string | { in: string[] } } = { screenId: store };
+  if (domainRecord) {
+    const access = await effectiveAccess(user.institutionId, user.accountId);
+    const visible = new Set<string>();
+    for (const s of screenSchemas().values()) {
+      const key = MODULE_PERMISSION[s.module];
+      if (!key || canView(access.permissions[key])) visible.add(storeOf(s));
+    }
+    screenScope = { screenId: { in: [...visible] } };
+  }
   const rows = await prisma.heritageAuditEntry.findMany({
     where: {
       institutionId: user.institutionId,
-      ...(domainRecord ? {} : { screenId: store }),
+      ...screenScope,
       ...(ctx.key && !domainRecord ? { contextKey: ctx.key } : {}),
       ...(query.recordId ? { OR: [{ recordId: query.recordId }, { note: query.recordId }] } : {}),
     },
@@ -1036,9 +1069,21 @@ export async function contextOptions(user: SessionClaims, type: string, q: strin
     .filter((o) => !term || o.label.toLowerCase().includes(term.toLowerCase()));
 }
 
+const GATE_WINDOW_MS = 15 * 60_000;
+const GATE_MAX_FAILURES = 5;
+const gateFailures = new Map<string, number[]>();
+
 export async function verifyGate(user: SessionClaims, password: string) {
+  const now = Date.now();
+  const recent = (gateFailures.get(user.accountId) ?? []).filter((t) => now - t < GATE_WINDOW_MS);
+  if (recent.length >= GATE_MAX_FAILURES) throw httpError(429, "Too many incorrect attempts. Try again in 15 minutes.", "RATE_LIMITED");
   const account = await prisma.account.findFirst({ where: { id: user.accountId, institutionId: user.institutionId } });
-  if (!account || !(await verifyPassword(password, account.passwordHash))) throw httpError(400, "Current password is incorrect", "INVALID_PASSWORD");
+  if (!account || !(await verifyPassword(password, account.passwordHash))) {
+    gateFailures.set(user.accountId, [...recent, now]);
+    if (gateFailures.size > 10_000) gateFailures.clear();
+    throw httpError(400, "Current password is incorrect", "INVALID_PASSWORD");
+  }
+  gateFailures.delete(user.accountId);
   await audit(user, "P11", "", "Account verification passed");
   return { ok: true, message: "Account verified" };
 }

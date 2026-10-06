@@ -129,7 +129,6 @@ export type Profile = {
   province: string;
   visaStatus: string;
   visaExpiry: string;
-  sin: string;
   academicHistory: string;
   transcripts: Array<{ id: string; name: string; size: number }>;
   declarationBy: string;
@@ -149,7 +148,6 @@ const EMPTY_PROFILE: Profile = {
   province: "",
   visaStatus: "",
   visaExpiry: "",
-  sin: "",
   academicHistory: "",
   transcripts: [],
   declarationBy: "",

@@ -12,15 +12,16 @@ const REVOCATION_TTL_MS = 15_000;
 const revocations = new Map<string, { revoked: boolean; at: number }>();
 
 /**
- * A session row whose expiry has passed was revoked by an administrator. Missing rows are not treated
- * as revoked: logout and the concurrent-session limit delete rows without invalidating issued tokens.
+ * Every token is minted at login alongside a session row. Logout, disabling an account, password resets,
+ * role changes and the concurrent-session limit delete that row; an administrator revoking a session
+ * expires it. Either way the token stops working.
  */
 async function sessionRevoked(sessionId: string | undefined) {
-  if (!sessionId) return false;
+  if (!sessionId) return true;
   const hit = revocations.get(sessionId);
   if (hit && Date.now() - hit.at < REVOCATION_TTL_MS) return hit.revoked;
   const row = await prisma.session.findUnique({ where: { id: sessionId }, select: { expiresAt: true } });
-  const revoked = Boolean(row && row.expiresAt.getTime() <= Date.now());
+  const revoked = !row || row.expiresAt.getTime() <= Date.now();
   if (revocations.size > 10_000) revocations.clear();
   revocations.set(sessionId, { revoked, at: Date.now() });
   return revoked;
@@ -38,7 +39,7 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
     }
     const token = header.slice("Bearer ".length);
     const user = await verifySession(token);
-    if (await sessionRevoked(user.sessionId)) throw new Error("This session was signed out by an administrator");
+    if (await sessionRevoked(user.sessionId)) throw new Error("This session has been signed out. Please sign in again.");
     (req as AuthedRequest).user = user;
     next();
   } catch (err) {

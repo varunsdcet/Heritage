@@ -41,7 +41,6 @@ const REQUIRED: Array<[string, string]> = [
   ["province", "Province / State"],
   ["phone", "Phone Number"],
   ["email", "E-mail Address"],
-  ["sin", "Social Insurance Number"],
   ["emergencyName", "Emergency Contact Name"],
   ["emergencyPhone", "Emergency Contact Phone Number"],
   ["visaStatus", "Visa Status"],
@@ -169,9 +168,6 @@ export function CreateStudent() {
             </F>
             <F label="E-mail Address" req>
               <Txt type="email" value={v("email")} onChange={set("email")} />
-            </F>
-            <F label="Social Insurance Number" req hint="9 digits; stored masked">
-              <Txt value={v("sin")} onChange={set("sin")} />
             </F>
           </Grid>
         </Card>

@@ -55,11 +55,11 @@ code="$(curl -s -o /dev/null -w '%{http_code}' -H "authorization: Bearer $AD" -H
 [ "$code" = "409" ] && echo "OK second approve rejected (409)" || { echo "FAIL second approve returned $code"; exit 1; }
 student "$API/student/leave-of-absence" | json '"student sees: %s" % d["requests"][0]["status"]'
 
-echo "==> profile change: edit (9 fields), approve"
-admin -X PATCH "$R/$PC" -d "{\"profile\":{\"familyName\":\"Vance-$STAMP\",\"givenName\":\"Marcus\",\"middleName\":\"J\",\"preferredName\":\"Marc\",\"phone\":\"604-555-0199\",\"primaryEmail\":\"marcus.$STAMP@example.com\",\"sinMasked\":\"123 456 789\",\"emergencyContactName\":\"Rita Vance\",\"emergencyContactPhone\":\"604-555-0100\"}}" | json 'd["message"]'
-admin "$R/$PC" | json '"requested sin=%s middle=%s current last=%s" % (d["profile"]["requested"]["sinMasked"], d["profile"]["requested"]["middleName"], d["profile"]["current"]["familyName"])'
+echo "==> profile change: edit (8 fields), approve"
+admin -X PATCH "$R/$PC" -d "{\"profile\":{\"familyName\":\"Vance-$STAMP\",\"givenName\":\"Marcus\",\"middleName\":\"J\",\"preferredName\":\"Marc\",\"phone\":\"604-555-0199\",\"primaryEmail\":\"marcus.$STAMP@example.com\",\"emergencyContactName\":\"Rita Vance\",\"emergencyContactPhone\":\"604-555-0100\"}}" | json 'd["message"]'
+admin "$R/$PC" | json '"requested middle=%s current last=%s" % (d["profile"]["requested"]["middleName"], d["profile"]["current"]["familyName"])'
 admin -X POST "$R/$PC/approve" -d '{"comments":"ID verified"}' | json 'd["message"]'
-student "$API/me/profile" | json '"student profile now: %s, %s <%s> sin=%s" % (d["familyName"], d["givenName"], d["primaryEmail"], d["sinMasked"])'
+student "$API/me/profile" | json '"student profile now: %s, %s <%s>" % (d["familyName"], d["givenName"], d["primaryEmail"])'
 
 echo "==> withdraw: decline"
 admin -X POST "$R/$WD/decline" -d '{"comments":"Past the withdrawal deadline"}' | json 'd["message"]'

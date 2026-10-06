@@ -380,7 +380,7 @@ export async function editAssignment(user: SessionClaims, id: string, body: Data
   const a = await find(user.institutionId, S.assignment, id, "Evaluation assignment");
   const win = windowOf(body);
   const ids = arr(a.data.rowIds).map(s);
-  await prisma.courseEvaluation.updateMany({ where: { id: { in: ids }, status: "pending" }, data: { dueAt: new Date(`${win.availableTo}:00`) } });
+  await prisma.courseEvaluation.updateMany({ where: { id: { in: ids }, institutionId: user.institutionId, status: "pending" }, data: { dueAt: new Date(`${win.availableTo}:00`) } });
   await update(user, id, { ...a.data, ...win });
   await audit(user, "C30", a.contextKey, "Updated evaluation assignment", { recordId: id, before: { availableFrom: a.data.availableFrom, availableTo: a.data.availableTo }, after: win });
   return { message: "Evaluation assignment saved" };
@@ -390,7 +390,7 @@ export async function unassignEvaluation(user: SessionClaims, id: string) {
   await edit(user);
   const a = await find(user.institutionId, S.assignment, id, "Evaluation assignment");
   const ids = arr(a.data.rowIds).map(s);
-  const removed = await prisma.courseEvaluation.deleteMany({ where: { id: { in: ids }, status: "pending" } });
+  const removed = await prisma.courseEvaluation.deleteMany({ where: { id: { in: ids }, institutionId: user.institutionId, status: "pending" } });
   await softDelete(user, [id]);
   await audit(user, "C30", a.contextKey, "Unassigned evaluation", { recordId: id, before: a.data });
   return { message: `Evaluation unassigned · ${removed.count} pending response request(s) withdrawn${ids.length - removed.count ? `; ${ids.length - removed.count} submitted response(s) kept on record` : ""}` };

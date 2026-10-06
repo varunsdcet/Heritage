@@ -1204,8 +1204,10 @@ export async function listRuns(user: SessionClaims, opts: { templateId?: string;
     listRecords<Template>(user.institutionId, SCREEN.template),
   ]);
   const live = new Set(templates.map((t) => t.id));
+  const byId = new Map(templates.map((t) => [t.id, t]));
   return {
     items: rows
+      .filter((r) => runVisible(user, r, parse<StoredRun>(r.dataJson), byId))
       .map((r) => {
         const d = parse<StoredRun>(r.dataJson);
         return {
@@ -1237,7 +1239,17 @@ export async function deleteRun(user: SessionClaims, id: string) {
 async function loadRun(user: SessionClaims, id: string) {
   const r = await prisma.heritageRecord.findFirst({ where: { id, institutionId: user.institutionId, screenId: SCREEN.run, deletedAt: null } });
   if (!r) throw httpError(404, "Report run not found", "NOT_FOUND");
-  return { rec: r, run: parse<StoredRun>(r.dataJson) };
+  const run = parse<StoredRun>(r.dataJson);
+  const templates = await listRecords<Template>(user.institutionId, SCREEN.template);
+  if (!runVisible(user, r, run, new Map(templates.map((t) => [t.id, t])))) throw httpError(404, "Report run not found", "NOT_FOUND");
+  return { rec: r, run };
+}
+
+/** A run inherits its template's audience; runs of deleted templates stay with whoever ran them (and administrators). */
+function runVisible(user: SessionClaims, rec: { createdById: string | null }, run: StoredRun, templates: Map<string, Stored<Template>>) {
+  const t = templates.get(run.templateId);
+  if (t) return canSee(user, t);
+  return rec.createdById === user.accountId || user.roles.includes("admin");
 }
 
 export async function getRun(user: SessionClaims, id: string) {

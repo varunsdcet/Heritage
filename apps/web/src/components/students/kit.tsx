@@ -433,10 +433,14 @@ export function FileDrop({ files, onChange, max = 10, label = "Add / Browse" }: 
   );
 }
 
+/** Types a browser renders without running script; anything else (HTML, SVG, XML…) is only ever saved to disk. */
+const INLINE_SAFE = /^(application\/pdf|image\/(png|jpe?g|gif|webp)|text\/plain)$/i;
+
 export function downloadBase64(name: string, mime: string, base64: string, open = false) {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-  const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
-  if (open) window.open(url, "_blank", "noopener");
+  const inline = open && INLINE_SAFE.test(mime.trim());
+  const url = URL.createObjectURL(new Blob([bytes], { type: inline ? mime : "application/octet-stream" }));
+  if (inline) window.open(url, "_blank", "noopener");
   else {
     const a = document.createElement("a");
     a.href = url;

@@ -252,7 +252,31 @@ async function refundFrom(c: StudentCtx, fund: Fund | null, r: RefundInput, amou
   return number;
 }
 
-export async function refundPayment(user: SessionClaims, entryId: string, body: Data) {
+const studentLocks = new Map<string, Promise<unknown>>();
+
+/** Serialises refunds per student (single API process) so two concurrent requests cannot both pass the refundable check. */
+async function withStudentLock<T>(user: SessionClaims, entryId: string, run: () => Promise<T>): Promise<T> {
+  const row = await prisma.financeLedgerEntry.findFirst({ where: { id: entryId, institutionId: user.institutionId }, select: { studentId: true } });
+  const key = `${user.institutionId}:${row?.studentId ?? entryId}`;
+  const next = (studentLocks.get(key) ?? Promise.resolve()).catch(() => undefined).then(run);
+  const tail = next.catch(() => undefined);
+  studentLocks.set(key, tail);
+  try {
+    return await next;
+  } finally {
+    if (studentLocks.get(key) === tail) studentLocks.delete(key);
+  }
+}
+
+export function refundPayment(user: SessionClaims, entryId: string, body: Data) {
+  return withStudentLock(user, entryId, () => refundPaymentLocked(user, entryId, body));
+}
+
+export function refundFee(user: SessionClaims, entryId: string, body: Data) {
+  return withStudentLock(user, entryId, () => refundFeeLocked(user, entryId, body));
+}
+
+async function refundPaymentLocked(user: SessionClaims, entryId: string, body: Data) {
   const c = await entryCtx(user, entryId, "edit");
   const p = findFund(c, entryId, "payment");
   const refundable = r2(p.amount - p.refunded);
@@ -266,7 +290,7 @@ export async function refundPayment(user: SessionClaims, entryId: string, body: 
   return { message: "Transaction information updated successfully" };
 }
 
-export async function refundFee(user: SessionClaims, entryId: string, body: Data) {
+async function refundFeeLocked(user: SessionClaims, entryId: string, body: Data) {
   const c = await entryCtx(user, entryId, "edit");
   const ch = findCharge(c, entryId);
   if (ch.hidden || ch.statusLabel === "Refunded") throw httpError(400, "This fee has already been removed or refunded");

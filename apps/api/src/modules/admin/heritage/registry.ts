@@ -125,6 +125,9 @@ export function slug(label: string) {
   );
 }
 
+/** Government identifiers are never collected, displayed or stored (docs/CLAUDE.md). */
+export const GOVERNMENT_ID = /social insurance|\bSIN\b|\bSSN\b|social security|passport (no|number|#)/i;
+
 function cleanLabel(raw: string) {
   return raw
     .replace(/^\*\s*/, "")
@@ -397,6 +400,7 @@ export function buildSchema(screen: RawScreen): ScreenSchema {
   const actions: ActionDef[] = [];
 
   for (const dp of screen.dataPoints) {
+    if (GOVERNMENT_ID.test(dp.label)) continue;
     const dpPartial = dp.status !== "Readable fields";
     if (dp.type.startsWith("Field")) {
       const def = classifyField(dp.id, dp.label, dpPartial);
