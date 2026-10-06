@@ -508,6 +508,13 @@ export async function gradeSubmissions(user: SessionClaims, q: { course?: string
   };
 }
 
+/** One of the caller's own offerings on the grades board; anything else is not theirs to submit. */
+export async function gradeSubmission(user: SessionClaims, sectionId: string) {
+  const row = (await submissionBoard(user)).find((o) => o.id === sectionId);
+  if (!row) throw httpError(404, "This course offering is not on your grades submission list", "NOT_FOUND");
+  return { ...row, status: row.submissionStatus };
+}
+
 export async function myCoursesCounts(user: SessionClaims) {
   const board = await submissionBoard(user);
   return { gradesSubmission: board.filter((o) => o.submissionStatus === "Submission Required").length };

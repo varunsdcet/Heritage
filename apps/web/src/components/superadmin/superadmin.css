@@ -17,8 +17,9 @@
 
 .mh-sa__head h1 {
   margin: 0;
-  font-size: 22px;
+  font-size: 26px;
   font-weight: 700;
+  letter-spacing: -0.025em;
 }
 
 .mh-sa__head-actions,
@@ -47,11 +48,17 @@
 .mh-sa__card {
   background: var(--mh-surface);
   border: 1px solid var(--mh-border);
-  border-radius: 12px;
+  border-radius: 14px;
   padding: 20px;
   display: flex;
   flex-direction: column;
   gap: 14px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  transition: box-shadow 0.2s ease;
+}
+
+.mh-sa__card:hover {
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.06);
 }
 
 .mh-sa__card-head {
@@ -122,13 +129,14 @@
   font-size: 14px;
   background: var(--mh-surface);
   color: inherit;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
 }
 
 .mh-sa__input:focus,
 .mh-sa-rte__area:focus {
-  outline: 2px solid #93c5fd;
-  outline-offset: 0;
+  outline: none;
   border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
 }
 
 .mh-sa__input--auto {
@@ -192,10 +200,15 @@ textarea.mh-sa__input {
   cursor: pointer;
   text-decoration: none;
   white-space: nowrap;
+  transition: background-color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, transform 0.12s ease;
 }
 
 .mh-sa__btn:hover {
   background: var(--mh-surface-muted);
+}
+
+.mh-sa__btn:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .mh-sa__btn:disabled {
@@ -207,10 +220,12 @@ textarea.mh-sa__input {
   background: #2563eb;
   border-color: #2563eb;
   color: #fff;
+  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.25);
 }
 
 .mh-sa__btn--primary:hover {
   background: #1d4ed8;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
 }
 
 .mh-sa__btn--danger {
@@ -289,6 +304,7 @@ textarea.mh-sa__input {
   padding: 10px 14px;
   border-radius: 8px;
   font-size: 14px;
+  animation: mh-sa-pop 0.22s ease both;
 }
 
 .mh-sa__notice button {
@@ -334,9 +350,36 @@ textarea.mh-sa__input {
 }
 
 .mh-sa__table td {
-  padding: 10px 12px;
+  padding: 12px;
   border-bottom: 1px solid var(--mh-border);
   vertical-align: top;
+  transition: background-color 0.14s ease;
+}
+
+.mh-sa__table tbody tr:hover td:not(.mh-sa__empty-cell) {
+  background: #f5f8ff;
+}
+
+.mh-sa__table tbody tr {
+  animation: mh-sa-row 0.32s ease backwards;
+}
+
+.mh-sa__table tbody tr:nth-child(2) { animation-delay: 0.04s; }
+.mh-sa__table tbody tr:nth-child(3) { animation-delay: 0.08s; }
+.mh-sa__table tbody tr:nth-child(4) { animation-delay: 0.12s; }
+.mh-sa__table tbody tr:nth-child(5) { animation-delay: 0.16s; }
+.mh-sa__table tbody tr:nth-child(6) { animation-delay: 0.2s; }
+.mh-sa__table tbody tr:nth-child(n + 7) { animation-delay: 0.24s; }
+
+@keyframes mh-sa-row {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .mh-sa__table tr.is-disabled td {
@@ -906,7 +949,9 @@ textarea.mh-sa__input {
   inset: 0;
   border: 0;
   background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(2px);
   cursor: default;
+  animation: mh-sa-fade 0.2s ease both;
 }
 
 .mh-sa-modal__panel {
@@ -916,8 +961,29 @@ textarea.mh-sa__input {
   display: flex;
   flex-direction: column;
   background: var(--mh-surface);
-  border-radius: 14px;
+  border-radius: 16px;
   box-shadow: 0 24px 48px rgba(15, 23, 42, 0.25);
+  animation: mh-sa-pop 0.24s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes mh-sa-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes mh-sa-pop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .mh-sa-modal__panel--wide {

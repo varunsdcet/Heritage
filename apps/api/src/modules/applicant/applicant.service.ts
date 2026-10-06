@@ -67,9 +67,10 @@ async function applicationFor(user: SessionClaims) {
     where: { institutionId: user.institutionId, accountId: user.accountId },
     include: {
       documents: { orderBy: { label: "asc" } },
-      offers: { orderBy: { createdAt: "desc" } },
+      offers: { where: { status: { notIn: ["draft", "withdrawn"] } }, orderBy: { createdAt: "desc" } },
       timeline: { orderBy: { occurredAt: "desc" } },
     },
+    orderBy: { createdAt: "desc" },
   });
 }
 

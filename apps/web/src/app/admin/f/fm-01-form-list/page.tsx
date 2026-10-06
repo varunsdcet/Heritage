@@ -1,7 +1,5 @@
-"use client";
-
-import { AdminSisScreen } from "@/components/AdminSisScreen";
+import { redirect } from "next/navigation";
 
 export default function Page() {
-  return <AdminSisScreen path="/admin/f/fm-01-form-list" />;
+  redirect("/admin/sysconfig/forms");
 }

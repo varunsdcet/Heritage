@@ -1,7 +1,5 @@
-"use client";
-
-import { AdminSisScreen } from "@/components/AdminSisScreen";
+import { redirect } from "next/navigation";
 
 export default function Page() {
-  return <AdminSisScreen path="/admin/f/ad-10-conversion" />;
+  redirect("/admin/ops/admissions/applications");
 }

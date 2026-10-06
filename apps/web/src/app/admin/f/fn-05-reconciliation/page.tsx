@@ -1,7 +1,5 @@
-"use client";
-
-import { AdminSisScreen } from "@/components/AdminSisScreen";
+import { redirect } from "next/navigation";
 
 export default function Page() {
-  return <AdminSisScreen path="/admin/f/fn-05-reconciliation" />;
+  redirect("/admin/financial/unallocated-funds");
 }

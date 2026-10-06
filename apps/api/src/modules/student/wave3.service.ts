@@ -25,6 +25,7 @@ import {
   mergeCourseLmsOverlay,
   studentQuizQuestionsForActivity,
 } from "../instructor/courseLmsScreens.js";
+import { sectionLmsMeta } from "../instructor/sectionLmsMeta.js";
 import { liveClassUrl } from "../../lib/liveClass.js";
 import { requireStudent } from "./surfaces.service.js";
 
@@ -148,8 +149,8 @@ export async function listStudentCalendars(user: SessionClaims) {
 
 async function loadInstructorLmsOverlay(institutionId: string, sectionId: string) {
   const candidates = [
-    `/instructor/f/t56-active-courses?view=${sectionId}`,
     `/instructor/sections/${sectionId}`,
+    `/instructor/f/t56-active-courses?view=${sectionId}`,
     `/instructor/f/t56-active-courses?view=${encodeURIComponent(sectionId)}`,
   ];
   for (const path of candidates) {
@@ -159,21 +160,6 @@ async function loadInstructorLmsOverlay(institutionId: string, sectionId: string
     if (state) return JSON.parse(state.payloadJson) as Record<string, unknown>;
   }
   return null;
-}
-
-function sessionLabelFor(code: string, sectionCode: string, startsOn: string | null, endsOn: string | null) {
-  if (/ACSW\s*500/i.test(code)) return `${sectionCode}: Sep. 18, 2026 - Oct. 2, 2026`;
-  if (/ACSW\s*200/i.test(code)) return `${sectionCode}: Apr. 27, 2026 - May. 1, 2026`;
-  if (startsOn && endsOn) {
-    const fmt = (iso: string) => {
-      const d = new Date(`${iso}T12:00:00`);
-      if (Number.isNaN(d.getTime())) return iso;
-      const months = ["Jan.", "Feb.", "Mar.", "Apr.", "May", "Jun.", "Jul.", "Aug.", "Sep.", "Oct.", "Nov.", "Dec."];
-      return `${months[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
-    };
-    return `${sectionCode}: ${fmt(startsOn)} - ${fmt(endsOn)}`;
-  }
-  return sectionCode;
 }
 
 export async function getStudentCourseLms(user: SessionClaims, sectionId: string) {
@@ -218,13 +204,10 @@ export async function getStudentCourseLms(user: SessionClaims, sectionId: string
   const names = instructorNameParts(instructor ? `${instructor.givenName} ${instructor.familyName}` : "Instructor");
   const code = enrolment.section.course.code;
   const title = enrolment.section.course.title;
-  const location =
-    enrolment.section.classSessions.map((s) => s.location?.trim()).find(Boolean) ||
-    "#110 Heritage College - Surrey";
+  const meta = await sectionLmsMeta(user.institutionId, sectionId);
+  const location = meta?.location ?? "Location to be announced";
   const joinUrl = liveClassUrl(sectionId);
-  const startsOn = block?.startsOn || null;
-  const endsOn = block?.endsOn || null;
-  const sessionLabel = sessionLabelFor(code, enrolment.section.code, startsOn, endsOn);
+  const sessionLabel = meta?.session ?? enrolment.section.code;
 
   const overlay = await loadInstructorLmsOverlay(user.institutionId, sectionId);
   const lms = mergeCourseLmsOverlay(
@@ -237,6 +220,7 @@ export async function getStudentCourseLms(user: SessionClaims, sectionId: string
       instructorLast: names.last,
       sectionCode: enrolment.section.code,
       joinUrl,
+      ended: meta?.ended ?? false,
     }),
     overlay,
   );
@@ -255,8 +239,11 @@ export async function getStudentCourseLms(user: SessionClaims, sectionId: string
           name: a.name,
           body: a.body,
           fileName: a.fileName,
+          fileId: a.fileId,
+          fileSize: a.fileSize,
           modified: a.modified,
           note: a.note,
+          storyboard: a.storyboard,
           hidden: false,
           joinUrl: type === "BIGBLUEBUTTON" ? a.joinUrl || joinUrl : null,
           gradingMethod: /final\s*exam/i.test(a.name) ? "Highest grade" : a.note?.includes("Grading method") ? a.note : undefined,
@@ -462,6 +449,7 @@ export async function listMailbox(user: SessionClaims, folderId?: string | null)
         participants,
         participantNames: participants,
         otherName,
+        flagged: p.flagged,
         updatedAt: p.updatedAt.toISOString(),
         readAt: p.readAt?.toISOString() ?? null,
         chat: p.thread.messages.map((m) => ({
@@ -520,8 +508,9 @@ export async function composeMail(user: SessionClaims, body: unknown, correlatio
 
   const recipientIds = [...new Set(parsed.data.toAccountIds.filter((id) => id !== user.accountId))];
   if (!asDraft && !recipientIds.length) throw httpError("At least one recipient required", "VALIDATION_ERROR", 400);
+  const deliverIds = [...new Set([...recipientIds, ...(parsed.data.ccAccountIds ?? []), ...(parsed.data.bccAccountIds ?? [])].filter((id) => id !== user.accountId))];
 
-  for (const accountId of recipientIds) {
+  for (const accountId of deliverIds) {
     const account = await prisma.account.findFirst({
       where: { id: accountId, institutionId: user.institutionId },
     });
@@ -649,14 +638,13 @@ export async function replyMail(user: SessionClaims, threadId: string, body: unk
       where: { id: threadId },
       data: { updatedAt: new Date(), rowVersion: { increment: 1 } },
     });
+    // One placement per account per thread (@@unique([accountId, threadId])): move it, never add a second.
     await tx.mailThreadPlacement.updateMany({
       where: { threadId, accountId: user.accountId },
       data: { updatedAt: new Date(), readAt: new Date() },
     });
     if (outbox) {
-      const mine = await tx.mailThreadPlacement.findFirst({
-        where: { threadId, accountId: user.accountId, folderId: outbox.id },
-      });
+      const mine = await tx.mailThreadPlacement.findFirst({ where: { threadId, accountId: user.accountId } });
       if (!mine) {
         await tx.mailThreadPlacement.create({
           data: {
@@ -672,12 +660,12 @@ export async function replyMail(user: SessionClaims, threadId: string, body: unk
     }
     for (const [accountId, folderId] of inboxByAccount) {
       const existing = await tx.mailThreadPlacement.findFirst({
-        where: { threadId, accountId, folderId },
+        where: { threadId, accountId },
       });
       if (existing) {
         await tx.mailThreadPlacement.update({
           where: { id: existing.id },
-          data: { updatedAt: new Date(), readAt: null },
+          data: { folderId, updatedAt: new Date(), readAt: null },
         });
       } else {
         await tx.mailThreadPlacement.create({
@@ -867,7 +855,7 @@ export async function listAudienceAccounts(user: SessionClaims) {
         });
       }
     }
-  } else {
+  } else if (user.roles.includes("instructor")) {
     const sections = await prisma.section.findMany({
       where: { institutionId: user.institutionId, instructorPersonId: user.personId },
       include: {
@@ -891,10 +879,35 @@ export async function listAudienceAccounts(user: SessionClaims) {
     }
   }
 
+  const accounts = await prisma.account.findMany({
+    where: { institutionId: user.institutionId, status: "active", id: { not: user.accountId } },
+    select: { id: true, rolesJson: true, person: { select: { givenName: true, familyName: true } } },
+  });
+  const staff = new Map<string, { accountId: string; name: string; group: string }>();
+  const isStaffUser = !user.roles.includes("student") && !user.roles.includes("instructor");
+  for (const a of accounts) {
+    const r = parseRoles(a.rolesJson);
+    const name = `${a.person.givenName} ${a.person.familyName}`.trim();
+    if (r.includes("admin") || r.includes("registrar")) staff.set(a.id, { accountId: a.id, name, group: "staff" });
+    else if (r.includes("instructor") && !user.roles.includes("student")) instructors.set(a.id, { accountId: a.id, name, group: "instructors" });
+    else if (r.includes("student") && isStaffUser) classmates.set(a.id, { accountId: a.id, name, group: "students" });
+  }
+
+  const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
   return {
-    instructors: [...instructors.values()],
-    classmates: [...classmates.values()],
+    instructors: [...instructors.values()].sort(byName),
+    classmates: [...classmates.values()].sort(byName),
+    staff: [...staff.values()].sort(byName),
   };
+}
+
+function parseRoles(json: string) {
+  try {
+    const v = JSON.parse(json);
+    return Array.isArray(v) ? (v as string[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 export async function getMailThread(user: SessionClaims, threadId: string) {
@@ -953,6 +966,7 @@ export async function getMailThread(user: SessionClaims, threadId: string) {
     messages: placement.thread.messages.map((m) => ({
       id: m.id,
       from: m.senderAccountId === user.accountId ? "me" : "them",
+      senderAccountId: m.senderAccountId,
       senderName: nameOf(m.senderAccountId),
       senderEmail: emailOf(m.senderAccountId),
       text: m.body,

@@ -144,7 +144,7 @@ export function ScreenScaffold({
         if (item === "Notifications") {
           router.push(
             role === "admin"
-              ? "/admin/notifications"
+              ? "/admin/ops/workspace/notifications"
               : role === "instructor"
                 ? "/instructor/notifications"
                 : role === "student"
@@ -160,7 +160,7 @@ export function ScreenScaffold({
         if (item === "Profile") {
           router.push(
             role === "admin"
-              ? "/admin/profile"
+              ? "/admin/faculty-profile"
               : role === "instructor"
                 ? "/instructor/profile"
                 : role === "student"

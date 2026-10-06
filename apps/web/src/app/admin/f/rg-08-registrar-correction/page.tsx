@@ -1,7 +1,5 @@
-"use client";
-
-import { AdminSisScreen } from "@/components/AdminSisScreen";
+import { redirect } from "next/navigation";
 
 export default function Page() {
-  return <AdminSisScreen path="/admin/f/rg-08-registrar-correction" />;
+  redirect("/admin/student-management/transcript-changes");
 }

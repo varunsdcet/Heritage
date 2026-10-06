@@ -58,6 +58,17 @@
   margin-bottom: 80px;
 }
 
+.mc-score {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.mc-score__input {
+  width: 90px;
+}
+
 .mc-note {
   width: 100%;
   min-height: 34px;

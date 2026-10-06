@@ -406,6 +406,20 @@ export async function loadBooks(inst: string, cfg: Config, studentIds?: string[]
     }
   }
   for (const b of books.values()) {
+    // Payments recorded outside Financial Management were taken against the balance, not specific fees:
+    // spread what they did not already settle oldest-first over the outside fees that are still open.
+    const outsidePaid = b.charges.filter((c) => !c.managed && c.status === "paid" && !b.allocs.some((a) => a.chargeId === c.id)).reduce((t, c) => t + c.total, 0);
+    const outsideRefunds = b.refunds.filter((r) => !r.refundOf && r.status !== "void").reduce((t, r) => t + r.amount, 0);
+    let pool = r2([...b.payments, ...b.credits].filter((f) => !f.managed && f.active).reduce((t, f) => t + f.amount - f.refunded, 0) - outsidePaid - outsideRefunds);
+    for (const c of b.charges) {
+      if (pool < EPS) break;
+      if (c.managed || c.hidden || c.statusLabel === "Refunded" || c.owing < EPS) continue;
+      const take = r2(Math.min(pool, c.owing));
+      c.paid = r2(c.paid + take);
+      c.owing = r2(c.owing - take);
+      c.statusLabel = c.owing < EPS ? "Paid" : "Partially Paid";
+      pool = r2(pool - take);
+    }
     const counted = b.entries.filter((e) => e.status !== "waived" && e.status !== "void");
     const sum = (k: string) => counted.filter((e) => e.kind === k).reduce((t, e) => t + e.amount, 0);
     b.balance = r2(sum("charge") + sum("refund") - sum("payment") - sum("credit"));

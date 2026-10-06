@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { formForActivity, type LmsFormField } from "@/lib/lmsActivityForms";
+import { formatFileSize, uploadLmsFile } from "@/lib/lmsFiles";
 
 type RosterStudent = {
   studentId?: string;
@@ -15,11 +16,12 @@ type Props = {
   label: string;
   busy?: boolean;
   roster?: RosterStudent[];
+  sectionId?: string;
   onSave: (values: Record<string, string>) => void;
   onCancel: () => void;
 };
 
-export function LmsAddForm({ code, label, busy, roster = [], onSave, onCancel }: Props) {
+export function LmsAddForm({ code, label, busy, roster = [], sectionId, onSave, onCancel }: Props) {
   const spec = useMemo(() => formForActivity(code), [code]);
   const isOnlineClass = /bigbluebutton/i.test(code);
   const [open, setOpen] = useState<Record<string, boolean>>(() => {
@@ -45,6 +47,31 @@ export function LmsAddForm({ code, label, busy, roster = [], onSave, onCancel }:
   });
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [error, setError] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const needsFile = /^file$/i.test(code) && spec.sections.some((s) => s.fields.some((f) => f.type === "file"));
+
+  async function pickFile(fieldName: string, file: File | undefined) {
+    if (!file) return;
+    if (!sectionId) {
+      setError("Open this from a course section to upload files.");
+      return;
+    }
+    setUploading(true);
+    setError("");
+    try {
+      const up = await uploadLmsFile(sectionId, file);
+      setValues((prev) => ({
+        ...prev,
+        [fieldName]: `${up.name}${up.size ? ` · ${formatFileSize(up.size)}` : ""}`,
+        FileId: up.id,
+        Name: !prev.Name || prev.Name === `New ${label}` ? up.name.replace(/\.[^.]+$/, "") : prev.Name,
+      }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  }
 
   if (spec.error) {
     return (
@@ -91,7 +118,14 @@ export function LmsAddForm({ code, label, busy, roster = [], onSave, onCancel }:
           <summary>{section.title}</summary>
           <div className="mh-lms-addform__fields">
             {section.fields.map((field) => (
-              <Field key={field.name} field={field} value={values[field.name] || ""} onChange={set} />
+              <Field
+                key={field.name}
+                field={field}
+                value={values[field.name] || ""}
+                onChange={set}
+                onFile={(name, file) => void pickFile(name, file)}
+                uploading={uploading}
+              />
             ))}
             {isOnlineClass && section.title === "Publish to students" && audienceSelected ? (
               <div className="mh-lms-online-roster">
@@ -141,10 +175,14 @@ export function LmsAddForm({ code, label, busy, roster = [], onSave, onCancel }:
         <button
           type="button"
           className="mh-teacher-btn"
-          disabled={busy}
+          disabled={busy || uploading}
           onClick={() => {
             if (!String(values.Name || "").trim()) {
               setError("Name is required.");
+              return;
+            }
+            if (needsFile && !values.FileId) {
+              setError("Upload a file first.");
               return;
             }
             if (isOnlineClass && audienceSelected && selectedIds.length === 0) {
@@ -174,10 +212,14 @@ function Field({
   field,
   value,
   onChange,
+  onFile,
+  uploading,
 }: {
   field: LmsFormField;
   value: string;
   onChange: (name: string, value: string) => void;
+  onFile: (name: string, file: File | undefined) => void;
+  uploading?: boolean;
 }) {
   if (field.type === "checkbox") {
     return (
@@ -230,9 +272,9 @@ function Field({
           {field.label} {field.required ? <em className="mh-lms-required">!</em> : null}
         </span>
         <div className="mh-teacher-dropzone">
-          <input type="file" onChange={(e) => onChange(field.name, e.target.files?.[0]?.name || "")} />
-          <p className="mh-teacher-muted">{field.help || "You can drag and drop files here to add them."}</p>
-          {value ? <p>{value}</p> : null}
+          <input type="file" disabled={uploading} onChange={(e) => onFile(field.name, e.target.files?.[0])} />
+          <p className="mh-teacher-muted">{field.help || "PDF, Office documents, text or images up to 8 MB."}</p>
+          {uploading ? <p>Uploading…</p> : value ? <p>Uploaded: {value}</p> : null}
         </div>
       </label>
     );

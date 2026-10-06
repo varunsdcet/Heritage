@@ -12,6 +12,7 @@ import { prisma } from "@myheritage/db";
 import { requireApproval } from "@myheritage/auth";
 import { writeAuditAndOutbox } from "@myheritage/events";
 import { requireAuth, requireRoles, type AuthedRequest } from "../../middleware/auth.js";
+import { currentStudentId } from "../me/studentAlignment.js";
 
 export const gradesRouter: Router = Router();
 
@@ -43,7 +44,7 @@ gradesRouter.get("/me", requireAuth, requireRoles("student"), async (req, res, n
   try {
     const user = (req as AuthedRequest).user;
     const student = await prisma.student.findFirst({
-      where: { institutionId: user.institutionId, personId: user.personId },
+      where: { id: await currentStudentId(user.institutionId, user.personId), institutionId: user.institutionId },
     });
     if (!student) throw Object.assign(new Error("Student not found"), { code: "NOT_FOUND", status: 404 });
 

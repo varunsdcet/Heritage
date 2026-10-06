@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { SaField, SuperFrame } from "@/components/superadmin/shared";
-import { CourseCell, ErrorNotice, ScheduleCell, TableState, gradesHref, useMc, type Offering, type Option } from "./common";
+import { CourseCell, ErrorNotice, ScheduleCell, TableState, useMc, type Offering, type Option } from "./common";
 
 const HOME = ["/admin"];
 
@@ -217,7 +217,7 @@ export function MyCourseRepository() {
 type Pending = {
   type: string;
   typeOptions: string[];
-  rows: Array<{ id: string; courseId: string; code: string; offering: string; title: string; changeType: string; submitted: string }>;
+  rows: Array<{ id: string; sectionId: string; courseId: string; code: string; offering: string; title: string; changeType: string; submitted: string }>;
 };
 
 export function MyPendingSchedules() {
@@ -270,7 +270,7 @@ export function MyPendingSchedules() {
                   data.rows.map((r) => (
                     <tr key={r.id}>
                       <td>
-                        <CourseCell o={r} />
+                        <CourseCell o={r} sectionId={r.sectionId} />
                       </td>
                       <td>{r.changeType}</td>
                       <td className="ur-nowrap">{r.submitted}</td>
@@ -365,7 +365,7 @@ export function MyGradesSubmission() {
                       <td className="mc-grading-type">{o.gradingType}</td>
                       <td className="ur-nowrap">{o.dates}</td>
                       <td className="ur-nowrap">
-                        <Link className="mh-sa__btn mh-sa__btn--sm" href={gradesHref(o.courseId)}>
+                        <Link className="mh-sa__btn mh-sa__btn--sm" href={`/admin/my-courses/grades/submit${qs({ section: o.id })}`}>
                           Submit Grades
                         </Link>
                       </td>

@@ -72,10 +72,10 @@ function AdminHomeBody({ stats }: { stats: CampusOverview | null }) {
   const todos: AdminTodo[] | null = stats
     ? [
         { count: stats.pendingApprovals, one: "pending approval", many: "pending approvals", href: "/admin/approvals" },
-        { count: stats.pendingGrades, one: "grade awaiting publish", many: "grades awaiting publish", href: "/admin/f/ac-13-pending-grades" },
-        { count: stats.pendingLoa, one: "leave of absence request", many: "leave of absence requests", href: "/admin/f/ac-18-loa-requests" },
-        { count: stats.atRisk, one: "at-risk student", many: "at-risk students", href: "/admin/f/ss-02-alert-queue" },
-        { count: stats.pendingEvaluations, one: "pending evaluation", many: "pending evaluations", href: "/admin/f/ac-15-course-evaluations" },
+        { count: stats.pendingGrades, one: "grade awaiting publish", many: "grades awaiting publish", href: "/admin/student-management/grades" },
+        { count: stats.pendingLoa, one: "leave of absence request", many: "leave of absence requests", href: "/admin/student-management/leave" },
+        { count: stats.atRisk, one: "at-risk student", many: "at-risk students", href: "/admin/ops/success/cases" },
+        { count: stats.pendingEvaluations, one: "pending evaluation", many: "pending evaluations", href: "/admin/course-management/evaluations" },
       ]
         .filter((t) => t.count > 0)
         .map((t) => ({ label: `${t.count} ${t.count === 1 ? t.one : t.many}`, href: t.href }))
@@ -99,9 +99,9 @@ function AdminHomeBody({ stats }: { stats: CampusOverview | null }) {
           </p>
         </div>
         <div className="mh-sis-dash__banner-actions">
-          <SisActionBtn label="Student onboard" href="/admin/users/create?role=student" tone="secondary" />
-          <SisActionBtn label="Instructor onboard" href="/admin/users/create?role=instructor" tone="secondary" />
-          <SisActionBtn label="Enrol student" href="/admin/enrolments" />
+          <SisActionBtn label="Student onboard" href="/admin/user-management/new?accessLevel=student" tone="secondary" />
+          <SisActionBtn label="Instructor onboard" href="/admin/user-management/new?accessLevel=faculty" tone="secondary" />
+          <SisActionBtn label="Enrol student" href="/admin/user-management/new?accessLevel=student" />
         </div>
       </div>
       {live.toast ? (
@@ -114,31 +114,31 @@ function AdminHomeBody({ stats }: { stats: CampusOverview | null }) {
           label="Students"
           value={loading ? "…" : stats.students}
           hint="Live roster"
-          href="/admin/f/rg-01-student-360"
+          href="/admin/student-management/browse"
         />
         <KpiButton
           label="Teachers"
           value={loading ? "…" : stats.teachers}
           hint="Instructor accounts"
-          href="/admin/f/ac-14-faculty-360"
+          href="/admin/user-management"
         />
         <KpiButton
           label="Programs"
           value={loading ? "…" : stats.programs}
           hint="Catalogue"
-          href="/admin/f/ac-03-programs"
+          href="/admin/program-management/faculties"
         />
         <KpiButton
           label="Courses"
           value={loading ? "…" : stats.courses}
           hint="Catalogue"
-          href="/admin/f/ac-06-course-catalogue"
+          href="/admin/course-management/courses"
         />
         <KpiButton
           label="Sections"
           value={loading ? "…" : stats.sections}
           hint="Current offerings"
-          href="/admin/f/ac-09-sections"
+          href="/admin/course-management/courses"
         />
         <KpiButton
           label="Enrolments"
@@ -160,7 +160,7 @@ function AdminHomeBody({ stats }: { stats: CampusOverview | null }) {
                 ? `${money(stats.feesPastDueCad)} past due`
                 : `${money(stats.feesPostedCad)} posted`
           }
-          href="/admin/f/fn-01-finance-dashboard"
+          href="/admin/financial/transactions"
           danger={!loading && stats.feesPastDueCad > 0}
         />
         <KpiButton
@@ -174,27 +174,27 @@ function AdminHomeBody({ stats }: { stats: CampusOverview | null }) {
           label="Pending grades"
           value={loading ? "…" : stats.pendingGrades}
           hint={loading ? "Draft / publish" : `${stats.publishedGrades} published`}
-          href="/admin/f/ac-13-pending-grades"
+          href="/admin/student-management/grades"
           danger={!loading && stats.pendingGrades > 0}
         />
         <KpiButton
           label="At-risk students"
           value={loading ? "…" : stats.atRisk}
           hint="Standing alerts"
-          href="/admin/f/ss-02-alert-queue"
+          href="/admin/ops/success/cases"
           danger={!loading && stats.atRisk > 0}
         />
         <KpiButton
           label="Pending evaluations"
           value={loading ? "…" : stats.pendingEvaluations}
           hint="Course evals"
-          href="/admin/f/ac-15-course-evaluations"
+          href="/admin/course-management/evaluations"
         />
         <KpiButton
           label="Pending LOA"
           value={loading ? "…" : stats.pendingLoa}
           hint={loading ? "Leave requests" : `${stats.pendingTasks} open tasks`}
-          href="/admin/f/ac-18-loa-requests"
+          href="/admin/student-management/leave"
           danger={!loading && stats.pendingLoa > 0}
         />
       </div>

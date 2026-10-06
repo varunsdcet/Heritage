@@ -9,6 +9,7 @@ export type LiveRoomStatus = {
   courseCode: string;
   sectionCode: string;
   role: "moderator" | "viewer";
+  canJoin?: boolean;
   running: boolean | null;
   participantCount: number | null;
   recording: boolean | null;

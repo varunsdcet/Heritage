@@ -1,11 +1,34 @@
 import type { NextFunction, Request, Response } from "express";
 import { verifySession, hasRole } from "@myheritage/auth";
 import type { RoleName, SessionClaims } from "@myheritage/contracts";
+import { prisma } from "@myheritage/db";
 
 export type AuthedRequest = Request & {
   user: SessionClaims;
   correlationId: string;
 };
+
+const REVOCATION_TTL_MS = 15_000;
+const revocations = new Map<string, { revoked: boolean; at: number }>();
+
+/**
+ * A session row whose expiry has passed was revoked by an administrator. Missing rows are not treated
+ * as revoked: logout and the concurrent-session limit delete rows without invalidating issued tokens.
+ */
+async function sessionRevoked(sessionId: string | undefined) {
+  if (!sessionId) return false;
+  const hit = revocations.get(sessionId);
+  if (hit && Date.now() - hit.at < REVOCATION_TTL_MS) return hit.revoked;
+  const row = await prisma.session.findUnique({ where: { id: sessionId }, select: { expiresAt: true } });
+  const revoked = Boolean(row && row.expiresAt.getTime() <= Date.now());
+  if (revocations.size > 10_000) revocations.clear();
+  revocations.set(sessionId, { revoked, at: Date.now() });
+  return revoked;
+}
+
+export function forgetSessionRevocation(sessionId: string) {
+  revocations.delete(sessionId);
+}
 
 export async function requireAuth(req: Request, _res: Response, next: NextFunction) {
   try {
@@ -15,6 +38,7 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
     }
     const token = header.slice("Bearer ".length);
     const user = await verifySession(token);
+    if (await sessionRevoked(user.sessionId)) throw new Error("This session was signed out by an administrator");
     (req as AuthedRequest).user = user;
     next();
   } catch (err) {

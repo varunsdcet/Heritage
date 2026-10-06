@@ -77,34 +77,28 @@ const CHROME_KEYS = new Set([
   "columnTemplate",
 ]);
 
-type FileManagerState = NonNullable<TeacherScreenConfig["fileManager"]>;
-
-function mergeFileManager(
-  chromeFm: FileManagerState | undefined,
-  liveFm: FileManagerState | undefined,
-): FileManagerState | undefined {
-  if (!chromeFm) return liveFm;
-  if (!liveFm) return chromeFm;
-  const filesByKey = new Map<string, FileManagerState["files"][number]>();
-  for (const file of [...chromeFm.files, ...liveFm.files]) {
-    filesByKey.set(`${file.folder ?? ""}::${file.name}`, file);
-  }
-  const treeByName = new Map<string, FileManagerState["tree"][number]>();
-  for (const node of [...chromeFm.tree, ...liveFm.tree]) {
-    const prev = treeByName.get(node.name);
-    treeByName.set(node.name, {
-      name: node.name,
-      active: Boolean(node.active || prev?.active),
-      children: [...new Set([...(prev?.children ?? []), ...(node.children ?? [])])],
-    });
-  }
-  return {
-    courseTitle: liveFm.courseTitle || chromeFm.courseTitle,
-    breadcrumbs: liveFm.breadcrumbs?.length ? liveFm.breadcrumbs : chromeFm.breadcrumbs,
-    tree: [...treeByName.values()],
-    files: [...filesByKey.values()],
-  };
-}
+/** Data sections whose catalog copy is a fixture: when live omits them, only the screen title/subtitle chrome is kept. */
+const DATA_SECTIONS = [
+  "activeCourses",
+  "courseList",
+  "programDirectory",
+  "facultiesPrograms",
+  "programSettings",
+  "courseConfigurations",
+  "courseHistory",
+  "gradingSchemes",
+  "programTypes",
+  "courseTypes",
+  "manageTerms",
+  "reviewTerm",
+  "scheduleManage",
+  "coursesSessions",
+  "courseAdmin",
+  "masterScheduling",
+  "academicCalendars",
+  "courseTextbooks",
+  "contentRepository",
+] as const;
 
 function chromeOnly(chrome: TeacherScreenConfig, loading: boolean): TeacherScreenConfig {
   const out: Record<string, unknown> = {
@@ -154,39 +148,15 @@ export function mergeTeacherLive(
 ): TeacherScreenConfig {
   const base = chromeOnly(chrome, loading);
   if (!payload) {
-    const fileManager = mergeFileManager(chrome.fileManager, undefined);
-    if (fileManager) (base as TeacherScreenConfig).fileManager = fileManager;
     const form = mergeForm(chrome.form, undefined);
     if (form) (base as TeacherScreenConfig).form = form;
-    if (chrome.studentsDirectory) (base as TeacherScreenConfig).studentsDirectory = chrome.studentsDirectory;
     if (chrome.courseMgmt) (base as TeacherScreenConfig).courseMgmt = chrome.courseMgmt;
-    if (chrome.activeCourses) (base as TeacherScreenConfig).activeCourses = chrome.activeCourses;
-    if (chrome.courseList) (base as TeacherScreenConfig).courseList = chrome.courseList;
     if (chrome.hub) (base as TeacherScreenConfig).hub = chrome.hub;
-    if (chrome.programDirectory) (base as TeacherScreenConfig).programDirectory = chrome.programDirectory;
-    if (chrome.facultiesPrograms) (base as TeacherScreenConfig).facultiesPrograms = chrome.facultiesPrograms;
-    if (chrome.programSettings) (base as TeacherScreenConfig).programSettings = chrome.programSettings;
-    if (chrome.courseConfigurations) (base as TeacherScreenConfig).courseConfigurations = chrome.courseConfigurations;
-    if (chrome.courseHistory) (base as TeacherScreenConfig).courseHistory = chrome.courseHistory;
-    if (chrome.gradingSchemes) (base as TeacherScreenConfig).gradingSchemes = chrome.gradingSchemes;
-    if (chrome.programTypes) (base as TeacherScreenConfig).programTypes = chrome.programTypes;
-    if (chrome.courseTypes) (base as TeacherScreenConfig).courseTypes = chrome.courseTypes;
-    if (chrome.manageTerms) (base as TeacherScreenConfig).manageTerms = chrome.manageTerms;
-    if (chrome.reviewTerm) (base as TeacherScreenConfig).reviewTerm = chrome.reviewTerm;
-    if (chrome.scheduleManage) (base as TeacherScreenConfig).scheduleManage = chrome.scheduleManage;
-    if (chrome.coursesSessions) (base as TeacherScreenConfig).coursesSessions = chrome.coursesSessions;
-    if (chrome.courseAdmin) (base as TeacherScreenConfig).courseAdmin = chrome.courseAdmin;
-    if (chrome.masterScheduling) (base as TeacherScreenConfig).masterScheduling = chrome.masterScheduling;
-    if (chrome.academicCalendars) (base as TeacherScreenConfig).academicCalendars = chrome.academicCalendars;
-    if (chrome.workshopEnrolments) (base as TeacherScreenConfig).workshopEnrolments = chrome.workshopEnrolments;
-    if (chrome.workshopAttendance) (base as TeacherScreenConfig).workshopAttendance = chrome.workshopAttendance;
-    if (chrome.workshops) (base as TeacherScreenConfig).workshops = chrome.workshops;
-    if (chrome.courseDetail && !loading) (base as TeacherScreenConfig).courseDetail = chrome.courseDetail;
-    if (chrome.courseTextbooks && !loading) (base as TeacherScreenConfig).courseTextbooks = chrome.courseTextbooks;
-    if (chrome.contentRepository && !loading) (base as TeacherScreenConfig).contentRepository = chrome.contentRepository;
     if (loading) {
       base.title = "Loading section…";
       base.subtitle = "Loading live Heritage course data…";
+    } else {
+      base.subtitle = "Live data could not be loaded. Refresh to try again.";
     }
     const helpSupport = mergeHelpSupport(chrome.helpSupport, undefined);
     if (helpSupport) (base as TeacherScreenConfig).helpSupport = helpSupport;
@@ -210,33 +180,12 @@ export function mergeTeacherLive(
     }
     merged[key] = value;
   }
-  const fileManager = mergeFileManager(chrome.fileManager, merged.fileManager as FileManagerState | undefined);
-  if (fileManager) merged.fileManager = fileManager;
   const form = mergeForm(chrome.form, merged.form as TeacherScreenConfig["form"] | undefined);
   if (form) merged.form = form;
-  const liveStudents = merged.studentsDirectory as TeacherScreenConfig["studentsDirectory"] | undefined;
-  if ((!liveStudents?.students?.length) && chrome.studentsDirectory) {
-    merged.studentsDirectory = chrome.studentsDirectory;
-  }
-  // Navigation hubs are chrome structure; keep catalog cards/tools when live payload omitted them
-  // (e.g. older API routed these paths to courseList / empty domain).
+  // Navigation hubs (cards / tool links) are chrome structure, not data.
   if (!(merged as TeacherScreenConfig).courseMgmt && chrome.courseMgmt) {
     merged.courseMgmt = chrome.courseMgmt;
     if (chrome.archetype === "courseMgmt") {
-      merged.title = chrome.title;
-      if (!loading) merged.subtitle = chrome.subtitle;
-    }
-  }
-  if (!(merged as TeacherScreenConfig).activeCourses && chrome.activeCourses) {
-    merged.activeCourses = chrome.activeCourses;
-    if (chrome.archetype === "activeCourses") {
-      merged.title = chrome.title;
-      if (!loading) merged.subtitle = chrome.subtitle;
-    }
-  }
-  if (!(merged as TeacherScreenConfig).courseList && chrome.courseList) {
-    merged.courseList = chrome.courseList;
-    if (chrome.archetype === "courseList") {
       merged.title = chrome.title;
       if (!loading) merged.subtitle = chrome.subtitle;
     }
@@ -248,144 +197,9 @@ export function mergeTeacherLive(
       if (!loading) merged.subtitle = chrome.subtitle;
     }
   }
-  if (!(merged as TeacherScreenConfig).programDirectory && chrome.programDirectory) {
-    merged.programDirectory = chrome.programDirectory;
-  }
-  const liveFaculties = (merged as TeacherScreenConfig).facultiesPrograms;
-  if (!liveFaculties?.faculties?.length && chrome.facultiesPrograms?.faculties?.length) {
-    merged.facultiesPrograms = chrome.facultiesPrograms;
-    if (chrome.archetype === "facultiesPrograms") {
-      merged.title = chrome.title;
-      if (!loading) merged.subtitle = chrome.subtitle;
-    }
-  }
-  const liveProgramSettings = (merged as TeacherScreenConfig).programSettings;
-  if (!liveProgramSettings?.programId && chrome.programSettings) {
-    merged.programSettings = {
-      ...chrome.programSettings,
-      ...liveProgramSettings,
-      tabs: liveProgramSettings?.tabs?.length ? liveProgramSettings.tabs : chrome.programSettings.tabs,
-      groups: liveProgramSettings?.groups?.length ? liveProgramSettings.groups : chrome.programSettings.groups,
-      audits: liveProgramSettings?.audits ?? chrome.programSettings.audits,
-    };
-    if (chrome.archetype === "programSettings") {
+  for (const key of DATA_SECTIONS) {
+    if (chrome.archetype === key && !merged[key]) {
       if (!merged.title || merged.title === "Instructor") merged.title = chrome.title;
-      if (!loading) merged.subtitle = chrome.subtitle;
-    }
-  } else if (liveProgramSettings && chrome.archetype === "programSettings") {
-    // Prefer live title (includes program name) when present.
-    if (!merged.title) merged.title = chrome.title;
-  }
-  const liveCourseConfigs = (merged as TeacherScreenConfig).courseConfigurations;
-  if (!liveCourseConfigs?.courses?.length && chrome.courseConfigurations?.courses?.length) {
-    merged.courseConfigurations = chrome.courseConfigurations;
-    if (chrome.archetype === "courseConfigurations") {
-      merged.title = chrome.title;
-      if (!loading) merged.subtitle = chrome.subtitle;
-    }
-  }
-  if (!(merged as TeacherScreenConfig).courseHistory && chrome.courseHistory) {
-    merged.courseHistory = chrome.courseHistory;
-    if (chrome.archetype === "courseHistory") {
-      merged.title = chrome.title;
-      if (!loading) merged.subtitle = chrome.subtitle;
-    }
-  }
-  if (!(merged as TeacherScreenConfig).gradingSchemes && chrome.gradingSchemes) {
-    merged.gradingSchemes = chrome.gradingSchemes;
-    if (chrome.archetype === "gradingSchemes") {
-      merged.title = chrome.title;
-      if (!loading) merged.subtitle = chrome.subtitle;
-    }
-  }
-  if (!(merged as TeacherScreenConfig).programTypes && chrome.programTypes) {
-    merged.programTypes = chrome.programTypes;
-    if (chrome.archetype === "programTypes") {
-      merged.title = chrome.title;
-      if (!loading) merged.subtitle = chrome.subtitle;
-    }
-  }
-  if (!(merged as TeacherScreenConfig).courseTypes && chrome.courseTypes) {
-    merged.courseTypes = chrome.courseTypes;
-    if (chrome.archetype === "courseTypes") {
-      merged.title = chrome.title;
-      if (!loading) merged.subtitle = chrome.subtitle;
-    }
-  }
-  if (!(merged as TeacherScreenConfig).manageTerms && chrome.manageTerms) {
-    merged.manageTerms = chrome.manageTerms;
-    if (chrome.archetype === "manageTerms") {
-      merged.title = chrome.title;
-      if (!loading) merged.subtitle = chrome.subtitle;
-    }
-  }
-  if (!(merged as TeacherScreenConfig).reviewTerm && chrome.reviewTerm) {
-    merged.reviewTerm = chrome.reviewTerm;
-    if (chrome.archetype === "reviewTerm") {
-      merged.title = chrome.title;
-      if (!loading) merged.subtitle = chrome.subtitle;
-    }
-  }
-  if (!(merged as TeacherScreenConfig).scheduleManage && chrome.scheduleManage) {
-    merged.scheduleManage = chrome.scheduleManage;
-    if (chrome.archetype === "scheduleManage") {
-      merged.title = chrome.title;
-      if (!loading) merged.subtitle = chrome.subtitle;
-    }
-  }
-  if (!(merged as TeacherScreenConfig).coursesSessions && chrome.coursesSessions) {
-    merged.coursesSessions = chrome.coursesSessions;
-    if (chrome.archetype === "coursesSessions") {
-      merged.title = chrome.title;
-      if (!loading) merged.subtitle = chrome.subtitle;
-    }
-  }
-  if (!(merged as TeacherScreenConfig).courseAdmin && chrome.courseAdmin) {
-    merged.courseAdmin = chrome.courseAdmin;
-    if (chrome.archetype === "courseAdmin") {
-      merged.title = chrome.title;
-      if (!loading) merged.subtitle = chrome.subtitle;
-    }
-  }
-  const liveMaster = merged.masterScheduling as TeacherScreenConfig["masterScheduling"] | undefined;
-  if (chrome.masterScheduling) {
-    merged.masterScheduling = {
-      ...chrome.masterScheduling,
-      ...liveMaster,
-      programOptions: chrome.masterScheduling.programOptions ?? liveMaster?.programOptions,
-      rows: liveMaster?.rows ?? chrome.masterScheduling.rows,
-    };
-    if (chrome.archetype === "masterScheduling") {
-      merged.title = chrome.title;
-      if (!loading) merged.subtitle = chrome.subtitle;
-    }
-  } else if (!liveMaster && chrome.masterScheduling) {
-    merged.masterScheduling = chrome.masterScheduling;
-  }
-  const liveCal = merged.academicCalendars as TeacherScreenConfig["academicCalendars"] | undefined;
-  if (chrome.academicCalendars) {
-    merged.academicCalendars = {
-      ...chrome.academicCalendars,
-      ...liveCal,
-      rows: liveCal?.rows ?? chrome.academicCalendars.rows,
-    };
-    if (chrome.archetype === "academicCalendars") {
-      merged.title = chrome.title;
-      if (!loading) merged.subtitle = chrome.subtitle;
-    }
-  }
-  if (!(merged as TeacherScreenConfig).courseTextbooks && chrome.courseTextbooks) {
-    merged.courseTextbooks = chrome.courseTextbooks;
-    if (chrome.archetype === "courseTextbooks") {
-      merged.title = chrome.title;
-      if (!loading) merged.subtitle = chrome.subtitle;
-    }
-  }
-  if (!(merged as TeacherScreenConfig).contentRepository && chrome.contentRepository) {
-    merged.contentRepository = chrome.contentRepository;
-    if (chrome.archetype === "contentRepository") {
-      merged.title = chrome.title;
-      if (!loading) merged.subtitle = chrome.subtitle;
     }
   }
   const helpSupport = mergeHelpSupport(chrome.helpSupport, merged.helpSupport as TeacherScreenConfig["helpSupport"] | undefined);

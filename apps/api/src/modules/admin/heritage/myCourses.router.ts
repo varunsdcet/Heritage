@@ -6,6 +6,7 @@ import {
   attendanceDay,
   courseHistory,
   evaluationList,
+  gradeSubmission,
   gradeSubmissions,
   myCoursesCounts,
   myCoursesNav,
@@ -62,4 +63,5 @@ myCoursesRouter.put(
 myCoursesRouter.get("/repository", view((req) => myRepository(user(req), { course: String(req.query.course ?? "").slice(0, 120) })));
 myCoursesRouter.get("/pending-schedules", view((req) => pendingSchedules(user(req), { type: String(req.query.type ?? "").slice(0, 40) })));
 myCoursesRouter.get("/grades", view((req) => gradeSubmissions(user(req), GradesQuery.parse(req.query))));
+myCoursesRouter.get("/grades/:sectionId", view((req) => gradeSubmission(user(req), String(req.params.sectionId).slice(0, 60))));
 myCoursesRouter.get("/history", view((req) => courseHistory(user(req))));

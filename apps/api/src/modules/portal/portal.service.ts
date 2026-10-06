@@ -10,6 +10,18 @@ import {
   toPortalRowsFromResources,
   toPortalRowsFromServices,
 } from "../student/surfaces.service.js";
+import {
+  activeFlags,
+  adminStatusAndCgpa,
+  contentProgress,
+  currentStudent,
+  personStudentIds,
+  studentAnnouncements,
+} from "../me/studentAlignment.js";
+
+function studentFor(user: SessionClaims) {
+  return currentStudent(user.institutionId, user.personId);
+}
 
 export type PortalRow = {
   primary: string;
@@ -126,9 +138,7 @@ async function coursesFor(user: SessionClaims): Promise<PortalRow[]> {
       href: `/instructor/sections/${s.id}`,
     }));
   }
-  const student = await prisma.student.findFirst({
-    where: { institutionId: user.institutionId, personId: user.personId },
-  });
+  const student = await studentFor(user);
   if (!student) return [];
   const enrolments = await prisma.enrolment.findMany({
     where: { institutionId: user.institutionId, studentId: student.id, status: "enrolled" },
@@ -148,9 +158,7 @@ async function coursesFor(user: SessionClaims): Promise<PortalRow[]> {
 }
 
 async function gradesFor(user: SessionClaims): Promise<{ metrics: PortalView["metrics"]; rows: PortalRow[] }> {
-  const student = await prisma.student.findFirst({
-    where: { institutionId: user.institutionId, personId: user.personId },
-  });
+  const student = await studentFor(user);
   if (!student) return { metrics: [], rows: [] };
   const grades = await prisma.gradeItem.findMany({
     where: { institutionId: user.institutionId, studentId: student.id, status: "published" },
@@ -193,10 +201,7 @@ async function calendarFor(user: SessionClaims): Promise<PortalRow[]> {
     });
     sectionIds = sections.map((section) => section.id);
   } else {
-    const student = await prisma.student.findFirst({
-      where: { institutionId: user.institutionId, personId: user.personId },
-      select: { id: true },
-    });
+    const student = await studentFor(user);
     if (student) {
       const enrolments = await prisma.enrolment.findMany({
         where: {
@@ -359,6 +364,56 @@ export async function buildPortalView(user: SessionClaims, path: string): Promis
   };
 
   const normalized = path.replace(/\/demo$/, "").replace(/\/$/, "") || path;
+
+  if (role === "student" && (normalized.endsWith("/continue") || normalized.endsWith("/modules"))) {
+    const student = await studentFor(user);
+    const progress = student ? await contentProgress(user, student.id) : [];
+    const totalItems = progress.reduce((n, c) => n + c.totalCount, 0);
+    const doneItems = progress.reduce((n, c) => n + c.completedCount, 0);
+    base.metrics = [
+      { label: "Enrolled courses", value: String(progress.length) },
+      { label: "Items completed", value: totalItems ? `${doneItems}/${totalItems}` : "—" },
+      { label: "Term", value: meta.termCode },
+    ];
+    if (normalized.endsWith("/continue")) {
+      base.title = "Continue learning";
+      const ordered = [...progress].sort(
+        (a, b) => Number(Boolean(b.next)) - Number(Boolean(a.next)) || (a.progressPct ?? 0) - (b.progressPct ?? 0),
+      );
+      base.sections = [
+        {
+          title: "Pick up where you left off",
+          rows: ordered.map((c) => ({
+            primary: `${c.courseCode} · ${c.courseTitle}`,
+            secondary: c.next
+              ? `Next: ${c.next.kind} · ${c.next.title}`
+              : c.totalCount
+                ? "All published content completed"
+                : "No content published yet",
+            meta: c.progressPct != null ? `${c.progressPct}% · ${c.completedCount}/${c.totalCount}` : "—",
+            href: c.next?.href ?? `/student/courses/${c.sectionId}`,
+          })),
+        },
+      ];
+    } else {
+      base.title = "Modules";
+      base.sections = progress.map((c) => ({
+        title: `${c.courseCode} · ${c.courseTitle}${c.progressPct != null ? ` — ${c.progressPct}% complete` : ""}`,
+        rows: c.items.map((i) => ({
+          primary: i.title,
+          secondary: `${i.kind}${i.when ? ` · ${new Date(i.when).toLocaleDateString()}` : ""}`,
+          meta: i.completed ? "Completed" : "Not started",
+          href: i.href,
+        })),
+      }));
+      if (!base.sections.length) base.sections = [{ title: "Modules", rows: [] }];
+    }
+    base.actions = [
+      { label: "My courses", href: "/student/courses" },
+      { label: "View grades", href: "/student/grades", variant: "secondary" },
+    ];
+    return base;
+  }
 
   // Domain-backed screens
   if (
@@ -527,37 +582,62 @@ export async function buildPortalView(user: SessionClaims, path: string): Promis
     return base;
   }
 
-  if (role === "student" && (normalized.endsWith("/holds") || normalized.includes("leave-of-absence"))) {
-    const student = await prisma.student.findFirst({
-      where: { institutionId: user.institutionId, personId: user.personId },
-    });
-    const pending = student
-      ? await prisma.approvalRequest.findMany({
-          where: {
-            institutionId: user.institutionId,
-            status: "pending",
-            OR: [{ subjectRef: student.id }, { requestedBy: user.accountId }],
-          },
+  if (role === "student" && normalized.includes("leave-of-absence")) {
+    const profiles = await personStudentIds(user.institutionId, user.personId);
+    const requests = profiles.length
+      ? await prisma.leaveOfAbsenceRequest.findMany({
+          where: { institutionId: user.institutionId, studentId: { in: profiles.map((p) => p.id) } },
           orderBy: { createdAt: "desc" },
-          take: 20,
+          take: 30,
         })
       : [];
-    const rows: PortalRow[] =
-      pending.length > 0
-        ? pending.map((a) => ({
-            primary: a.type.replace(/_/g, " "),
-            secondary: `Status: ${a.status}`,
-            meta: new Date(a.createdAt).toLocaleDateString(),
-            href: "/student/holds",
-          }))
-        : [
-            {
-              primary: "No active holds",
-              secondary: student ? `Standing: ${student.standing}` : "Registration clear",
-              meta: "OK",
-            },
-          ];
-    base.sections = [{ title: "Registration holds", rows }];
+    base.sections = [
+      {
+        title: "Leave of absence requests",
+        rows: requests.map((r) => ({
+          primary: `${r.startsOn} – ${r.endsOn}`,
+          secondary: r.decisionNote ? `${r.reason} · ${r.decisionNote}` : r.reason,
+          meta: r.status,
+        })),
+      },
+    ];
+    base.actions = [
+      { label: "Student services", href: "/student/f/st-16-services", variant: "secondary" },
+      { label: "Holds", href: "/student/holds", variant: "secondary" },
+    ];
+    return base;
+  }
+
+  if (role === "student" && normalized.endsWith("/holds")) {
+    const [student, profiles] = await Promise.all([
+      studentFor(user),
+      personStudentIds(user.institutionId, user.personId),
+    ]);
+    const flags = await activeFlags(user.institutionId, profiles.map((p) => p.id));
+    const numberOf = new Map(profiles.map((p) => [p.id, p.studentNumber]));
+    const toRow = (f: (typeof flags)[number]): PortalRow => ({
+      primary: f.name,
+      secondary: f.messageText || undefined,
+      meta: [
+        new Date(f.date).toLocaleDateString(),
+        profiles.length > 1 ? numberOf.get(f.studentId) : undefined,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+    });
+    const holds = flags.filter((f) => f.isHold);
+    const others = flags.filter((f) => !f.isHold);
+    const header = student ? await adminStatusAndCgpa(user.institutionId, student.id) : null;
+    base.title = "Holds";
+    base.metrics = [
+      { label: "Active holds", value: String(holds.length) },
+      { label: "Active flags", value: String(others.length) },
+      { label: "Status", value: header?.status ?? "—" },
+    ];
+    base.sections = [
+      { title: "Holds", rows: holds.map(toRow) },
+      { title: "Flags", rows: others.map(toRow) },
+    ];
     base.actions = [
       { label: "Student services", href: "/student/f/st-16-services", variant: "secondary" },
       { label: "Profile", href: "/student/profile", variant: "secondary" },
@@ -591,9 +671,7 @@ export async function buildPortalView(user: SessionClaims, path: string): Promis
   }
 
   if (role === "student" && normalized.endsWith("/advising")) {
-    const student = await prisma.student.findFirst({
-      where: { institutionId: user.institutionId, personId: user.personId },
-    });
+    const student = await studentFor(user);
     const appointments = student
       ? await prisma.advisingAppointment.findMany({
           where: { institutionId: user.institutionId, studentId: student.id },
@@ -616,6 +694,30 @@ export async function buildPortalView(user: SessionClaims, path: string): Promis
     const rows = await calendarFor(user);
     base.sections = [{ title: "Upcoming", rows }];
     base.actions = [{ label: "Assessments", href: role === "instructor" ? "/instructor/assessments" : "/student/assessments" }];
+    return base;
+  }
+
+  if (role === "student" && normalized.endsWith("/announcements")) {
+    const student = await studentFor(user);
+    const [campus, inbox] = await Promise.all([studentAnnouncements(user, student?.id ?? null), notificationsFor(user)]);
+    base.title = "Announcements";
+    base.metrics = [
+      { label: "Announcements", value: String(campus.length) },
+      { label: "Unread notifications", value: String(inbox.filter((r) => r.meta === "Unread").length) },
+      { label: "Term", value: meta.termCode },
+    ];
+    base.sections = [
+      {
+        title: "Campus announcements",
+        rows: campus.map((a) => ({
+          primary: a.title,
+          secondary: a.body,
+          meta: new Date(a.updatedAt).toLocaleDateString(),
+        })),
+      },
+      { title: "Your notifications", rows: inbox },
+    ];
+    base.actions = [{ label: "Notifications", href: "/student/notifications", variant: "secondary" }];
     return base;
   }
 
@@ -684,9 +786,8 @@ export async function buildPortalView(user: SessionClaims, path: string): Promis
       return base;
     }
     const person = await prisma.person.findUnique({ where: { id: user.personId } });
-    const student = await prisma.student.findFirst({
-      where: { institutionId: user.institutionId, personId: user.personId },
-    });
+    const student = role === "student" ? await studentFor(user) : null;
+    const header = student ? await adminStatusAndCgpa(user.institutionId, student.id) : null;
     base.sections = [
       {
         title: "Profile",
@@ -700,7 +801,7 @@ export async function buildPortalView(user: SessionClaims, path: string): Promis
             ? [
                 {
                   primary: student.programName,
-                  secondary: `Standing: ${student.standing}`,
+                  secondary: `Status: ${header?.status ?? "—"}${header?.cgpa != null ? ` · CGPA ${header.cgpa.toFixed(2)}` : ""}`,
                   meta: student.studentNumber,
                 },
               ]

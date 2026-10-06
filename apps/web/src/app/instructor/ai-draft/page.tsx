@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AiDraftView } from "@/components/ai-draft/AiDraftView";
+import { AiDraftCoursePicker } from "@/components/ai-draft/AiDraftCoursePicker";
 import { TeacherSisShell } from "@/components/TeacherSisShell";
 import { loadSession } from "@/lib/api";
 
@@ -34,7 +34,7 @@ export default function AiDraftPage() {
       activeHref="/instructor/ai-draft"
       userName={userName}
     >
-      <AiDraftView />
+      <AiDraftCoursePicker />
     </TeacherSisShell>
   );
 }

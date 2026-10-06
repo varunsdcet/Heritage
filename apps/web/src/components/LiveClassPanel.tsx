@@ -84,7 +84,10 @@ export function LiveClassPanel({ sectionId, note }: { sectionId: string; note?: 
   const bbb = status.provider === "bigbluebutton";
   const moderator = status.role === "moderator";
   const running = Boolean(status.running);
-  const stateLabel = !bbb
+  const canJoin = status.canJoin !== false;
+  const stateLabel = !canJoin
+    ? "Course completed"
+    : !bbb
     ? "Room ready"
     : running
       ? `Live now · ${status.participantCount ?? 0} in the room`
@@ -104,7 +107,9 @@ export function LiveClassPanel({ sectionId, note }: { sectionId: string; note?: 
 
       <p className="mh-live__note">
         {note ||
-          (moderator
+          (!canJoin
+            ? "You have completed this course, so the live class is closed. Published recordings stay available below."
+            : moderator
             ? bbb
               ? "You join as moderator: share your screen, use the whiteboard, run polls, manage students and start or stop the recording."
               : "Teacher and students meet in the same room."
@@ -114,9 +119,11 @@ export function LiveClassPanel({ sectionId, note }: { sectionId: string; note?: 
       </p>
 
       <div className="mh-live__actions">
-        <button type="button" className="mh-hcc-btn" onClick={join}>
-          {moderator ? (running ? "Join class" : "Start class") : "Join class"}
-        </button>
+        {canJoin ? (
+          <button type="button" className="mh-hcc-btn" onClick={join}>
+            {moderator ? (running ? "Join class" : "Start class") : "Join class"}
+          </button>
+        ) : null}
         {moderator && bbb && running ? (
           <button type="button" className="mh-live__danger" onClick={() => void end()} disabled={busy}>
             {busy ? "Ending…" : "End class for everyone"}

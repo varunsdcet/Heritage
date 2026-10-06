@@ -8,6 +8,7 @@ import {
   roomFromSessions,
   scheduleTextFromSessions,
 } from "./sectionSchedule.js";
+import { currentStudentId } from "../me/studentAlignment.js";
 
 export const coursesRouter: Router = Router();
 
@@ -73,7 +74,7 @@ coursesRouter.get("/me", requireAuth, async (req, res, next) => {
     }
 
     const student = await prisma.student.findFirst({
-      where: { institutionId: user.institutionId, personId: user.personId },
+      where: { id: await currentStudentId(user.institutionId, user.personId), institutionId: user.institutionId },
     });
     if (!student) {
       res.json({ items: [] });

@@ -1,248 +1,406 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import "@/components/heritage/heritage.css";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ApprovalRequest } from "@myheritage/contracts";
-import { AppShell, Breadcrumb, Button, RecordHeader, StatusPill } from "@myheritage/ui";
-import { api, loadSession, type Session } from "@/lib/api";
-import { resolveNav } from "@/lib/nav";
+import { SaCard, SaModal, SaNotice, SuperFrame } from "@/components/superadmin/shared";
+import { ApiError, api, loadSession } from "@/lib/api";
 
 type ProfileMeta = {
   studentNumber?: string;
   studentName?: string;
   currentValues?: Record<string, string | null | undefined>;
+  subjectLabel?: string | null;
+  requestedByName?: string | null;
 };
 
-const PROFILE_FIELDS = [
-  "givenName",
-  "familyName",
-  "middleName",
-  "preferredName",
-  "primaryEmail",
-  "personalEmail",
-  "phone",
-  "dateOfBirth",
-  "emergencyContactName",
-  "emergencyContactPhone",
-  "sinMasked",
-] as const;
+type Filter = "all" | "pending" | "approved";
 
-function FieldDiff({ diff }: { diff: Record<string, unknown> }) {
-  const meta = (diff._meta as ProfileMeta | undefined) ?? {};
+const PROFILE_FIELDS: Record<string, string> = {
+  givenName: "Given name",
+  familyName: "Family name",
+  middleName: "Middle name",
+  preferredName: "Preferred name",
+  primaryEmail: "Primary email",
+  personalEmail: "Personal email",
+  phone: "Phone",
+  dateOfBirth: "Date of birth",
+  emergencyContactName: "Emergency contact",
+  emergencyContactPhone: "Emergency contact phone",
+  sinMasked: "SIN",
+};
+
+const TYPE_LABELS: Record<string, string> = {
+  student_profile_change: "Personal details change",
+  grade_publish: "Grade publication",
+  "grade.publish": "Grade publication",
+  leave_of_absence: "Leave of absence",
+  course_session_new: "New course session",
+  course_session_change: "Course schedule change",
+  "service_request.course_withdrawal": "Course withdrawal",
+  "service_request.academic_appeal": "Academic appeal",
+};
+
+const token = () => loadSession()?.accessToken;
+const errMsg = (e: unknown, fallback: string) => (e instanceof ApiError || e instanceof Error ? e.message : fallback);
+
+function typeLabel(type: string) {
+  return TYPE_LABELS[type] ?? type.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+}
+
+function diffOf(item: ApprovalRequest) {
+  return (item.proposedDiff ?? {}) as Record<string, unknown>;
+}
+
+function metaOf(item: ApprovalRequest): ProfileMeta {
+  return (diffOf(item)._meta as ProfileMeta | undefined) ?? {};
+}
+
+function subjectOf(item: ApprovalRequest) {
+  const meta = metaOf(item);
+  if (meta.studentName) return `${meta.studentName}${meta.studentNumber ? ` · ${meta.studentNumber}` : ""}`;
+  const gradeItems = diffOf(item).gradeItemIds;
+  const count = Array.isArray(gradeItems) ? `${gradeItems.length} grade item${gradeItems.length === 1 ? "" : "s"}` : "";
+  if (meta.subjectLabel) return count ? `${meta.subjectLabel} · ${count}` : meta.subjectLabel;
+  return count || item.subjectRef;
+}
+
+function when(iso: string) {
+  return new Date(iso).toLocaleString("en-CA", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function StatusPill({ status }: { status: string }) {
+  const tone = status === "pending" ? " mh-sa__pill--warn" : status === "approved" || status === "applied" ? " mh-sa__pill--ok" : "";
+  const label = status === "approved" ? "Approved · awaiting apply" : status.charAt(0).toUpperCase() + status.slice(1);
+  return <span className={`mh-sa__pill${tone}`}>{label}</span>;
+}
+
+function RequestDetail({ item }: { item: ApprovalRequest }) {
+  const diff = diffOf(item);
+  const meta = metaOf(item);
   const current = meta.currentValues ?? {};
-  const rows = PROFILE_FIELDS.filter((key) => diff[key] !== undefined).map((key) => ({
-    key,
-    oldValue: current[key] ?? "—",
-    newValue: String(diff[key]),
-  }));
-  if (!rows.length && !meta.studentName) {
-    return (
-      <pre style={{ margin: "10px 0 0", fontSize: 12, whiteSpace: "pre-wrap", color: "var(--mh-text-muted)" }}>
-        {JSON.stringify(diff, null, 2)}
-      </pre>
-    );
-  }
+  const profileRows = Object.keys(PROFILE_FIELDS).filter((key) => diff[key] !== undefined);
+  const other = Object.entries(diff).filter(([k, v]) => !k.startsWith("_") && !(k in PROFILE_FIELDS) && k !== "reason" && v !== null && v !== undefined && v !== "");
+
   return (
-    <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-      {meta.studentName ? (
-        <div style={{ fontSize: 13 }}>
-          <strong>{meta.studentName}</strong>
-          {meta.studentNumber ? <span style={{ color: "var(--mh-text-muted)" }}> · {meta.studentNumber}</span> : null}
+    <div className="mh-sa__stack">
+      <dl className="mh-sa__dl">
+        <dt>Request</dt>
+        <dd>{typeLabel(item.type)}</dd>
+        <dt>Subject</dt>
+        <dd>{subjectOf(item)}</dd>
+        <dt>Requested by</dt>
+        <dd>{meta.requestedByName || "—"}</dd>
+        <dt>Submitted</dt>
+        <dd>{when(item.createdAt)}</dd>
+        <dt>Status</dt>
+        <dd>
+          <StatusPill status={item.status} />
+        </dd>
+        <dt>Approvals needed</dt>
+        <dd>
+          {item.decisions.filter((d) => d.decision === "approve").length} of {item.requiredCount} · {item.requiredApproverRoles.join(" or ")}
+        </dd>
+        {typeof diff.reason === "string" && diff.reason ? (
+          <>
+            <dt>Reason</dt>
+            <dd>{diff.reason}</dd>
+          </>
+        ) : null}
+      </dl>
+
+      {profileRows.length ? (
+        <div className="mh-sa__table-wrap">
+          <table className="mh-sa__table">
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Current</th>
+                <th>Proposed</th>
+              </tr>
+            </thead>
+            <tbody>
+              {profileRows.map((key) => (
+                <tr key={key}>
+                  <td>{PROFILE_FIELDS[key]}</td>
+                  <td className="mh-sa__muted">{current[key] || "—"}</td>
+                  <td>
+                    <strong>{String(diff[key]) || "—"}</strong>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       ) : null}
-      {typeof diff.reason === "string" ? (
-        <p style={{ margin: 0, fontSize: 13, color: "var(--mh-text-muted)" }}>Reason: {diff.reason}</p>
+
+      {other.length ? (
+        <dl className="mh-sa__dl">
+          {other.map(([k, v]) => (
+            <div key={k} className="hx-dl__row">
+              <dt>{k.replace(/([A-Z])/g, " $1").replace(/^\w/, (c) => c.toUpperCase())}</dt>
+              <dd>{Array.isArray(v) ? `${v.length} item${v.length === 1 ? "" : "s"}` : typeof v === "object" ? JSON.stringify(v) : String(v)}</dd>
+            </div>
+          ))}
+        </dl>
       ) : null}
-      {rows.length ? (
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-          <thead>
-            <tr style={{ textAlign: "left", color: "var(--mh-text-muted)" }}>
-              <th style={{ padding: "4px 6px" }}>Field</th>
-              <th style={{ padding: "4px 6px" }}>Current</th>
-              <th style={{ padding: "4px 6px" }}>Proposed</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.key} style={{ borderTop: "1px solid var(--mh-border)" }}>
-                <td style={{ padding: "6px" }}>{row.key}</td>
-                <td style={{ padding: "6px" }}>{row.oldValue || "—"}</td>
-                <td style={{ padding: "6px", fontWeight: 600 }}>{row.newValue}</td>
-              </tr>
+
+      <div>
+        <h3 className="hx-subhead">Decision history</h3>
+        {item.decisions.length ? (
+          <ul className="hx-audit">
+            {item.decisions.map((d) => (
+              <li key={`${d.actorId}-${d.decidedAt}`}>
+                <strong>{d.decision === "approve" ? "Approved" : "Rejected"}</strong> · {when(d.decidedAt)}
+                {d.comment ? <div className="mh-sa__muted">{d.comment}</div> : null}
+              </li>
             ))}
-          </tbody>
-        </table>
-      ) : null}
+          </ul>
+        ) : (
+          <p className="mh-sa__muted">No decisions recorded yet.</p>
+        )}
+      </div>
     </div>
   );
 }
 
 export default function AdminApprovalsPage() {
-  const router = useRouter();
-  const [session, setSession] = useState<Session | null>(null);
-  const [items, setItems] = useState<ApprovalRequest[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const [items, setItems] = useState<ApprovalRequest[] | null>(null);
+  const [filter, setFilter] = useState<Filter>("all");
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState<ApprovalRequest | null>(null);
+  const [note, setNote] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
-  const [rejectNote, setRejectNote] = useState<Record<string, string>>({});
+  const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
-  async function refresh(s: Session) {
-    const data = await api<{ items: ApprovalRequest[] }>("/approvals", {}, s.accessToken);
-    setItems(data.items);
-  }
+  const refresh = useCallback(async () => {
+    try {
+      const data = await api<{ items: ApprovalRequest[] }>("/approvals", {}, token());
+      setItems(data.items);
+      return data.items;
+    } catch (e) {
+      setNotice({ tone: "error", text: errMsg(e, "Failed to load approvals") });
+      setItems((cur) => cur ?? []);
+      return null;
+    }
+  }, []);
 
   useEffect(() => {
-    const s = loadSession();
-    if (!s) {
-      router.replace("/login");
+    void refresh();
+  }, [refresh]);
+
+  const counts = useMemo(() => {
+    const list = items ?? [];
+    return {
+      all: list.length,
+      pending: list.filter((i) => i.status === "pending").length,
+      approved: list.filter((i) => i.status === "approved").length,
+    };
+  }, [items]);
+
+  const rows = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return (items ?? []).filter(
+      (i) => (filter === "all" || i.status === filter) && (!needle || `${typeLabel(i.type)} ${subjectOf(i)} ${metaOf(i).requestedByName ?? ""} ${i.status}`.toLowerCase().includes(needle)),
+    );
+  }, [items, filter, q]);
+
+  function openItem(item: ApprovalRequest) {
+    setOpen(item);
+    setNote("");
+    setNotice(null);
+  }
+
+  async function act(item: ApprovalRequest, kind: "approve" | "reject" | "apply") {
+    if (kind === "reject" && !note.trim()) {
+      setNotice({ tone: "error", text: "Add a note explaining why the request is rejected." });
       return;
     }
-    setSession(s);
-    refresh(s).catch((err) => setError(err instanceof Error ? err.message : "Failed to load approvals"));
-  }, [router]);
-
-  async function decide(id: string, decision: "approve" | "reject") {
-    if (!session) return;
-    setBusy(`${id}:${decision}`);
-    setError(null);
+    setBusy(kind);
     try {
-      await api(
-        `/approvals/${id}/decide`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            decision,
-            comment:
-              decision === "approve"
-                ? "Approved in inbox"
-                : rejectNote[id]?.trim() || "Rejected in inbox",
-          }),
-        },
-        session.accessToken,
-      );
-      setToast(`Request ${decision}d`);
-      await refresh(session);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Decision failed");
+      if (kind === "apply") {
+        await api(`/approvals/${item.id}/apply`, { method: "POST", body: "{}" }, token());
+      } else {
+        await api(
+          `/approvals/${item.id}/decide`,
+          { method: "POST", body: JSON.stringify({ decision: kind, comment: note.trim() || (kind === "approve" ? "Approved in inbox" : undefined) }) },
+          token(),
+        );
+      }
+      setNotice({
+        tone: "success",
+        text: kind === "apply" ? `${typeLabel(item.type)} applied to the record.` : `${typeLabel(item.type)} ${kind === "approve" ? "approved" : "rejected"}.`,
+      });
+      const next = await refresh();
+      const updated = next?.find((i) => i.id === item.id) ?? null;
+      setOpen(updated);
+      setNote("");
+    } catch (e) {
+      setNotice({ tone: "error", text: errMsg(e, kind === "apply" ? "Apply failed" : "Decision failed") });
     } finally {
       setBusy(null);
     }
   }
 
-  async function apply(id: string) {
-    if (!session) return;
-    setBusy(`${id}:apply`);
-    setError(null);
-    try {
-      await api(`/approvals/${id}/apply`, { method: "POST", body: "{}" }, session.accessToken);
-      setToast("Approved change applied to student record");
-      await refresh(session);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Apply failed");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  if (!session) return null;
-  const pending = items.filter((i) => i.status === "pending").length;
+  const tabs: Array<{ id: Filter; label: string }> = [
+    { id: "all", label: `All (${counts.all})` },
+    { id: "pending", label: `Pending (${counts.pending})` },
+    { id: "approved", label: `Awaiting apply (${counts.approved})` },
+  ];
 
   return (
-    <AppShell
-      role="admin"
-      userName={`${session.givenName} ${session.familyName}`}
-      active="Approvals"
-      onNavigate={(item) => {
-        const href = resolveNav("admin", item);
-        if (href) router.push(href);
-      }}
+    <SuperFrame
+      title="Approvals"
+      breadcrumbs={["Home", "Approvals"]}
+      breadcrumbHrefs={["/admin", null]}
+      activeHref="/admin/approvals"
+      actions={
+        <button type="button" className="mh-sa__btn" onClick={() => void refresh()}>
+          Refresh
+        </button>
+      }
     >
-      <Breadcrumb items={["Admin", "Approvals"]} />
-      <RecordHeader
-        title="Approval Inbox"
-        subtitle="GAP-ADM-01 — field-by-field personal-details review, approve, apply."
-        meta={<StatusPill tone={pending ? "warning" : "success"}>{pending} pending</StatusPill>}
-      />
-      {error ? <p style={{ color: "var(--mh-danger)" }}>{error}</p> : null}
-      {toast ? <p style={{ color: "var(--mh-success, #0f766e)" }}>{toast}</p> : null}
-      <div style={{ display: "grid", gap: 12 }}>
-        {items.length === 0 ? (
-          <p style={{ color: "var(--mh-text-muted)" }}>No approval requests in the queue.</p>
-        ) : (
-          items.map((item) => {
-            const diff = (item.proposedDiff ?? {}) as Record<string, unknown>;
-            return (
-              <div
-                key={item.id}
-                style={{
-                  border: "1px solid var(--mh-border)",
-                  borderRadius: 10,
-                  padding: 14,
-                  background: "var(--mh-surface)",
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                  <div>
-                    <strong>{item.type}</strong>
-                    <div style={{ color: "var(--mh-text-muted)", fontSize: 13 }}>{item.subjectRef}</div>
-                    <div style={{ color: "var(--mh-text-muted)", fontSize: 12 }}>
-                      Created {item.createdAt.slice(0, 19).replace("T", " ")}
-                    </div>
-                  </div>
-                  <StatusPill tone={item.status === "pending" ? "warning" : item.status === "approved" ? "ai" : "success"}>
-                    {item.status}
-                  </StatusPill>
-                </div>
-                {item.type === "student_profile_change" ? <FieldDiff diff={diff} /> : (
-                  <pre style={{ margin: "10px 0 0", fontSize: 12, whiteSpace: "pre-wrap", color: "var(--mh-text-muted)" }}>
-                    {JSON.stringify(diff, null, 2)}
-                  </pre>
-                )}
-                <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  {item.status === "pending" ? (
-                    <>
-                      <input
-                        placeholder="Reject reason / note"
-                        value={rejectNote[item.id] ?? ""}
-                        onChange={(e) => setRejectNote((m) => ({ ...m, [item.id]: e.target.value }))}
-                        style={{
-                          flex: "1 1 180px",
-                          border: "1px solid var(--mh-border)",
-                          borderRadius: 8,
-                          padding: "8px 10px",
-                        }}
-                      />
-                      <Button
-                        type="button"
-                        disabled={busy === `${item.id}:approve`}
-                        onClick={(e: FormEvent) => {
-                          e.preventDefault();
-                          void decide(item.id, "approve");
-                        }}
-                      >
-                        Approve
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        disabled={busy === `${item.id}:reject`}
-                        onClick={() => void decide(item.id, "reject")}
-                      >
-                        Reject
-                      </Button>
-                    </>
-                  ) : null}
-                  {item.status === "approved" ? (
-                    <Button type="button" disabled={busy === `${item.id}:apply`} onClick={() => void apply(item.id)}>
-                      Apply to record
-                    </Button>
-                  ) : null}
-                </div>
-              </div>
-            );
-          })
-        )}
+      <p className="mh-sa__muted">Review requests that need administrative sign-off: personal details changes, grade publication, leave of absence and service requests.</p>
+
+      {notice && !open ? (
+        <SaNotice tone={notice.tone} onClose={() => setNotice(null)}>
+          {notice.text}
+        </SaNotice>
+      ) : null}
+
+      <div className="hx-kpis">
+        <div className="hx-kpi">
+          <span>Pending review</span>
+          <strong>{counts.pending}</strong>
+        </div>
+        <div className="hx-kpi">
+          <span>Approved · awaiting apply</span>
+          <strong>{counts.approved}</strong>
+        </div>
+        <div className="hx-kpi">
+          <span>Open requests</span>
+          <strong>{counts.all}</strong>
+        </div>
       </div>
-    </AppShell>
+
+      <SaCard
+        title="Approval inbox"
+        actions={tabs.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            className={`mh-sa__btn mh-sa__btn--sm${filter === t.id ? " mh-sa__btn--primary" : ""}`}
+            aria-pressed={filter === t.id}
+            onClick={() => setFilter(t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
+      >
+        <div className="hx-listbar">
+          <input className="mh-sa__input hx-quick" placeholder="Search by request, student or status…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search approvals" />
+          <span className="mh-sa__muted">
+            {rows.length} result{rows.length === 1 ? "" : "s"}
+          </span>
+        </div>
+        <div className="mh-sa__table-wrap">
+          <table className="mh-sa__table">
+            <thead>
+              <tr>
+                <th>Request</th>
+                <th>Subject</th>
+                <th>Requested by</th>
+                <th>Submitted</th>
+                <th>Approvals</th>
+                <th>Status</th>
+                <th className="mh-sa__col-action">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items === null ? (
+                <tr>
+                  <td colSpan={7} className="mh-sa__empty-cell">
+                    Loading approvals…
+                  </td>
+                </tr>
+              ) : rows.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="mh-sa__empty-cell">
+                    {counts.all ? "No requests match this filter." : "No approval requests in the queue."}
+                  </td>
+                </tr>
+              ) : (
+                rows.map((item) => (
+                  <tr key={item.id}>
+                    <td>
+                      <button type="button" className="mh-sa__link" onClick={() => openItem(item)}>
+                        {typeLabel(item.type)}
+                      </button>
+                    </td>
+                    <td>{subjectOf(item)}</td>
+                    <td>{metaOf(item).requestedByName || "—"}</td>
+                    <td>{when(item.createdAt)}</td>
+                    <td>
+                      {item.decisions.filter((d) => d.decision === "approve").length} / {item.requiredCount}
+                    </td>
+                    <td>
+                      <StatusPill status={item.status} />
+                    </td>
+                    <td className="hx-row-actions">
+                      <button type="button" className="mh-sa__btn mh-sa__btn--sm mh-sa__btn--primary" onClick={() => openItem(item)}>
+                        {item.status === "approved" ? "Apply" : "Review"}
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </SaCard>
+
+      {open ? (
+        <SaModal
+          title={typeLabel(open.type)}
+          onClose={() => setOpen(null)}
+          wide
+          footer={
+            <>
+              <button type="button" className="mh-sa__btn" onClick={() => setOpen(null)}>
+                Close
+              </button>
+              {open.status === "pending" ? (
+                <>
+                  <button type="button" className="mh-sa__btn mh-sa__btn--danger" disabled={Boolean(busy)} onClick={() => void act(open, "reject")}>
+                    {busy === "reject" ? "Rejecting…" : "Reject"}
+                  </button>
+                  <button type="button" className="mh-sa__btn mh-sa__btn--primary" disabled={Boolean(busy)} onClick={() => void act(open, "approve")}>
+                    {busy === "approve" ? "Approving…" : "Approve"}
+                  </button>
+                </>
+              ) : null}
+              {open.status === "approved" ? (
+                <button type="button" className="mh-sa__btn mh-sa__btn--primary" disabled={Boolean(busy)} onClick={() => void act(open, "apply")}>
+                  {busy === "apply" ? "Applying…" : "Apply to record"}
+                </button>
+              ) : null}
+            </>
+          }
+        >
+          {notice ? (
+            <SaNotice tone={notice.tone} onClose={() => setNotice(null)}>
+              {notice.text}
+            </SaNotice>
+          ) : null}
+          <RequestDetail item={open} />
+          {open.status === "pending" ? (
+            <label className="mh-sa__field mh-sa__field--wide">
+              <span className="mh-sa__label">Decision note (required to reject)</span>
+              <textarea className="mh-sa__input" rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add a note for the requester…" />
+            </label>
+          ) : null}
+        </SaModal>
+      ) : null}
+    </SuperFrame>
   );
 }

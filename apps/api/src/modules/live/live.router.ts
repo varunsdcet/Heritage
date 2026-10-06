@@ -29,6 +29,7 @@ async function resolveRoom(user: SessionClaims, sectionId: string) {
   if (!section) throw httpError("Class not found", "NOT_FOUND", 404);
 
   let role: LiveRole | null = null;
+  let completed = false;
   if (section.instructorPersonId === user.personId) role = "moderator";
   else if (user.roles.includes("admin") || user.roles.includes("registrar")) role = "moderator";
   else {
@@ -36,12 +37,16 @@ async function resolveRoom(user: SessionClaims, sectionId: string) {
       where: {
         institutionId: user.institutionId,
         sectionId: section.id,
-        status: "enrolled",
+        status: { in: ["enrolled", "completed"] },
         student: { personId: user.personId },
       },
-      select: { id: true },
+      select: { id: true, status: true },
+      orderBy: { status: "desc" },
     });
-    if (enrolled) role = "viewer";
+    if (enrolled) {
+      role = "viewer";
+      completed = enrolled.status !== "enrolled";
+    }
   }
   if (!role) throw httpError("You are not part of this class", "FORBIDDEN", 403);
   if (role === "viewer" && user.accountStatus === "paused") {
@@ -56,6 +61,7 @@ async function resolveRoom(user: SessionClaims, sectionId: string) {
   return {
     section,
     role,
+    completed,
     fullName,
     meetingId: `heritage-${section.id}`,
     meetingName: `${section.course.code} ${section.code} — ${section.course.title}`,
@@ -93,6 +99,7 @@ liveRouter.get("/sections/:sectionId", requireAuth, async (req, res, next) => {
       courseCode: room.section.course.code,
       sectionCode: room.section.code,
       role: room.role,
+      canJoin: !room.completed,
       running: info?.running ?? null,
       participantCount: info?.participantCount ?? null,
       recording: info?.recording ?? null,
@@ -107,6 +114,9 @@ liveRouter.post("/sections/:sectionId/join", requireAuth, async (req, res, next)
   try {
     const user = (req as AuthedRequest).user;
     const room = await resolveRoom(user, String(req.params.sectionId));
+    if (room.completed) {
+      throw httpError("You have completed this course, so its live class is closed. Published recordings are still available.", "COURSE_COMPLETED", 403);
+    }
     const cfg = bbbConfig();
     if (!cfg) {
       res.json({

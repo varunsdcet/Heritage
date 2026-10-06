@@ -9,7 +9,6 @@ import {
   extractDropCourseCode,
   facultyAssistantAnswer,
   groundedCoachAnswer,
-  isAdminAskDataQuestion,
   isAdvisorQuestion,
   isCareerAssistantQuestion,
   isFacultyAssistantQuestion,
@@ -43,6 +42,8 @@ import { executeAiTool } from "./tool-executor.js";
 import { listKnowledgeDocuments } from "./knowledge.service.js";
 import { getExecutiveMetrics } from "./metrics.service.js";
 import { askHeritageAi } from "../../lib/ask.js";
+import { adminCampusFacts, relevantFacts } from "./admin-facts.js";
+import { currentStudentId } from "../me/studentAlignment.js";
 
 export const aiRouter: Router = Router();
 
@@ -323,9 +324,7 @@ aiRouter.post("/ask", async (req, res, next) => {
     else if (role === "student" && isCareerAssistantQuestion(question)) capability = "career_assistant";
     else if (role === "student" && isStudyCoachQuestion(question)) capability = "study_coach";
     else if (role === "student" && isStudentSuccessQuestion(question)) capability = "student_success";
-    else if ((role === "admin" || role === "registrar") && /executive|retention|graduation|draft grade|success case/.test(question.toLowerCase()))
-      capability = "admin_ask_data";
-    else if ((role === "admin" || role === "registrar") && isAdminAskDataQuestion(question)) capability = "admin_ask_data";
+    else if (role === "admin" || role === "registrar") capability = "admin_ask_data";
     else if (role === "instructor" && /rubric|grade suggestion|draft feedback|suggest.*score/.test(question.toLowerCase()))
       capability = "grading_assistant";
     else if (role === "instructor") capability = "faculty_assistant";
@@ -344,7 +343,7 @@ aiRouter.post("/ask", async (req, res, next) => {
     const student =
       role === "student"
         ? await prisma.student.findFirst({
-            where: { institutionId: user.institutionId, personId: user.personId },
+            where: { id: await currentStudentId(user.institutionId, user.personId), institutionId: user.institutionId },
           })
         : null;
 
@@ -472,41 +471,17 @@ aiRouter.post("/ask", async (req, res, next) => {
       studyPolicy = studyResult.studyPolicy;
       provider = "study_coach_v1";
     } else if (capability === "admin_ask_data") {
-      metrics = (await executeAiTool("get_enrollment_metrics", ctx, {})) as EnrollmentMetricsSnapshot;
+      assertToolAllowed("get_enrollment_metrics", user.roles);
       executiveMetrics = await getExecutiveMetrics(user.institutionId);
-      const facts = [
-        {
-          id: "metrics:students",
-          title: "Students",
-          uri: "/admin/students",
-          text: `${metrics.studentCount} student records; ${metrics.enrolmentCount} active enrolments.`,
-        },
-        {
-          id: "metrics:sections",
-          title: "Sections",
-          uri: "/admin/sections",
-          text: `${metrics.sectionCount} sections; ${metrics.lowUtilizationSections.length} below 40% seat utilization (capacity assumption ${metrics.lowUtilizationSections[0]?.capacityAssumption ?? 30}).`,
-        },
-        {
-          id: "metrics:approvals",
-          title: "Approvals",
-          uri: "/admin/approvals",
-          text: `${metrics.pendingApprovals} approval requests pending human review.`,
-        },
-        {
-          id: "metrics:executive",
-          title: "Executive academic",
-          uri: "/admin/ai/executive",
-          text: `${executiveMetrics.academic.publishedGradeCount} published grades; ${executiveMetrics.academic.draftGradeCount} drafts; ${executiveMetrics.academic.openSuccessCases} open success cases; ${executiveMetrics.academic.advisingRequested} advising requests.`,
-        },
-        ...metrics.byProgram.slice(0, 5).map((row) => ({
-          id: `metrics:program:${row.programCode}`,
-          title: row.programName,
-          uri: "/admin/students",
-          text: `${row.programName} (${row.programCode}): ${row.studentCount} students.`,
-        })),
-      ];
-      grounded = adminAskDataAnswer({ question, facts });
+      const all = await adminCampusFacts(user.institutionId);
+      const cited = relevantFacts(question, all);
+      const base = adminAskDataAnswer({ question, facts: all });
+      grounded = {
+        ...base,
+        sources: cited.map(({ id, title, uri }) => ({ id, title, uri })),
+        suggestedActions: cited.slice(0, 4).map((f) => ({ label: `Open ${f.title.toLowerCase()}`, href: f.uri })),
+        claims: cited.map((f) => ({ kind: "fact" as const, text: f.text.slice(0, 500), evidenceIds: [f.id] })),
+      };
       provider = "admin_ask_data_v1";
     } else if (capability === "faculty_assistant") {
       const rows = (await executeAiTool("get_section_missing_submissions", ctx, {})) as Array<{

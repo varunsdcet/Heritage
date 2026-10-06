@@ -21,6 +21,7 @@ import { api, loadSession } from "@/lib/api";
 import type { ShellRole } from "@/lib/nav";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 import { ScreenScaffold } from "@/components/ScreenScaffold";
+import { SuperFrame } from "@/components/superadmin/shared";
 import { StudentSisShell } from "@/components/StudentSisShell";
 import { TeacherSisShell } from "@/components/TeacherSisShell";
 
@@ -535,6 +536,14 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
       <TeacherSisShell title="Ask Heritage" subtitle="Grounded campus assistant" activeHref="/instructor/ask">
         {chat}
       </TeacherSisShell>
+    );
+  }
+
+  if (role === "admin") {
+    return (
+      <SuperFrame title="Ask Heritage" breadcrumbs={["Home", "Ask Heritage"]} activeHref="/admin/ai/ask">
+        {chat}
+      </SuperFrame>
     );
   }
 

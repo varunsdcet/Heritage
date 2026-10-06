@@ -374,7 +374,8 @@ def forget(*ids):
 
 
 c, sm = req("GET", f"{S}/meta", token=T)
-check("sysconfig meta", c == 200 and len(sm.get("entities", {})) == 39 and len(sm.get("settings", {})) == 9, f"{len(sm.get('entities', {}))} entities, {len(sm.get('settings', {}))} settings")
+fin_entities = {"lockouts", "ledgerCategories", "ledgerTypes", "paymentMethods", "rateCategories", "planTemplates", "taxRates", "disbursementTypes", "promotions", "fundingSources", "collectionAgencies"}
+check("sysconfig meta", c == 200 and len(set(sm.get("entities", {})) - fin_entities - {"agents"}) == 39 and fin_entities <= set(sm.get("entities", {})) and len(sm.get("settings", {})) == 9, f"{len(sm.get('entities', {}))} entities, {len(sm.get('settings', {}))} settings")
 users = sm.get("users", [])
 
 # Captured seeds
@@ -627,6 +628,183 @@ for ent, sid in reversed(smade):
         print(f"     cleanup {ent}/{sid}: {c} {r.get('error') or r.get('message')}")
 check(f"sysconfig smoke records removed ({sremoved}/{len(smade)})", sremoved == len(smade))
 check("default agent status intact", by(sitems("agentStatuses"), "name", "Inactive").get("defaultStatus") == "Yes")
+
+# Financial Management (F01-F21 + student profile Finance). Every write is tagged "Heritage smoke"
+# and reversed here; deploy/cleanup-finance-smoke.sql removes the reversed rows afterwards.
+F = "/admin/heritage/financial"
+SMOKE = f"Heritage smoke {tag}"
+
+
+def raw(method, path, body=None):
+    r = urllib.request.Request(API + path, data=json.dumps(body).encode() if body is not None else None, method=method)
+    r.add_header("content-type", "application/json")
+    r.add_header("authorization", f"Bearer {T}")
+    try:
+        with urllib.request.urlopen(r, timeout=120) as resp:
+            return resp.status, resp.headers.get("content-type", ""), resp.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.headers.get("content-type", ""), e.read()
+
+
+def fin(method, path, body=None, expect=200):
+    c, r = req(method, F + path, body, T)
+    return c == expect, r
+
+
+def msg(r):
+    e = r.get("error")
+    return str(r.get("message") or (e.get("message") if isinstance(e, dict) else e) or "")
+
+
+c, fm = req("GET", f"{F}/meta", token=T)
+check("finance meta", c == 200 and bool(fm.get("ledgerTypes")) and bool(fm.get("paymentMethods")) and fm.get("perms", {}).get("edit") is True, f"{len(fm.get('ledgerTypes', []))} ledger types, {len(fm.get('paymentMethods', []))} methods, {len(fm.get('terms', []))} terms")
+for slug in ["transactions", "fees", "invoices", "disbursements", "awards", "adjustments", "commissions", "plans", "funds", "alerts"]:
+    ok, r = fin("GET", f"/{slug}?perPage=5")
+    check(f"finance list {slug}", ok and "items" in r and "pages" in r, f"{r.get('total')} rows" if ok else msg(r))
+ok, r = fin("GET", "/alerts?perPage=5&status=__none__")
+check("finance alerts empty filter", ok and r.get("total") == 0)
+
+method = (fm.get("paymentMethods") or [{}])[0].get("id", "")
+lt = next((t for t in fm.get("ledgerTypes", []) if t["overridable"] and not t["trigger"]), None) or next((t for t in fm.get("ledgerTypes", []) if t["overridable"]), {})
+dtype = next((d for d in fm.get("disbursementTypes", []) if "advance" not in d["name"].lower()), {})
+agent = (fm.get("agents") or [{}])[0].get("id", "")
+fsid = students[0]["key"].split(":", 1)[-1] if students else ""
+
+if fsid and method and lt:
+    ok, hd = fin("GET", f"/student/{fsid}")
+    check("student finance header", ok and bool(hd.get("name")) and "applicationNumber" in hd and "cgpa" in hd and bool(hd.get("initials")), f"{hd.get('name')} #{hd.get('applicationNumber')}")
+    for tab in ["overview", "transactions", "invoices", "disbursements", "awards", "plans", "audit"]:
+        ok, r = fin("GET", f"/student/{fsid}/{tab}")
+        check(f"student finance tab {tab}", ok, msg(r))
+
+    def balance():
+        return fin("GET", f"/student/{fsid}/overview")[1].get("summary", {}).get("balance", 0)
+
+    bal0 = balance()
+    ok, r = fin("POST", f"/student/{fsid}/fees", {"ledgerTypeId": lt["id"], "amount": 1, "quantity": 1, "paymentStatus": "Pending / Not Paid", "note": SMOKE}, 201)
+    check("add fee", ok and r.get("message") == "Fee added successfully", msg(r))
+    fee = r.get("id")
+    check("fee raises balance", abs(balance() - bal0 - 1) < 0.01)
+    if fee:
+        ok, r = fin("PATCH", f"/fees/{fee}", {"amount": 2})
+        check("edit fee", ok and r.get("message") == "Fee updated successfully", msg(r))
+        ok, r = fin("GET", f"/fees?perPage=50&student={hd.get('applicationNumber', '')}")
+        check("fee in Tuition & Fees list", ok and any(x.get("id") == fee for x in r.get("items", [])), f"{r.get('total')} rows")
+    ok, r = fin("POST", f"/student/{fsid}/payments", {"amount": 0, "method": method}, 400)
+    check("zero payment rejected (400)", ok, msg(r))
+    ok, r = fin("POST", f"/student/{fsid}/payments", {"amount": 2, "method": method, "note": SMOKE, "autoApply": False}, 201)
+    check("apply payment", ok and r.get("message") == "Payment applied successfully", msg(r))
+    pay = r.get("id")
+    if pay:
+        ok, r = fin("POST", f"/transactions/{pay}/receipt")
+        check("generate receipt", ok and "generated" in msg(r), msg(r))
+        c, ct, body = raw("GET", f"{F}/transactions/{pay}/receipt.pdf")
+        check("receipt pdf", c == 200 and "pdf" in ct and body[:4] == b"%PDF", f"{c} {ct} {len(body)} bytes")
+        ok, r = fin("POST", f"/transactions/{pay}/refund", {"refundType": "Cash Back", "method": method, "amount": 3, "note": SMOKE}, 400)
+        check("over-refund rejected (400)", ok, msg(r))
+        ok, r = fin("POST", f"/transactions/{pay}/refund", {"refundType": "Cash Back", "method": method, "amount": 2, "note": SMOKE})
+        check("refund payment", ok and r.get("message") == "Transaction information updated successfully", msg(r))
+    if fee:
+        ok, r = fin("DELETE", f"/fees/{fee}")
+        check("remove fee", ok, msg(r))
+    check("balance restored after fee/payment/refund", abs(balance() - bal0) < 0.01)
+
+    if dtype:
+        ok, r = fin("POST", f"/student/{fsid}/disbursements", {"typeId": dtype["id"], "amount": 1, "note": SMOKE, "allocate": False}, 201)
+        check("create disbursement", ok, msg(r))
+        if r.get("id"):
+            ok, r = fin("DELETE", f"/disbursements/{r['id']}")
+            check("remove disbursement", ok, msg(r))
+
+    ok, r = fin("POST", f"/student/{fsid}/plans", {"startDate": time.strftime("%Y-%m-%d"), "syncBalance": "Disabled", "debt": 3, "scheduleType": "Fixed Instalment Frequency", "frequency": "1 month", "instalmentAmount": 1, "notes": SMOKE}, 201)
+    check("create payment plan", ok, msg(r))
+    if r.get("id"):
+        pid = r["id"]
+        ok, r = fin("GET", f"/student/{fsid}/plans")
+        plan = by(r.get("items", []), "id", pid) or {}
+        check("plan has 3 instalments", len(plan.get("instalments", [])) == 3, str(len(plan.get("instalments", []))))
+        ok, r = fin("DELETE", f"/plans/{pid}")
+        check("delete payment plan", ok, msg(r))
+    ok, r = fin("POST", f"/student/{fsid}/plans", {"startDate": time.strftime("%Y-%m-%d"), "syncBalance": "Disabled", "debt": 3, "scheduleType": "Manual / Advanced Instalments", "instalments": [{"date": time.strftime("%Y-%m-%d"), "amount": 1}]}, 400)
+    check("manual instalments must add up (400)", ok, msg(r))
+
+    ok, r = fin("POST", "/invoices", {"type": "Student", "studentId": fsid, "dueDate": time.strftime("%Y-%m-%d"), "items": [{"kind": "other", "description": SMOKE, "fee": 1}]}, 400)
+    check("student invoice needs a term (400)", ok and msg(r) == "Please select a student and term to continue", msg(r))
+    if agent:
+        ok, r = fin("POST", "/invoices", {"type": "Agent", "agentId": agent, "dueDate": time.strftime("%Y-%m-%d"), "items": [{"kind": "other", "description": SMOKE, "quantity": 2, "fee": 1.5}], "note": SMOKE}, 201)
+        check("create agent invoice", ok and r.get("message") == "Invoice saved successfully", msg(r))
+        if r.get("id"):
+            iid = r["id"]
+            ok, inv = fin("GET", f"/invoices/{iid}")
+            check("invoice totals", ok and abs(inv.get("subtotal", 0) - 3) < 0.01, str(inv.get("subtotal")))
+            c, ct, body = raw("GET", f"{F}/invoices/{iid}/pdf")
+            check("invoice pdf", c == 200 and body[:4] == b"%PDF", f"{c} {len(body)} bytes")
+            ok, r = fin("DELETE", f"/invoices/{iid}")
+            check("delete invoice", ok, msg(r))
+        ok, r = fin("POST", "/commissions/bonus", {"agentId": agent, "studentId": fsid, "amount": 1, "note": SMOKE}, 201)
+        check("create agent bonus", ok, msg(r))
+        if r.get("id"):
+            ok, r = fin("DELETE", f"/commissions/bonus/{r['id']}")
+            check("delete agent bonus", ok, msg(r))
+
+    ok, r = fin("POST", "/adjustments", {"studentId": fsid, "direction": "Increase balance (debit)", "amount": 1, "reason": SMOKE}, 201)
+    check("request adjustment", ok, msg(r))
+    if r.get("id"):
+        ok, r = fin("POST", f"/adjustments/{r['id']}/review", {"decision": "Declined", "note": SMOKE})
+        check("decline adjustment", ok and r.get("message") == "Financial adjustment declined", msg(r))
+
+    ok, r = fin("POST", "/funds", {"amount": 5, "receivedDate": time.strftime("%Y-%m-%d"), "methodId": method, "receipt": f"SMK{tag}", "note": SMOKE}, 201)
+    check("record unallocated fund", ok, msg(r))
+    if r.get("id"):
+        fid = r["id"]
+        if dtype:
+            ok, r = fin("POST", f"/funds/{fid}/allocate", {"rows": [{"studentId": fsid, "amount": 6, "typeId": dtype["id"]}]}, 400)
+            check("over-allocation rejected (400)", ok, msg(r))
+            ok, r = fin("POST", f"/funds/{fid}/allocate", {"rows": [{"studentId": fsid, "amount": 2, "typeId": dtype["id"]}]})
+            check("allocate fund", ok, msg(r))
+            ok, r = fin("DELETE", f"/funds/{fid}", expect=400)
+            check("fund with allocations cannot be deleted (400)", ok, msg(r))
+            ok, r = fin("GET", f"/funds?perPage=50&keyword=SMK{tag}")
+            fund = by(r.get("items", []), "id", fid) or {}
+            for a in fund.get("allocations", []):
+                ok, r = fin("DELETE", f"/funds/{fid}/allocations/{a['id']}")
+                check("remove fund allocation", ok, msg(r))
+        ok, r = fin("DELETE", f"/funds/{fid}")
+        check("delete fund", ok, msg(r))
+    check("balance unchanged after finance smoke", abs(balance() - bal0) < 0.01)
+
+    c, ct, body = raw("POST", f"{F}/documents", {"document": "statement", "studentId": fsid})
+    check("financial statement pdf", c == 200 and body[:4] == b"%PDF", f"{c} {len(body)} bytes")
+    ok, r = fin("POST", "/documents", {"document": "statement"}, 400)
+    check("statement needs a student (400)", ok, msg(r))
+    ok, au = fin("GET", f"/student/{fsid}/audit")
+    check("finance audit trail records smoke actions", ok and {"Payment recorded", "Payment refunded", "Payment plan created"} <= set(au.get("actions", [])), ", ".join(au.get("actions", [])[:8]))
+
+# Finance configuration (F12-F21) on the System Configuration engine
+fmade = []
+for ent, body, label in [
+    ("paymentMethods", {"name": f"Smoke Pay {tag}"}, "F14 add payment method"),
+    ("taxRates", {"name": f"Smoke Tax {tag}", "rate": 5, "code": "SMK"}, "F17 add tax rate"),
+    ("ledgerCategories", {"name": f"Smoke Category {tag}"}, "F13 add ledger category"),
+    ("fundingSources", {"name": f"Smoke Source {tag}"}, "F20 add funding source"),
+    ("collectionAgencies", {"name": f"Smoke Agency {tag}", "commissionRate": 10}, "F21 add collection agency"),
+]:
+    c, r = req("POST", f"{S}/e/{ent}", body, T)
+    check(label, c == 201 and bool(r.get("id")), msg(r))
+    if c == 201 and r.get("id"):
+        fmade.append((ent, r["id"]))
+camp = (fm.get("campuses") or [""])[0]
+c, r = req("POST", f"{S}/e/lockouts", {"campuses": [camp.get("id") if isinstance(camp, dict) else camp], "startDate": "2026-02-01", "endDate": "2026-01-01"}, T)
+check("F12 lock-out end before start (400)", c == 400 and "End Date" in msg(r), msg(r))
+used = next((t for t in sitems("ledgerTypes") if t.get("taxes")), None)
+if used:
+    c, r = req("DELETE", f"{S}/e/taxRates/{used['taxes'][0]}", token=T)
+    check("tax rate used by a ledger type cannot be deleted (409)", c == 409, msg(r))
+fremoved = 0
+for ent, fid in reversed(fmade):
+    c, r = req("DELETE", f"{S}/e/{ent}/{fid}", token=T)
+    fremoved += c == 200
+check(f"finance config smoke records removed ({fremoved}/{len(fmade)})", fremoved == len(fmade))
 
 print("\nHeritage screen smoke " + ("PASSED" if not failures else f"FAILED: {', '.join(failures)}"))
 sys.exit(1 if failures else 0)

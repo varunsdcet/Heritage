@@ -3,6 +3,7 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { AddActivityChooser } from "@/components/AddActivityChooser";
+import { CourseAiDraftDialog } from "@/components/ai-draft/CourseAiDraftDialog";
 import { LmsAddForm } from "@/components/lms/LmsAddForm";
 import {
   ActionMenu,
@@ -219,10 +220,8 @@ function acswFallbackTopics(): CourseLmsState["topics"] {
 
 function fallbackLms(c: NonNullable<TeacherScreenConfig["courseDetail"]>): CourseLmsState {
   const isAcsw = /ACSW\s*200/i.test(c.code);
-  const session = isAcsw
-    ? "ACSWAPR26-01: Apr. 27, 2026 - May. 1, 2026"
-    : c.meta.split(" · ")[2] || c.meta;
-  const location = isAcsw ? "#110 Heritage College- Surrey" : c.meta.split(" · ")[0] || "";
+  const session = c.meta.split(" · ")[2] || c.meta;
+  const location = c.meta.split(" · ")[0] || "";
   const first = "Elena";
   const last = "Vance";
   const prompts = [
@@ -479,6 +478,7 @@ export function CourseLmsView({ config }: Props) {
           label={atypeParam}
           busy={Boolean(live?.busy)}
           roster={c.roster ?? []}
+          sectionId={c.sectionId}
           onSave={(values) => {
             void (async () => {
               const ok = await live?.runAction?.(
@@ -536,9 +536,16 @@ export function CourseLmsView({ config }: Props) {
       return (
         <PageEditPanel
           activity={viewedActivity}
-          onSave={() => {
-            void live?.runAction?.("Save page", JSON.stringify({ Id: viewedActivity.id, Name: viewedActivity.name }));
-            go({ tab: "Course", action: "view-activity", aid: viewedActivity.id });
+          hidden={Boolean(viewedActivity.hidden)}
+          onSave={(values) => {
+            void live
+              ?.runAction?.(
+                "Save page",
+                JSON.stringify({ Id: viewedActivity.id, Name: values.name, Body: values.body, Hidden: values.hidden ? "yes" : "no" }),
+              )
+              .then((ok) => {
+                if (ok) go({ tab: "Course", action: "view-activity", aid: viewedActivity.id });
+              });
           }}
           onCancel={() => go({ tab: "Course", action: "view-activity", aid: viewedActivity.id })}
         />
@@ -885,6 +892,8 @@ function CourseContentPanel({
   const topics = lms?.topics ?? [];
   const activityTypes = decorateLmsActivityTypes(lms?.activityTypes);
   const [chooserTopicId, setChooserTopicId] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+  const [aiDraftTopicId, setAiDraftTopicId] = useState<string | null>(() => (searchParams.get("aiDraft") === "1" ? "" : null));
 
   return (
     <section className="mh-lms-course">
@@ -902,6 +911,16 @@ function CourseContentPanel({
             Add topic
           </button>
         ) : null}
+        {editMode && live?.path ? (
+          <button
+            type="button"
+            className="mh-teacher-btn"
+            disabled={live?.busy || topics.length === 0}
+            onClick={() => setAiDraftTopicId("")}
+          >
+            ✦ AI draft
+          </button>
+        ) : null}
       </div>
       {topics.map((topic, index) => {
         const shut = Boolean(collapsed[topic.id]);
@@ -917,6 +936,7 @@ function CourseContentPanel({
                   label={`Section actions for ${topic.title}`}
                   items={[
                     { label: "Edit section", onClick: () => onEditSection(topic.id) },
+                    { label: "AI draft lesson", onClick: () => setAiDraftTopicId(topic.id) },
                     { label: "Highlight", onClick: () => void live?.runAction?.("Highlight section", topic.id) },
                   ]}
                 />
@@ -1011,6 +1031,16 @@ function CourseContentPanel({
           </article>
         );
       })}
+      {aiDraftTopicId !== null && live?.path ? (
+        <CourseAiDraftDialog
+          path={live.path}
+          topics={topics}
+          initialTopicId={aiDraftTopicId || undefined}
+          busy={live.busy}
+          runAction={live.runAction}
+          onClose={() => setAiDraftTopicId(null)}
+        />
+      ) : null}
       {chooserTopicId ? (
         <AddActivityChooser
           types={activityTypes}

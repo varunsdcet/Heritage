@@ -1,18 +1,18 @@
 import type { Metadata } from "next";
-import { Cormorant_Garamond, Playfair_Display, Plus_Jakarta_Sans, Source_Serif_4 } from "next/font/google";
+import { Cormorant_Garamond, Inter, Playfair_Display, Plus_Jakarta_Sans } from "next/font/google";
 import "@myheritage/tokens/css";
 import "./globals.css";
 
-const sans = Plus_Jakarta_Sans({
+const sans = Inter({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700", "800"],
   display: "swap",
   variable: "--font-sans",
 });
 
-const display = Source_Serif_4({
+const display = Plus_Jakarta_Sans({
   subsets: ["latin"],
-  weight: ["500", "600", "700"],
+  weight: ["500", "600", "700", "800"],
   display: "swap",
   variable: "--font-display",
 });

@@ -27,6 +27,7 @@ import { dashboardRouter } from "./dashboard.router.js";
 import { myCoursesRouter } from "./myCourses.router.js";
 import { coursesRouter } from "./courses.router.js";
 import { studentsRouter } from "./students.router.js";
+import { opsRouter } from "./ops.router.js";
 
 export const heritageRouter: Router = Router();
 
@@ -41,6 +42,7 @@ heritageRouter.use("/my-courses", myCoursesRouter);
 heritageRouter.use("/programs", programsRouter);
 heritageRouter.use("/courses", coursesRouter);
 heritageRouter.use("/students", studentsRouter);
+heritageRouter.use("/ops", opsRouter);
 
 const DataBody = z.object({ ctx: z.string().max(200).optional(), data: z.record(z.unknown()).default({}) });
 const ActionBody = z.object({

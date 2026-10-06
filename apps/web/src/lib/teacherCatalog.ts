@@ -157,9 +157,12 @@ export type CourseLmsState = {
       note?: string;
       body?: string;
       fileName?: string;
+      fileId?: string;
+      fileSize?: number;
       modified?: string;
       hidden?: boolean;
       joinUrl?: string | null;
+      storyboard?: import("@/lib/aiDraftSamples").AiDraftStoryboard;
     }>;
   }>;
   activityTypes?: Array<{ code: string; label: string; kind: string }>;

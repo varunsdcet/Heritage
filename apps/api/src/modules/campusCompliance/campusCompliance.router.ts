@@ -11,6 +11,7 @@ import {
 } from "./sessions.js";
 import { buildComplianceInbox, submitExplanation } from "./inbox.js";
 import { POLICY } from "./policy.js";
+import { currentStudentId } from "../me/studentAlignment.js";
 
 export const campusComplianceRouter: Router = Router();
 
@@ -177,7 +178,7 @@ campusComplianceRouter.get("/pause-status", requireAuth, async (req, res, next) 
       select: { status: true },
     });
     const student = await prisma.student.findFirst({
-      where: { institutionId: user.institutionId, personId: user.personId },
+      where: { id: await currentStudentId(user.institutionId, user.personId), institutionId: user.institutionId },
       select: { id: true },
     });
     const open = student

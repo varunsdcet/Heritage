@@ -8,6 +8,9 @@ import { StudentFrame } from "@/components/StudentSisShell";
 import { formatHccDateRange, statusLabel, statusTone } from "@/lib/hccCourseFormat";
 import { liveSectionId, openClassLink } from "@/lib/liveClass";
 import { LiveClassPanel } from "@/components/LiveClassPanel";
+import { AiDraftVideoPlayer } from "@/components/ai-draft/AiDraftVideoPlayer";
+import { LessonBody, LmsFileCard } from "@/components/lms/LmsScreens";
+import type { AiDraftStoryboard } from "@/lib/aiDraftSamples";
 
 type LoadState = "loading" | "ready" | "offline" | "forbidden" | "error";
 
@@ -44,11 +47,14 @@ type LmsActivity = {
   name: string;
   body?: string;
   fileName?: string;
+  fileId?: string;
+  fileSize?: number;
   modified?: string;
   note?: string;
   joinUrl?: string | null;
   gradingMethod?: string;
   questions?: Array<{ id: string; text: string; answers: string[]; mark?: string }>;
+  storyboard?: AiDraftStoryboard;
 };
 
 type CourseLms = {
@@ -91,13 +97,6 @@ type GradeRow = {
 
 const EVAL_COLORS = ["#2f9e44", "#1971c2", "#e8590c", "#9c36b5", "#868e96"];
 
-const DEFAULT_EVAL_ROWS = [
-  { component: "Class Participation", weight: "20%" },
-  { component: "Quizzes", weight: "20%" },
-  { component: "Mid-term Exam", weight: "30%" },
-  { component: "Final Exam", weight: "30%" },
-];
-
 function EvaluationCriteriaCard({
   courseCode,
   courseTitle,
@@ -111,7 +110,9 @@ function EvaluationCriteriaCard({
   modified?: string;
   compact?: boolean;
 }) {
-  const list = (rows.filter((r) => r.component !== "Total").length ? rows.filter((r) => r.component !== "Total") : DEFAULT_EVAL_ROWS);
+  const list = rows.filter((r) => r.component !== "Total");
+  const totalRow = rows.find((r) => r.component === "Total");
+  const total = totalRow?.weight ?? `${Number(list.reduce((n, r) => n + (Number.parseFloat(r.weight) || 0), 0).toFixed(2))}%`;
   return (
     <div className={`mh-student-eval-card${compact ? " is-compact" : ""}`} data-screen="evaluation">
       <header>
@@ -127,6 +128,9 @@ function EvaluationCriteriaCard({
         </em>
       </header>
       <p className="mh-student-eval-card__section">COURSE EVALUATION</p>
+      {list.length === 0 ? (
+        <p className="mh-teacher-muted">Your instructor has not published the evaluation criteria for this course yet.</p>
+      ) : null}
       <ul>
         {list.map((row, i) => {
           const pct = Number.parseFloat(row.weight) || 0;
@@ -144,33 +148,93 @@ function EvaluationCriteriaCard({
           );
         })}
       </ul>
-      <p className="mh-student-eval-card__note">
-        Students must achieve a cumulative passing grade according to course requirements.
-      </p>
-      <footer>
-        <span>TOTAL</span>
-        <span>100%</span>
-      </footer>
+      {list.length ? (
+        <footer>
+          <span>TOTAL</span>
+          <span>{total}</span>
+        </footer>
+      ) : null}
       {modified ? <p className="mh-teacher-muted mh-student-eval-card__mod">Last modified: {modified}</p> : null}
     </div>
   );
 }
 
+type SyllabusInfo =
+  | { available: true; name: string; mime: string; size: number | null; updatedAt: string | null; description: string }
+  | { available: false; description: string };
+
+function formatBytes(n: number | null) {
+  if (n == null) return "";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function fileFormat(mime: string, name: string) {
+  if (/pdf/i.test(mime)) return "PDF";
+  if (/word/i.test(mime) || /\.docx?$/i.test(name)) return "Word";
+  if (/^image\//i.test(mime)) return "Image";
+  if (/^text\//i.test(mime)) return "Text";
+  return "File";
+}
+
 function SyllabusDocumentCard({
-  fileName,
+  sectionId,
   courseCode,
   courseTitle,
-  modified,
 }: {
-  fileName?: string;
+  sectionId: string;
   courseCode: string;
   courseTitle: string;
-  modified?: string;
 }) {
+  const [info, setInfo] = useState<SyllabusInfo | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
+
+  useEffect(() => {
+    const session = loadSession();
+    if (!session) return;
+    let live = true;
+    api<SyllabusInfo>(`/me/courses/${encodeURIComponent(sectionId)}/syllabus`, {}, session.accessToken)
+      .then((r) => live && setInfo(r))
+      .catch((e: unknown) => live && setLoadError(e instanceof Error ? e.message : "The syllabus could not be loaded."));
+    return () => {
+      live = false;
+    };
+  }, [sectionId]);
+
+  async function download() {
+    const session = loadSession();
+    if (!session) return;
+    setDownloading(true);
+    setLoadError(null);
+    try {
+      const file = await api<{ name: string; mime: string; base64: string }>(
+        `/me/courses/${encodeURIComponent(sectionId)}/syllabus/file`,
+        {},
+        session.accessToken,
+      );
+      const bytes = Uint8Array.from(atob(file.base64), (c) => c.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], { type: file.mime || "application/octet-stream" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = file.name || "syllabus";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "The syllabus could not be downloaded.");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  const ready = info?.available ? info : null;
   return (
     <div className="mh-student-syllabus" data-screen="syllabus">
       <div className="mh-student-syllabus__hero">
-        <span className="mh-student-syllabus__badge">PDF</span>
+        {ready ? <span className="mh-student-syllabus__badge">{fileFormat(ready.mime, ready.name).toUpperCase()}</span> : null}
         <div>
           <p className="mh-student-activity-type">FILE</p>
           <h2>Course Syllabus</h2>
@@ -180,31 +244,38 @@ function SyllabusDocumentCard({
         </div>
       </div>
       <div className="mh-student-syllabus__body">
-        <h3>What&apos;s inside</h3>
-        <ul>
-          <li>Course description, learning outcomes, and weekly schedule</li>
-          <li>Required readings, lab expectations, and assessment weights</li>
-          <li>Academic integrity, attendance, and support resources</li>
-        </ul>
-        <dl>
-          <div>
-            <dt>Document</dt>
-            <dd>{fileName || "ACSW500-Family-Studies-Syllabus.pdf"}</dd>
-          </div>
-          <div>
-            <dt>Format</dt>
-            <dd>PDF · Downloadable</dd>
-          </div>
-          {modified ? (
-            <div>
-              <dt>Updated</dt>
-              <dd>{modified}</dd>
-            </div>
-          ) : null}
-        </dl>
-        <button type="button" className="mh-hcc-btn">
-          Download syllabus
-        </button>
+        {info?.description ? <p>{info.description}</p> : null}
+        {loadError ? <p className="mh-teacher-error">{loadError}</p> : null}
+        {!info && !loadError ? <p className="mh-teacher-muted">Loading syllabus…</p> : null}
+        {info && !ready ? (
+          <p className="mh-teacher-muted">No syllabus has been released to students for this course yet.</p>
+        ) : null}
+        {ready ? (
+          <>
+            <dl>
+              <div>
+                <dt>Document</dt>
+                <dd>{ready.name}</dd>
+              </div>
+              <div>
+                <dt>Format</dt>
+                <dd>
+                  {fileFormat(ready.mime, ready.name)}
+                  {ready.size != null ? ` · ${formatBytes(ready.size)}` : ""}
+                </dd>
+              </div>
+              {ready.updatedAt ? (
+                <div>
+                  <dt>Updated</dt>
+                  <dd>{formatDate(ready.updatedAt)}</dd>
+                </div>
+              ) : null}
+            </dl>
+            <button type="button" className="mh-hcc-btn" onClick={() => void download()} disabled={downloading}>
+              {downloading ? "Downloading…" : "Download syllabus"}
+            </button>
+          </>
+        ) : null}
       </div>
     </div>
   );
@@ -822,28 +893,17 @@ export function StudentCourseDetailPremiumView({ sectionId }: { sectionId: strin
                 ) : viewed.type === "FILE" &&
                   (viewed.id === "act-course-syllabus" || /syllabus/i.test(viewed.name)) ? (
                   <SyllabusDocumentCard
-                    fileName={viewed.fileName}
+                    sectionId={sectionId}
                     courseCode={course.courseCode}
                     courseTitle={course.courseTitle}
-                    modified={viewed.modified}
                   />
                 ) : viewed.type === "FILE" || viewed.type === "FOLDER" ? (
-                  <div className="mh-student-file-card" data-screen="file">
-                    <div className="mh-student-file-card__icon" aria-hidden>
-                      {viewed.type === "FOLDER" ? "F" : "PDF"}
-                    </div>
-                    <div>
-                      <strong>{viewed.name}</strong>
-                      <p className="mh-teacher-muted">{viewed.fileName || `${viewed.name}.pdf`}</p>
-                      <button type="button" className="mh-hcc-btn ghost">
-                        Download
-                      </button>
-                    </div>
-                  </div>
+                  <LmsFileCard activity={viewed} sectionId={sectionId} audience="student" />
                 ) : (
                   /* Screen 5 — PAGE (Brief Course Description / Learning Objectives) */
                   <div className="mh-lms-pagebody mh-student-pagebody" data-screen="page">
-                    <p>{viewed.body || `${viewed.name} content will appear here when published by your instructor.`}</p>
+                    {viewed.storyboard ? <AiDraftVideoPlayer key={viewed.id} storyboard={viewed.storyboard} /> : null}
+                    <LessonBody body={viewed.body} empty={`${viewed.name} content will appear here when published by your instructor.`} />
                     {viewed.modified ? (
                       <p className="mh-teacher-muted">Last modified: {viewed.modified}</p>
                     ) : null}

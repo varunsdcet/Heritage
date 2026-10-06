@@ -14,6 +14,7 @@ import {
   getProgramPlan,
   getTranscriptSummary,
 } from "./program-plan.service.js";
+import { currentStudentId } from "../me/studentAlignment.js";
 
 export const academicRouter: Router = Router();
 
@@ -21,7 +22,7 @@ academicRouter.use(requireAuth, requireRoles("student"));
 
 async function ownStudent(user: AuthedRequest["user"]) {
   const student = await prisma.student.findFirst({
-    where: { institutionId: user.institutionId, personId: user.personId },
+    where: { id: await currentStudentId(user.institutionId, user.personId), institutionId: user.institutionId },
   });
   if (!student) {
     throw Object.assign(new Error("Student record not found"), { code: "NOT_FOUND", status: 404 });

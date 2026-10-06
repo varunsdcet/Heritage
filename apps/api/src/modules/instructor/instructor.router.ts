@@ -9,7 +9,17 @@ import {
 
 export const instructorRouter: Router = Router();
 
-instructorRouter.use(requireAuth, requireRoles("instructor", "admin"));
+instructorRouter.use(requireAuth, requireRoles("instructor", "admin", "registrar"));
+
+instructorRouter.post("/ai-draft", async (req, res, next) => {
+  try {
+    const { AiDraftRequest, generateAiDraft } = await import("./aiDraft.js");
+    const body = AiDraftRequest.parse(req.body);
+    res.json(await generateAiDraft((req as AuthedRequest).user, body));
+  } catch (err) {
+    next(err);
+  }
+});
 
 instructorRouter.get("/sis/bootstrap", async (req, res, next) => {
   try {

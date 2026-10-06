@@ -3,7 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, loadSession, type Session } from "@/lib/api";
 
-export type HccMailRole = "student" | "instructor";
+export type HccMailRole = "student" | "instructor" | "admin";
 
 type Folder = { id: string; name: string; kind: string; unreadCount: number; sortOrder?: number };
 type ThreadRow = {
@@ -15,6 +15,7 @@ type ThreadRow = {
   updatedAt: string;
   readAt: string | null;
   folderKind?: string;
+  flagged?: boolean;
 };
 type ThreadDetail = {
   id: string;
@@ -22,11 +23,19 @@ type ThreadDetail = {
   messageType?: string;
   folderKind: string;
   flagged: boolean;
-  from: { name: string; email: string } | null;
-  to: Array<{ name: string; email: string }>;
+  from: { accountId?: string; name: string; email: string } | null;
+  to: Array<{ accountId?: string; name: string; email: string }>;
   cc: Array<{ name: string; email: string }>;
   bcc: Array<{ name: string; email: string }>;
-  messages: Array<{ id: string; from: string; senderName: string; senderEmail: string; text: string; time: string }>;
+  messages: Array<{
+    id: string;
+    from: string;
+    senderAccountId?: string;
+    senderName: string;
+    senderEmail: string;
+    text: string;
+    time: string;
+  }>;
 };
 type Settings = {
   emailAddress?: string;
@@ -39,10 +48,14 @@ type Settings = {
   autoResponderEnabled?: boolean;
   autoResponderBody?: string | null;
 };
+type Person = { accountId: string; name: string; group?: string };
 type Audience = {
-  instructors: Array<{ accountId: string; name: string }>;
-  classmates: Array<{ accountId: string; name: string }>;
+  instructors: Person[];
+  classmates: Person[];
+  staff?: Person[];
 };
+
+const GROUP_LABEL: Record<string, string> = { instructors: "Instructors", classmates: "Classmates", students: "Students", staff: "Staff" };
 
 type View =
   | "compose"
@@ -115,6 +128,7 @@ export function HccMailViews({
   const [listName, setListName] = useState("");
   const [replyText, setReplyText] = useState("");
   const [showReply, setShowReply] = useState(false);
+  const [returnView, setReturnView] = useState<View>("inbox");
 
   // compose
   const [messageType, setMessageType] = useState("standard");
@@ -216,6 +230,7 @@ export function HccMailViews({
   async function openThread(id: string) {
     if (!session) return;
     setError(null);
+    if (view !== "thread") setReturnView(view);
     try {
       const detail = await api<ThreadDetail>(`/mail/threads/${id}`, {}, session.accessToken);
       setThread(detail);
@@ -294,6 +309,48 @@ export function HccMailViews({
     }
   }
 
+  function quoted(t: ThreadDetail) {
+    const last = t.messages[t.messages.length - 1];
+    if (!last) return "";
+    const lines = last.text.split("\n").map((l) => `> ${l}`).join("\n");
+    return `\n\n----- Original message -----\nFrom: ${last.senderName}\nSent: ${fmtDate(last.time)}\nSubject: ${t.subject}\n\n${lines}`;
+  }
+
+  function composeFrom(t: ThreadDetail, mode: "reply" | "forward") {
+    const last = t.messages[t.messages.length - 1];
+    const prefix = mode === "reply" ? "Re: " : "Fwd: ";
+    const base = t.subject.replace(/^(re|fwd?):\s*/i, "");
+    const replyTo =
+      mode === "reply"
+        ? [last && last.from !== "me" ? last.senderAccountId : t.to[0]?.accountId].filter((id): id is string => Boolean(id))
+        : [];
+    const senderName = last && last.from !== "me" ? last.senderName : t.to[0]?.name;
+    if (replyTo[0] && senderName) setExtraPeople([{ accountId: replyTo[0], name: senderName }]);
+    goView("compose");
+    setToIds(replyTo);
+    setCcIds([]);
+    setBccIds([]);
+    setAddCc(false);
+    setAddBcc(false);
+    setSubject(`${prefix}${base}`.slice(0, 200));
+    setBody(quoted(t));
+  }
+
+  async function toggleFlag(id: string, flagged: boolean) {
+    if (!session) return;
+    try {
+      await api(
+        "/mail/bulk",
+        { method: "POST", body: JSON.stringify({ threadIds: [id], action: flagged ? "unflag" : "flag" }) },
+        session.accessToken,
+      );
+      setThreads((prev) => prev.map((t) => (t.id === id ? { ...t, flagged: !flagged } : t)));
+      setThread((prev) => (prev && prev.id === id ? { ...prev, flagged: !flagged } : prev));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update flag");
+    }
+  }
+
   async function sendReply() {
     if (!session || !thread || !replyText.trim()) return;
     setBusy(true);
@@ -314,9 +371,47 @@ export function HccMailViews({
     }
   }
 
+  const [who, setWho] = useState("");
+  const [previewing, setPreviewing] = useState(false);
+  const [extraPeople, setExtraPeople] = useState<Person[]>([]);
   const people = useMemo(() => {
-    return [...(audience?.instructors ?? []), ...(audience?.classmates ?? [])];
-  }, [audience]);
+    const base = [...(audience?.staff ?? []), ...(audience?.instructors ?? []), ...(audience?.classmates ?? [])];
+    const known = new Set(base.map((p) => p.accountId));
+    return [...base, ...extraPeople.filter((p) => !known.has(p.accountId))];
+  }, [audience, extraPeople]);
+  const nameById = useMemo(() => new Map(people.map((p) => [p.accountId, p.name])), [people]);
+
+  function pickPeople(ids: string[], setIds: (fn: (prev: string[]) => string[]) => void, prefix: string) {
+    const needle = who.trim().toLowerCase();
+    const shown = people.filter((p) => ids.includes(p.accountId) || !needle || p.name.toLowerCase().includes(needle));
+    const groups = [...new Set(shown.map((p) => p.group ?? ""))];
+    return (
+      <div className="mh-hcc-mail__chips">
+        {people.length === 0 ? <p className="mh-hcc-mail__hint">No recipients available yet.</p> : null}
+        {people.length > 0 && shown.length === 0 ? <p className="mh-hcc-mail__hint">No one matches “{who}”.</p> : null}
+        {groups.map((g) => (
+          <div key={`${prefix}-${g}`} className="mh-hcc-mail__chip-group">
+            {groups.length > 1 && g ? <span className="mh-hcc-mail__hint">{GROUP_LABEL[g] ?? g}</span> : null}
+            {shown
+              .filter((p) => (p.group ?? "") === g)
+              .map((p) => {
+                const on = ids.includes(p.accountId);
+                return (
+                  <button
+                    key={`${prefix}-${p.accountId}`}
+                    type="button"
+                    className={`mh-hcc-mail__chip${on ? " is-on" : ""}`}
+                    onClick={() => setIds((prev) => (on ? prev.filter((id) => id !== p.accountId) : [...prev, p.accountId]))}
+                  >
+                    {p.name}
+                  </button>
+                );
+              })}
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   function toggleSelect(id: string) {
     setSelected((prev) => {
@@ -343,7 +438,8 @@ export function HccMailViews({
 
   const listTitle = view === "outbox" || view === "drafts" ? "To" : view === "deleted" ? "From / To" : "From";
   const dateTitle = view === "outbox" ? "Sent" : view === "drafts" ? "Saved" : view === "deleted" ? "Date" : "Received";
-  const recipientLabel = role === "instructor" ? "Students & colleagues" : "Instructors & classmates";
+  const recipientLabel =
+    role === "admin" ? "Students, instructors & staff" : role === "instructor" ? "Students, colleagues & staff" : "Instructors, classmates & staff";
   const customFolders = folders.filter((f) => f.kind === "custom");
 
   return shell({
@@ -418,25 +514,20 @@ export function HccMailViews({
                 </div>
               </fieldset>
 
-              <label className="mh-hcc-mail__field">
-                <span>To · {recipientLabel}</span>
-                <div className="mh-hcc-mail__chips">
-                  {people.length === 0 ? <p className="mh-hcc-mail__hint">No recipients available yet.</p> : null}
-                  {people.map((p) => {
-                    const on = toIds.includes(p.accountId);
-                    return (
-                      <button
-                        key={p.accountId}
-                        type="button"
-                        className={`mh-hcc-mail__chip${on ? " is-on" : ""}`}
-                        onClick={() => setToIds((prev) => (on ? prev.filter((id) => id !== p.accountId) : [...prev, p.accountId]))}
-                      >
-                        {p.name}
-                      </button>
-                    );
-                  })}
-                </div>
-              </label>
+              {people.length > 12 ? (
+                <label className="mh-hcc-mail__field">
+                  <span>Find people</span>
+                  <input className="mh-teacher-field" value={who} onChange={(e) => setWho(e.target.value)} placeholder="Type a name to filter recipients" />
+                </label>
+              ) : null}
+
+              <div className="mh-hcc-mail__field">
+                <span>
+                  To · {recipientLabel}
+                  {toIds.length ? ` (${toIds.length} selected: ${toIds.map((id) => nameById.get(id) ?? "").filter(Boolean).slice(0, 4).join(", ")}${toIds.length > 4 ? "…" : ""})` : ""}
+                </span>
+                {pickPeople(toIds, setToIds, "to")}
+              </div>
 
               <div className="mh-hcc-mail__checks">
                 <label>
@@ -448,45 +539,17 @@ export function HccMailViews({
               </div>
 
               {addCc ? (
-                <label className="mh-hcc-mail__field">
+                <div className="mh-hcc-mail__field">
                   <span>Cc</span>
-                  <div className="mh-hcc-mail__chips">
-                    {people.map((p) => {
-                      const on = ccIds.includes(p.accountId);
-                      return (
-                        <button
-                          key={`cc-${p.accountId}`}
-                          type="button"
-                          className={`mh-hcc-mail__chip${on ? " is-on" : ""}`}
-                          onClick={() => setCcIds((prev) => (on ? prev.filter((id) => id !== p.accountId) : [...prev, p.accountId]))}
-                        >
-                          {p.name}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </label>
+                  {pickPeople(ccIds, setCcIds, "cc")}
+                </div>
               ) : null}
 
               {addBcc ? (
-                <label className="mh-hcc-mail__field">
+                <div className="mh-hcc-mail__field">
                   <span>Bcc</span>
-                  <div className="mh-hcc-mail__chips">
-                    {people.map((p) => {
-                      const on = bccIds.includes(p.accountId);
-                      return (
-                        <button
-                          key={`bcc-${p.accountId}`}
-                          type="button"
-                          className={`mh-hcc-mail__chip${on ? " is-on" : ""}`}
-                          onClick={() => setBccIds((prev) => (on ? prev.filter((id) => id !== p.accountId) : [...prev, p.accountId]))}
-                        >
-                          {p.name}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </label>
+                  {pickPeople(bccIds, setBccIds, "bcc")}
+                </div>
               ) : null}
 
               <label className="mh-hcc-mail__field">
@@ -505,10 +568,18 @@ export function HccMailViews({
                 />
               </label>
 
-              <div className="mh-hcc-mail__attach">
-                <strong>Attachments</strong>
-                <p>Drag files here · Add / Browse · Size: 0 b · Progress: 0%</p>
-              </div>
+              {previewing ? (
+                <div className="mh-hcc-mail__attach">
+                  <strong>Preview</strong>
+                  <p>
+                    <b>To:</b> {toIds.map((id) => nameById.get(id) ?? id).join(", ") || "—"}
+                    {ccIds.length ? <><br /><b>Cc:</b> {ccIds.map((id) => nameById.get(id) ?? id).join(", ")}</> : null}
+                    {bccIds.length ? <><br /><b>Bcc:</b> {bccIds.map((id) => nameById.get(id) ?? id).join(", ")}</> : null}
+                    <br /><b>Subject:</b> {subject || "—"}
+                  </p>
+                  <p style={{ whiteSpace: "pre-wrap" }}>{body || "—"}</p>
+                </div>
+              ) : null}
 
               <div className="mh-hcc-mail__actions">
                 <button
@@ -519,8 +590,13 @@ export function HccMailViews({
                 >
                   Save Draft
                 </button>
-                <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary" disabled>
-                  Preview
+                <button
+                  type="button"
+                  className="mh-teacher-btn mh-teacher-btn--secondary"
+                  disabled={!subject.trim() && !body.trim()}
+                  onClick={() => setPreviewing((v) => !v)}
+                >
+                  {previewing ? "Hide Preview" : "Preview"}
                 </button>
                 <button
                   type="button"
@@ -637,7 +713,26 @@ export function HccMailViews({
                           {t.preview ? <em>{t.preview}</em> : null}
                         </span>
                         <span className="mh-hcc-mail__date">{fmtShort(t.updatedAt)}</span>
-                        <span className="mh-hcc-mail__flag" aria-hidden>
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          className={`mh-hcc-mail__flag${t.flagged ? " is-on" : ""}`}
+                          aria-label={t.flagged ? "Remove flag" : "Flag message"}
+                          aria-pressed={Boolean(t.flagged)}
+                          title={t.flagged ? "Flagged" : "Flag"}
+                          style={{ opacity: t.flagged ? 1 : 0.3, color: t.flagged ? "#b42318" : undefined }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void toggleFlag(t.id, Boolean(t.flagged));
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              void toggleFlag(t.id, Boolean(t.flagged));
+                            }
+                          }}
+                        >
                           ⚑
                         </span>
                       </button>
@@ -671,17 +766,25 @@ export function HccMailViews({
           {view === "thread" && thread ? (
             <div className="mh-hcc-mail__panel mh-hcc-mail__thread">
               <div className="mh-hcc-mail__thread-actions">
-                <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary" onClick={() => goView("inbox")}>
+                <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary" onClick={() => goView(returnView)}>
                   ← Back
                 </button>
-                <button type="button" className="mh-teacher-btn mh-teacher-btn--primary" onClick={() => setShowReply(true)}>
+                <button type="button" className="mh-teacher-btn mh-teacher-btn--primary" onClick={() => composeFrom(thread, "reply")}>
                   Reply
                 </button>
                 <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary" onClick={() => setShowReply(true)}>
                   Reply All
                 </button>
-                <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary" onClick={() => goView("compose")}>
+                <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary" onClick={() => composeFrom(thread, "forward")}>
                   Forward
+                </button>
+                <button
+                  type="button"
+                  className="mh-teacher-btn mh-teacher-btn--secondary"
+                  aria-pressed={thread.flagged}
+                  onClick={() => void toggleFlag(thread.id, thread.flagged)}
+                >
+                  {thread.flagged ? "⚑ Unflag" : "⚑ Flag"}
                 </button>
                 <button
                   type="button"
@@ -695,10 +798,12 @@ export function HccMailViews({
                         body: JSON.stringify({ threadIds: [thread.id], action: "delete" }),
                       },
                       session.accessToken,
-                    ).then(() => {
-                      goView("deleted");
-                      setNotice("Moved to deleted");
-                    });
+                    )
+                      .then(() => {
+                        goView("deleted");
+                        setNotice("Moved to deleted");
+                      })
+                      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Delete failed"));
                   }}
                 >
                   Delete
@@ -741,6 +846,10 @@ export function HccMailViews({
 
               {showReply ? (
                 <div className="mh-hcc-mail__reply">
+                  <p className="mh-hcc-mail__hint">
+                    Reply all · goes to {thread.to.map((p) => p.name).join(", ") || "everyone on this thread"}
+                    {thread.cc.length ? ` · Cc ${thread.cc.map((p) => p.name).join(", ")}` : ""}
+                  </p>
                   <label className="mh-hcc-mail__field">
                     <span>Your reply</span>
                     <textarea
@@ -768,10 +877,13 @@ export function HccMailViews({
                 </div>
               ) : (
                 <div className="mh-hcc-mail__thread-actions">
-                  <button type="button" className="mh-teacher-btn mh-teacher-btn--primary" onClick={() => setShowReply(true)}>
+                  <button type="button" className="mh-teacher-btn mh-teacher-btn--primary" onClick={() => composeFrom(thread, "reply")}>
                     Reply
                   </button>
-                  <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary" onClick={() => goView("compose")}>
+                  <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary" onClick={() => setShowReply(true)}>
+                    Reply All
+                  </button>
+                  <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary" onClick={() => composeFrom(thread, "forward")}>
                     Forward
                   </button>
                 </div>

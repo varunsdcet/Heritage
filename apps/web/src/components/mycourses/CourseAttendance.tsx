@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { SaField, SuperFrame } from "@/components/superadmin/shared";
-import { courseHref, errMsg, json, mc, type Option } from "./common";
+import { errMsg, json, mc, offeringHref, type Option } from "./common";
 
 type Mark = "" | "present" | "absent";
 type Day = {
@@ -217,7 +217,7 @@ export function CourseAttendance() {
               <section key={g.course.id} className="mh-sa__card wk-roster">
                 <div className="mh-sa__card-head">
                   <h2>
-                    <Link href={courseHref(g.course.courseId)}>
+                    <Link href={offeringHref(g.course.id)}>
                       {g.course.code} ({g.course.offering})
                     </Link>{" "}
                     — {g.course.title} <span className="mc-group-meta">({g.course.dates})</span>

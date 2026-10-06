@@ -22,13 +22,13 @@ function askConfigured() {
   return Boolean(url && url !== "off");
 }
 
-async function callHumanitixAsk(systemPrompt: string, question: string): Promise<AskResult> {
+async function callHumanitixAsk(systemPrompt: string, question: string, timeoutMs = ASK_TIMEOUT_MS): Promise<AskResult> {
   const url = process.env.HUMANITIX_ASK_URL || DEFAULT_ASK_URL;
   const response = await fetchWithTimeout(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ system_prompt: systemPrompt, question }),
-  });
+  }, timeoutMs);
   if (!response.ok) throw new Error(`Humanitix ask failed: ${response.status}`);
   const body = (await response.json()) as { success?: boolean; answer?: unknown; model?: string };
   if (!body?.success || body.answer == null) throw new Error("Humanitix ask returned empty answer");
@@ -44,7 +44,7 @@ async function callHumanitixAsk(systemPrompt: string, question: string): Promise
   };
 }
 
-async function callOpenAi(systemPrompt: string, question: string): Promise<AskResult> {
+async function callOpenAi(systemPrompt: string, question: string, timeoutMs = ASK_TIMEOUT_MS, maxTokens?: number): Promise<AskResult> {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("OPENAI_API_KEY missing");
   const response = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
@@ -56,12 +56,13 @@ async function callOpenAi(systemPrompt: string, question: string): Promise<AskRe
     body: JSON.stringify({
       model: process.env.OPENAI_MODEL || "gpt-4o-mini",
       temperature: 0.2,
+      ...(maxTokens ? { max_tokens: maxTokens } : {}),
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: question },
       ],
     }),
-  });
+  }, timeoutMs);
   if (!response.ok) throw new Error(`OpenAI failed: ${response.status}`);
   const body = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
   const answer = body.choices?.[0]?.message?.content?.trim();
@@ -69,7 +70,7 @@ async function callOpenAi(systemPrompt: string, question: string): Promise<AskRe
   return { answer, model: process.env.OPENAI_MODEL || "gpt-4o-mini", source: "openai" };
 }
 
-async function callAnthropic(systemPrompt: string, question: string): Promise<AskResult> {
+async function callAnthropic(systemPrompt: string, question: string, timeoutMs = ASK_TIMEOUT_MS, maxTokens = 1024): Promise<AskResult> {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) throw new Error("ANTHROPIC_API_KEY missing");
   const response = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
@@ -81,11 +82,11 @@ async function callAnthropic(systemPrompt: string, question: string): Promise<As
     },
     body: JSON.stringify({
       model: process.env.ANTHROPIC_MODEL || "claude-3-5-haiku-20241022",
-      max_tokens: 1024,
+      max_tokens: maxTokens,
       system: systemPrompt,
       messages: [{ role: "user", content: question }],
     }),
-  });
+  }, timeoutMs);
   if (!response.ok) throw new Error(`Anthropic failed: ${response.status}`);
   const body = (await response.json()) as { content?: Array<{ type?: string; text?: string }> };
   const answer = body.content?.find((c) => c.type === "text")?.text?.trim();
@@ -95,6 +96,29 @@ async function callAnthropic(systemPrompt: string, question: string): Promise<As
     model: process.env.ANTHROPIC_MODEL || "claude-3-5-haiku-20241022",
     source: "anthropic",
   };
+}
+
+/** Long-form generation (lesson drafts etc.): same provider chain, longer timeout, throws when every provider fails. */
+export async function generateWithAi(systemPrompt: string, prompt: string, timeoutMs = 75_000): Promise<AskResult> {
+  const attempts: Array<[string, () => Promise<AskResult>]> = [];
+  if (askConfigured()) attempts.push(["humanitix", () => callHumanitixAsk(systemPrompt, prompt, timeoutMs)]);
+  if (process.env.ANTHROPIC_API_KEY) attempts.push(["anthropic", () => callAnthropic(systemPrompt, prompt, timeoutMs, 8000)]);
+  if (process.env.OPENAI_API_KEY) attempts.push(["openai", () => callOpenAi(systemPrompt, prompt, timeoutMs, 8000)]);
+  const errors: string[] = [];
+  for (const [name, run] of attempts) {
+    try {
+      const result = await run();
+      if (result.answer.trim()) return result;
+      errors.push(`${name}: empty answer`);
+    } catch (err) {
+      errors.push(`${name}: ${err instanceof Error ? err.message : "failed"}`);
+    }
+  }
+  throw Object.assign(new Error("The AI provider is unavailable right now. Please try again in a minute."), {
+    status: 502,
+    code: "AI_UNAVAILABLE",
+    details: errors,
+  });
 }
 
 export async function askHeritageAi(input: {

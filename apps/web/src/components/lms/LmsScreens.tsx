@@ -1,10 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { CourseLmsState } from "@/lib/teacherCatalog";
 import { useOptionalTeacherLive } from "@/lib/useTeacherSisLive";
 import { liveSectionId, openClassLink } from "@/lib/liveClass";
 import { LiveClassPanel } from "@/components/LiveClassPanel";
+import { AiDraftVideoPlayer } from "@/components/ai-draft/AiDraftVideoPlayer";
+import type { AiDraftStoryboard } from "@/lib/aiDraftSamples";
+import { downloadLmsFile, formatFileSize } from "@/lib/lmsFiles";
 
 export function AttendancePanel({
   lms,
@@ -714,9 +717,70 @@ type Activity = {
   note?: string;
   body?: string;
   fileName?: string;
+  fileId?: string;
+  fileSize?: number;
   modified?: string;
   joinUrl?: string | null;
+  storyboard?: AiDraftStoryboard;
 };
+
+/** FILE / FOLDER activity card shared by the admin, instructor and student course views. */
+export function LmsFileCard({
+  activity,
+  sectionId,
+  audience,
+}: {
+  activity: Pick<Activity, "id" | "type" | "name" | "fileName" | "fileId" | "fileSize" | "modified">;
+  sectionId?: string;
+  audience: "staff" | "student";
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const folder = activity.type.toUpperCase() === "FOLDER";
+  const uploaded = Boolean(activity.fileId && sectionId);
+  return (
+    <div className="mh-student-file-card" data-screen="file">
+      <div className="mh-student-file-card__icon" aria-hidden>
+        {folder ? "F" : (activity.fileName?.split(".").pop() || "FILE").slice(0, 4).toUpperCase()}
+      </div>
+      <div>
+        <strong>{activity.name}</strong>
+        <p className="mh-teacher-muted">
+          {uploaded
+            ? `${activity.fileName || activity.name}${activity.fileSize ? ` · ${formatFileSize(activity.fileSize)}` : ""}`
+            : audience === "staff"
+              ? "No file uploaded yet. Add a File activity with an upload, then delete this placeholder."
+              : "Your instructor has not uploaded this file yet."}
+        </p>
+        {activity.modified && uploaded ? <p className="mh-teacher-muted">Uploaded {activity.modified}</p> : null}
+        {uploaded ? (
+          <button
+            type="button"
+            className="mh-hcc-btn ghost"
+            disabled={busy}
+            onClick={() => {
+              setBusy(true);
+              setError("");
+              downloadLmsFile(sectionId!, activity.fileId!)
+                .catch((e: unknown) => setError(e instanceof Error ? e.message : "Download failed"))
+                .finally(() => setBusy(false));
+            }}
+          >
+            {busy ? "Downloading…" : "Download"}
+          </button>
+        ) : null}
+        {error ? <p className="mh-lms-qform__error">{error}</p> : null}
+      </div>
+    </div>
+  );
+}
+
+/** Page bodies are sanitized to a tag whitelist by the API before they are stored. */
+export function LessonBody({ body, empty }: { body?: string; empty: string }) {
+  if (!body?.trim()) return <p className="mh-teacher-muted">{empty}</p>;
+  if (!/<[a-z][^>]*>/i.test(body)) return <p style={{ whiteSpace: "pre-wrap" }}>{body}</p>;
+  return <div className="mh-lms-lesson-html" dangerouslySetInnerHTML={{ __html: body }} />;
+}
 
 type RosterStudent = {
   studentId?: string;
@@ -748,7 +812,6 @@ export function ResourceView({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [publishMsg, setPublishMsg] = useState("");
   const [publishing, setPublishing] = useState(false);
-
   const liveSection = liveSectionId(activity.joinUrl) || (activity.joinUrl ? null : sectionId) || null;
 
   function openJoin() {
@@ -904,22 +967,18 @@ export function ResourceView({
         </div>
       ) : type === "FILE" && /evaluation/i.test(activity.name) ? (
         <EvaluationTable rows={evaluationRows || []} />
-      ) : type === "FOLDER" ? (
-        <div>
-          <p className="mh-teacher-muted">{activity.fileName || "Folder contents"}</p>
-          <ul className="mh-lms-files">
-            <li>
-              <a href="#">{activity.fileName || `${activity.name}.pdf`}</a>
-            </li>
-          </ul>
-          <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary">
-            Download folder
-          </button>
-        </div>
+      ) : type === "FILE" && (activity.id === "act-course-syllabus" || /syllabus/i.test(activity.name)) && !activity.fileId ? (
+        <p className="mh-teacher-muted">
+          Students download the syllabus file uploaded on the admin course record (Course Catalogue → this course → Syllabus) once
+          its privacy is set to Enrolled Students or Public.
+        </p>
+      ) : (type === "FOLDER" || type === "FILE") && !activity.body ? (
+        <LmsFileCard activity={activity} sectionId={sectionId} audience="staff" />
       ) : (
         <div className="mh-lms-pagebody">
-          <p>{activity.body || `${activity.name} content for Social Service Work Fundamentals.`}</p>
-          {activity.modified ? <p className="mh-teacher-muted">Last modified: {activity.modified}</p> : <p className="mh-teacher-muted">Last modified: Monday, 2 March 2026, 2:13 PM</p>}
+          {activity.storyboard ? <AiDraftVideoPlayer key={activity.id} storyboard={activity.storyboard} /> : null}
+          <LessonBody body={activity.body} empty="No content has been added to this page yet. Use Edit to add it." />
+          {activity.modified ? <p className="mh-teacher-muted">Last modified: {activity.modified}</p> : null}
         </div>
       )}
       <button type="button" className="mh-teacher-link" onClick={onEdit}>
@@ -1026,16 +1085,32 @@ export function PermissionsPanel({ onBack }: { onBack: () => void }) {
   );
 }
 
+export type PageEditValues = { name: string; body: string; hidden: boolean };
+
 export function PageEditPanel({
   activity,
+  hidden = false,
   onSave,
   onCancel,
 }: {
   activity: Activity;
-  onSave: () => void;
+  hidden?: boolean;
+  onSave: (values: PageEditValues) => void;
   onCancel: () => void;
 }) {
   const live = useOptionalTeacherLive();
+  const editorRef = useRef<HTMLDivElement>(null);
+  const [name, setName] = useState(activity.name);
+  const [visibility, setVisibility] = useState(hidden ? "hide" : "show");
+  const initialHtml = useMemo(() => {
+    const body = activity.body || "";
+    if (!body.trim() || /<[a-z][^>]*>/i.test(body)) return body;
+    return body
+      .split(/\n{2,}/)
+      .map((p) => `<p>${p.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>`)
+      .join("");
+  }, [activity.body]);
+
   return (
     <section className="mh-teacher-card mh-lms-addform">
       <h2>Updating Page: {activity.name}</h2>
@@ -1044,56 +1119,46 @@ export function PageEditPanel({
         <div className="mh-lms-addform__fields">
           <label>
             <span>Name</span>
-            <input className="mh-teacher-field" defaultValue={activity.name} />
-          </label>
-          <label className="mh-lms-addform__wide">
-            <span>Description</span>
-            <textarea className="mh-teacher-field" rows={3} />
-          </label>
-          <label className="mh-lms-check">
-            <input type="checkbox" />
-            Display description on course page
+            <input className="mh-teacher-field" value={name} onChange={(e) => setName(e.target.value)} />
           </label>
         </div>
       </details>
       <details open className="mh-lms-addform__sec">
         <summary>Content</summary>
-        <label className="mh-lms-addform__wide">
+        {activity.storyboard ? (
+          <p className="mh-teacher-muted">
+            This page has an AI video lesson ({activity.storyboard.slides.length} slides). The video stays attached when you edit the text.
+          </p>
+        ) : null}
+        <div className="mh-lms-addform__wide">
           <span>Page content</span>
-          <textarea className="mh-teacher-field mh-teacher-field--tall" rows={8} defaultValue={activity.body || ""} />
-        </label>
+          <div
+            ref={editorRef}
+            className="mh-teacher-field mh-teacher-field--tall mh-lms-lesson-html"
+            contentEditable
+            suppressContentEditableWarning
+            style={{ minHeight: 220, overflow: "auto" }}
+            dangerouslySetInnerHTML={{ __html: initialHtml }}
+          />
+        </div>
       </details>
-      <details className="mh-lms-addform__sec">
-        <summary>Appearance</summary>
-        <label className="mh-lms-check">
-          <input type="checkbox" />
-          Display page description
-        </label>
-        <label className="mh-lms-check">
-          <input type="checkbox" defaultChecked />
-          Display last modified date
-        </label>
-      </details>
-      <details className="mh-lms-addform__sec">
+      <details open className="mh-lms-addform__sec">
         <summary>Common module settings</summary>
         <label>
           <span>Availability</span>
-          <select className="mh-teacher-field">
-            <option>Show on course page</option>
-            <option>Hide from students</option>
+          <select className="mh-teacher-field" value={visibility} onChange={(e) => setVisibility(e.target.value)}>
+            <option value="show">Show on course page</option>
+            <option value="hide">Hide from students</option>
           </select>
         </label>
-        <label>
-          <span>ID number</span>
-          <input className="mh-teacher-field" />
-        </label>
-      </details>
-      <details className="mh-lms-addform__sec">
-        <summary>Restrict access</summary>
-        <p className="mh-teacher-muted">None</p>
       </details>
       <div className="mh-lms-toolbar">
-        <button type="button" className="mh-teacher-btn" disabled={live?.busy} onClick={onSave}>
+        <button
+          type="button"
+          className="mh-teacher-btn"
+          disabled={live?.busy || !name.trim()}
+          onClick={() => onSave({ name: name.trim(), body: editorRef.current?.innerHTML ?? activity.body ?? "", hidden: visibility === "hide" })}
+        >
           Save and return to course
         </button>
         <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary" onClick={onCancel}>

@@ -470,7 +470,7 @@ export function HccAttendanceView({ config }: { config: TeacherScreenConfig }) {
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
-    setDate(d?.dateFilter || "2026-09-18");
+    setDate(d?.dateFilter || new Date().toLocaleDateString("en-CA"));
     setStudentFilter(d?.studentFilter || "");
     setCourseFilter(d?.courseFilter || "All Courses");
     setGroups(d?.groups ?? []);
@@ -487,21 +487,23 @@ export function HccAttendanceView({ config }: { config: TeacherScreenConfig }) {
     router.push(`/instructor/attendance?${qs.toString()}`);
   }
 
-  function setStatus(studentId: string, status: string) {
+  function setStatus(sectionId: string | undefined, studentId: string, status: string) {
     setGroups((prev) =>
-      prev.map((g) => ({
-        ...g,
-        students: g.students.map((s) => (s.id === studentId ? { ...s, status } : s)),
-      })),
+      prev.map((g) =>
+        g.sectionId !== sectionId
+          ? g
+          : { ...g, students: g.students.map((s) => (s.id === studentId ? { ...s, status } : s)) },
+      ),
     );
   }
 
-  function setNote(studentId: string, note: string) {
+  function setNote(sectionId: string | undefined, studentId: string, note: string) {
     setGroups((prev) =>
-      prev.map((g) => ({
-        ...g,
-        students: g.students.map((s) => (s.id === studentId ? { ...s, note } : s)),
-      })),
+      prev.map((g) =>
+        g.sectionId !== sectionId
+          ? g
+          : { ...g, students: g.students.map((s) => (s.id === studentId ? { ...s, note } : s)) },
+      ),
     );
   }
 
@@ -665,7 +667,7 @@ export function HccAttendanceView({ config }: { config: TeacherScreenConfig }) {
       ) : (
         visible.map((g) =>
           g.students.length === 0 ? null : (
-            <section key={g.offering} className="mh-hcc-att-group">
+            <section key={g.sectionId || g.offering} className="mh-hcc-att-group">
               <h2>
                 {g.course} ({g.offering}) — {g.title}
               </h2>
@@ -691,30 +693,23 @@ export function HccAttendanceView({ config }: { config: TeacherScreenConfig }) {
                         </div>
                       </td>
                       <td>
-                        <label>
-                          <input
-                            type="radio"
-                            name={`att-${s.id}`}
-                            checked={s.status === "Present"}
-                            onChange={() => setStatus(s.id, "Present")}
-                          />{" "}
-                          Present
-                        </label>{" "}
-                        <label>
-                          <input
-                            type="radio"
-                            name={`att-${s.id}`}
-                            checked={s.status === "Absent"}
-                            onChange={() => setStatus(s.id, "Absent")}
-                          />{" "}
-                          Absent
-                        </label>
+                        {(["Present", "Absent", "Late", "Excused"] as const).map((opt) => (
+                          <label key={opt} style={{ marginRight: 10 }}>
+                            <input
+                              type="radio"
+                              name={`att-${g.sectionId}-${s.id}`}
+                              checked={s.status === opt}
+                              onChange={() => setStatus(g.sectionId, s.id, opt)}
+                            />{" "}
+                            {opt}
+                          </label>
+                        ))}
                       </td>
                       <td>
                         <input
                           className="mh-teacher-field"
                           value={s.note}
-                          onChange={(e) => setNote(s.id, e.target.value)}
+                          onChange={(e) => setNote(g.sectionId, s.id, e.target.value)}
                         />
                       </td>
                     </tr>

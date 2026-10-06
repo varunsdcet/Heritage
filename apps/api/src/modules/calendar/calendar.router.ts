@@ -2,6 +2,7 @@ import { Router } from "express";
 import { prisma } from "@myheritage/db";
 import { requireAuth, type AuthedRequest } from "../../middleware/auth.js";
 import { sessionJoinUrl } from "../../lib/liveClass.js";
+import { currentStudentId } from "../me/studentAlignment.js";
 
 export const calendarRouter: Router = Router();
 
@@ -20,7 +21,7 @@ calendarRouter.get("/me", requireAuth, async (req, res, next) => {
       sectionIds = sections.map((s) => s.id);
     } else if (!roles.includes("admin") && !roles.includes("registrar")) {
       const student = await prisma.student.findFirst({
-        where: { institutionId: user.institutionId, personId: user.personId },
+        where: { id: await currentStudentId(user.institutionId, user.personId), institutionId: user.institutionId },
       });
       if (student) {
         const enrolments = await prisma.enrolment.findMany({

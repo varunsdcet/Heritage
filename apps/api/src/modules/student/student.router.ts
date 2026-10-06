@@ -54,6 +54,7 @@ import {
   updateMailboxSettings,
 } from "./wave3.service.js";
 import { sessionJoinUrl } from "../../lib/liveClass.js";
+import { currentStudentId } from "../me/studentAlignment.js";
 
 export const studentRouter: Router = Router();
 
@@ -126,7 +127,7 @@ function decodeAndValidateFile(input: ReturnType<typeof parseUploadBody>) {
 
 async function getStudent(user: AuthedRequest["user"]) {
   const student = await prisma.student.findFirst({
-    where: { institutionId: user.institutionId, personId: user.personId },
+    where: { id: await currentStudentId(user.institutionId, user.personId), institutionId: user.institutionId },
   });
   if (!student) throw httpError("Student record not found", "NOT_FOUND", 404);
   return student;
@@ -433,7 +434,7 @@ studentRouter.get("/courses/:sectionId/content", requireAuth, requireRoles("stud
     const user = (req as AuthedRequest).user;
     const sectionId = String(req.params.sectionId);
     const student = await prisma.student.findFirst({
-      where: { institutionId: user.institutionId, personId: user.personId },
+      where: { id: await currentStudentId(user.institutionId, user.personId), institutionId: user.institutionId },
     });
     if (!student) {
       res.status(404).json({ error: { message: "Student record not found" } });
@@ -509,7 +510,7 @@ studentRouter.post("/courses/:sectionId/content/:itemId/complete", requireAuth, 
     const sectionId = String(req.params.sectionId);
     const itemId = decodeURIComponent(String(req.params.itemId));
     const student = await prisma.student.findFirst({
-      where: { institutionId: user.institutionId, personId: user.personId },
+      where: { id: await currentStudentId(user.institutionId, user.personId), institutionId: user.institutionId },
     });
     if (!student) {
       res.status(404).json({ error: { message: "Student record not found" } });
@@ -879,7 +880,7 @@ studentRouter.get("/documents", requireAuth, requireRoles("student"), async (req
   try {
     const user = (req as AuthedRequest).user;
     const student = await prisma.student.findFirst({
-      where: { institutionId: user.institutionId, personId: user.personId },
+      where: { id: await currentStudentId(user.institutionId, user.personId), institutionId: user.institutionId },
     });
     if (!student) {
       res.status(404).json({ error: { message: "Student not found" } });

@@ -1,6 +1,7 @@
 import type { RoleName, SessionClaims } from "@myheritage/contracts";
 import { prisma } from "@myheritage/db";
 import type { GroundedCoachFact } from "@myheritage/ai";
+import { currentStudentId } from "../me/studentAlignment.js";
 
 const rolePrefixes: Array<{ prefix: string; role: RoleName }> = [
   { prefix: "/student", role: "student" },
@@ -109,7 +110,7 @@ export async function buildCoachFacts(user: SessionClaims, role: RoleName): Prom
 
   if (role === "student") {
     const student = await prisma.student.findFirst({
-      where: { institutionId: user.institutionId, personId: user.personId },
+      where: { id: await currentStudentId(user.institutionId, user.personId), institutionId: user.institutionId },
       select: { id: true, studentNumber: true, programName: true, standing: true },
     });
     if (!student) throw Object.assign(new Error("Student record not found"), { code: "NOT_FOUND", status: 404 });

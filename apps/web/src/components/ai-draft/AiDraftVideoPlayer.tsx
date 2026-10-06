@@ -7,10 +7,12 @@ type Gender = "female" | "male";
 
 type Props = {
   storyboard: AiDraftStoryboard;
-  onClose: () => void;
+  /** Popup mode when set; omitted = embedded in the page (slides beside the avatar). */
+  onClose?: () => void;
 };
 
 export function AiDraftVideoPlayer({ storyboard, onClose }: Props) {
+  const inline = !onClose;
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const [slideIndex, setSlideIndex] = useState(0);
@@ -132,11 +134,11 @@ export function AiDraftVideoPlayer({ storyboard, onClose }: Props) {
     }
   };
 
-  return (
-    <div className="mh-ai-draft-overlay" role="dialog" aria-modal="true" aria-label="AI lesson video">
+  const player = (
       <div
         ref={rootRef}
-        className={`mh-ai-draft-video${fullscreen ? " is-fullscreen" : ""}`}
+        className={`mh-ai-draft-video${inline ? " mh-ai-draft-video--inline" : ""}${fullscreen ? " is-fullscreen" : ""}`}
+        aria-label={inline ? "AI video lesson" : undefined}
       >
         <header className="mh-ai-draft-video__head">
           <div>
@@ -168,17 +170,19 @@ export function AiDraftVideoPlayer({ storyboard, onClose }: Props) {
             <button type="button" className="mh-teacher-btn" onClick={() => void toggleFullscreen()}>
               {fullscreen ? "Exit full screen" : "Full screen"}
             </button>
-            <button
-              type="button"
-              className="mh-ai-draft-modal__x"
-              onClick={() => {
-                stop();
-                onClose();
-              }}
-              aria-label="Close"
-            >
-              ×
-            </button>
+            {onClose ? (
+              <button
+                type="button"
+                className="mh-ai-draft-modal__x"
+                onClick={() => {
+                  stop();
+                  onClose();
+                }}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            ) : null}
           </div>
         </header>
 
@@ -256,6 +260,12 @@ export function AiDraftVideoPlayer({ storyboard, onClose }: Props) {
           </button>
         </div>
       </div>
+  );
+
+  if (inline) return player;
+  return (
+    <div className="mh-ai-draft-overlay" role="dialog" aria-modal="true" aria-label="AI lesson video">
+      {player}
     </div>
   );
 }

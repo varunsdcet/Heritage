@@ -127,6 +127,24 @@ check "course filter" "[r['id'] for r in d['rows']] == ['$B']" "/grades?status=P
 REQ="$(get /grades | json 'd["requiredCount"]')"
 check "sidebar count equals Submission Required rows" "d['gradesSubmission'] == $REQ" /counts
 
+echo "==> Submit Grades"
+check "submit page loads own offering" "d['id']=='$A' and d['status']=='Submission Required'" "/grades/$A"
+if [ -n "$OTHER" ]; then
+  expect 404 "another instructor's offering not on the submission list" GET "/grades/$OTHER" ""
+fi
+BOOK="$(curl -fsS -H "authorization: Bearer $AD" "$API/gradebooks/$A")"
+ASG="$(echo "$BOOK" | json 'd["assignments"][0]["id"]')"
+ITEMS=""
+for st in $(echo "$BOOK" | json '" ".join(r["studentId"] for r in d["rows"])'); do
+  id="$(curl -fsS -X POST -H "authorization: Bearer $AD" -H "content-type: application/json" "$API/grade-items" \
+    -d "{\"assignmentId\":\"$ASG\",\"studentId\":\"$st\",\"score\":80}" | json 'd["id"]')"
+  ITEMS="$ITEMS${ITEMS:+,}\"$id\""
+done
+curl -fsS -X POST -H "authorization: Bearer $AD" -H "content-type: application/json" -H "idempotency-key: smoke-mc-$STAMP" \
+  "$API/gradebooks/$A/publish" -d "{\"gradeItemIds\":[$ITEMS]}" > /dev/null && echo "OK grades submitted for approval"
+check "submitted offering moves to Pending" "d['status']=='Pending'" "/grades/$A"
+check "sidebar count drops by one" "d['gradesSubmission'] == $REQ - 1" /counts
+
 echo "==> Course Attendance"
 check "today's roster groups both BETH 190 offerings" "{g['course']['id'] for g in d['groups']} >= {'$A','$B'}" "/attendance?date=$TODAY"
 check "upcoming offering not on today's roster" "'$U' not in {g['course']['id'] for g in d['groups']}" "/attendance?date=$TODAY"
@@ -158,7 +176,7 @@ import { PrismaClient } from "@prisma/client";
 const p = new PrismaClient();
 const f = JSON.parse(process.env.FIX);
 const ids = [f.A, f.B, f.C, f.U, f.H];
-await p.approvalRequest.deleteMany({ where: { subjectRef: { in: ids } } });
+await p.approvalRequest.deleteMany({ where: { subjectRef: { in: [...ids, ...ids.map((id) => `section:${id}`)] } } });
 await p.gradeItem.deleteMany({ where: { assignment: { sectionId: { in: ids } } } });
 await p.assignment.deleteMany({ where: { sectionId: { in: ids } } });
 await p.attendanceRecord.deleteMany({ where: { sectionId: { in: ids } } });

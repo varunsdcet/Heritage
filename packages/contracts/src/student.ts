@@ -678,12 +678,23 @@ export const StudentLmsActivityView = z.object({
   name: z.string(),
   body: z.string().optional(),
   fileName: z.string().optional(),
+  fileId: z.string().optional(),
+  fileSize: z.number().optional(),
   modified: z.string().optional(),
   note: z.string().optional(),
   hidden: z.boolean().optional(),
   joinUrl: z.string().nullable().optional(),
   gradingMethod: z.string().optional(),
   questions: z.array(StudentQuizQuestionView).optional(),
+  storyboard: z
+    .object({
+      title: z.string(),
+      estimated_duration_sec: z.number(),
+      slides: z.array(
+        z.object({ number: z.number(), heading: z.string(), bullets: z.array(z.string()), narration: z.string() }),
+      ),
+    })
+    .optional(),
 });
 
 export const StudentLmsTopicView = z.object({
@@ -765,6 +776,7 @@ export const MailThreadView = z.object({
   participants: z.array(z.string()),
   participantNames: z.array(z.string()).optional(),
   otherName: z.string().optional(),
+  flagged: z.boolean().optional(),
   updatedAt: IsoDateTime,
   readAt: IsoDateTime.nullable(),
   chat: z

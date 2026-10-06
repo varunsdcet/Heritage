@@ -160,10 +160,10 @@ function CreateUserInner() {
         <Button type="button" variant="secondary" onClick={() => router.push("/admin/enrolments")}>
           Enrol student
         </Button>
-        <Button type="button" variant="secondary" onClick={() => router.push("/admin/f/rg-01-student-360")}>
+        <Button type="button" variant="secondary" onClick={() => router.push("/admin/student-management/browse")}>
           Student 360
         </Button>
-        <Button type="button" variant="secondary" onClick={() => router.push("/admin/f/ac-14-faculty-360")}>
+        <Button type="button" variant="secondary" onClick={() => router.push("/admin/user-management")}>
           Instructor 360
         </Button>
         <Button type="button" variant="secondary" onClick={() => router.push("/admin/users")}>

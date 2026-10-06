@@ -234,6 +234,18 @@ export function SuperUserForm() {
       .catch((err) => setError(errorMessage(err, "Could not load user")));
   }, [id]);
 
+  const presetLevel = id ? null : params.get("accessLevel");
+  useEffect(() => {
+    if (!presetLevel) return;
+    const preset = levels.find((l) => l.id === presetLevel);
+    if (!preset) return;
+    setForm((f) =>
+      f && !f.accessLevelId
+        ? { ...f, accessLevelId: preset.id, permissions: preset.permissions, instructing: f.instructing || preset.profileType === "Faculty" }
+        : f,
+    );
+  }, [presetLevel, levels]);
+
   const level = levels.find((l) => l.id === form?.accessLevelId);
   const levelDefaults: PermissionMap | undefined = level?.permissions;
 

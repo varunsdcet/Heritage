@@ -9,6 +9,7 @@ import {
 import { requireApproval } from "@myheritage/auth";
 import { writeAuditAndOutbox } from "@myheritage/events";
 import { effectiveAccess } from "../admin/superAdmin.service.js";
+import { adminStatusAndCgpa, currentStudent, studentAnnouncements } from "./studentAlignment.js";
 
 export const meRouter: Router = Router();
 
@@ -113,28 +114,10 @@ meRouter.get("/home", requireAuth, async (req, res, next) => {
       return;
     }
 
-    const student = await prisma.student.findFirst({
-      where: { institutionId: user.institutionId, personId: user.personId },
-    });
-    const enrolmentCount = student
-      ? await prisma.enrolment.count({
-          where: { institutionId: user.institutionId, studentId: student.id, status: "enrolled" },
-        })
-      : 0;
-
-    const grades = student
-      ? await prisma.gradeItem.findMany({
-          where: { institutionId: user.institutionId, studentId: student.id, status: "published" },
-        })
-      : [];
-    const gpa =
-      grades.length > 0
-        ? Number(
-            (
-              grades.reduce((n, g) => n + ((g.score ?? 0) / g.maxScore) * 4, 0) / grades.length
-            ).toFixed(2),
-          )
-        : null;
+    const student = await currentStudent(user.institutionId, user.personId);
+    const enrolmentCount = student?._count.enrolments ?? 0;
+    const header = student ? await adminStatusAndCgpa(user.institutionId, student.id) : null;
+    const gpa = header?.cgpa ?? null;
 
     const nextAssignment = student
       ? await prisma.assignment.findFirst({
@@ -153,11 +136,18 @@ meRouter.get("/home", requireAuth, async (req, res, next) => {
         })
       : null;
 
-    const notifications = await prisma.notification.findMany({
-      where: { institutionId: user.institutionId, recipientAccountId: user.accountId },
-      orderBy: { createdAt: "desc" },
-      take: 5,
-    });
+    const [notifications, adminAnnouncements] = await Promise.all([
+      prisma.notification.findMany({
+        where: { institutionId: user.institutionId, recipientAccountId: user.accountId },
+        orderBy: { createdAt: "desc" },
+        take: 5,
+      }),
+      studentAnnouncements(user, student?.id ?? null),
+    ]);
+    const announcements = [
+      ...adminAnnouncements,
+      ...notifications.map((n) => ({ id: n.id, title: n.title, body: n.body, source: "notification" as const })),
+    ];
 
     const pendingEvaluations = student
       ? await prisma.courseEvaluation.findMany({
@@ -185,11 +175,14 @@ meRouter.get("/home", requireAuth, async (req, res, next) => {
     res.json({
       role: "student",
       headline: "Your campus home",
-      standing: student?.standing ?? "unknown",
-      programName: student?.programName ?? "Undeclared",
+      standing: header?.status ?? null,
+      status: header?.status ?? null,
+      programName: student?.programName ?? null,
       studentNumber: student?.studentNumber ?? null,
+      studentId: student?.id ?? null,
       enrolledCourses: enrolmentCount,
       gpa,
+      cgpa: gpa,
       attendanceRate,
       nextDeadline: nextAssignment
         ? {
@@ -204,7 +197,7 @@ meRouter.get("/home", requireAuth, async (req, res, next) => {
         { label: "Calendar", href: "/student/calendar" },
         { label: "Student services", href: "/student/advising" },
       ],
-      announcements: notifications.map((n) => ({ id: n.id, title: n.title, body: n.body })),
+      announcements,
       pendingEvaluations: pendingEvaluations.map((e) => ({
         id: e.id,
         courseCode: e.courseCode,
@@ -214,7 +207,7 @@ meRouter.get("/home", requireAuth, async (req, res, next) => {
         href: `/student/f/st-24-course-evaluation?evaluationId=${e.id}`,
       })),
       items: [
-        ...notifications.map((n) => ({ label: n.title, sub: n.body })),
+        ...announcements.map((a) => ({ label: a.title, sub: a.body })),
         ...pendingEvaluations.map((e) => ({
           label: `Evaluate ${e.courseCode}`,
           sub: e.courseTitle,
@@ -234,6 +227,90 @@ meRouter.get("/home", requireAuth, async (req, res, next) => {
   }
 });
 
+/** Course Syllabus uploaded on the admin course record (CM:COURSE), released per its Course Syllabus Privacy. */
+async function enrolledSyllabus(user: AuthedRequest["user"], sectionId: string) {
+  if (!user.roles.includes("student")) {
+    throw Object.assign(new Error("Forbidden"), { code: "FORBIDDEN", status: 403 });
+  }
+  const enrolment = await prisma.enrolment.findFirst({
+    where: {
+      institutionId: user.institutionId,
+      sectionId,
+      status: { in: ["enrolled", "completed"] },
+      student: { personId: user.personId, institutionId: user.institutionId },
+    },
+    include: { section: { select: { courseId: true } } },
+  });
+  if (!enrolment) {
+    throw Object.assign(new Error("Section not in your enrolment"), { code: "NOT_FOUND", status: 404 });
+  }
+  const settings = await prisma.heritageRecord.findFirst({
+    where: {
+      institutionId: user.institutionId,
+      screenId: "CM:COURSE",
+      contextKey: enrolment.section.courseId,
+      singletonKey: "settings",
+      deletedAt: null,
+    },
+    select: { dataJson: true, updatedAt: true },
+  });
+  let data: Record<string, unknown> = {};
+  try {
+    data = settings ? (JSON.parse(settings.dataJson) as Record<string, unknown>) : {};
+  } catch {
+    data = {};
+  }
+  const file = (data.syllabus && typeof data.syllabus === "object" ? data.syllabus : null) as
+    | { id?: unknown; name?: unknown; mime?: unknown; size?: unknown }
+    | null;
+  const privacy = typeof data.syllabusPrivacy === "string" && data.syllabusPrivacy ? data.syllabusPrivacy : "Private";
+  const released = privacy === "Enrolled Students" || privacy === "Public";
+  const fileId = file && typeof file.id === "string" ? file.id : "";
+  return {
+    available: Boolean(fileId) && released,
+    fileId,
+    name: file && typeof file.name === "string" ? file.name : "",
+    mime: file && typeof file.mime === "string" ? file.mime : "",
+    size: file && typeof file.size === "number" ? file.size : null,
+    updatedAt: settings?.updatedAt.toISOString() ?? null,
+    description: typeof data.description === "string" ? data.description : "",
+  };
+}
+
+meRouter.get("/courses/:sectionId/syllabus", requireAuth, async (req, res, next) => {
+  try {
+    const s = await enrolledSyllabus((req as AuthedRequest).user, String(req.params.sectionId));
+    res.json(
+      s.available
+        ? { available: true, name: s.name, mime: s.mime, size: s.size, updatedAt: s.updatedAt, description: s.description }
+        : { available: false, description: s.description },
+    );
+  } catch (error) {
+    next(error);
+  }
+});
+
+meRouter.get("/courses/:sectionId/syllabus/file", requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    const s = await enrolledSyllabus(user, String(req.params.sectionId));
+    if (!s.available) {
+      throw Object.assign(new Error("No syllabus has been released for this course"), { code: "NOT_FOUND", status: 404 });
+    }
+    const rec = await prisma.heritageRecord.findFirst({
+      where: { id: s.fileId, institutionId: user.institutionId, screenId: "CM:FILE", deletedAt: null },
+      select: { dataJson: true },
+    });
+    const d = rec ? (JSON.parse(rec.dataJson) as { name?: string; mime?: string; base64?: string }) : null;
+    if (!d?.base64) {
+      throw Object.assign(new Error("The syllabus file is no longer available"), { code: "NOT_FOUND", status: 404 });
+    }
+    res.json({ name: d.name || s.name, mime: d.mime || s.mime, base64: d.base64 });
+  } catch (error) {
+    next(error);
+  }
+});
+
 meRouter.get("/access", requireAuth, async (req, res, next) => {
   try {
     const user = (req as AuthedRequest).user;
@@ -249,18 +326,22 @@ meRouter.get("/profile", requireAuth, async (req, res, next) => {
     if (!user.roles.includes("student")) {
       throw Object.assign(new Error("Forbidden"), { code: "FORBIDDEN", status: 403 });
     }
-    const student = await prisma.student.findFirst({
-      where: { institutionId: user.institutionId, personId: user.personId },
-      include: { person: true },
-    });
+    const current = await currentStudent(user.institutionId, user.personId);
+    const student = current
+      ? await prisma.student.findFirst({
+          where: { id: current.id, institutionId: user.institutionId },
+          include: { person: true },
+        })
+      : null;
     const account = await prisma.account.findFirst({
       where: { id: user.accountId, institutionId: user.institutionId, personId: user.personId },
     });
     if (!student || !account) {
       throw Object.assign(new Error("Student profile not found"), { code: "NOT_FOUND", status: 404 });
     }
-    res.json(
-      StudentProfileResponse.parse({
+    const { status } = await adminStatusAndCgpa(user.institutionId, student.id);
+    res.json({
+      ...StudentProfileResponse.parse({
         studentId: student.id,
         studentNumber: student.studentNumber,
         givenName: student.person.givenName,
@@ -278,7 +359,8 @@ meRouter.get("/profile", requireAuth, async (req, res, next) => {
         standing: student.standing,
         timezone: account.timezone,
       }),
-    );
+      status,
+    });
   } catch (error) {
     next(error);
   }
@@ -333,9 +415,7 @@ meRouter.post("/profile-change-requests", requireAuth, async (req, res, next) =>
     }
     const parsed = RequestStudentProfileChange.safeParse(req.body);
     if (!parsed.success) throw validationError(parsed.error.issues);
-    const student = await prisma.student.findFirst({
-      where: { institutionId: user.institutionId, personId: user.personId },
-    });
+    const student = await currentStudent(user.institutionId, user.personId);
     if (!student) throw Object.assign(new Error("Student not found"), { code: "NOT_FOUND", status: 404 });
 
     const approval = await requireApproval({

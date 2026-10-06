@@ -6,11 +6,11 @@ type Tone = "navy" | "rose" | "cyan" | "red" | "sky" | "blue" | "violet" | "indi
 type IconName = "user-plus" | "teacher" | "check" | "search" | "mail" | "clipboard" | "dollar" | "file" | "receipt";
 
 const QUICK_ACCESS: Array<{ label: string; href: string; tone: Tone; icon: IconName }> = [
-  { label: "Student onboard", href: "/admin/users/create?role=student", tone: "rose", icon: "user-plus" },
-  { label: "Instructor onboard", href: "/admin/users/create?role=instructor", tone: "violet", icon: "teacher" },
-  { label: "Enrol student", href: "/admin/enrolments", tone: "green", icon: "check" },
+  { label: "Student onboard", href: "/admin/user-management/new?accessLevel=student", tone: "rose", icon: "user-plus" },
+  { label: "Instructor onboard", href: "/admin/user-management/new?accessLevel=faculty", tone: "violet", icon: "teacher" },
+  { label: "Enrol student", href: "/admin/user-management/new?accessLevel=student", tone: "green", icon: "check" },
   { label: "Search Students", href: "/admin/student-search", tone: "cyan", icon: "search" },
-  { label: "Messages", href: "/admin/notifications", tone: "red", icon: "mail" },
+  { label: "Messages", href: "/admin/messages", tone: "red", icon: "mail" },
   { label: "Approvals", href: "/admin/approvals", tone: "amber", icon: "clipboard" },
   { label: "AR posting", href: "/admin/finance/posting", tone: "navy", icon: "dollar" },
   { label: "Documents", href: "/admin/student-documents", tone: "sky", icon: "file" },

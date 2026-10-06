@@ -1743,7 +1743,13 @@ export async function getCampusOverview(institutionId: string): Promise<CampusOv
     prisma.course.count({ where: { institutionId } }),
     prisma.section.count({ where: { institutionId } }),
     prisma.enrolment.count({ where: { institutionId } }),
-    prisma.approvalRequest.count({ where: { institutionId, status: "pending" } }),
+    prisma.approvalRequest.count({
+      where: {
+        institutionId,
+        status: "pending",
+        OR: [{ requiredApproverRolesJson: { contains: '"admin"' } }, { requiredApproverRolesJson: { contains: '"registrar"' } }],
+      },
+    }),
     prisma.gradeItem.count({
       where: { institutionId, status: { in: ["draft", "pending_publish"] } },
     }),

@@ -76,7 +76,6 @@ import {
   buildHccAttendance,
   buildHccCourseEvaluations,
   buildHccCourseHistory,
-  buildHccEmptyTable,
   buildHccGradesSubmission,
   buildHccMyCourses,
   buildHccPendingGradeSubmissions,
@@ -127,6 +126,20 @@ import {
   mergeCourseLmsOverlay,
   questionFromFields,
 } from "./courseLmsScreens.js";
+import { normalizeStoryboard, sanitizeLessonHtml } from "./aiDraftContent.js";
+import { sectionLmsMeta } from "./sectionLmsMeta.js";
+import {
+  buildInstructorAlertQueue,
+  buildInstructorAssessmentQueue,
+  buildInstructorLeaveQueue,
+  buildInstructorRequirementQueue,
+  buildInstructorWithdrawQueue,
+  instructorAlertCount,
+  loadStudentAdminDetail,
+  recordAdminAlert,
+  recordAdminFlag,
+  seesAllStudents,
+} from "./adminStudentRecords.js";
 import { classJoinUrl, liveClassUrl, sessionJoinUrl } from "../../lib/liveClass.js";
 import { createClassSessionWithNotifications } from "../campusCompliance/sessions.js";
 
@@ -237,7 +250,7 @@ function letterFromPct(p: number | null) {
 /** Course Management admins open any section's course workspace (View Course) through the instructor screens. */
 function adminSectionId(user: SessionClaims, path?: string) {
   if (!path || !(user.roles.includes("admin") || user.roles.includes("registrar"))) return null;
-  return /^\/instructor\/sections\/([0-9a-f-]{36})(?:[/?]|$)/i.exec(path)?.[1] ?? null;
+  return /^\/instructor\/sections\/([0-9a-z-]{36})(?:[/?]|$)/i.exec(path)?.[1] ?? null;
 }
 
 async function loadCtx(user: SessionClaims, path?: string): Promise<InstructorCtx> {
@@ -726,6 +739,24 @@ function sectionSchedule(ctx: InstructorCtx, section: InstructorCtx["sections"][
   };
 }
 
+function sectionLocation(ctx: InstructorCtx, section: InstructorCtx["sections"][number]) {
+  const sessions = ctx.classSessions.filter((s) => s.sectionCode === section.code && s.courseCode === section.courseCode);
+  return (
+    sessions.find((s) => s.location?.trim())?.location?.trim() ||
+    (sessions.some((s) => s.joinUrl) ? "Online" : "Location not set")
+  );
+}
+
+function sectionTermStatus(ctx: InstructorCtx, section: InstructorCtx["sections"][number]) {
+  const term = ctx.terms.find((t) => t.code === section.termCode);
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Toronto" });
+  const startsOn = term?.startsOn ? String(term.startsOn).slice(0, 10) : "";
+  const endsOn = term?.endsOn ? String(term.endsOn).slice(0, 10) : "";
+  if (endsOn && endsOn < today) return "Completed" as const;
+  if (startsOn && startsOn > today) return "Not Started" as const;
+  return "In Progress" as const;
+}
+
 function buildCourseList(ctx: InstructorCtx, path?: string): InstructorLivePayload {
   const now = new Date();
   const weekEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
@@ -773,7 +804,7 @@ function buildCourseList(ctx: InstructorCtx, path?: string): InstructorLivePaylo
           term: s.termCode || ctx.term?.name || ctx.term?.code || "—",
           schedule: slot.schedule,
           room: slot.room,
-          location: "#110 Heritage College- Surrey",
+          location: sectionLocation(ctx, s),
           enrolled: String(enrolled || s.enrolmentCount),
           capacity: String(Math.max(enrolled || s.enrolmentCount, 30)),
           status: "Active",
@@ -785,54 +816,6 @@ function buildCourseList(ctx: InstructorCtx, path?: string): InstructorLivePaylo
     },
   };
 }
-
-const DEFAULT_MANAGE_COURSES = [
-  {
-    id: "course-dap-practicum",
-    name: "DAP PRACTICUM",
-    number: "0",
-    creditValue: "0.0",
-    notStarted: 1,
-    inProgress: 11,
-    completed: 0,
-  },
-  {
-    id: "course-capa-dap-105",
-    name: "Computerized Accounting",
-    number: "CAPA-DAP 105",
-    creditValue: "4.0",
-    notStarted: 0,
-    inProgress: 2,
-    completed: 4,
-  },
-  {
-    id: "course-capa-dap-106",
-    name: "Modern Office Technology",
-    number: "CAPA-DAP 106",
-    creditValue: "3.5",
-    notStarted: 1,
-    inProgress: 1,
-    completed: 2,
-  },
-  {
-    id: "course-capa-dap-110",
-    name: "Payroll Compliance Basics",
-    number: "CAPA-DAP 110",
-    creditValue: "3.0",
-    notStarted: 0,
-    inProgress: 0,
-    completed: 1,
-  },
-  {
-    id: "course-capa-dib-112",
-    name: "Business Communication Theory",
-    number: "CAPA-DIB 112",
-    creditValue: "3.0",
-    notStarted: 0,
-    inProgress: 2,
-    completed: 0,
-  },
-] as const;
 
 function buildCoursesSessionsList(ctx: InstructorCtx): InstructorLivePayload {
   type ManageCourse = {
@@ -847,20 +830,21 @@ function buildCoursesSessionsList(ctx: InstructorCtx): InstructorLivePayload {
   const fromSections = new Map<string, ManageCourse>();
   for (const s of ctx.sections) {
     const key = s.courseCode;
-    if (fromSections.has(key)) continue;
-    fromSections.set(key, {
+    const row = fromSections.get(key) ?? {
       id: `course-${key.toLowerCase().replace(/\s+/g, "-")}`,
       name: s.courseTitle,
       number: s.courseCode,
-      creditValue: "3.0",
+      creditValue: Number(s.credits || 0).toFixed(1),
       notStarted: 0,
-      inProgress: 1,
+      inProgress: 0,
       completed: 0,
-    });
+    };
+    const status = sectionTermStatus(ctx, s);
+    if (status === "Completed") row.completed += 1;
+    else if (status === "Not Started") row.notStarted += 1;
+    else row.inProgress += 1;
+    fromSections.set(key, row);
   }
-  const seeded = DEFAULT_MANAGE_COURSES.filter(
-    (c) => ![...fromSections.values()].some((x) => x.number === c.number),
-  );
   return {
     title: "Manage Courses & Sessions",
     subtitle: "SYS.COURSE_MGMT // SESSIONS_CATALOG",
@@ -870,7 +854,7 @@ function buildCoursesSessionsList(ctx: InstructorCtx): InstructorLivePayload {
     coursesSessions: {
       searchPlaceholder: "Search Courses",
       filterCoursePlaceholder: "Enter Course Name / Number Here",
-      courses: [...fromSections.values(), ...seeded.map((c) => ({ ...c }))],
+      courses: [...fromSections.values()],
     },
   };
 }
@@ -881,67 +865,32 @@ function courseAdminIdFor(code: string) {
 
 function buildCourseAdmin(ctx: InstructorCtx, path: string): InstructorLivePayload {
   const courseIdMatch = /courseId=([^&]+)/.exec(path);
-  const courseId = courseIdMatch ? decodeURIComponent(courseIdMatch[1]) : "course-dap-practicum";
-  const seeded = DEFAULT_MANAGE_COURSES.find((c) => c.id === courseId);
+  const courseId = courseIdMatch
+    ? decodeURIComponent(courseIdMatch[1])
+    : ctx.sections[0]
+      ? courseAdminIdFor(ctx.sections[0].courseCode)
+      : "";
   const matching = ctx.sections.filter(
     (s) => courseAdminIdFor(s.courseCode) === courseId || s.courseCode === courseId || s.courseId === courseId,
   );
   const section = matching[0];
-  const label = seeded
-    ? `${seeded.number}: ${seeded.name}`
-    : section
-      ? `${section.courseCode}: ${section.courseTitle}`
-      : "0: DAP PRACTICUM";
+  const label = section ? `${section.courseCode}: ${section.courseTitle}` : "No course selected";
   const fromDb = matching.map((s) => ({
     id: s.id,
     courseId,
     course: `${s.courseCode}: ${s.courseTitle}`,
-    location: "—",
+    location: sectionLocation(ctx, s),
     instructors: ctx.displayName,
-    schedule: s.termCode,
+    schedule: sectionSchedule(ctx, s).schedule,
     enrolled: s.enrolmentCount,
     reserved: 0,
     waitList: 0,
-    status: "Not Started",
+    status: sectionTermStatus(ctx, s),
   }));
-  const defaultSessions = [
-    {
-      id: "sess-not-started-1",
-      courseId,
-      course: label,
-      location: "#110 Heritage College- Surrey · Room 101",
-      instructors: ctx.displayName,
-      schedule: "Mon–Fri 08:00–13:00",
-      enrolled: 0,
-      reserved: 0,
-      waitList: 0,
-      status: "Not Started",
-    },
-    {
-      id: "sess-in-progress-1",
-      courseId,
-      course: label,
-      location: "Heritage Community College - Distance",
-      instructors: ctx.displayName,
-      schedule: "Mon–Thu 09:00–12:00",
-      enrolled: 12,
-      reserved: 2,
-      waitList: 3,
-      status: "In Progress",
-    },
-    {
-      id: "sess-in-progress-2",
-      courseId,
-      course: label,
-      location: "#110 Heritage College- Surrey · Lab A",
-      instructors: ctx.displayName,
-      schedule: "Tue/Thu 13:00–16:00",
-      enrolled: 8,
-      reserved: 0,
-      waitList: 1,
-      status: "In Progress",
-    },
-  ];
+  const courseOptions = [...new Map(ctx.sections.map((s) => [s.courseCode, s])).values()].map((s) => ({
+    label: `${s.courseCode}: ${s.courseTitle}`,
+    value: courseAdminIdFor(s.courseCode),
+  }));
   return {
     title: "Course Sessions & Offerings",
     subtitle: "SYS.COURSE_MGMT // COURSE_ADMIN",
@@ -966,14 +915,11 @@ function buildCourseAdmin(ctx: InstructorCtx, path: string): InstructorLivePaylo
         { label: "All Statuses", value: "" },
       ],
       createSessionHref: "/instructor/f/t78-add-session-offering",
-      sessions: fromDb.length ? fromDb : defaultSessions,
+      sessions: fromDb,
       linkedCourses: {
         emptyMessage: "No linked courses were found.",
         rows: [],
-        courseOptions: DEFAULT_MANAGE_COURSES.map((c) => ({
-          label: `${c.number}: ${c.name}`,
-          value: c.id,
-        })),
+        courseOptions,
         conditionOptions: [
           { label: "Optional Enrolment", value: "Optional Enrolment" },
           { label: "Required Enrolment", value: "Required Enrolment" },
@@ -1006,9 +952,15 @@ function buildCourseAdmin(ctx: InstructorCtx, path: string): InstructorLivePaylo
 
 function buildAddSessionOfferingForm(ctx: InstructorCtx, path: string): InstructorLivePayload {
   const courseIdMatch = /courseId=([^&]+)/.exec(path);
-  const courseId = courseIdMatch ? decodeURIComponent(courseIdMatch[1]) : "course-dap-practicum";
-  const seeded = DEFAULT_MANAGE_COURSES.find((c) => c.id === courseId);
-  const number = seeded?.number || "0";
+  const courseId = courseIdMatch
+    ? decodeURIComponent(courseIdMatch[1])
+    : ctx.sections[0]
+      ? courseAdminIdFor(ctx.sections[0].courseCode)
+      : "";
+  const section = ctx.sections.find(
+    (s) => courseAdminIdFor(s.courseCode) === courseId || s.courseCode === courseId || s.courseId === courseId,
+  );
+  const number = section?.courseCode || courseId.replace(/^course-/i, "").replace(/-/g, " ").toUpperCase() || "New course";
   const form = buildAddSessionScreenForm(number);
   return {
     title: `Add Session / Offering: ${number}`,
@@ -1018,12 +970,6 @@ function buildAddSessionOfferingForm(ctx: InstructorCtx, path: string): Instruct
     secondaryActionHref: `/instructor/f/t77-course-admin?courseId=${encodeURIComponent(courseId)}`,
     form,
   };
-}
-
-function lmsSessionFor(code: string, fallback: string) {
-  if (/ACSW\s*200/i.test(code)) return "ACSWAPR26-01: Apr. 27, 2026 - May. 1, 2026";
-  if (/ACSW\s*500/i.test(code)) return "ACSWMAR26-01: Sep. 18, 2026 - Oct. 2, 2026";
-  return fallback;
 }
 
 function resolveSectionFromPath(ctx: InstructorCtx, path: string) {
@@ -1181,31 +1127,24 @@ async function buildCourseDetail(ctx: InstructorCtx, path: string): Promise<Inst
   const viewId = (query.get("view") || "").trim();
   const sectionId = viewId || pathname.split("/").pop() || "";
   const names = instructorNameParts(ctx.displayName);
-  const acswDemo =
-    sectionId === "course-acsw-200" ||
-    /acsw.?200/i.test(sectionId) ||
-    sectionId.includes("t08-my-courses-detail");
-  const sec =
-    ctx.sections.find((s) => s.id === sectionId) ||
-    (sectionId === "demo" ? ctx.sections[0] : undefined) ||
-    (acswDemo ? undefined : ctx.sections[0]);
+  const sec = ctx.sections.find((s) => s.id === sectionId) || ctx.sections[0];
 
   if (!sec) {
-    const code = acswDemo ? "ACSW 200" : "—";
-    const title = acswDemo ? "SOCIAL SERVICE WORK FUNDAMENTALS" : "No section";
-    const session = lmsSessionFor(code, "Session not scheduled");
-    const location = "#110 Heritage College- Surrey";
+    const code = "—";
+    const title = "No section";
+    const session = "Session not scheduled";
+    const location = "Location not set";
     return {
-      title: acswDemo ? `${code}: ${title}` : "Section detail",
-      subtitle: acswDemo ? session : "No teaching section assigned",
+      title: "Section detail",
+      subtitle: "No teaching section assigned",
       courseDetail: {
         code,
         title,
-        meta: acswDemo ? `${session} · ${location}` : "Assign a section to this instructor to open the workspace.",
-        status: acswDemo ? "Ended" : "Empty",
+        meta: "Assign a section to this instructor to open the workspace.",
+        status: "Empty",
         tabs: [...COURSE_LMS_TABS],
         activeTab: "Course",
-        overview: [{ label: "Status", value: acswDemo ? "Course has ended" : "No section" }],
+        overview: [{ label: "Status", value: "No section" }],
         modules: [],
         team: [
           {
@@ -1226,8 +1165,8 @@ async function buildCourseDetail(ctx: InstructorCtx, path: string): Promise<Inst
           location,
           instructorFirst: names.first,
           instructorLast: names.last,
-          sectionCode: acswDemo ? "ACSWAPR26-01" : "SECTION",
-          ended: acswDemo,
+          sectionCode: "SECTION",
+          ended: false,
         }),
       },
     };
@@ -1252,11 +1191,9 @@ async function buildCourseDetail(ctx: InstructorCtx, path: string): Promise<Inst
       location: s.location || "—",
     }));
 
-  const session = lmsSessionFor(
-    sec.courseCode,
-    `${sec.code}${sec.termCode ? `: ${sec.termCode}` : ""}`,
-  );
-  const location = "#110 Heritage College- Surrey";
+  const meta = await sectionLmsMeta(ctx.user.institutionId, sec.id);
+  const session = meta?.session ?? `${sec.code}${sec.termCode ? `: ${sec.termCode}` : ""}`;
+  const location = meta?.location ?? "Location to be announced";
   const namesLive = instructorNameParts(ctx.displayName);
   const liveJoin = liveClassUrl(sec.id);
 
@@ -1270,7 +1207,7 @@ async function buildCourseDetail(ctx: InstructorCtx, path: string): Promise<Inst
       code: sec.courseCode,
       title: sec.courseTitle,
       meta: `${session} · ${location}`,
-      status: /ACSW\s*200/i.test(sec.courseCode) ? "Ended" : "Active",
+      status: meta?.ended ? "Ended" : "Active",
       tabs: [...COURSE_LMS_TABS],
       activeTab: "Course",
       overview: [
@@ -1342,7 +1279,7 @@ async function buildCourseDetail(ctx: InstructorCtx, path: string): Promise<Inst
         instructorLast: namesLive.last,
         sectionCode: sec.code,
         joinUrl: liveJoin,
-        ended: /ACSW\s*200/i.test(sec.courseCode),
+        ended: meta?.ended ?? false,
       }),
     },
   };
@@ -1749,6 +1686,47 @@ async function buildStudentDetail(ctx: InstructorCtx, studentId?: string | null)
     }
   }
 
+  if (
+    studentId &&
+    seesAllStudents(ctx.user) &&
+    !hits.some((h) => h.studentId === studentId || h.studentNumber === studentId)
+  ) {
+    const other = await prisma.student.findFirst({
+      where: { institutionId: ctx.user.institutionId, OR: [{ id: studentId }, { studentNumber: studentId }] },
+      include: {
+        person: true,
+        enrolments: {
+          where: { status: { in: ["enrolled", "completed", "withdrawn"] } },
+          include: { section: { include: { course: true } } },
+        },
+      },
+    });
+    if (other) {
+      const base = {
+        studentId: other.id,
+        studentNumber: other.studentNumber,
+        studentName: `${other.person.givenName} ${other.person.familyName}`.trim(),
+        email: other.person.email,
+        programName: other.programName,
+        standing: other.standing,
+      };
+      if (other.enrolments.length) {
+        for (const e of other.enrolments) {
+          hits.push({
+            ...base,
+            id: e.id,
+            status: e.status,
+            courseCode: e.section.course.code,
+            courseTitle: e.section.course.title,
+            sectionId: e.sectionId,
+          });
+        }
+      } else {
+        hits.push({ ...base, id: "", status: "", courseCode: "", courseTitle: "", sectionId: "" });
+      }
+    }
+  }
+
   const focus =
     (studentId
       ? hits.find((h) => h.studentId === studentId || h.studentNumber === studentId)
@@ -1760,9 +1738,9 @@ async function buildStudentDetail(ctx: InstructorCtx, studentId?: string | null)
     tabs: ["Overview", "Assessments", "Requirements", "Flags", "Leave"],
     fields: [
       { label: "Institution", value: "—" },
-      { label: "Current GPA", value: "—" },
+      { label: "Student Status", value: "—" },
+      { label: "CGPA", value: "—" },
       { label: "Attendance", value: "—" },
-      { label: "Academic Standing", value: "—" },
     ],
     alerts: [] as Array<{ title: string; body: string; tone: "danger" | "warning" | "info" | "muted" }>,
     courses: [] as Array<{ code: string; title: string; grade: string; status: string }>,
@@ -1786,11 +1764,13 @@ async function buildStudentDetail(ctx: InstructorCtx, studentId?: string | null)
   const institution = await prisma.institution.findFirst({
     where: { institutionId: ctx.user.institutionId },
   });
-  const studentRow = await prisma.student.findFirst({
-    where: { id: focus.studentId, institutionId: ctx.user.institutionId },
+  const admin = await loadStudentAdminDetail(ctx.user, {
+    studentId: focus.studentId,
+    studentNumber: focus.studentNumber,
+    studentName: focus.studentName,
   });
 
-  const studentHits = hits.filter((h) => h.studentId === focus.studentId);
+  const studentHits = hits.filter((h) => h.studentId === focus.studentId && h.sectionId);
   const studentGrades = ctx.grades.filter((g) => g.studentId === focus.studentId);
   const scored = studentGrades.filter((g) => g.score != null);
   const gpaPct =
@@ -1801,14 +1781,6 @@ async function buildStudentDetail(ctx: InstructorCtx, studentId?: string | null)
       : null;
   const gpaLetter = letterFromPct(gpaPct);
   const missingCount = studentGrades.filter((g) => g.score == null).length;
-  const standingLabel =
-    focus.standing === "probation" || focus.standing === "alert"
-      ? "Conditional"
-      : focus.standing === "warning"
-        ? "Warning"
-        : focus.standing === "good" || focus.standing === "active"
-          ? "Good standing"
-          : focus.standing;
 
   const attendanceRows = await prisma.attendanceRecord.findMany({
     where: {
@@ -1862,186 +1834,7 @@ async function buildStudentDetail(ctx: InstructorCtx, studentId?: string | null)
     }
   }
 
-  const requirementRows = studentRow?.programVersionId
-    ? await prisma.degreeRequirement.findMany({
-        where: {
-          institutionId: ctx.user.institutionId,
-          programVersionId: studentRow.programVersionId,
-        },
-        orderBy: { sortOrder: "asc" },
-      })
-    : [];
-
-  let requirementsSource = requirementRows;
-  if (!requirementsSource.length && focus.programName) {
-    const versions = await prisma.programVersion.findMany({
-      where: {
-        institutionId: ctx.user.institutionId,
-        program: { name: focus.programName },
-      },
-      select: { id: true },
-    });
-    if (versions.length) {
-      requirementsSource = await prisma.degreeRequirement.findMany({
-        where: {
-          institutionId: ctx.user.institutionId,
-          programVersionId: { in: versions.map((v) => v.id) },
-        },
-        orderBy: { sortOrder: "asc" },
-      });
-    }
-  }
-
-  const enrolledCodes = new Set(studentHits.map((h) => h.courseCode));
-  const requirements = requirementsSource.map((r) => ({
-    code: r.courseCode,
-    title: r.title,
-    credits: String(r.credits),
-    kind: r.kind,
-    status: enrolledCodes.has(r.courseCode) ? "In progress" : "Not started",
-  }));
-
-  const alerts: Array<{ title: string; body: string; tone: "danger" | "warning" | "info" | "muted" }> = [];
-  if (focus.standing === "probation" || focus.standing === "alert") {
-    alerts.push({
-      title: "High academic risk",
-      body: `${focus.studentName} is on ${focus.standing} standing${missingCount ? ` with ${missingCount} unscored assessment(s)` : ""}.`,
-      tone: "danger",
-    });
-  } else if (focus.standing === "warning" || missingCount > 0) {
-    alerts.push({
-      title: "Monitor closely",
-      body:
-        missingCount > 0
-          ? `${missingCount} assessment(s) still need grades across your sections.`
-          : `${focus.studentName} is flagged with warning standing.`,
-      tone: "warning",
-    });
-  }
-
-  // Flags for THIS student only — portal academic alerts + matching notifications + standing
-  const alertRecords = await prisma.portalRecord.findMany({
-    where: {
-      institutionId: ctx.user.institutionId,
-      screenPath: "/instructor/f/t44-academic-alerts",
-      role: "instructor",
-      OR: [{ audienceAccountId: ctx.user.accountId }, { audienceAccountId: null }],
-    },
-    orderBy: { createdAt: "desc" },
-    take: 100,
-  });
-
-  const studentFlagItems: Array<{
-    title: string;
-    body: string;
-    when: string;
-    tone: "danger" | "warning" | "info" | "muted";
-  }> = [];
-
-  for (const r of alertRecords) {
-    let meta: { studentId?: string | null; studentNumber?: string | null; tag?: string; tagTone?: string } = {};
-    try {
-      meta = r.metaText ? (JSON.parse(r.metaText) as typeof meta) : {};
-    } catch {
-      meta = {};
-    }
-    const matchesStudent =
-      meta.studentId === focus.studentId ||
-      meta.studentNumber === focus.studentNumber ||
-      r.primaryText === focus.studentName ||
-      r.primaryText.includes(focus.studentNumber) ||
-      (r.href || "").includes(focus.studentId);
-    if (!matchesStudent) continue;
-    const tone =
-      meta.tagTone === "danger" || meta.tagTone === "warning" || meta.tagTone === "info"
-        ? meta.tagTone
-        : /risk|danger|alert/i.test(meta.tag || r.primaryText)
-          ? ("danger" as const)
-          : ("warning" as const);
-    studentFlagItems.push({
-      title: meta.tag || "ACADEMIC ALERT",
-      body: r.secondaryText || `${focus.studentName} · academic alert`,
-      when: r.createdAt.toLocaleString(),
-      tone,
-    });
-  }
-
-  const flagNotes = await prisma.notification.findMany({
-    where: {
-      institutionId: ctx.user.institutionId,
-      recipientAccountId: ctx.user.accountId,
-      AND: [
-        {
-          OR: [
-            { templateKey: "instructor.alert" },
-            { templateKey: { contains: "flag" } },
-            { templateKey: { contains: "alert" } },
-          ],
-        },
-        {
-          OR: [
-            { title: { contains: focus.studentName } },
-            { body: { contains: focus.studentName } },
-            { title: { contains: focus.studentNumber } },
-            { body: { contains: focus.studentNumber } },
-            { title: { contains: focus.studentId } },
-            { body: { contains: focus.studentId } },
-          ],
-        },
-      ],
-    },
-    orderBy: { createdAt: "desc" },
-    take: 30,
-  });
-
-  // Deduplicate notifications already represented by portal rows (same title/body)
-  const seenFlagKeys = new Set(studentFlagItems.map((f) => `${f.title}|${f.body}`.toLowerCase()));
-  for (const n of flagNotes) {
-    const key = `${n.title}|${n.body}`.toLowerCase();
-    if (seenFlagKeys.has(key)) continue;
-    seenFlagKeys.add(key);
-    studentFlagItems.push({
-      title: n.title,
-      body: n.body,
-      when: n.createdAt.toLocaleString(),
-      tone: (/risk|alert|missing|high/i.test(n.title) ? "danger" : "info") as "danger" | "info",
-    });
-  }
-
-  for (const a of alerts) {
-    const key = `${a.title}|${a.body}`.toLowerCase();
-    if (seenFlagKeys.has(key)) continue;
-    seenFlagKeys.add(key);
-    studentFlagItems.push({
-      title: a.title,
-      body: a.body,
-      when: "Standing / gradebook",
-      tone: a.tone,
-    });
-  }
-
-  const flags = studentFlagItems;
-
-  const leaveRequests = await prisma.serviceRequest.findMany({
-    where: {
-      institutionId: ctx.user.institutionId,
-      studentId: focus.studentId,
-      OR: [
-        { type: { contains: "leave" } },
-        { type: { contains: "withdraw" } },
-        { subject: { contains: "leave" } },
-        { subject: { contains: "withdraw" } },
-      ],
-    },
-    orderBy: { createdAt: "desc" },
-    take: 20,
-  });
-  const leave = leaveRequests.map((r) => ({
-    title: r.subject || r.type,
-    body: r.details,
-    status: r.status,
-    when: r.createdAt.toLocaleDateString(),
-  }));
+  const { alerts, flags, requirements, leave } = admin;
 
   // Distinct alert types / priorities already used for THIS student
   const alertTypeSet = new Set<string>();
@@ -2055,17 +1848,15 @@ async function buildStudentDetail(ctx: InstructorCtx, studentId?: string | null)
   if (attendanceRows.length && presentCount / Math.max(attendanceRows.length, 1) < 0.7) {
     alertTypeSet.add("ATTENDANCE RISK");
   }
+  if (!alertTypeSet.size) alertTypeSet.add("ACADEMIC ALERT");
 
-  const prioritySet = new Set<string>();
-  for (const f of flags) {
-    const m = f.body.match(/\b(High|Medium|Low)\b/i);
-    if (m) prioritySet.add(m[1]!.charAt(0).toUpperCase() + m[1]!.slice(1).toLowerCase());
-  }
-  if (!prioritySet.size) {
-    if (focus.standing === "probation" || focus.standing === "alert") prioritySet.add("High");
-    else if (focus.standing === "warning" || missingCount > 0) prioritySet.add("Medium");
-    else prioritySet.add("Low");
-  }
+  const suggestedPriority =
+    focus.standing === "probation" || focus.standing === "alert" || admin.holdCount > 0
+      ? "High"
+      : focus.standing === "warning" || missingCount > 0 || admin.openFlagCount > 0 || alerts.length > 0
+        ? "Medium"
+        : "Low";
+  const prioritySet = new Set<string>([suggestedPriority, "High", "Medium", "Low"]);
 
   return {
     title: focus.studentName,
@@ -2077,9 +1868,14 @@ async function buildStudentDetail(ctx: InstructorCtx, studentId?: string | null)
       tabs: ["Overview", "Current Courses", "Assessments", "Requirements", "Flags", "Leave"],
       fields: [
         { label: "Institution", value: institution?.name || institution?.legalName || "Heritage Community College" },
-        { label: "Current GPA", value: gpaPct != null ? `${gpaLetter} (${gpaPct}%)` : "—" },
+        { label: "Student Status", value: admin.status },
+        { label: "CGPA", value: admin.cgpa != null ? admin.cgpa.toFixed(2) : "—" },
+        { label: "Average in My Sections", value: gpaPct != null ? `${gpaLetter} (${gpaPct}%)` : "—" },
         { label: "Attendance", value: attendancePct },
-        { label: "Academic Standing", value: standingLabel },
+        {
+          label: "Open Flags / Holds",
+          value: `${admin.openFlagCount} flag(s) · ${admin.holdCount} hold(s)`,
+        },
       ],
       alerts,
       courses,
@@ -2924,6 +2720,7 @@ async function persistAcademicAlert(
     tag: string;
     body: string;
     priority: string;
+    mirrorToAdmin?: boolean;
   },
 ) {
   const ALERTS_PATH = "/instructor/f/t44-academic-alerts";
@@ -2964,6 +2761,17 @@ async function persistAcademicAlert(
       audienceAccountId: ctx.user.accountId,
     },
   });
+
+  if (input.mirrorToAdmin && input.studentId) {
+    await recordAdminAlert(ctx.user, {
+      studentId: input.studentId,
+      type: input.tag,
+      description: input.body,
+      priority: input.priority,
+      course: input.course,
+      portalRecordId: record.id,
+    });
+  }
 
   await prisma.notification.create({
     data: {
@@ -3494,26 +3302,7 @@ function buildLectures(ctx: InstructorCtx): InstructorLivePayload {
       };
     });
 
-  const fromAssignments = ctx.sections.flatMap((s) =>
-    s.assignments.slice(0, 4).map((a) => ({
-      title: `${s.courseCode} · ${a.title}`,
-      when: a.dueAt ? a.dueAt.toLocaleString() : "TBA",
-      duration: "50 min",
-      status: a.dueAt && a.dueAt < new Date() ? "Completed" : "Scheduled",
-      tone: (a.dueAt && a.dueAt < new Date() ? "muted" : "info") as "muted" | "info",
-      href: reviewHref,
-    })),
-  );
-
-  const sessions = [...fromSessions]
-  const seen = new Set(sessions.map((s) => s.title.toLowerCase()));
-  for (const item of fromAssignments) {
-    if (sessions.length >= 12) break;
-    const key = item.title.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    sessions.push(item);
-  }
+  const sessions = [...fromSessions];
   return {
     title: "Lectures",
     subtitle: sec ? `${sec.courseCode} · ${sec.code}` : "Teaching sessions",
@@ -3525,12 +3314,10 @@ function buildLectures(ctx: InstructorCtx): InstructorLivePayload {
   };
 }
 
-function buildLectureReview(ctx: InstructorCtx, path: string): InstructorLivePayload {
-  const sec = primarySection(ctx);
+async function buildLectureReview(ctx: InstructorCtx, path: string): Promise<InstructorLivePayload> {
   const sessionId = (() => {
     try {
-      const q = path.includes("?") ? new URL(path, "http://local").searchParams.get("sessionId") : null;
-      return q;
+      return path.includes("?") ? new URL(path, "http://local").searchParams.get("sessionId") : null;
     } catch {
       return null;
     }
@@ -3540,34 +3327,43 @@ function buildLectureReview(ctx: InstructorCtx, path: string): InstructorLivePay
     ctx.classSessions.find((c) => !/lab/i.test(c.title) && c.startsAt < new Date()) ||
     ctx.classSessions.find((c) => !/lab/i.test(c.title)) ||
     null;
-  const enrolled = sec?.enrolmentCount ?? ctx.studentCount;
-  const attended = Math.max(0, Math.min(enrolled, Math.round(enrolled * 0.9)));
+  const sec =
+    (session ? ctx.sections.find((s) => s.code === session.sectionCode && s.courseCode === session.courseCode) : undefined) ||
+    primarySection(ctx);
+  const enrolled = sec ? sec.enrolments.filter((e) => e.status === "enrolled").length : 0;
+  const day = session ? session.startsAt.toLocaleDateString("en-CA", { timeZone: "America/Toronto" }) : "";
+  const records =
+    session && sec
+      ? await prisma.attendanceRecord.findMany({
+          where: { institutionId: ctx.user.institutionId, sectionId: sec.id, meetingLabel: day },
+          select: { status: true },
+        })
+      : [];
+  const attended = records.filter((r) => r.status === "present" || r.status === "late").length;
+  const attendanceLine = records.length
+    ? `${attended} of ${enrolled} students attended (attendance submitted for ${day})`
+    : session
+      ? `Attendance not submitted for ${day}`
+      : "No class session yet";
   const title = session?.title || (sec ? `${sec.courseCode} lecture review` : "Lecture review");
-  const when = session
-    ? session.startsAt.toLocaleString()
-    : sec
-      ? `${sec.courseCode} · ${sec.code}`
-      : "No session scheduled";
-  const location = session?.location || "Hall TBA";
+  const when = session ? session.startsAt.toLocaleString() : "No session scheduled";
+  const location = session?.location || (session?.joinUrl ? "Online" : "Location not set");
   return {
     title: "Lecture Review",
-    subtitle: sec ? `${sec.courseCode} · recording & AI notes` : "Recording, transcript, and AI highlights",
+    subtitle: sec ? `${sec.courseCode} · ${sec.code}` : "Recording, transcript, and AI highlights",
     primaryAction: "Share with Class",
     lectureReview: {
       title,
-      meta: `${sec ? `${sec.courseCode} · ${sec.code}` : "Course"} · ${when} · ${location} · ${attended}/${enrolled || "—"} attendees`,
+      meta: `${sec ? `${sec.courseCode} · ${sec.code}` : "Course"} · ${when} · ${location} · ${attendanceLine}`,
       transcript: session
-        ? `Session “${session.title}” covered the planned outcomes for ${sec?.courseTitle || "this course"}. Students worked through examples, asked clarifying questions, and closed with a short formative check.`
-        : "No recorded lecture is linked yet. Schedule or complete a class session to generate transcript and AI highlights.",
+        ? "No recording or transcript is stored for this session yet."
+        : "No lecture session is scheduled yet. Schedule a class session to review it here.",
       highlights: [
-        `${attended} of ${enrolled || "—"} students attended`,
-        sec ? `Section ${sec.code} · ${sec.courseTitle}` : "No active teaching section",
-        session?.joinUrl ? "Join / recording link available for this session" : "Add a join URL when scheduling the next lecture",
-        "AI suggested a short recap at the start of the next meeting",
+        attendanceLine,
+        ...(sec ? [`Section ${sec.code} · ${sec.courseTitle}`] : []),
+        session?.joinUrl ? "Join link available for this session" : "No join link on this session",
       ],
-      aiNotes: session
-        ? `Recommend a brief recap of “${session.title}” before introducing the next topic, and flag any students with missing submissions in this section.`
-        : "Once a lecture session exists, Heritage will draft follow-up notes and suggested remediation here.",
+      aiNotes: "",
     },
   };
 }
@@ -3593,41 +3389,7 @@ function buildLabs(ctx: InstructorCtx): InstructorLivePayload {
       };
     });
 
-  const fromAssignments = ctx.sections.flatMap((s) =>
-    s.assignments.slice(0, 3).map((a) => ({
-      title: `${s.courseCode} Lab · ${a.title}`,
-      when: a.dueAt ? a.dueAt.toLocaleString() : "TBA",
-      room: "Lab",
-      capacity: `${s.enrolmentCount} enrolled`,
-      status: a.dueAt && a.dueAt < new Date() ? "Completed" : "Scheduled",
-      tone: (a.dueAt && a.dueAt < new Date() ? "muted" : "info") as "muted" | "info",
-      href: `/instructor/sections/${s.id}`,
-    })),
-  );
-
   const labs = [...fromSessions];
-  const seen = new Set(labs.map((l) => l.title.toLowerCase()));
-  for (const item of fromAssignments) {
-    if (labs.length >= 12) break;
-    const key = item.title.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    labs.push(item);
-  }
-
-  if (labs.length === 0) {
-    for (const s of ctx.sections) {
-      labs.push({
-        title: `${s.courseCode} · Hands-on lab`,
-        when: ctx.term ? `${ctx.term.code} · weekly` : "TBA",
-        room: "Lab",
-        capacity: `${s.enrolmentCount} enrolled`,
-        status: "Scheduled",
-        tone: "info" as const,
-        href: `/instructor/sections/${s.id}`,
-      });
-    }
-  }
 
   return {
     title: "Labs",
@@ -4166,31 +3928,19 @@ async function routePayload(
     return buildHccStudentFlags(ctx.user);
   }
   if (p.includes("t44") || p.includes("academic-alert")) {
-    return buildHccEmptyTable("ACADEMIC ALERTS", ["Home", "Academic Alerts"], "No academic alerts were found.");
+    return buildInstructorAlertQueue(ctx.user, ctx.sections);
   }
   if (p.includes("t46") || p.includes("student-assessment")) {
-    return buildHccEmptyTable("STUDENT ASSESSMENTS", ["Home", "Student Assessments"], "No assessments were found.");
+    return buildInstructorAssessmentQueue(ctx.user, ctx.sections);
   }
   if (p.includes("t47") || p.includes("student-requirement")) {
-    return buildHccEmptyTable(
-      "STUDENT REQUIREMENTS",
-      ["Home", "Student Requirements"],
-      "No requirement requests were found.",
-    );
+    return buildInstructorRequirementQueue(ctx.user, ctx.sections);
   }
   if (p.includes("t48") || (p.includes("leave-of-absence") && !p.includes("student"))) {
-    return buildHccEmptyTable(
-      "LEAVE OF ABSENCE",
-      ["Home", "Leave of Absence"],
-      "No leave of absence students were found.",
-    );
+    return buildInstructorLeaveQueue(ctx.user, ctx.sections);
   }
   if (p.includes("t49") || p.includes("withdraw-request")) {
-    return buildHccEmptyTable(
-      "COURSE WITHDRAW REQUESTS",
-      ["Home", "Course Withdraw Requests"],
-      "No course withdraw requests were found.",
-    );
+    return buildInstructorWithdrawQueue(ctx.user, ctx.sections, ctx.grades);
   }
   if (p.includes("t36") || p.includes("course-evaluation")) {
     return buildHccCourseEvaluations(ctx, path);
@@ -4331,7 +4081,7 @@ export async function buildInstructorScreen(
     (payload as Record<string, unknown>)._lastAction = overlay._lastAction;
   }
   const workshopCounts = await workshopNavCounts(user);
-  const statusCounts = await loadStudentStatusCounts(user.institutionId);
+  const statusCounts = await loadStudentStatusCounts(user);
   return {
     path,
     live: true as const,
@@ -4346,7 +4096,7 @@ export async function buildInstructorScreen(
       workshopCounts,
       statusCounts: statusCounts.byLabel,
       flagCount: statusCounts.flagCount,
-      alertCount: 0,
+      alertCount: await instructorAlertCount(user, ctx.sections),
     },
     payload,
   };
@@ -4355,7 +4105,7 @@ export async function buildInstructorScreen(
 export async function buildInstructorBootstrap(user: SessionClaims) {
   const ctx = await loadCtx(user);
   const workshopCounts = await workshopNavCounts(user);
-  const statusCounts = await loadStudentStatusCounts(user.institutionId);
+  const statusCounts = await loadStudentStatusCounts(user);
   return {
     displayName: ctx.displayName,
     email: ctx.person.email,
@@ -4366,7 +4116,7 @@ export async function buildInstructorBootstrap(user: SessionClaims) {
     workshopCounts,
     statusCounts: statusCounts.byLabel,
     flagCount: statusCounts.flagCount,
-    alertCount: 0,
+    alertCount: await instructorAlertCount(user, ctx.sections),
     sections: ctx.sections.map((s) => ({
       sectionId: s.id,
       code: s.courseCode,
@@ -4477,7 +4227,16 @@ function parseFileManagerUploads(rowKey?: string): OverlayFile[] {
   }
 }
 
+/** Active Courses → View (`t56?view=<sectionId>`) is the same course workspace admin and students use. */
+function sectionWorkspacePath(path: string) {
+  const { pathname, query } = parseScreenQuery(path);
+  const view = (query.get("view") || "").trim();
+  return pathname === "/instructor/f/t56-active-courses" && /^[0-9a-z-]{36}$/i.test(view) ? `/instructor/sections/${view}` : null;
+}
+
 function overlayStoragePath(path: string) {
+  const workspace = sectionWorkspacePath(path);
+  if (workspace) return workspace;
   const { pathname, query } = parseScreenQuery(path);
   for (const key of ["tab", "more", "action", "qtype", "qid", "atype", "topic", "aid", "sid", "view"]) {
     query.delete(key);
@@ -4486,10 +4245,14 @@ function overlayStoragePath(path: string) {
   return qs ? `${pathname}?${qs}` : pathname;
 }
 
-async function loadScreenOverlay(institutionId: string, path: string) {
-  const { pathname } = parseScreenQuery(path);
+function overlayReadKeys(path: string) {
   const canonical = overlayStoragePath(path);
-  for (const key of [...new Set([canonical, path, pathname])]) {
+  if (sectionWorkspacePath(path)) return [canonical];
+  return [...new Set([canonical, path, parseScreenQuery(path).pathname])];
+}
+
+async function loadScreenOverlay(institutionId: string, path: string) {
+  for (const key of overlayReadKeys(path)) {
     const state = await prisma.sisScreenState.findUnique({
       where: { institutionId_path: { institutionId, path: key } },
     });
@@ -4504,9 +4267,8 @@ async function patchScreenOverlay(
   patch: (prev: Record<string, unknown>) => Record<string, unknown>,
 ) {
   const canonical = overlayStoragePath(path);
-  const { pathname } = parseScreenQuery(path);
   let prev: Record<string, unknown> = {};
-  for (const key of [...new Set([canonical, pathname, path])]) {
+  for (const key of overlayReadKeys(path)) {
     const existing = await prisma.sisScreenState.findUnique({
       where: { institutionId_path: { institutionId, path: key } },
     });
@@ -4999,9 +4761,6 @@ async function buildActiveCourses(ctx: InstructorCtx, path = ""): Promise<Instru
       label: `${s.courseCode}: ${s.courseTitle}`,
       value: `${s.courseCode}: ${s.courseTitle}`,
     })),
-    { label: "0: DAP Practicum", value: "0: DAP Practicum" },
-    { label: "ACSW 100: Addictions Fundamentals", value: "ACSW 100: Addictions Fundamentals" },
-    { label: "COMP 101: Introduction to Computers", value: "COMP 101: Introduction to Computers" },
   ].filter((opt, idx, arr) => arr.findIndex((o) => o.value === opt.value) === idx);
 
   const termOptions = [
@@ -5010,15 +4769,10 @@ async function buildActiveCourses(ctx: InstructorCtx, path = ""): Promise<Instru
       label: `${t.name || t.code}${t.startsOn && t.endsOn ? ` — ${t.startsOn} - ${t.endsOn}` : ""}`,
       value: t.code,
     })),
-    { label: "3rd Term-2026 — 2026-09-01 - 2026-12-31", value: "3rd Term-2026" },
-    { label: "2nd Term-2026 — 2026-05-01 - 2026-08-31", value: "2nd Term-2026" },
-    { label: "1st Term-2026 — 2026-01-01 - 2026-04-30", value: "1st Term-2026" },
   ].filter((opt, idx, arr) => arr.findIndex((o) => o.value === opt.value) === idx);
 
   const liveRows = ctx.sections.map((s) => {
     const termMeta = ctx.terms.find((t) => t.code === s.termCode) || ctx.terms[0];
-    const capacity = Math.max(s.enrolmentCount, 30);
-    const pct = capacity ? Math.round((s.enrolmentCount / capacity) * 100) : 0;
     const dates =
       termMeta?.startsOn && termMeta?.endsOn ? `${termMeta.startsOn} — ${termMeta.endsOn}` : "Continuous";
     return {
@@ -5027,83 +4781,17 @@ async function buildActiveCourses(ctx: InstructorCtx, path = ""): Promise<Instru
       code: s.courseCode,
       section: s.code,
       title: s.courseTitle,
-      location: "#110 Heritage College- Surrey",
-      room: "Room Not Set",
+      location: sectionLocation(ctx, s),
+      room: sectionSchedule(ctx, s).room,
       instructors: ctx.displayName || "Not Set",
       dates,
-      enrolment: `${pct}%`,
+      enrolment: `${s.enrolmentCount} enrolled`,
       viewHref: `/instructor/f/t56-active-courses?view=${encodeURIComponent(s.id)}`,
       attendanceHref: `/instructor/attendance?sectionId=${encodeURIComponent(s.id)}`,
     };
   });
 
-  const fallbackRows = [
-    {
-      id: "course-acsw-200",
-      course: "ACSW 200 (ACSWAPR26-01) Social Service Work Fundamentals",
-      code: "ACSW 200",
-      section: "ACSWAPR26-01",
-      title: "Social Service Work Fundamentals",
-      location: "#110 Heritage College- Surrey",
-      room: "Room Not Set",
-      instructors: ctx.displayName || "Not Set",
-      dates: "Apr. 27, 2026 - May. 1, 2026",
-      enrolment: "0%",
-      viewHref: "/instructor/f/t56-active-courses?view=course-acsw-200",
-      attendanceHref: "/instructor/attendance",
-    },
-    {
-      id: "course-dap-01",
-      course: "0 (01) DAP Practicum",
-      code: "0",
-      section: "01",
-      title: "DAP Practicum",
-      location: "#110 Heritage College- Surrey",
-      room: "Room Not Set",
-      instructors: "Not Set",
-      dates: "Continuous",
-      enrolment: "0%",
-      viewHref: "/instructor/f/t56-active-courses?view=course-dap-01",
-      attendanceHref: "/instructor/attendance",
-    },
-    {
-      id: "course-work-exp",
-      course: "0 (01) Work Experience",
-      code: "0",
-      section: "01",
-      title: "Work Experience",
-      location: "#110 Heritage College- Surrey",
-      room: "Room Not Set",
-      instructors: "Not Set",
-      dates: "Jan. 10, 2022 (Mon.) – Feb. 4, 2022 (Fri.)",
-      enrolment: "2%",
-      viewHref: "/instructor/f/t56-active-courses?view=course-work-exp",
-      attendanceHref: "/instructor/attendance",
-    },
-  ];
-
-  const rows = [
-    ...liveRows.filter((row) => row.id !== "course-acsw-200"),
-    ...(liveRows.some((row) => /ACSW\s*200/i.test(row.code || row.course))
-      ? []
-      : [
-          {
-            id: "course-acsw-200",
-            course: "ACSW 200 (ACSWAPR26-01) Social Service Work Fundamentals",
-            code: "ACSW 200",
-            section: "ACSWAPR26-01",
-            title: "Social Service Work Fundamentals",
-            location: "#110 Heritage College- Surrey",
-            room: "Room Not Set",
-            instructors: ctx.displayName || "Not Set",
-            dates: "Apr. 27, 2026 - May. 1, 2026",
-            enrolment: "0%",
-            viewHref: "/instructor/f/t56-active-courses?view=course-acsw-200",
-            attendanceHref: "/instructor/attendance",
-          },
-        ]),
-    ...(liveRows.length ? [] : fallbackRows.filter((row) => row.id !== "course-acsw-200")),
-  ];
+  const rows = liveRows;
   const viewed = viewId ? rows.find((row) => row.id === viewId) : undefined;
   const detail = viewId ? await buildCourseDetail(ctx, `/instructor/sections/${viewId}`) : null;
   const courseDetail =
@@ -5124,8 +4812,9 @@ async function buildActiveCourses(ctx: InstructorCtx, path = ""): Promise<Instru
           value: "ALL CAMPUSES",
           options: [
             { label: "ALL CAMPUSES", value: "ALL CAMPUSES" },
-            { label: "#110 Heritage College- Surrey", value: "#110 Heritage College- Surrey" },
-            { label: "Heritage College - Main", value: "Heritage College - Main" },
+            ...[...new Set(rows.map((r) => r.location))]
+              .filter((l) => l !== "Location not set")
+              .map((l) => ({ label: l, value: l })),
           ],
         },
         course: {
@@ -6979,118 +6668,77 @@ async function saveAttendanceSession(ctx: InstructorCtx, path: string, finalize:
     where: { institutionId_path: { institutionId: ctx.user.institutionId, path } },
   });
   const prev = existing ? (JSON.parse(existing.payloadJson) as Record<string, unknown>) : {};
-  const existingAttendance = prev.attendance as
-    | {
-        sectionId: string;
-        sectionCode: string;
-        courseCode: string;
-        finalized?: boolean;
-        savedAt: string;
-        roster: Array<{ studentId: string; studentNumber: string; name: string; status: string }>;
-      }
-    | undefined;
-  if (existingAttendance?.finalized === true && finalize === true) {
-    return existingAttendance;
-  }
+  type Row = { studentId: string; studentNumber: string; name: string; status: string; note?: string; sectionId: string };
+  const existingAttendance = prev.attendance as { roster?: Array<Partial<Row>> } | undefined;
 
-  let rosterFromClient: Array<{
-    studentId?: string;
-    id?: string;
-    studentNumber?: string;
-    name: string;
-    status: string;
-    sectionId?: string;
-  }> | null = null;
+  type ClientRow = { studentId?: string; id?: string; studentNumber?: string; name?: string; status?: string; note?: string; sectionId?: string };
+  let rosterFromClient: ClientRow[] | null = null;
+  let dateFromClient = "";
   if (rowKey?.trim().startsWith("{") || rowKey?.trim().startsWith("[")) {
     try {
-      const parsed = JSON.parse(rowKey) as
-        | {
-            roster?: Array<{
-              studentId?: string;
-              id?: string;
-              studentNumber?: string;
-              name: string;
-              status: string;
-              sectionId?: string;
-            }>;
-          }
-        | Array<{
-            studentId?: string;
-            id?: string;
-            studentNumber?: string;
-            name: string;
-            status: string;
-            sectionId?: string;
-          }>;
+      const parsed = JSON.parse(rowKey) as { roster?: ClientRow[]; date?: string } | ClientRow[];
       rosterFromClient = Array.isArray(parsed) ? parsed : parsed.roster ?? null;
+      if (!Array.isArray(parsed) && typeof parsed.date === "string") dateFromClient = parsed.date.trim();
     } catch {
       rosterFromClient = null;
     }
   }
 
-  const activeEnrolments = (() => {
-    const enrolments = enrolledAcrossSections(ctx);
-    return { section: sec, enrolments };
-  })();
+  const sameStudent = (r: ClientRow | Partial<Row>, e: { studentId: string; studentNumber: string }) =>
+    r.studentId === e.studentId || r.studentNumber === e.studentNumber || (r as ClientRow).id === e.studentNumber;
+  const roster: Row[] = [];
+  for (const s of ctx.sections) {
+    for (const e of s.enrolments.filter((x) => x.status === "enrolled")) {
+      const fromClient = rosterFromClient?.find((r) => sameStudent(r, e) && (!r.sectionId || r.sectionId === s.id));
+      const prior = existingAttendance?.roster?.find((r) => sameStudent(r, e) && (!r.sectionId || r.sectionId === s.id));
+      roster.push({
+        studentId: e.studentId,
+        studentNumber: e.studentNumber,
+        name: e.studentName,
+        status: (fromClient?.status ?? prior?.status ?? "").trim(),
+        note: (fromClient?.note ?? prior?.note ?? "").trim(),
+        sectionId: s.id,
+      });
+    }
+  }
 
-  const roster = activeEnrolments.enrolments.map((e) => {
-    const fromClient = rosterFromClient?.find(
-      (r) =>
-        r.studentId === e.studentId ||
-        r.studentNumber === e.studentNumber ||
-        r.id === e.studentNumber ||
-        r.name === e.studentName,
-    );
-    const prior = existingAttendance?.roster?.find((r) => r.studentId === e.studentId);
-    const homeSection =
-      ctx.sections.find((s) => s.enrolments.some((en) => en.studentId === e.studentId && en.status === "enrolled")) ||
-      sec;
-    return {
-      studentId: e.studentId,
-      studentNumber: e.studentNumber,
-      name: e.studentName,
-      status: fromClient?.status || prior?.status || "Present",
-      sectionId: fromClient?.sectionId || homeSection?.id || sec.id,
-    };
-  });
-
-  if (finalize && roster.length) {
-    let meetingFromFields = "";
-    if (rowKey?.trim().startsWith("{")) {
-      try {
-        const parsed = JSON.parse(rowKey) as { date?: string };
-        if (typeof parsed.date === "string") meetingFromFields = parsed.date.trim();
-      } catch {
-        meetingFromFields = "";
-      }
+  if (finalize) {
+    const marked = roster.filter((r) => r.status);
+    if (!marked.length) {
+      throw Object.assign(new Error("Mark Present, Absent, Late or Excused for at least one student before submitting."), { status: 400 });
     }
     const pathDate = parseScreenQuery(path).query.get("date")?.trim() || "";
     const meetingLabel =
-      (/^\d{4}-\d{2}-\d{2}$/.test(meetingFromFields) && meetingFromFields) ||
+      (/^\d{4}-\d{2}-\d{2}$/.test(dateFromClient) && dateFromClient) ||
       (/^\d{4}-\d{2}-\d{2}$/.test(pathDate) && pathDate) ||
-      new Date().toISOString().slice(0, 10);
-    for (const row of roster) {
-      await prisma.attendanceRecord.create({
-        data: {
-          id: randomUUID(),
-          institutionId: ctx.user.institutionId,
-          studentId: row.studentId,
-          sectionId: row.sectionId || activeEnrolments.section.id,
-          meetingLabel,
-          status: row.status.toLowerCase(),
-        },
-      });
-    }
-    // Fire miss escalation promptly after attendance finalize (non-blocking).
+      new Date().toLocaleDateString("en-CA", { timeZone: "America/Toronto" });
+    await prisma.$transaction(async (tx) => {
+      for (const row of marked) {
+        await tx.attendanceRecord.deleteMany({
+          where: { institutionId: ctx.user.institutionId, studentId: row.studentId, sectionId: row.sectionId, meetingLabel },
+        });
+        await tx.attendanceRecord.create({
+          data: {
+            id: randomUUID(),
+            institutionId: ctx.user.institutionId,
+            studentId: row.studentId,
+            sectionId: row.sectionId,
+            meetingLabel,
+            status: row.status.toLowerCase(),
+            ...(row.note ? { note: row.note.slice(0, 500) } : {}),
+          },
+        });
+      }
+    });
     void import("../campusCompliance/sweep.js")
       .then(({ escalateStudentMisses }) => escalateStudentMisses(ctx.user.institutionId))
       .catch(() => undefined);
   }
 
   const attendance = {
-    sectionId: activeEnrolments.section.id,
-    sectionCode: activeEnrolments.section.code,
-    courseCode: activeEnrolments.section.courseCode,
+    sectionId: sec.id,
+    sectionCode: sec.code,
+    courseCode: sec.courseCode,
     finalized: finalize,
     savedAt: new Date().toISOString(),
     roster,
@@ -7098,14 +6746,8 @@ async function saveAttendanceSession(ctx: InstructorCtx, path: string, finalize:
   const next = { ...prev, attendance };
   await prisma.sisScreenState.upsert({
     where: { institutionId_path: { institutionId: ctx.user.institutionId, path } },
-    create: {
-      institutionId: ctx.user.institutionId,
-      path,
-      payloadJson: JSON.stringify(next),
-    },
-    update: {
-      payloadJson: JSON.stringify(next),
-    },
+    create: { institutionId: ctx.user.institutionId, path, payloadJson: JSON.stringify(next) },
+    update: { payloadJson: JSON.stringify(next) },
   });
   return attendance;
 }
@@ -7165,9 +6807,8 @@ async function resolveCourseForSession(ctx: InstructorCtx, courseIdParam: string
   if (fromSection) {
     return { courseId: fromSection.courseId, code: fromSection.courseCode, title: fromSection.courseTitle };
   }
-  const seeded = DEFAULT_MANAGE_COURSES.find((c) => c.id === courseIdParam || c.number === courseIdParam);
-  const code = (seeded?.number || courseIdParam.replace(/^course-/i, "").replace(/-/g, " ")).trim().toUpperCase().slice(0, 32);
-  const title = seeded?.name || code;
+  const code = courseIdParam.replace(/^course-/i, "").replace(/-/g, " ").trim().toUpperCase().slice(0, 32);
+  const title = code;
   let course = await prisma.course.findFirst({
     where: { institutionId: ctx.user.institutionId, code },
   });
@@ -7178,7 +6819,7 @@ async function resolveCourseForSession(ctx: InstructorCtx, courseIdParam: string
         institutionId: ctx.user.institutionId,
         code: code || `CRS-${Date.now().toString(36).slice(-6).toUpperCase()}`,
         title,
-        credits: Number(seeded?.creditValue) || 3,
+        credits: 3,
       },
     });
   }
@@ -7480,7 +7121,7 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
           /* keep defaults */
         }
       } else if (path.includes("lecture-review") || path.includes("in-09")) {
-        const review = buildLectureReview(ctx, path).lectureReview as
+        const review = (await buildLectureReview(ctx, path)).lectureReview as
           | { title?: string; meta?: string; transcript?: string; highlights?: string[]; aiNotes?: string }
           | undefined;
         if (review?.title) {
@@ -7583,8 +7224,16 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
       (lower.includes("attendance") && lower.includes("submit")) ||
       lower.includes("mark all present")
     ) {
-      const att = await saveAttendanceSession(ctx, path, true, input.rowKey);
-      message = `Attendance finalized for ${att.courseCode} · ${att.roster.length} student(s)`;
+      const rowKey = lower.includes("mark all present")
+        ? JSON.stringify({
+            roster: ctx.sections.flatMap((s) =>
+              s.enrolments.filter((e) => e.status === "enrolled").map((e) => ({ studentId: e.studentId, sectionId: s.id, status: "Present" })),
+            ),
+          })
+        : input.rowKey;
+      const att = await saveAttendanceSession(ctx, path, true, rowKey);
+      const markedCount = att.roster.filter((r) => r.status).length;
+      message = `Attendance submitted · ${markedCount} student(s) marked`;
       result = att;
     } else if (
       path.includes("t42") ||
@@ -8631,20 +8280,22 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
       let flagType = "ACADEMIC RISK";
       let description = "";
       let priority = "High";
+      let studentResolved = false;
       const fields = parseActionFields(input.rowKey);
       if (fields) {
-        const studentLabel = fields["Student Name"] || fields.studentName || "";
+        const studentLabel = (fields["Student Name"] || fields.studentName || "").toLowerCase();
         const match = ctx.sections
           .flatMap((s) => s.enrolments.map((e) => ({ ...e, courseCode: s.courseCode })))
           .find(
             (e) =>
-              studentLabel.includes(e.studentName) ||
-              studentLabel.includes(e.studentNumber) ||
+              studentLabel.includes(e.studentName.toLowerCase()) ||
+              studentLabel.includes(e.studentNumber.toLowerCase()) ||
               studentLabel.includes(e.studentId),
           );
         if (match) {
           focus = match;
           courseCode = match.courseCode;
+          studentResolved = true;
         }
         flagType = fields["Alert Type"] || fields["Flag Type"] || fields.flagType || flagType;
         description = fields.Description || fields.description || "";
@@ -8659,59 +8310,74 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
         if (match) {
           focus = match;
           courseCode = match.courseCode;
+          studentResolved = true;
         }
       }
 
-      const body =
-        description ||
-        `${action} recorded for ${focus?.studentNumber ?? "roster"} (${focus?.standing ?? "n/a"}) · priority ${priority}.`;
-
-      const isFlagPath = path.includes("flag") || path.includes("t45");
-      const isAlertPath =
-        path.includes("t44") ||
-        path.includes("academic-alert") ||
-        path.includes("t22") ||
-        path.includes("student-detail") ||
-        lower.includes("alert");
-
-      if (isAlertPath || !isFlagPath) {
-        await persistAcademicAlert(ctx, {
-          studentName: focus?.studentName ?? fields?.["Student Name"] ?? "Student",
-          studentNumber: focus?.studentNumber ?? null,
-          studentId: focus?.studentId ?? null,
-          course: courseCode,
-          tag: flagType,
-          body,
-          priority,
-        });
+      if (fields && !studentResolved) {
+        message = "Student not found in your sections · enter the student's full name or student number";
+        result = { error: true };
       } else {
-        await prisma.notification.create({
-          data: {
-            institutionId: user.institutionId,
-            recipientAccountId: user.accountId,
-            channel: "in_app",
-            title: `${flagType} · ${focus?.studentName ?? "student"}`,
-            body,
-            templateKey: "instructor.alert",
-          },
-        });
-      }
+        const body =
+          description ||
+          `${action} recorded for ${focus?.studentNumber ?? "roster"} (${focus?.standing ?? "n/a"}) · priority ${priority}.`;
 
-      if (isFlagPath) {
-        await appendExtraRow(user.institutionId, path.includes("create") ? "/instructor/f/t45-student-flags" : path, {
-          cells: [
-            `${focus?.studentName ?? "Student"} · ${focus?.studentNumber ?? "—"}`,
-            flagType,
-            description || "Flag recorded from instructor workspace.",
+        const isFlagPath = path.includes("flag") || path.includes("t45");
+        const isAlertPath =
+          path.includes("t44") ||
+          path.includes("academic-alert") ||
+          path.includes("t22") ||
+          path.includes("student-detail") ||
+          lower.includes("alert");
+
+        if (isAlertPath || !isFlagPath) {
+          await persistAcademicAlert(ctx, {
+            studentName: focus?.studentName ?? fields?.["Student Name"] ?? "Student",
+            studentNumber: focus?.studentNumber ?? null,
+            studentId: focus?.studentId ?? null,
+            course: courseCode,
+            tag: flagType,
+            body,
             priority,
-            "Active",
-          ],
-          badge: priority,
-          badgeTone: /high/i.test(priority) ? "danger" : /medium/i.test(priority) ? "warning" : "info",
-        });
+            mirrorToAdmin: studentResolved,
+          });
+        } else {
+          await prisma.notification.create({
+            data: {
+              institutionId: user.institutionId,
+              recipientAccountId: user.accountId,
+              channel: "in_app",
+              title: `${flagType} · ${focus?.studentName ?? "student"}`,
+              body,
+              templateKey: "instructor.alert",
+            },
+          });
+        }
+
+        if (isFlagPath) {
+          await appendExtraRow(user.institutionId, path.includes("create") ? "/instructor/f/t45-student-flags" : path, {
+            cells: [
+              `${focus?.studentName ?? "Student"} · ${focus?.studentNumber ?? "—"}`,
+              flagType,
+              description || "Flag recorded from instructor workspace.",
+              priority,
+              "Active",
+            ],
+            badge: priority,
+            badgeTone: /high/i.test(priority) ? "danger" : /medium/i.test(priority) ? "warning" : "info",
+          });
+          if (studentResolved && focus?.studentId) {
+            await recordAdminFlag(user, {
+              studentId: focus.studentId,
+              name: flagType,
+              message: description || "Flag recorded from instructor workspace.",
+              priority,
+            });
+          }
+        }
+        message = `Alert created · ${focus?.studentName ?? "roster"} · ${flagType}`;
+        result = { studentId: focus?.studentId ?? null, flagType, priority, courseCode };
       }
-      message = `Alert created · ${focus?.studentName ?? "roster"} · ${flagType}`;
-      result = { studentId: focus?.studentId ?? null, flagType, priority, courseCode };
     } else if (
       path.includes("t33") ||
       path.includes("help-support") ||
@@ -8985,6 +8651,40 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
           type,
           name,
         };
+        const fileId = (fields.FileId || "").trim();
+        if (fileId && (type === "FILE" || type === "FOLDER")) {
+          const sec = resolveSectionFromPath(ctx, path);
+          const file = sec
+            ? await prisma.heritageRecord.findFirst({
+                where: { id: fileId, institutionId: user.institutionId, screenId: "LMS:FILE", contextKey: sec.id, deletedAt: null },
+                select: { id: true, dataJson: true },
+              })
+            : null;
+          if (!file) throw Object.assign(new Error("Uploaded file not found for this course. Upload it again."), { status: 400 });
+          const meta = JSON.parse(file.dataJson) as { name?: string; mime?: string; size?: number };
+          activity.fileId = file.id;
+          activity.fileName = meta.name || name;
+          activity.fileMime = meta.mime || "";
+          activity.fileSize = Number(meta.size) || 0;
+          activity.modified = new Date().toLocaleString("en-CA", { dateStyle: "full", timeStyle: "short", timeZone: "America/Toronto" });
+        }
+        const bodyHtml = (fields.Body || "").trim();
+        if (bodyHtml) {
+          activity.body = sanitizeLessonHtml(bodyHtml);
+          activity.modified = new Date().toLocaleString("en-CA", { dateStyle: "full", timeStyle: "short", timeZone: "America/Toronto" });
+        }
+        if (fields.Storyboard) {
+          let raw: unknown = null;
+          try {
+            raw = JSON.parse(fields.Storyboard);
+          } catch {
+            raw = null;
+          }
+          const storyboard = normalizeStoryboard(raw, name);
+          if (!storyboard) throw Object.assign(new Error("Video storyboard is invalid"), { status: 400 });
+          activity.storyboard = storyboard;
+          activity.note = `AI video lesson · ${storyboard.slides.length} slides · ~${Math.max(1, Math.round(storyboard.estimated_duration_sec / 60))} min`;
+        }
         if (type === "BIGBLUEBUTTON") {
           const publishNow = !/^(no|false|0|skip)$/i.test(
             String(fields.PublishMeeting || fields["Publish meeting"] || "yes").trim() || "yes",
@@ -9072,6 +8772,41 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
         });
         message = "Activity deleted";
         result = { id: activityId };
+      }
+    } else if (lower === "save page") {
+      const fields = parseActionFields(input.rowKey) || {};
+      const activityId = (fields.Id || "").trim();
+      const name = (fields.Name || "").trim();
+      if (!activityId || !name) {
+        message = "Page name is required";
+        result = { error: true };
+      } else {
+        const edit: Record<string, unknown> = {
+          name,
+          modified: new Date().toLocaleString("en-CA", { dateStyle: "full", timeStyle: "short", timeZone: "America/Toronto" }),
+        };
+        if (typeof fields.Body === "string") edit.body = sanitizeLessonHtml(fields.Body.trim());
+        const hide = /^(yes|true|1)$/i.test(String(fields.Hidden || ""));
+        await patchScreenOverlay(user.institutionId, path, (prev) => {
+          const topicActivities = {
+            ...((prev.topicActivities as Record<string, Array<Record<string, unknown>>>) || {}),
+          };
+          let inOverlay = false;
+          for (const key of Object.keys(topicActivities)) {
+            topicActivities[key] = (topicActivities[key] || []).map((row) => {
+              if (String(row.id || "") !== activityId) return row;
+              inOverlay = true;
+              return { ...row, ...edit };
+            });
+          }
+          const activityEdits = { ...((prev.activityEdits as Record<string, Record<string, unknown>>) || {}) };
+          if (!inOverlay) activityEdits[activityId] = { ...(activityEdits[activityId] || {}), ...edit };
+          const hidden = Array.isArray(prev.hiddenActivityIds) ? (prev.hiddenActivityIds as string[]).filter((id) => id !== activityId) : [];
+          if (hide) hidden.push(activityId);
+          return { ...prev, topicActivities, activityEdits, hiddenActivityIds: hidden };
+        });
+        message = `Page saved · ${name}`;
+        result = { id: activityId, name, hidden: hide };
       }
     } else if (lower.includes("save section") || lower.includes("edit section")) {
       const fields = parseActionFields(input.rowKey) || {};

@@ -390,10 +390,12 @@
 
 /* Student header and tabs */
 
-.fn-head {
+.mh-sa__card.fn-head {
   display: flex;
+  flex-direction: row;
   gap: 18px;
   align-items: center;
+  text-align: left;
 }
 
 .fn-avatar {
@@ -444,7 +446,9 @@
   font-weight: 600;
 }
 
-.fn-tabs {
+.lx-tabs.fn-tabs {
+  flex-wrap: wrap;
+  overflow: visible;
   margin-bottom: -4px;
 }
 
@@ -503,7 +507,7 @@
     grid-template-columns: 1fr;
   }
 
-  .fn-head {
+  .mh-sa__card.fn-head {
     flex-wrap: wrap;
   }
 

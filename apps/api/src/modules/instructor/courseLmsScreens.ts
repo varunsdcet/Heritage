@@ -2,6 +2,7 @@
 
 import { LMS_ACTIVITY_TYPES } from "../../lib/lifecycle-status.js";
 import { externalJoinUrl } from "../../lib/liveClass.js";
+import type { AiDraftStoryboard } from "./aiDraftContent.js";
 
 export const COURSE_LMS_TABS = ["Course", "Class List", "Attendance", "Grades", "Badges", "More"] as const;
 
@@ -40,10 +41,16 @@ export type CourseLmsActivity = {
   note?: string;
   body?: string;
   fileName?: string;
+  /** Uploaded file (`LMS:FILE` record) — templates only carry a fileName, so no fileId means nothing to download. */
+  fileId?: string;
+  fileMime?: string;
+  fileSize?: number;
   modified?: string;
   hidden?: boolean;
   /** Live class launcher (`/live/<sectionId>`) or an external HTTPS meeting link. */
   joinUrl?: string | null;
+  /** Narrated slideshow ("AI video lesson") played by the avatar player. */
+  storyboard?: AiDraftStoryboard;
 };
 
 export type CourseLmsQuestion = {
@@ -774,6 +781,10 @@ export function mergeCourseLmsOverlay(
       ? (overlay.deletedActivityIds as unknown[]).filter((id): id is string => typeof id === "string")
       : [],
   );
+  const activityEdits =
+    overlay.activityEdits && typeof overlay.activityEdits === "object"
+      ? (overlay.activityEdits as Record<string, Partial<Pick<CourseLmsActivity, "name" | "body" | "modified">>>)
+      : {};
   const topics = [...lms.topics, ...extraTopics.filter((t) => !lms.topics.some((base) => base.id === t.id))].map(
     (topic) => ({
       ...topic,
@@ -781,6 +792,7 @@ export function mergeCourseLmsOverlay(
       summary: topicSummaries[topic.id] ?? topic.summary,
       activities: [...topic.activities, ...(topicEdits[topic.id] || [])]
         .filter((activity) => !deletedActivityIds.has(activity.id))
+        .map((activity) => ({ ...activity, ...(activityEdits[activity.id] || {}) }))
         .map((activity) => {
           const type = String(activity.type || "").toUpperCase();
           const hidden = hiddenActivityIds.has(activity.id) || activity.hidden;

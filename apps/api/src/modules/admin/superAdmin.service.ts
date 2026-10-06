@@ -13,6 +13,7 @@ import {
   key as catalogKey,
   termMatches,
 } from "./studentSearchCatalog.js";
+import { currentStudentId } from "../me/studentAlignment.js";
 
 /* ------------------------------------------------------------------ */
 /* Key-value store on SisScreenState (paths never start with /admin,  */
@@ -1185,7 +1186,7 @@ export async function saveTimeZone(user: SessionClaims, body: z.infer<typeof Tim
 }
 
 export async function listAccomplishments(user: SessionClaims) {
-  const student = await prisma.student.findFirst({ where: { institutionId: user.institutionId, personId: user.personId } });
+  const student = await prisma.student.findFirst({ where: { id: await currentStudentId(user.institutionId, user.personId), institutionId: user.institutionId } });
   const badges = student
     ? await prisma.studentBadge.findMany({ where: { studentId: student.id, status: "earned" }, orderBy: { earnedAt: "desc" } })
     : [];

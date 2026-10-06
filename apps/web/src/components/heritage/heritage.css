@@ -169,20 +169,58 @@
 .hx-kpi {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 14px 16px;
-  border-radius: 10px;
+  gap: 6px;
+  padding: 16px 18px;
+  border-radius: 14px;
   border: 1px solid var(--mh-border);
   background: var(--mh-surface);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  animation: hx-kpi-in 0.4s ease backwards;
+}
+
+.hx-kpi:nth-child(2) {
+  animation-delay: 0.05s;
+}
+
+.hx-kpi:nth-child(3) {
+  animation-delay: 0.1s;
+}
+
+.hx-kpi:nth-child(n + 4) {
+  animation-delay: 0.15s;
+}
+
+.hx-kpi:hover {
+  transform: translateY(-2px);
+  border-color: #c7d2fe;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
 }
 
 .hx-kpi span {
-  font-size: 12px;
+  font-size: 12.5px;
+  font-weight: 500;
   color: var(--mh-text-muted);
 }
 
 .hx-kpi strong {
-  font-size: 18px;
+  font-family: var(--mh-font-display);
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes hx-kpi-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .hx-toolbar {

@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import { api, loadSession } from "@/lib/api";
 import type { AdminNavChild, AdminSidebarEntry } from "./adminNav";
-import { heritageHref } from "./heritageNav";
+
+/** The offering's own workspace (Course, Class List, Attendance, Grades) in Course Management. */
+export const offeringHref = (sectionId: string) => `/admin/course-management/active/view?${new URLSearchParams({ id: sectionId }).toString()}`;
 
 export type MyCoursesNav = {
   instructor: boolean;
@@ -44,7 +46,7 @@ export function withMyCourses(sidebar: AdminSidebarEntry[], nav: MyCoursesNav | 
     if (entry.type !== "item" || entry.item.label !== MY_COURSES_LABEL || !entry.item.children) return entry;
     const active: AdminNavChild[] = nav.activeCourses.map((c, i) => ({
       label: `${c.code} (${c.offering}) — ${c.title}`,
-      href: heritageHref("LM01", { ctx: `course:${c.courseId}` }),
+      href: offeringHref(c.id),
       section: "ACTIVE COURSES",
       ...(i === 0 ? { subheading: "Instructor" } : {}),
     }));

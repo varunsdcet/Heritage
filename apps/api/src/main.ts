@@ -23,6 +23,7 @@ import { employerRouter } from "./modules/employer/employer.router.js";
 import { mailRouter } from "./modules/mail/mail.router.js";
 import { campusComplianceRouter } from "./modules/campusCompliance/campusCompliance.router.js";
 import { liveRouter } from "./modules/live/live.router.js";
+import { lmsFilesRouter } from "./modules/instructor/lmsFiles.router.js";
 import { errorHandler } from "./middleware/error-handler.js";
 
 const app: Express = express();
@@ -56,6 +57,7 @@ app.use(
 app.use("/student", express.json({ limit: "15mb" }));
 app.use("/admin/super", express.json({ limit: "2mb" }));
 app.use("/admin/heritage", express.json({ limit: "12mb" }));
+app.use("/lms-files", express.json({ limit: "12mb" }));
 app.use(express.json());
 app.use((req, _res, next) => {
   (req as express.Request & { correlationId: string }).correlationId =
@@ -123,6 +125,7 @@ app.use("/messages", messagesRouter);
 app.use("/mail", mailRouter);
 app.use("/compliance", campusComplianceRouter);
 app.use("/live", liveRouter);
+app.use("/lms-files", lmsFilesRouter);
 app.use("/search", searchRouter);
 app.use("/ai", aiRouter);
 app.use("/catalog", catalogRouter);

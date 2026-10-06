@@ -7,7 +7,7 @@ import "./mycourses.css";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ApiError, api, loadSession } from "@/lib/api";
-import { heritageHref } from "@/lib/heritageNav";
+import { offeringHref } from "@/lib/myCoursesNav";
 
 export const mc = <T,>(path: string, init?: RequestInit) => api<T>(`/admin/heritage/my-courses${path}`, init ?? {}, loadSession()?.accessToken);
 export const errMsg = (e: unknown, fallback: string) => (e instanceof ApiError || e instanceof Error ? e.message : fallback);
@@ -31,10 +31,7 @@ export type Offering = {
   status: string;
 };
 
-/** Course detail (LM01) is opened for the course of the offering. */
-export const courseHref = (courseId: string) => heritageHref("LM01", { ctx: `course:${courseId}` });
-/** Class List, Attendance and Grades tabs of the course. */
-export const gradesHref = (courseId: string) => heritageHref("LM08", { ctx: `course:${courseId}` });
+export { offeringHref };
 
 /** Loads `path`, re-fetching whenever it changes. */
 export function useMc<T>(path: string, fallback: string) {
@@ -58,11 +55,22 @@ export function useMc<T>(path: string, fallback: string) {
   return { data, error, setError };
 }
 
-export function CourseCell({ o, role, offeringBelow }: { o: Pick<Offering, "courseId" | "code" | "offering" | "title">; role?: string; offeringBelow?: boolean }) {
+export function CourseCell({
+  o,
+  sectionId,
+  role,
+  offeringBelow,
+}: {
+  o: Pick<Offering, "id" | "code" | "offering" | "title">;
+  /** Rows that are not themselves offerings (e.g. approval requests) name their offering here. */
+  sectionId?: string;
+  role?: string;
+  offeringBelow?: boolean;
+}) {
   return (
     <>
       <div className="ur-name">
-        <Link href={courseHref(o.courseId)}>{offeringBelow ? o.code : `${o.code} (${o.offering})`}</Link>
+        <Link href={offeringHref(sectionId ?? o.id)}>{offeringBelow ? o.code : `${o.code} (${o.offering})`}</Link>
       </div>
       <div>{o.title}</div>
       {offeringBelow ? <div className="mh-sa__sub">{o.offering}</div> : null}

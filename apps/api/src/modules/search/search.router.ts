@@ -12,6 +12,7 @@ import {
   yearOptions,
   normalizeLifecycleLabel,
 } from "./searchMeta.js";
+import { currentStudentId } from "../me/studentAlignment.js";
 
 export const searchRouter: Router = Router();
 
@@ -105,7 +106,7 @@ searchRouter.get("/", requireAuth, async (req, res, next) => {
     }
     if (user.roles.includes("student") && !user.roles.some((role) => role === "admin" || role === "registrar")) {
       const student = await prisma.student.findFirst({
-        where: { institutionId: user.institutionId, personId: user.personId },
+        where: { id: await currentStudentId(user.institutionId, user.personId), institutionId: user.institutionId },
       });
       if (!student) {
         res.json({ groups: [] });

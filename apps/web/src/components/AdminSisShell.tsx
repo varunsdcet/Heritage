@@ -23,14 +23,14 @@ const SEARCH_PALETTE = [
         detail: "Bachelor of Nursing (BSN)",
         badge: "Active",
         badgeTone: "active" as const,
-        href: "/admin/f/rg-01-student-360",
+        href: "/admin/student-management/browse",
       },
       {
         label: "Sarah Mitchelson",
         detail: "Computer Science (AS)",
         badge: "Active",
         badgeTone: "active" as const,
-        href: "/admin/f/rg-01-student-360",
+        href: "/admin/student-management/browse",
       },
     ],
   },
@@ -42,7 +42,7 @@ const SEARCH_PALETTE = [
         detail: "Application #APP-4521 — Bachelor of Nursing",
         badge: "In Review",
         badgeTone: "review" as const,
-        href: "/admin/f/ad-03-application-detail",
+        href: "/admin/ops/admissions/applications",
       },
     ],
   },
@@ -60,7 +60,7 @@ const SEARCH_PALETTE = [
 ];
 
 function NavIcon({ name, active }: { name: string; active?: boolean }) {
-  const stroke = active ? "#2563EB" : "#8D928A";
+  const stroke = active ? "#FFFFFF" : "#8FA3C7";
   const common = {
     width: 16,
     height: 16,
@@ -197,12 +197,19 @@ function NavIcon({ name, active }: { name: string; active?: boolean }) {
           <path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-9V3" />
         </svg>
       );
+    case "mail":
+      return (
+        <svg {...common}>
+          <rect x="3" y="5" width="18" height="14" rx="2" />
+          <path d="m3 7 9 6 9-6" />
+        </svg>
+      );
     default:
       return <span style={{ width: 16, height: 16 }} />;
   }
 }
 
-function HeaderIcon({ name }: { name: "menu" | "search" | "mail" | "home" | "exit" }) {
+function HeaderIcon({ name }: { name: "menu" | "search" | "mail" | "home" }) {
   const common = {
     width: 16,
     height: 16,
@@ -242,13 +249,6 @@ function HeaderIcon({ name }: { name: "menu" | "search" | "mail" | "home" | "exi
           <path d="M5 9.5V21h14V9.5" />
         </svg>
       );
-    case "exit":
-      return (
-        <svg {...common}>
-          <path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4" />
-          <path d="M10 17l-5-5 5-5M5 12h11" />
-        </svg>
-      );
   }
 }
 
@@ -263,8 +263,8 @@ function visibleSidebar(access: MyAccess | null | undefined): AdminSidebarEntry[
       items.push(entry);
       continue;
     }
-    if (!allows(access, entry.item.gate)) continue;
-    const children = entry.item.children?.filter((c) => allows(access, c.gate));
+    if (entry.item.hidden || !allows(access, entry.item.gate)) continue;
+    const children = entry.item.children?.filter((c) => !c.hidden && allows(access, c.gate));
     items.push({ type: "item", item: { ...entry.item, ...(children ? { children } : {}) } });
   }
   return items.filter((entry, i) => entry.type === "item" || items[i + 1]?.type === "item");
@@ -408,10 +408,12 @@ export function AdminSisShell({
                     <NavIcon name={item.icon} active={active} />
                   </span>
                   <span className="mh-sis__nav-text">{item.label}</span>
-                  {item.count && counts[item.count] !== undefined ? <span className="mh-sis__nav-count">{counts[item.count]}</span> : null}
+                  {item.count && counts[item.count] !== undefined ? (
+                    <span className={`mh-sis__nav-count${counts[item.count] ? "" : " is-zero"}`}>{counts[item.count]}</span>
+                  ) : null}
                   {item.children ? (
                     <img
-                      src={`/brand/icons/chevron-${expanded ? "down" : "right"}.svg`}
+                      src="/brand/icons/chevron-right.svg"
                       alt=""
                       width={12}
                       height={12}
@@ -434,7 +436,9 @@ export function AdminSisShell({
                         >
                           <span className="mh-sis__nav-dot" />
                           {child.label}
-                          {child.count && counts[child.count] !== undefined ? <span className="mh-sis__nav-count">{counts[child.count]}</span> : null}
+                          {child.count && counts[child.count] !== undefined ? (
+                            <span className={`mh-sis__nav-count${counts[child.count] ? "" : " is-zero"}`}>{counts[child.count]}</span>
+                          ) : null}
                         </button>
                       </div>
                     ))}
@@ -573,21 +577,18 @@ export function AdminSisShell({
               Advanced Search
             </button>
             <div className="mh-sis__shortcuts">
-              <button type="button" className="mh-sis__shortcut" aria-label="Messages" title="Messages" onClick={() => router.push("/admin/notifications")}>
+              <button type="button" className="mh-sis__shortcut" aria-label="Messages" title="Messages" onClick={() => router.push("/admin/messages")}>
                 <HeaderIcon name="mail" />
               </button>
               <button type="button" className="mh-sis__shortcut" aria-label="Home" title="Home" onClick={() => router.push("/admin")}>
                 <HeaderIcon name="home" />
-              </button>
-              <button type="button" className="mh-sis__shortcut" aria-label="Switch portal" title="Switch portal" onClick={() => router.push("/role-select")}>
-                <HeaderIcon name="exit" />
               </button>
             </div>
             <button type="button" className="mh-sis__copilot" onClick={() => router.push("/admin/ai/ask")}>
               <img src="/brand/icons/sparkle.svg" alt="" width={14} height={14} />
               <span>Ask Heritage AI</span>
             </button>
-            <button type="button" className="mh-sis__bell" aria-label="Notifications" onClick={() => router.push("/admin/notifications")}>
+            <button type="button" className="mh-sis__bell" aria-label="Notifications" onClick={() => router.push("/admin/ops/workspace/notifications")}>
               <img src="/brand/icons/bell.svg" alt="" width={16} height={16} />
             </button>
             <div className="mh-sis__profile">
@@ -618,10 +619,6 @@ export function AdminSisShell({
         <div className="mh-sis__scroll">{blocked ? access === undefined ? null : <NoModuleAccess /> : children}</div>
         <footer className="mh-sis__footer">
           <span>Version {APP_VERSION}</span>
-          <span aria-hidden>|</span>
-          <span>
-            Powered by <strong>MySIS</strong>
-          </span>
           {today ? (
             <>
               <span aria-hidden>|</span>

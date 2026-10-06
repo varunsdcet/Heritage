@@ -1,54 +1,47 @@
-import { randomUUID } from "crypto";
 import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
-import { LIFECYCLE_STATUSES, type LifecycleStatus } from "../../lib/lifecycle-status.js";
+import { studentMetaMap } from "../admin/superAdmin.service.js";
+import { agentCatalogue, fullName, profilesFor, s as str, staffAccounts, statusOf } from "../admin/heritage/students.core.js";
+import { entityRecords } from "../admin/heritage/sysconfig.js";
+import { STATUS_TREE } from "../admin/heritage/students.spec.js";
+import { dateBoundsFromSessions, instructorDisplayName, scheduleTextFromSessions } from "../courses/sectionSchedule.js";
 import {
-  ADMISSION_TERM_MENU,
-  ADVISOR_MENU,
-  ADVISOR_OPTS,
-  AGENT_MENU,
-  AGENT_OPTS,
-  CAMPUS_MENU,
-  NATIONALITY_MENU,
-  NATIONALITY_OPTS,
-  PATHWAY_MENU,
+  FILTER_ALL_LABELS,
+  NO_VALUE,
   PER_PAGE_OPTS,
-  PROGRAM_MENU,
-  PROGRAM_TERM_MENU,
-  PROGRAM_TERM_OPTS,
-  SCHEDULE_MENU,
-  STATUS_FILTER_OPTS,
-  STATUS_MENU,
-  advisorDisplayFromFilter,
-  advisorFilterFromDisplay,
-  programCodeFromOption,
+  buildFilterMenu,
   selectableValues,
   serializeFilterMenu,
+  type FilterKey,
+  type FilterMenu,
 } from "./studentFilterCatalog.js";
 
-/** PDF sidebar status labels (exact copy) with target census counts. */
-export const STUDENT_STATUS_SIDEBAR: Array<{ label: string; key: LifecycleStatus | "All Statuses"; target: number }> = [
-  { label: "New Inquiry", key: "New Inquiry", target: 2 },
-  { label: "Approved Application", key: "Approved Application", target: 10 },
-  { label: "Pre-enrolment Application", key: "Pre-Enrollment Application", target: 0 },
-  { label: "CLOA", key: "CLOA", target: 2 },
-  { label: "LOA", key: "LOA", target: 0 },
-  { label: "Cancelled/ Did not proceed", key: "Did Not Proceed", target: 96 },
-  { label: "Follow Up", key: "Follow Up", target: 120 },
-  { label: "In-active Leads", key: "Inactive Leads", target: 295 },
-  { label: "Duplicate profiles", key: "Duplicate Profile", target: 10 },
-  { label: "Declined Application", key: "Declined Application", target: 82 },
-  { label: "Registered Student", key: "Registered Student", target: 10 },
-  { label: "Active Student", key: "Active Student", target: 257 },
-  { label: "On-Hold", key: "On Hold", target: 0 },
-  { label: "Leave of Absence", key: "Leave of Absence", target: 0 },
-  { label: "Graduated", key: "Graduated", target: 437 },
-  { label: "Incomplete", key: "Incomplete", target: 7 },
-  { label: "Withdrawn Students", key: "Withdrawn Students", target: 228 },
-  { label: "Dismissed", key: "Dismissed", target: 399 },
-  { label: "Refused Visa", key: "Refused Visa", target: 105 },
-  { label: "File not Logged (Offshore student)", key: "File Not Logged", target: 111 },
-  { label: "Prospective Student (Marketing team)", key: "Prospective Student", target: 0 },
+/**
+ * Status labels used by the instructor side-nav (`statusCounts[label]` lookups). Counts are always
+ * computed from real students; these labels only alias admin status names that differ in spacing.
+ */
+export const STUDENT_STATUS_NAV_LABELS = [
+  "New Inquiry",
+  "Approved Application",
+  "Pre-enrolment Application",
+  "CLOA",
+  "LOA",
+  "Cancelled/ Did not proceed",
+  "Follow Up",
+  "In-active Leads",
+  "Duplicate profiles",
+  "Declined Application",
+  "Registered Student",
+  "Active Student",
+  "On-Hold",
+  "Leave of Absence",
+  "Graduated",
+  "Incomplete",
+  "Withdrawn Students",
+  "Dismissed",
+  "Refused Visa",
+  "File not Logged (Offshore student)",
+  "Prospective Student (Marketing team)",
 ];
 
 const FLAG_DESCRIPTIONS = [
@@ -105,7 +98,21 @@ type SessionRow = {
   location: string | null;
   sectionCode: string;
   courseCode: string;
+  joinUrl?: string | null;
 };
+
+/** In person / Online / Hybrid from the section's scheduled class sessions. */
+function deliveryLabel(sessions: SessionRow[], sectionCode: string) {
+  const mine = sessions.filter((s) => s.sectionCode === sectionCode);
+  if (!mine.length) return "—";
+  const inPerson = mine.some((s) => s.location?.trim());
+  const online = mine.some((s) => s.joinUrl?.trim());
+  return inPerson && online ? "Hybrid" : online ? "Online" : "In person";
+}
+
+function locationLabel(sessions: SessionRow[], sectionCode: string) {
+  return sessions.find((s) => s.sectionCode === sectionCode && s.location?.trim())?.location?.trim() || "—";
+}
 
 function formatClock(d: Date) {
   return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).toLowerCase().replace(" ", "");
@@ -257,11 +264,11 @@ export async function buildHccMyCourses(
       section: s.code,
       title: s.courseTitle,
       role: "Instructor",
-      delivery: "TBA",
+      delivery: deliveryLabel(ctx.classSessions, s.code),
       students: `Enrolled: ${s.enrolmentCount}`,
       status,
       statusTone: (timing === "ended" ? "muted" : "active") as "muted" | "active",
-      location: "TBD",
+      location: locationLabel(ctx.classSessions, s.code),
       schedule: scheduleLabel(ctx.classSessions, s.code),
       href: `/instructor/sections/${s.id}`,
       term: termMeta.get(s.termCode)?.name || s.termCode,
@@ -457,11 +464,19 @@ export async function buildHccGradesSubmission(
     term: { code: string; name: string } | null;
     grades?: Array<{ sectionCode: string; courseCode: string; status: string; score: number | null }>;
     displayName?: string;
+    classSessions?: SessionRow[];
+    terms?: Array<{ code: string; startsOn?: string; endsOn?: string }>;
   },
   path = "",
 ) {
   const qs = path.includes("?") ? new URLSearchParams(path.slice(path.indexOf("?") + 1)) : new URLSearchParams();
   const rawCourse = (qs.get("course") || "All Courses").trim() || "All Courses";
+  const termByCode = new Map((ctx.terms ?? []).map((t) => [t.code, t]));
+  function sectionDates(section: SectionRow) {
+    const bounds = dateBoundsFromSessions((ctx.classSessions ?? []).filter((c) => c.sectionCode === section.code));
+    const term = termByCode.get(section.termCode);
+    return dateRangeLabel(bounds.startsOn ?? term?.startsOn, bounds.endsOn ?? term?.endsOn);
+  }
   const rawStatus = (qs.get("status") || "Submission Required").trim() || "Submission Required";
 
   const pool = ctx.term
@@ -536,7 +551,7 @@ export async function buildHccGradesSubmission(
       gradingType: board.enrolled
         ? `Final Grades · ${board.enrolled} student(s) · ${board.missing} missing`
         : "Final Grades · no enrolled students",
-      dates: "Continuous",
+      dates: sectionDates(s),
       href: `/instructor/gradebook?sectionId=${encodeURIComponent(s.id)}`,
       highlight: board.status === "Submission Required" && board.enrolled > 0,
       studentCount: board.enrolled,
@@ -569,12 +584,90 @@ export async function buildHccGradesSubmission(
   };
 }
 
+const GRADE_APPROVAL_TYPES = ["grade_publish", "grade.publish"];
+const sectionIdOfSubject = (ref: string) => ref.replace(/^section:/, "");
+
+function isElevated(user: SessionClaims) {
+  return (user.roles ?? []).some((r) => r === "admin" || r === "registrar");
+}
+
+/** Instructors see their own teaching sections; admin / registrar see the whole institution. */
+function teachingScope(user: SessionClaims): string | null {
+  return isElevated(user) ? null : user.personId;
+}
+
+function dateRangeLabel(startsOn: string | null | undefined, endsOn: string | null | undefined) {
+  if (startsOn && endsOn) return startsOn === endsOn ? startsOn : `${startsOn} - ${endsOn}`;
+  return startsOn || endsOn || NO_VALUE;
+}
+
+/** Pending grade-publish approvals (the same queue admin reviews), scoped to the caller's sections. */
+async function loadPendingGradeSubmissions(institutionId: string, scopePersonId: string | null) {
+  const approvals = await prisma.approvalRequest.findMany({
+    where: { institutionId, type: { in: GRADE_APPROVAL_TYPES }, status: "pending" },
+    orderBy: { createdAt: "desc" },
+  });
+  const sectionIds = [...new Set(approvals.map((a) => sectionIdOfSubject(a.subjectRef)))];
+  if (!sectionIds.length) return [];
+  const sections = await prisma.section.findMany({
+    where: {
+      institutionId,
+      id: { in: sectionIds },
+      ...(scopePersonId ? { instructorPersonId: scopePersonId } : {}),
+    },
+    include: {
+      course: true,
+      term: true,
+      classSessions: { orderBy: { startsAt: "asc" }, select: { startsAt: true, endsAt: true } },
+      enrolments: { where: { status: "enrolled" }, select: { studentId: true } },
+    },
+  });
+  if (!sections.length) return [];
+  const sectionById = new Map(sections.map((x) => [x.id, x]));
+  const [instructors, requesters, metaMap] = await Promise.all([
+    prisma.person.findMany({ where: { id: { in: [...new Set(sections.map((x) => x.instructorPersonId))] } } }),
+    prisma.account.findMany({
+      where: { id: { in: [...new Set(approvals.map((a) => a.requestedBy))] } },
+      include: { person: true },
+    }),
+    studentMetaMap(institutionId),
+  ]);
+  const instructorName = new Map(instructors.map((p) => [p.id, instructorDisplayName(p) ?? ""]));
+  const requesterName = new Map(
+    requesters.map((a) => [a.id, `${a.person.givenName} ${a.person.familyName}`.trim() || a.email]),
+  );
+  return approvals.flatMap((a) => {
+    const sec = sectionById.get(sectionIdOfSubject(a.subjectRef));
+    if (!sec) return [];
+    const bounds = dateBoundsFromSessions(sec.classSessions);
+    const campuses = [
+      ...new Set(
+        sec.enrolments
+          .map((e) => str((metaMap[e.studentId] as Record<string, unknown> | undefined)?.campus).trim())
+          .filter(Boolean),
+      ),
+    ].sort((x, y) => x.localeCompare(y));
+    return [
+      {
+        approvalId: a.id,
+        sectionId: sec.id,
+        course: sec.course.code,
+        title: sec.course.title,
+        offering: sec.code,
+        instructor: instructorName.get(sec.instructorPersonId) || NO_VALUE,
+        campuses,
+        dates: dateRangeLabel(bounds.startsOn ?? sec.term.startsOn, bounds.endsOn ?? sec.term.endsOn),
+        submittedBy: requesterName.get(a.requestedBy) || NO_VALUE,
+        submittedAt: a.createdAt,
+      },
+    ];
+  });
+}
+
 export async function buildHccPendingGradeSubmissions(
   ctx: {
+    user: SessionClaims;
     displayName: string;
-    sections: SectionRow[];
-    term: { code: string; name: string } | null;
-    grades?: Array<{ sectionCode: string; status: string; score: number | null }>;
   },
   path = "",
 ) {
@@ -583,36 +676,43 @@ export async function buildHccPendingGradeSubmissions(
   const courseFilter = (qs.get("course") || "All Courses").trim() || "All Courses";
   const facultyFilter = (qs.get("faculty") || "All Faculty / Instructors").trim() || "All Faculty / Instructors";
 
-  const grades = ctx.grades ?? [];
-  const pendingSections = ctx.sections.filter((s) => {
-    const mine = grades.filter((g) => g.sectionCode === s.code);
-    if (!mine.length) return true;
-    return mine.some((g) => g.score == null || g.status === "draft" || g.status === "pending_publish");
-  });
-  const source = pendingSections.length ? pendingSections : ctx.sections.slice(0, 3);
+  const pending = await loadPendingGradeSubmissions(ctx.user.institutionId, teachingScope(ctx.user));
 
   const courseOptions = [
     "All Courses",
-    ...[...new Set(source.map((s) => `${s.courseCode} · ${s.courseTitle}`))].sort((a, b) => a.localeCompare(b)),
+    ...[...new Set(pending.map((p) => `${p.course} · ${p.title}`))].sort((a, b) => a.localeCompare(b)),
   ];
-  const campusOptions = ["All Campuses", "Surrey", "Online"];
-  const facultyOptions = ["All Faculty / Instructors", ctx.displayName].filter(Boolean);
+  const campusOptions = [
+    "All Campuses",
+    ...[...new Set(pending.flatMap((p) => p.campuses))].sort((a, b) => a.localeCompare(b)),
+  ];
+  const facultyOptions = [
+    "All Faculty / Instructors",
+    ...[...new Set(pending.map((p) => p.instructor).filter((n) => n && n !== NO_VALUE))].sort((a, b) =>
+      a.localeCompare(b),
+    ),
+  ];
 
-  let rows = source.map((s) => ({
-    course: s.courseCode,
-    title: s.courseTitle,
-    offering: s.code,
-    instructor: ctx.displayName,
-    campus: "Surrey",
-    dates: "Continuous",
-    submittedBy: ctx.displayName,
-    submittedAt: "Sep. 16, 2026 (Wed.)",
-    href: `/instructor/gradebook?sectionId=${encodeURIComponent(s.id)}`,
-    courseLabel: `${s.courseCode} · ${s.courseTitle}`,
+  let rows = pending.map((p) => ({
+    course: p.course,
+    title: p.title,
+    offering: p.offering,
+    instructor: p.instructor,
+    campuses: p.campuses,
+    dates: p.dates,
+    submittedBy: p.submittedBy,
+    submittedAt: p.submittedAt.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      weekday: "short",
+    }),
+    href: `/instructor/gradebook?sectionId=${encodeURIComponent(p.sectionId)}`,
+    courseLabel: `${p.course} · ${p.title}`,
   }));
 
   if (campusFilter !== "All Campuses") {
-    rows = rows.filter((r) => r.campus === campusFilter);
+    rows = rows.filter((r) => r.campuses.includes(campusFilter));
   }
   if (courseFilter !== "All Courses") {
     rows = rows.filter(
@@ -634,38 +734,143 @@ export async function buildHccPendingGradeSubmissions(
       campusOptions,
       courseOptions,
       facultyOptions,
-      rows: rows.map(({ courseLabel: _c, campus: _camp, ...rest }) => rest),
+      rows: rows.map(({ courseLabel: _c, campuses: _camp, ...rest }) => rest),
     },
     countLabel: `${rows.length} submission(s)`,
   };
 }
 
+function localIsoDate(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function attendanceLabel(status: string) {
+  const v = (status || "").trim().toLowerCase();
+  if (v === "present") return "Present";
+  if (v === "absent") return "Absent";
+  if (v === "late") return "Late";
+  if (v === "excused") return "Excused";
+  return "";
+}
+
+/** Real class-session timing for the section on the chosen date, else its usual weekly pattern. */
+function sessionMetaForDate(sessions: SessionRow[], sectionCode: string, dateIso: string) {
+  const mine = sessions.filter((x) => x.sectionCode === sectionCode);
+  if (!mine.length) return "No class sessions scheduled for this section";
+  const today = mine.filter((x) => localIsoDate(x.startsAt) === dateIso);
+  if (today.length) {
+    return today
+      .map((x) => {
+        const time = x.endsAt ? `${formatClock(x.startsAt)} - ${formatClock(x.endsAt)}` : formatClock(x.startsAt);
+        return [x.title, time, x.location].filter(Boolean).join(" · ");
+      })
+      .join("; ");
+  }
+  const weekly = scheduleTextFromSessions(mine);
+  return `No class session on this date${weekly ? ` · Usual schedule: ${weekly.split("\n").join("; ")}` : ""}`;
+}
+
+type AttendanceDraft = {
+  savedAt?: string;
+  finalized?: boolean;
+  roster: Array<{ studentId: string; status: string; sectionId?: string }>;
+};
+
+/** Unsubmitted "Save Draft" roster for this date (stored by the attendance action in screen state). */
+async function loadAttendanceDraft(institutionId: string, dateIso: string): Promise<AttendanceDraft | null> {
+  const keys = [`/instructor/attendance?date=${dateIso}`, "/instructor/attendance"];
+  const states = await prisma.sisScreenState.findMany({ where: { institutionId, path: { in: keys } } });
+  for (const key of keys) {
+    const st = states.find((x) => x.path === key);
+    if (!st) continue;
+    let att: AttendanceDraft | undefined;
+    try {
+      att = (JSON.parse(st.payloadJson) as { attendance?: AttendanceDraft }).attendance;
+    } catch {
+      att = undefined;
+    }
+    if (!att || !Array.isArray(att.roster) || att.finalized) continue;
+    // The bare path carries no date, so only trust it for drafts saved on the requested day.
+    if (key === "/instructor/attendance" && (!att.savedAt || localIsoDate(new Date(att.savedAt)) !== dateIso)) continue;
+    return att;
+  }
+  return null;
+}
+
 export async function buildHccAttendance(ctx: {
+  user?: SessionClaims;
   sections: SectionRow[];
   classSessions: SessionRow[];
   term: { code: string; name: string } | null;
   dateIso?: string;
 }) {
-  const dateIso = ctx.dateIso || "2026-09-18";
-  const current = ctx.term
-    ? ctx.sections.filter((s) => s.termCode === ctx.term!.code)
-    : ctx.sections;
-  const groups = current.map((s) => ({
-    sectionId: s.id,
-    course: s.courseCode,
-    title: s.courseTitle,
-    offering: s.code,
-    meta: "Continuous",
-    students: s.enrolments
-      .filter((e) => e.status === "enrolled")
-      .map((e) => ({
+  const dateIso = /^\d{4}-\d{2}-\d{2}$/.test(ctx.dateIso || "") ? ctx.dateIso! : localIsoDate(new Date());
+  const inTerm = ctx.term ? ctx.sections.filter((s) => s.termCode === ctx.term!.code) : ctx.sections;
+  const current = inTerm.length ? inTerm : ctx.sections;
+  const sectionIds = current.map((s) => s.id);
+
+  const [records, draft] = await Promise.all([
+    sectionIds.length && ctx.user?.institutionId
+      ? prisma.attendanceRecord.findMany({
+          where: { institutionId: ctx.user.institutionId, sectionId: { in: sectionIds }, meetingLabel: dateIso },
+          orderBy: { recordedAt: "desc" },
+          select: { studentId: true, sectionId: true, status: true, note: true, recordedAt: true },
+        })
+      : Promise.resolve([]),
+    ctx.user?.institutionId ? loadAttendanceDraft(ctx.user.institutionId, dateIso) : Promise.resolve(null),
+  ]);
+  const recordByKey = new Map<string, (typeof records)[number]>();
+  for (const r of records) {
+    const key = `${r.sectionId}:${r.studentId}`;
+    if (!recordByKey.has(key)) recordByKey.set(key, r);
+  }
+
+  const groups = current.map((s) => {
+    const enrolled = s.enrolments.filter((e) => e.status === "enrolled");
+    const recorded = enrolled.filter((e) => recordByKey.has(`${s.id}:${e.studentId}`));
+    const draftFor = (studentId: string) =>
+      draft?.roster.find((r) => r.studentId === studentId && (!r.sectionId || r.sectionId === s.id));
+    const students = enrolled.map((e) => {
+      const rec = recordByKey.get(`${s.id}:${e.studentId}`);
+      const pending = rec ? undefined : draftFor(e.studentId);
+      return {
         id: e.studentId,
         name: e.studentName,
         studentNumber: e.studentNumber,
-        status: "Present",
-        note: "",
-      })),
-  }));
+        // Empty status leaves both Present/Absent unselected: not yet marked for this date.
+        status: rec ? attendanceLabel(rec.status) : pending ? attendanceLabel(pending.status) : "",
+        note: rec?.note || "",
+      };
+    });
+
+    let state: string;
+    if (!enrolled.length) {
+      state = "No enrolled students";
+    } else if (recorded.length) {
+      const tally = new Map<string, number>();
+      for (const e of recorded) {
+        const label = attendanceLabel(recordByKey.get(`${s.id}:${e.studentId}`)!.status);
+        tally.set(label, (tally.get(label) ?? 0) + 1);
+      }
+      const parts = [...tally.entries()].map(([k, v]) => `${v} ${k}`).join(", ");
+      const missing = enrolled.length - recorded.length;
+      state = `Attendance submitted: ${parts}${missing ? ` · ${missing} not yet marked` : ""}`;
+    } else if (students.some((st) => st.status)) {
+      const saved = draft?.savedAt ? new Date(draft.savedAt) : null;
+      state = `Draft saved${saved && !Number.isNaN(saved.getTime()) ? ` ${saved.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` : ""} · not submitted yet`;
+    } else {
+      state = "Attendance not yet taken for this date";
+    }
+
+    return {
+      sectionId: s.id,
+      course: s.courseCode,
+      title: s.courseTitle,
+      offering: s.code,
+      meta: `${sessionMetaForDate(ctx.classSessions, s.code, dateIso)} · ${state}`,
+      students,
+    };
+  });
   const d = new Date(`${dateIso}T12:00:00`);
   const label = d.toLocaleDateString("en-US", {
     month: "short",
@@ -814,25 +1019,25 @@ function parseQueryFromPath(path: string) {
   }
 }
 
-function mapStandingToSidebarLabel(standing: string) {
-  const s = standing.trim();
-  if (/cancelled/i.test(s)) return "Cancelled/ Did not proceed";
-  const hit = STUDENT_STATUS_SIDEBAR.find(
-    (x) => x.key === s || x.label.toLowerCase() === s.toLowerCase() || String(x.key).toLowerCase() === s.toLowerCase(),
-  );
-  return hit?.label || s;
-}
+/** Status names compare loosely so "Cancelled / Did not proceed" (admin) matches "Cancelled/ Did not proceed" (nav). */
+const statusKey = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, "");
 
-const CAMPUS_OPTS = selectableValues(CAMPUS_MENU);
-const PATHWAY_OPTS = selectableValues(PATHWAY_MENU);
-const SCHEDULE_OPTS = selectableValues(SCHEDULE_MENU);
-const TERM_OPTS = PROGRAM_TERM_OPTS;
-const PROGRAM_CODES = PROGRAM_MENU.groups!.flatMap((g) => g.options.map(programCodeFromOption));
-
-function hashPick<T>(seed: string, items: T[]): T {
-  let h = 0;
-  for (let i = 0; i < seed.length; i += 1) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  return items[h % items.length]!;
+/** Admin's Student Statuses catalogue (System Configuration), falling back to the captured tree like admin does. */
+async function studentStatusCatalogue(institutionId: string): Promise<string[]> {
+  const recs = await entityRecords(institutionId, "studentStatuses");
+  if (!recs.length) return STATUS_TREE.flatMap((x) => [x.name, ...(x.children ?? [])]);
+  const order = (r: { data: Record<string, unknown> }) => Number(r.data._order ?? 0);
+  return recs
+    .filter((r) => !str(r.data.parent))
+    .sort((a, b) => order(a) - order(b))
+    .flatMap((root) => [
+      str(root.data.name),
+      ...recs
+        .filter((c) => str(c.data.parent) === root.id)
+        .sort((a, b) => order(a) - order(b))
+        .map((c) => str(c.data.name)),
+    ])
+    .filter(Boolean);
 }
 
 function isAllFilter(value: string | null | undefined, allLabel: string) {
@@ -843,18 +1048,20 @@ function isAllFilter(value: string | null | undefined, allLabel: string) {
   return lower === allLabel.toLowerCase() || lower.startsWith("all ");
 }
 
-type EnrichedStudent = {
+type DirectoryStudent = {
   id: string;
   name: string;
   familyName: string;
   studentNumber: string;
   status: string;
-  advisors: string;
+  advisorNames: string[];
   program: string;
   programTerm: string;
   admissionTerm: string;
   date: string;
-  dateMs: number;
+  /** Admin's Start / End date semantics: schedule start (or profile creation) and schedule end. */
+  start: string;
+  end: string;
   campus: string;
   pathway: string;
   schedule: string;
@@ -862,110 +1069,79 @@ type EnrichedStudent = {
   agent: string;
 };
 
-/** Exact PDF row overrides keyed by student number. */
-const DIRECTORY_OVERRIDES: Record<
-  string,
-  Partial<EnrichedStudent> & { displayName?: string; dateIso?: string }
-> = {
-  "2600474": {
-    displayName: "Singh, Jagdeep",
-    status: "CLOA",
-    advisors: "Muskan, Muskan",
-    program: "ACSW",
-    programTerm: "3rd Term-2026: 2026-09-01 - 2026-12-31",
-    admissionTerm: "3rd Term-2026: 2026-09-01 - 2026-12-31",
-    campus: "#110 Heritage College- Surrey",
-    pathway: "No Pathways",
-    schedule: "Jan. 5, 2026 - Sep. 28, 2026",
-    nationality: "India",
-    agent: "-, Direct",
-    dateIso: "2026-09-17 15:17:18",
-  },
-  "2600475": {
-    displayName: "Kaur, Tranjot",
-    status: "CLOA",
-    advisors: "Sharma, Shivani",
-    program: "DIB",
-    programTerm: "3rd Term-2026: 2026-09-01 - 2026-12-31",
-    admissionTerm: "3rd Term-2026: 2026-09-01 - 2026-12-31",
-    campus: "#110 Heritage College- Surrey",
-    pathway: "No Pathways",
-    schedule: "Jan. 5, 2026 - Sep. 28, 2026",
-    nationality: "India",
-    agent: "-, Direct",
-    dateIso: "2026-08-28 09:04:33",
-  },
-};
+/** Enrolments that make a student one of "my students" for the section's instructor. */
+const TAUGHT_ENROLMENT_STATUSES = ["enrolled", "completed"];
 
-function enrichStudent(st: {
-  id: string;
-  studentNumber: string;
-  programName: string;
-  standing: string;
-  updatedAt: Date;
-  person: { givenName: string; familyName: string };
-}): EnrichedStudent {
-  const status = mapStandingToSidebarLabel(st.standing);
-  const seed = st.id || st.studentNumber;
-  const override = DIRECTORY_OVERRIDES[st.studentNumber];
-  const programFromSeed = st.programName?.trim() || hashPick(seed + ":prog", PROGRAM_CODES);
-  const programCode = programCodeFromOption(programFromSeed).split(/\s+/)[0] || programFromSeed;
-  const base: EnrichedStudent = {
-    id: st.id,
-    name: `${st.person.familyName}, ${st.person.givenName}`,
-    familyName: st.person.familyName || "",
-    studentNumber: st.studentNumber,
-    status,
-    advisors: advisorDisplayFromFilter(hashPick(seed + ":adv", ADVISOR_OPTS)),
-    program: programCode,
-    programTerm: hashPick(seed + ":pt", TERM_OPTS),
-    admissionTerm: hashPick(seed + ":at", TERM_OPTS),
-    date: st.updatedAt.toLocaleString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
+/**
+ * Directory rows built from the same sources the admin Students directory reads: Student / Person,
+ * the `student-meta` store (status, campus, pathway, schedule, country, admission term), STU:PROFILE
+ * (advisors, agent, schedule dates) and the student's current enrolled term. Nothing is derived or invented.
+ */
+async function loadDirectoryStudents(institutionId: string, scopePersonId: string | null): Promise<DirectoryStudent[]> {
+  const [students, metaMap, advisors, agents] = await Promise.all([
+    prisma.student.findMany({
+      where: {
+        institutionId,
+        ...(scopePersonId
+          ? {
+              enrolments: {
+                some: { status: { in: TAUGHT_ENROLMENT_STATUSES }, section: { instructorPersonId: scopePersonId } },
+              },
+            }
+          : {}),
+      },
+      include: {
+        person: true,
+        enrolments: {
+          where: { status: "enrolled" },
+          include: { section: { include: { term: true } } },
+          orderBy: { createdAt: "desc" },
+        },
+      },
+      orderBy: [{ person: { familyName: "asc" } }, { person: { givenName: "asc" } }],
+      take: 5000,
     }),
-    dateMs: st.updatedAt.getTime(),
-    campus: hashPick(seed + ":camp", CAMPUS_OPTS),
-    pathway: hashPick(seed + ":path", PATHWAY_OPTS),
-    schedule: hashPick(seed + ":sch", SCHEDULE_OPTS),
-    nationality: hashPick(seed + ":nat", NATIONALITY_OPTS),
-    agent: hashPick(seed + ":agent", AGENT_OPTS),
-  };
-  if (!override) return base;
-  const dateMs = override.dateIso ? Date.parse(override.dateIso.replace(" ", "T")) : base.dateMs;
-  return {
-    ...base,
-    ...override,
-    name: override.displayName || base.name,
-    familyName: (override.displayName || base.name).split(",")[0]?.trim() || base.familyName,
-    date: override.dateIso || base.date,
-    dateMs: Number.isNaN(dateMs) ? base.dateMs : dateMs,
-  };
-}
-
-function matchesProgramFilter(studentProgram: string, selected: string) {
-  if (isAllFilter(selected, "All Programs")) return true;
-  const code = programCodeFromOption(selected);
-  const short = code.replace(/\s*\(.*?\)\s*/g, "").trim();
-  return (
-    studentProgram === selected ||
-    studentProgram === code ||
-    studentProgram === short ||
-    studentProgram.toLowerCase() === short.toLowerCase() ||
-    selected.toLowerCase().startsWith(studentProgram.toLowerCase() + ":")
+    studentMetaMap(institutionId),
+    staffAccounts(institutionId),
+    agentCatalogue(institutionId),
+  ]);
+  const profiles = await profilesFor(
+    institutionId,
+    students.map((x) => x.id),
   );
-}
+  const advisorName = new Map(advisors.map((a) => [a.id, a.name]));
+  const agentName = new Map(agents.map((a) => [a.id, a.name]));
+  const orDash = (v: string | null | undefined) => (v ?? "").trim() || NO_VALUE;
 
-function matchesAdvisorFilter(studentAdvisor: string, selected: string) {
-  if (isAllFilter(selected, "All Advisors")) return true;
-  if (studentAdvisor === selected) return true;
-  if (advisorFilterFromDisplay(studentAdvisor) === selected) return true;
-  if (advisorDisplayFromFilter(selected) === studentAdvisor) return true;
-  return studentAdvisor.toLowerCase().replace(/,/g, "").replace(/\s+/g, " ").trim() ===
-    selected.toLowerCase().replace(/,/g, "").replace(/\s+/g, " ").trim();
+  return students.map((st) => {
+    const m = (metaMap[st.id] ?? {}) as Record<string, string | undefined>;
+    const p = profiles.get(st.id);
+    return {
+      id: st.id,
+      name: fullName(st.person),
+      familyName: st.person.familyName || "",
+      studentNumber: st.studentNumber,
+      status: statusOf(m, st.enrolments.length),
+      advisorNames: (p?.advisors ?? []).map((id) => advisorName.get(id) ?? "").filter(Boolean),
+      program: orDash(st.programName),
+      programTerm: orDash(st.enrolments[0]?.section.term.name),
+      admissionTerm: orDash(m.admissionTerm),
+      date: st.createdAt.toLocaleString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      }),
+      start: p?.scheduleStart || st.createdAt.toISOString().slice(0, 10),
+      end: p?.scheduleEnd || "",
+      campus: orDash(m.campus),
+      pathway: orDash(m.pathway),
+      schedule: orDash(m.schedule),
+      nationality: orDash(m.country),
+      agent: orDash(p?.agentId ? agentName.get(p.agentId) : ""),
+    };
+  });
 }
 
 export async function buildHccStudentsDirectory(user: SessionClaims, path: string) {
@@ -988,61 +1164,41 @@ export async function buildHccStudentsDirectory(user: SessionClaims, path: strin
   const perPageRaw = Number(qs.get("perPage") || "50") || 50;
   const perPage = PER_PAGE_OPTS.includes(String(perPageRaw)) ? perPageRaw : 50;
 
-  const students = await prisma.student.findMany({
-    where: { institutionId: user.institutionId },
-    include: { person: true },
-    orderBy: [{ person: { familyName: "asc" } }, { person: { givenName: "asc" } }],
-    take: 5000,
-  });
+  const scope = teachingScope(user);
+  const [enriched, statusCatalogue, pendingGrades] = await Promise.all([
+    loadDirectoryStudents(user.institutionId, scope),
+    studentStatusCatalogue(user.institutionId),
+    loadPendingGradeSubmissions(user.institutionId, scope),
+  ]);
 
-  const enriched = students.map(enrichStudent);
-
-  const census = new Map<string, number>();
-  for (const item of STUDENT_STATUS_SIDEBAR) census.set(item.label, 0);
+  const census = new Map<string, { label: string; count: number }>();
+  for (const label of statusCatalogue) {
+    if (!census.has(statusKey(label))) census.set(statusKey(label), { label, count: 0 });
+  }
   for (const st of enriched) {
-    census.set(st.status, (census.get(st.status) || 0) + 1);
+    const entry = census.get(statusKey(st.status)) ?? { label: st.status, count: 0 };
+    entry.count += 1;
+    census.set(statusKey(st.status), entry);
   }
 
-  const censusRow = await prisma.portalRecord.findFirst({
-    where: {
-      institutionId: user.institutionId,
-      screenPath: "/instructor/f/t12-students-view",
-      primaryText: "statusCensus",
-      role: "instructor",
-    },
-  });
-  if (censusRow?.metaText) {
-    try {
-      const parsed = JSON.parse(censusRow.metaText) as Record<string, number>;
-      for (const [k, v] of Object.entries(parsed)) {
-        census.set(mapStandingToSidebarLabel(k), v);
-      }
-    } catch {
-      /* ignore */
-    }
-  }
-
-  const sidebar = STUDENT_STATUS_SIDEBAR.map((s) => ({
-    label: s.label,
-    count: census.get(s.label) ?? s.target,
-    href: `/instructor/f/t12-students-view?status=${encodeURIComponent(s.label)}`,
-    active: statusParam ? statusParam.toLowerCase() === s.label.toLowerCase() : false,
+  const sidebar = [...census.values()].map((c) => ({
+    label: c.label,
+    count: c.count,
+    href: `/instructor/f/t12-students-view?status=${encodeURIComponent(c.label)}`,
+    active: statusParam ? statusKey(statusParam) === statusKey(c.label) : false,
   }));
 
-  const directoryTotal = [...census.values()].reduce((a, b) => a + b, 0) || enriched.length;
-
-  const startMs = startDateParam ? Date.parse(`${startDateParam}T00:00:00`) : NaN;
-  const endMs = endDateParam ? Date.parse(`${endDateParam}T23:59:59`) : NaN;
+  const directoryTotal = enriched.length;
 
   let filtered = enriched;
   if (!isAllFilter(statusParam, "All Statuses")) {
-    filtered = filtered.filter((st) => st.status.toLowerCase() === statusParam.toLowerCase());
+    filtered = filtered.filter((st) => statusKey(st.status) === statusKey(statusParam));
   }
   if (!isAllFilter(campusParam, "All Campuses")) {
     filtered = filtered.filter((st) => st.campus === campusParam);
   }
   if (!isAllFilter(programParam, "All Programs")) {
-    filtered = filtered.filter((st) => matchesProgramFilter(st.program, programParam));
+    filtered = filtered.filter((st) => st.program === programParam);
   }
   if (!isAllFilter(pathwayParam, "All Pathways")) {
     filtered = filtered.filter((st) => st.pathway === pathwayParam);
@@ -1063,13 +1219,13 @@ export async function buildHccStudentsDirectory(user: SessionClaims, path: strin
     filtered = filtered.filter((st) => st.agent === agentParam);
   }
   if (!isAllFilter(advisorParam, "All Advisors")) {
-    filtered = filtered.filter((st) => matchesAdvisorFilter(st.advisors, advisorParam));
+    filtered = filtered.filter((st) => st.advisorNames.includes(advisorParam));
   }
-  if (!Number.isNaN(startMs)) {
-    filtered = filtered.filter((st) => st.dateMs >= startMs);
+  if (startDateParam) {
+    filtered = filtered.filter((st) => st.start >= startDateParam);
   }
-  if (!Number.isNaN(endMs)) {
-    filtered = filtered.filter((st) => st.dateMs <= endMs);
+  if (endDateParam) {
+    filtered = filtered.filter((st) => (st.end || st.start) <= endDateParam);
   }
   if (letterParam && letterParam !== "ALL") {
     filtered = filtered.filter((st) => st.familyName.toUpperCase().startsWith(letterParam));
@@ -1093,7 +1249,7 @@ export async function buildHccStudentsDirectory(user: SessionClaims, path: strin
     name: st.name,
     studentNumber: st.studentNumber,
     status: st.status,
-    advisors: st.advisors,
+    advisors: st.advisorNames.join(", ") || NO_VALUE,
     program: st.program,
     programTerm: st.programTerm,
     admissionTerm: st.admissionTerm,
@@ -1114,31 +1270,24 @@ export async function buildHccStudentsDirectory(user: SessionClaims, path: strin
     where: { institutionId: user.institutionId, screenPath: "/instructor/f/t45-student-flags", role: "instructor" },
   });
 
-  const filterMenus = {
-    campus: serializeFilterMenu(CAMPUS_MENU),
-    program: serializeFilterMenu(PROGRAM_MENU),
-    pathway: serializeFilterMenu(PATHWAY_MENU),
-    schedule: serializeFilterMenu(SCHEDULE_MENU),
-    programTerm: serializeFilterMenu(PROGRAM_TERM_MENU),
-    admissionTerm: serializeFilterMenu(ADMISSION_TERM_MENU),
-    nationality: serializeFilterMenu(NATIONALITY_MENU),
-    status: serializeFilterMenu(STATUS_MENU),
-    agent: serializeFilterMenu(AGENT_MENU),
-    advisor: serializeFilterMenu(ADVISOR_MENU),
+  const menus: Record<FilterKey, FilterMenu> = {
+    campus: buildFilterMenu(FILTER_ALL_LABELS.campus, enriched.map((st) => st.campus)),
+    program: buildFilterMenu(FILTER_ALL_LABELS.program, enriched.map((st) => st.program)),
+    pathway: buildFilterMenu(FILTER_ALL_LABELS.pathway, enriched.map((st) => st.pathway)),
+    schedule: buildFilterMenu(FILTER_ALL_LABELS.schedule, enriched.map((st) => st.schedule)),
+    programTerm: buildFilterMenu(FILTER_ALL_LABELS.programTerm, enriched.map((st) => st.programTerm)),
+    admissionTerm: buildFilterMenu(FILTER_ALL_LABELS.admissionTerm, enriched.map((st) => st.admissionTerm)),
+    nationality: buildFilterMenu(FILTER_ALL_LABELS.nationality, enriched.map((st) => st.nationality)),
+    status: buildFilterMenu(FILTER_ALL_LABELS.status, sidebar.filter((x) => x.count > 0).map((x) => x.label), true),
+    agent: buildFilterMenu(FILTER_ALL_LABELS.agent, enriched.map((st) => st.agent)),
+    advisor: buildFilterMenu(FILTER_ALL_LABELS.advisor, enriched.flatMap((st) => st.advisorNames)),
   };
-
-  const filterOptions: Record<string, string[]> = {
-    campus: [CAMPUS_MENU.all, ...CAMPUS_OPTS],
-    program: [PROGRAM_MENU.all, ...selectableValues(PROGRAM_MENU)],
-    pathway: [PATHWAY_MENU.all, ...PATHWAY_OPTS],
-    schedule: [SCHEDULE_MENU.all, ...SCHEDULE_OPTS],
-    programTerm: [PROGRAM_TERM_MENU.all, ...TERM_OPTS],
-    admissionTerm: [ADMISSION_TERM_MENU.all, ...TERM_OPTS],
-    nationality: [NATIONALITY_MENU.all, ...NATIONALITY_OPTS],
-    status: [STATUS_MENU.all, ...STATUS_FILTER_OPTS],
-    agent: [AGENT_MENU.all, ...AGENT_OPTS],
-    advisor: [ADVISOR_MENU.all, ...ADVISOR_OPTS],
-  };
+  const filterMenus = Object.fromEntries(
+    Object.entries(menus).map(([k, m]) => [k, serializeFilterMenu(m)]),
+  ) as Record<FilterKey, ReturnType<typeof serializeFilterMenu>>;
+  const filterOptions: Record<string, string[]> = Object.fromEntries(
+    Object.entries(menus).map(([k, m]) => [k, [m.all, ...selectableValues(m)]]),
+  );
 
   return {
     title,
@@ -1173,7 +1322,7 @@ export async function buildHccStudentsDirectory(user: SessionClaims, path: strin
         { label: "Student Requirements", href: "/instructor/f/t47-student-requirements", count: 0 },
         { label: "Leave of Absence", href: "/instructor/f/t48-leave-of-absence", count: 0 },
         { label: "Course Withdraw Requests", href: "/instructor/f/t49-course-withdraw-requests", count: 0 },
-        { label: "Pending Grade Submissions", href: "/instructor/f/t62-pending-grade-submissions", count: 3 },
+        { label: "Pending Grade Submissions", href: "/instructor/f/t62-pending-grade-submissions", count: pendingGrades.length },
         { label: "Pending Transcript Changes", href: "/instructor/f/t64-pending-transcript-changes", count: 0 },
         { label: "Pending Entry / Progress Marks", href: "/instructor/f/t62-pending-grade-submissions", count: 0 },
         { label: "Badges / Accomplishments", href: "/instructor/f/t34-accomplishments", count: 0 },
@@ -1240,35 +1389,27 @@ export async function buildHccEmptyTable(title: string, crumbs: string[], empty:
   };
 }
 
-export async function loadStudentStatusCounts(institutionId: string) {
+/**
+ * Real per-status student counts. Pass the session to scope to the instructor's own students
+ * (admin / registrar see everyone); a bare institution id counts the whole institution.
+ */
+export async function loadStudentStatusCounts(who: string | SessionClaims) {
+  const institutionId = typeof who === "string" ? who : who.institutionId;
+  const scope = typeof who === "string" ? null : teachingScope(who);
+  const [students, catalogue, flagCount] = await Promise.all([
+    loadDirectoryStudents(institutionId, scope),
+    studentStatusCatalogue(institutionId),
+    prisma.portalRecord.count({
+      where: { institutionId, screenPath: "/instructor/f/t45-student-flags", role: "instructor" },
+    }),
+  ]);
+  const byKey = new Map<string, number>();
+  for (const st of students) byKey.set(statusKey(st.status), (byKey.get(statusKey(st.status)) ?? 0) + 1);
   const byLabel: Record<string, number> = {};
-  for (const item of STUDENT_STATUS_SIDEBAR) byLabel[item.label] = item.target;
-
-  const censusRow = await prisma.portalRecord.findFirst({
-    where: {
-      institutionId,
-      screenPath: "/instructor/f/t12-students-view",
-      primaryText: "statusCensus",
-      role: "instructor",
-    },
-  });
-  if (censusRow?.metaText) {
-    try {
-      const parsed = JSON.parse(censusRow.metaText) as Record<string, number>;
-      for (const [k, v] of Object.entries(parsed)) {
-        byLabel[mapStandingToSidebarLabel(k)] = v;
-        byLabel[k] = v;
-      }
-    } catch {
-      /* ignore */
-    }
+  for (const label of [...catalogue, ...STUDENT_STATUS_NAV_LABELS, ...students.map((st) => st.status)]) {
+    byLabel[label] = byKey.get(statusKey(label)) ?? 0;
   }
-
-  const flagCount = await prisma.portalRecord.count({
-    where: { institutionId, screenPath: "/instructor/f/t45-student-flags", role: "instructor" },
-  });
-  const total = Object.values(byLabel).reduce((a, b) => a + b, 0);
-  return { byLabel, total, flagCount };
+  return { byLabel, total: students.length, flagCount };
 }
 
 export { FLAG_DESCRIPTIONS };

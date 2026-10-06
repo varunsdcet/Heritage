@@ -43,6 +43,7 @@ import {
   type StudentAccess,
 } from "../../lib/workshopPolicy.js";
 import { studentMetaMap } from "../admin/superAdmin.service.js";
+import { currentStudentId } from "../me/studentAlignment.js";
 
 function httpError(message: string, code: string, status: number) {
   return Object.assign(new Error(message), { code, status });
@@ -50,7 +51,7 @@ function httpError(message: string, code: string, status: number) {
 
 export async function requireStudent(user: SessionClaims) {
   const student = await prisma.student.findFirst({
-    where: { institutionId: user.institutionId, personId: user.personId },
+    where: { id: await currentStudentId(user.institutionId, user.personId), institutionId: user.institutionId },
   });
   if (!student) throw httpError("Student not found", "NOT_FOUND", 404);
   return student;

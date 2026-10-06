@@ -1,7 +1,5 @@
-"use client";
-
-import { AdminSisScreen } from "@/components/AdminSisScreen";
+import { redirect } from "next/navigation";
 
 export default function Page() {
-  return <AdminSisScreen path="/admin/f/rg-04-transfer-credits" />;
+  redirect("/admin/ops/registrar/transfer-credits");
 }

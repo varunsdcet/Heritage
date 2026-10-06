@@ -379,7 +379,7 @@ function buildTeachingRows(ctx: ProfileCtx) {
         course: s.courseCode,
         code: s.sectionCode,
         title: ctx.sections.find((x) => x.code === s.sectionCode)?.courseTitle || s.title,
-        delivery: "TBA",
+        delivery: s.location?.trim() && (s as { joinUrl?: string | null }).joinUrl ? "Hybrid" : (s as { joinUrl?: string | null }).joinUrl ? "Online" : "In person",
         location: s.location || "TBA",
         schedule: "",
         days: new Set([s.startsAt.getDay()]),
@@ -391,6 +391,9 @@ function buildTeachingRows(ctx: ProfileCtx) {
       if (s.startsAt < existing.start) existing.start = s.startsAt;
       if (end > existing.end) existing.end = end;
       if (s.location && existing.location === "TBA") existing.location = s.location;
+      const online = Boolean((s as { joinUrl?: string | null }).joinUrl);
+      const inPerson = Boolean(s.location?.trim());
+      if ((existing.delivery === "Online" && inPerson) || (existing.delivery === "In person" && online)) existing.delivery = "Hybrid";
     }
   }
 
@@ -399,9 +402,9 @@ function buildTeachingRows(ctx: ProfileCtx) {
       course: s.courseCode,
       code: s.code,
       title: s.courseTitle,
-      delivery: "TBA",
-      location: "TBA",
-      schedule: "TBA",
+      delivery: "Not scheduled",
+      location: "—",
+      schedule: "No class sessions scheduled",
     }));
   }
 
