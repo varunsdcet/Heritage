@@ -19,10 +19,14 @@ import {
 import { reportsRouter } from "./reports.router.js";
 import { locationRouter } from "./location.router.js";
 import { sysconfigRouter } from "./sysconfig.router.js";
+import { financeRouter } from "./finance.router.js";
 import { requestsRouter } from "./requests.router.js";
 import { workshopsRouter } from "./workshops.router.js";
 import { programsRouter } from "./programs.router.js";
 import { dashboardRouter } from "./dashboard.router.js";
+import { myCoursesRouter } from "./myCourses.router.js";
+import { coursesRouter } from "./courses.router.js";
+import { studentsRouter } from "./students.router.js";
 
 export const heritageRouter: Router = Router();
 
@@ -30,9 +34,13 @@ heritageRouter.use("/dashboard", dashboardRouter);
 heritageRouter.use("/reports", reportsRouter);
 heritageRouter.use("/location", locationRouter);
 heritageRouter.use("/sysconfig", sysconfigRouter);
+heritageRouter.use("/financial", financeRouter);
 heritageRouter.use("/requests", requestsRouter);
 heritageRouter.use("/workshops", workshopsRouter);
+heritageRouter.use("/my-courses", myCoursesRouter);
 heritageRouter.use("/programs", programsRouter);
+heritageRouter.use("/courses", coursesRouter);
+heritageRouter.use("/students", studentsRouter);
 
 const DataBody = z.object({ ctx: z.string().max(200).optional(), data: z.record(z.unknown()).default({}) });
 const ActionBody = z.object({

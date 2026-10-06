@@ -40,7 +40,40 @@ const ACCESS_LOG_SCREEN = "SYS:ACCESS_LOG";
 const SEED_SCREEN = "SYS:SEED";
 const SEED_VERSION = "1";
 
-type Rec = { id: string; contextKey: string; data: Data; createdAt: Date; updatedAt: Date; updatedById: string | null };
+export type Rec = { id: string; contextKey: string; data: Data; createdAt: Date; updatedAt: Date; updatedById: string | null };
+
+/** Rules owned by other modules (Financial Management) for entities served by this engine. */
+export type EntityHooks = {
+  validate?: (user: SessionClaims, data: Data, selfId: string | null) => Promise<void>;
+  afterSave?: (user: SessionClaims, id: string, before: Data | null, after: Data) => Promise<void>;
+  beforeDelete?: (user: SessionClaims, rec: Rec) => Promise<void>;
+  decorate?: (user: SessionClaims, recs: Rec[]) => Promise<Data[]>;
+};
+const HOOKS: Partial<Record<EntityKey, EntityHooks>> = {};
+const EXTRA_SEEDS: Array<{ key: string; run: (user: SessionClaims) => Promise<void> }> = [];
+export function registerEntityHooks(map: Partial<Record<EntityKey, EntityHooks>>) {
+  Object.assign(HOOKS, map);
+}
+/** One-time seed that runs (once per institution) the first time any configuration list is opened. */
+export function registerSeed(key: string, run: (user: SessionClaims) => Promise<void>) {
+  if (!EXTRA_SEEDS.some((x) => x.key === key)) EXTRA_SEEDS.push({ key, run });
+}
+
+const permOf = (entity: EntityKey) => ENTITIES[entity].perm ?? "systemConfiguration";
+
+/** Meta and shared lists are needed by every module that edits records through this engine. */
+async function assertAnyView(user: SessionClaims) {
+  let last: unknown;
+  for (const mod of ["systemConfiguration", "financialManagement", "agentManagement"] as const) {
+    try {
+      await assertPermission(user, mod, "view");
+      return;
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last;
+}
 
 function httpError(status: number, message: string, code = "VALIDATION_ERROR") {
   return Object.assign(new Error(message), { status, code });
@@ -127,7 +160,7 @@ export function sanitizeHtml(html: string) {
     .replace(/(href|src)\s*=\s*("|')\s*data:(?!image\/(png|jpe?g|gif|webp))[^"']*\2/gi, '$1="#"');
 }
 
-type Ctx = { inst: string; lists: () => Promise<Record<string, string[]>> };
+type Ctx = { inst: string; lists: () => Promise<Record<string, string[]>>; regions: () => Promise<Record<string, string[]>> };
 
 async function refExists(inst: string, entity: EntityKey, id: string) {
   return (await prisma.heritageRecord.count({ where: { id, institutionId: inst, screenId: ENTITIES[entity].screen, deletedAt: null, singletonKey: null } })) > 0;
@@ -144,7 +177,7 @@ async function clean(fields: Field[], input: Data, base: Data, ctx: Ctx, prefix 
   const err = (f: Field, msg: string) => errors.push(`${prefix}${f.label} ${msg}`);
   for (const f of fields) {
     if (!applies(f, out)) {
-      if (f.kind !== "secret" && f.kind !== "password") out[f.key] = emptyOf(f);
+      if (f.kind !== "secret" && f.kind !== "password") out[f.key] = f.dflt !== undefined ? f.dflt : emptyOf(f);
       continue;
     }
     const raw = out[f.key];
@@ -174,7 +207,10 @@ async function clean(fields: Field[], input: Data, base: Data, ctx: Ctx, prefix 
         else if (f.kind === "time" && !TIME_RE.test(v)) err(f, "must be a time such as 09:30");
         else if (f.kind === "color" && !HEX_RE.test(v)) err(f, "must be a colour such as #1565c0");
         else if ((f.kind === "select" || f.kind === "radio" || f.kind === "icon") && f.options && !f.options.includes(v)) err(f, `: "${v}" is not a valid choice`);
-        else if (f.kind === "select" && f.dyn) {
+        else if (f.kind === "select" && f.dependsOn) {
+          const allowed = (await ctx.regions())[s(out[f.dependsOn])] ?? [];
+          if (allowed.length && !allowed.includes(v)) err(f, `: "${v}" is not a region of ${s(out[f.dependsOn]) || "the selected country"}`);
+        } else if (f.kind === "select" && f.dyn) {
           const allowed = [...(f.dynExtra ?? []), ...((await ctx.lists())[f.dyn] ?? [])];
           if (allowed.length && !allowed.includes(v)) err(f, `: "${v}" is not a valid choice`);
         }
@@ -333,13 +369,80 @@ function validateCross(entity: EntityKey, d: Data, self?: string) {
 /* ------------------------------------------------------------------ */
 
 const seeding = new Map<string, Promise<void>>();
+const VERSION_FIX = "2";
 
-async function ensureSeed(user: SessionClaims) {
+export async function ensureSeed(user: SessionClaims) {
   const inst = user.institutionId;
-  const marker = await prisma.heritageRecord.count({ where: { institutionId: inst, screenId: SEED_SCREEN, singletonKey: SEED_VERSION } });
-  if (marker) return;
-  if (!seeding.has(inst)) seeding.set(inst, seed(user).finally(() => seeding.delete(inst)));
+  const keys = [SEED_VERSION, VERSION_FIX, ...EXTRA_SEEDS.map((x) => x.key)];
+  const markers = await prisma.heritageRecord.count({ where: { institutionId: inst, screenId: SEED_SCREEN, singletonKey: { in: keys } } });
+  if (markers === keys.length) return;
+  if (!seeding.has(inst)) seeding.set(inst, seedAll(user).finally(() => seeding.delete(inst)));
   await seeding.get(inst);
+}
+
+async function mark(inst: string, actorId: string, key: string) {
+  await prisma.heritageRecord.upsert({
+    where: { institutionId_screenId_contextKey_singletonKey: { institutionId: inst, screenId: SEED_SCREEN, contextKey: "", singletonKey: key } },
+    create: { institutionId: inst, screenId: SEED_SCREEN, contextKey: "", singletonKey: key, dataJson: "{}", createdById: actorId, updatedById: actorId },
+    update: {},
+  });
+}
+
+async function seedAll(user: SessionClaims) {
+  const inst = user.institutionId;
+  const has = async (key: string) => (await prisma.heritageRecord.count({ where: { institutionId: inst, screenId: SEED_SCREEN, singletonKey: key } })) > 0;
+  if (!(await has(SEED_VERSION))) await seed(user);
+  if (!(await has(VERSION_FIX))) {
+    await fixSeededVersions(inst);
+    await mark(inst, user.accountId, VERSION_FIX);
+  }
+  for (const extra of EXTRA_SEEDS) {
+    if (await has(extra.key)) continue;
+    await extra.run(user);
+    await mark(inst, user.accountId, extra.key);
+  }
+}
+
+/** The seeded "Template created" snapshot: before the header, footer and module paragraph were added. */
+function originalTemplate(d: Data): Data {
+  const content = s(d.content)
+    .replace(/<p>\[\[Module:[^\]]*\]\]<\/p>/g, "")
+    .replace(/ starting \{input:start_date\}/g, "");
+  return { ...d, header: "None", headerElement: "", footer: "None", footerElement: "", content };
+}
+
+/** Versions seeded before `seq` existed were all stamped at once with identical snapshots. */
+async function fixSeededVersions(inst: string) {
+  for (const tpl of await list(inst, ENTITIES.documentTemplates.screen)) {
+    const versions = await list(inst, VERSION_SCREEN, tpl.id);
+    if (!versions.length || versions.some((v) => typeof v.data.seq === "number")) continue;
+    const ordered = [...versions.filter(isFirstVersion), ...versions.filter((v) => !isFirstVersion(v))];
+    const seeded = ordered.length > 1 && ordered.every((v) => s(v.data.by) === "System" && v.createdAt.getTime() === ordered[0]!.createdAt.getTime());
+    for (const [i, v] of ordered.entries()) {
+      const older = seeded && i < ordered.length - 1;
+      const data = { ...v.data, seq: i + 1, ...(older ? { snapshot: originalTemplate((v.data.snapshot ?? {}) as Data) } : {}) };
+      await prisma.heritageRecord.update({
+        where: { id: v.id },
+        data: { dataJson: JSON.stringify(data), ...(older ? { createdAt: new Date(v.createdAt.getTime() - (ordered.length - 1 - i) * 3 * 86_400_000) } : {}) },
+      });
+    }
+  }
+}
+
+/** Live (non-deleted) records of one configuration list. */
+export async function entityRecords(inst: string, entity: EntityKey, contextKey?: string) {
+  return list(inst, ENTITIES[entity].screen, contextKey);
+}
+
+/** Inserts a seed record with every field defaulted, then the given values. */
+export async function seedRecord(user: SessionClaims, entity: EntityKey, values: Data, contextKey = "") {
+  const out: Data = {};
+  for (const f of ENTITIES[entity].fields) out[f.key] = f.dflt !== undefined ? f.dflt : emptyOf(f);
+  return insert(user.institutionId, user.accountId, ENTITIES[entity].screen, { ...out, ...values }, contextKey);
+}
+
+export async function entityIsEmpty(inst: string, entity: EntityKey) {
+  return (await prisma.heritageRecord.count({ where: { institutionId: inst, screenId: ENTITIES[entity].screen } })) === 0;
 }
 
 async function seed(user: SessionClaims) {
@@ -440,8 +543,13 @@ async function seed(user: SessionClaims) {
     const el = (n: string) => elements.find((e) => e.data.name === n)?.id ?? "";
     const letter = (title: string, body: string) => `<p>{student.first_name} {student.last_name}<br>{student.address}</p><p>{date}</p><p><strong>${title}</strong></p>${body}<p>Sincerely,<br>Office of the Registrar</p>`;
     const mk = async (data: Data, revisions: string[]) => {
-      const rec = await put("documentTemplates", defaults("documentTemplates", data));
-      for (const note of revisions) await insert(inst, a, VERSION_SCREEN, { snapshot: { ...defaults("documentTemplates", data) }, changes: [note], by: "System" }, rec.id);
+      const full = defaults("documentTemplates", data);
+      const rec = await put("documentTemplates", full);
+      for (const [i, note] of revisions.entries()) {
+        const last = i === revisions.length - 1;
+        const v = await insert(inst, a, VERSION_SCREEN, { snapshot: last ? full : originalTemplate(full), changes: [note], seq: i + 1, by: "System" }, rec.id);
+        if (!last) await prisma.heritageRecord.update({ where: { id: v.id }, data: { createdAt: new Date(v.createdAt.getTime() - (revisions.length - 1 - i) * 3 * 86_400_000) } });
+      }
     };
     await mk(
       {
@@ -558,8 +666,9 @@ async function userList(inst: string) {
 
 async function dynLists(user: SessionClaims): Promise<Record<string, string[]>> {
   const r = await refs(user);
-  const forms = await list(user.institutionId, ENTITIES.forms.screen);
+  const [forms, ledgerTypes] = await Promise.all([list(user.institutionId, ENTITIES.forms.screen), list(user.institutionId, ENTITIES.ledgerTypes.screen)]);
   return {
+    planFees: ledgerTypes.filter((t) => t.data.trigger === "Payment Plan").map((t) => s(t.data.name)),
     statuses: r.statuses ?? [],
     programs: r.programs ?? [],
     campuses: r.campuses ?? [],
@@ -570,20 +679,36 @@ async function dynLists(user: SessionClaims): Promise<Record<string, string[]>> 
     timezones: r.timezones ?? [],
     terms: r.terms ?? [],
     provinces: r.provinces ?? [],
+    courses: r.courses ?? [],
+    schedules: r.schedules ?? [],
+    agents: r.agents ?? [],
     agreementForms: forms.filter((x) => x.data.formType === "Agreement Form").map((x) => s(x.data.name)),
   };
 }
 
-const ctxFor = (user: SessionClaims): Ctx => {
+/** Country name → its region names (System Configuration › Countries & Regions). */
+async function regionMap(inst: string): Promise<Record<string, string[]>> {
+  const [countries, regions] = await Promise.all([list(inst, ENTITIES.countries.screen), list(inst, ENTITIES.countryRegions.screen)]);
+  const out: Record<string, string[]> = {};
+  for (const c of countries) {
+    const names = regions.filter((r) => r.contextKey === c.id).map((r) => s(r.data.name)).filter(Boolean).sort((a, b) => a.localeCompare(b));
+    if (names.length) out[s(c.data.name)] = names;
+  }
+  return out;
+}
+
+export const ctxFor = (user: SessionClaims): Ctx => {
   let cache: Promise<Record<string, string[]>> | null = null;
-  return { inst: user.institutionId, lists: () => (cache ??= dynLists(user)) };
+  let regions: Promise<Record<string, string[]>> | null = null;
+  return { inst: user.institutionId, lists: () => (cache ??= dynLists(user)), regions: () => (regions ??= regionMap(user.institutionId)) };
 };
 
 export async function sysMeta(user: SessionClaims) {
-  await assertPermission(user, "systemConfiguration", "view");
+  await assertAnyView(user);
   await ensureSeed(user);
-  const [lists, users] = await Promise.all([dynLists(user), userList(user.institutionId)]);
+  const [lists, users, regions] = await Promise.all([dynLists(user), userList(user.institutionId), regionMap(user.institutionId)]);
   return {
+    regions,
     entities: Object.fromEntries(Object.entries(ENTITIES).map(([k, e]) => [k, { label: e.label, fields: e.fields, sortable: Boolean(e.sortable), noCreate: Boolean(e.noCreate) }])),
     settings: Object.fromEntries(Object.entries(SETTINGS).map(([k, t]) => [k, { label: t.label, save: t.save, fields: t.fields }])),
     lists,
@@ -654,6 +779,8 @@ async function decorate(user: SessionClaims, entity: EntityKey, recs: Rec[]) {
     });
   }
   if (entity === "plugins") recs.forEach((_, i) => (extras[i]!._protected = "Catalogue plug-ins cannot be deleted"));
+  const hook = HOOKS[entity]?.decorate;
+  if (hook) (await hook(user, recs)).forEach((more, i) => Object.assign(extras[i]!, more));
   return extras;
 }
 
@@ -668,7 +795,7 @@ function sortRecs(def: EntityDef, recs: Rec[]) {
 }
 
 export async function listEntity(user: SessionClaims, entity: EntityKey, opts: { parentId?: string; q?: string }) {
-  await assertPermission(user, "systemConfiguration", "view");
+  await assertPermission(user, permOf(entity), "view");
   await ensureSeed(user);
   const def = ENTITIES[entity];
   const inst = user.institutionId;
@@ -683,7 +810,7 @@ export async function listEntity(user: SessionClaims, entity: EntityKey, opts: {
 }
 
 export async function getEntity(user: SessionClaims, entity: EntityKey, id: string) {
-  await assertPermission(user, "systemConfiguration", "view");
+  await assertPermission(user, permOf(entity), "view");
   const def = ENTITIES[entity];
   const rec = await find(user.institutionId, def.screen, id, def.label);
   const [extra] = await decorate(user, entity, [rec]);
@@ -709,6 +836,7 @@ async function afterSave(user: SessionClaims, entity: EntityKey, id: string, bef
     for (const r of await list(inst, ENTITIES[entity].screen)) if (r.id !== id && r.data.defaultStatus === "Yes") await write(user.accountId, r.id, { ...r.data, defaultStatus: "No" });
   }
   if (entity === "studentStatuses" && before && s(before.name) !== s(after.name)) await renameStatus(user, s(before.name), s(after.name));
+  await HOOKS[entity]?.afterSave?.(user, id, before, after);
 }
 
 /** Status names are referenced by name across configuration records and student profiles. */
@@ -740,7 +868,7 @@ async function renameStatus(user: SessionClaims, from: string, to: string) {
 }
 
 export async function createEntity(user: SessionClaims, entity: EntityKey, body: Data & { parentId?: string }) {
-  await assertPermission(user, "systemConfiguration", "edit");
+  await assertPermission(user, permOf(entity), "edit");
   await ensureSeed(user);
   const def = ENTITIES[entity];
   if (def.noCreate) throw httpError(400, `${def.label} records are provided by the system and cannot be added here`);
@@ -751,6 +879,7 @@ export async function createEntity(user: SessionClaims, entity: EntityKey, body:
   }
   const data = await clean(def.fields, body, {}, ctxFor(user));
   validateCross(entity, data);
+  await HOOKS[entity]?.validate?.(user, data, null);
   if (entity === "studentStatuses") await checkStatusParent(inst, data, null);
   const ctx = def.parent ? s(body.parentId) : "";
   await assertUnique(inst, def, data, ctx);
@@ -779,12 +908,13 @@ async function checkStatusParent(inst: string, data: Data, selfId: string | null
 }
 
 export async function updateEntity(user: SessionClaims, entity: EntityKey, id: string, body: Data) {
-  await assertPermission(user, "systemConfiguration", "edit");
+  await assertPermission(user, permOf(entity), "edit");
   const def = ENTITIES[entity];
   const inst = user.institutionId;
   const rec = await find(inst, def.screen, id, def.label);
   const data = await clean(def.fields, body, rec.data, ctxFor(user));
   validateCross(entity, data, id);
+  await HOOKS[entity]?.validate?.(user, data, id);
   if (entity === "studentStatuses") await checkStatusParent(inst, data, id);
   await assertUnique(inst, def, data, rec.contextKey, id);
   if (typeof rec.data._order === "number") data._order = rec.data._order;
@@ -807,7 +937,7 @@ async function usedBy(inst: string, entity: EntityKey, test: (d: Data) => boolea
 }
 
 export async function deleteEntity(user: SessionClaims, entity: EntityKey, id: string) {
-  await assertPermission(user, "systemConfiguration", "edit");
+  await assertPermission(user, permOf(entity), "edit");
   const def = ENTITIES[entity];
   const inst = user.institutionId;
   const rec = await find(inst, def.screen, id, def.label);
@@ -848,6 +978,7 @@ export async function deleteEntity(user: SessionClaims, entity: EntityKey, id: s
   if (entity === "currencies") block(await usedBy(inst, "countries", (d) => s(d.currency) === id), "country");
   if (entity === "countries") cascade.push(...(await list(inst, ENTITIES.countryRegions.screen, id)).map((r) => r.id));
   if (entity === "documentTemplates") cascade.push(...(await list(inst, VERSION_SCREEN, id)).map((r) => r.id));
+  await HOOKS[entity]?.beforeDelete?.(user, rec);
   await remove(user.accountId, [id, ...cascade]);
   await audit(user, def.audit, rec.contextKey, entity === "bounces" ? "dismiss bounce" : `delete ${def.label.toLowerCase()}`, {
     recordId: id,
@@ -859,7 +990,7 @@ export async function deleteEntity(user: SessionClaims, entity: EntityKey, id: s
 }
 
 export async function reorderEntity(user: SessionClaims, entity: EntityKey, ids: string[]) {
-  await assertPermission(user, "systemConfiguration", "edit");
+  await assertPermission(user, permOf(entity), "edit");
   const def = ENTITIES[entity];
   if (!def.sortable) throw httpError(400, `${capital(def.label)} records cannot be reordered`);
   const inst = user.institutionId;
@@ -934,14 +1065,37 @@ async function actorName(accountId: string) {
   return a ? `${a.person.givenName} ${a.person.familyName}`.trim() || a.email : "System";
 }
 
+const isFirstVersion = (v: Rec) => /^(Template created|Copied from)/.test(s(arr(v.data.changes)[0]));
+
+/** Newest first. Seeded versions can share a timestamp, so `seq` and the "created" note break ties. */
+async function versionsOf(inst: string, templateId: string) {
+  const seq = (v: Rec) => (typeof v.data.seq === "number" ? v.data.seq : isFirstVersion(v) ? 0 : 1);
+  return (await list(inst, VERSION_SCREEN, templateId)).sort((x, y) => y.createdAt.getTime() - x.createdAt.getTime() || seq(y) - seq(x));
+}
+
 async function addVersion(user: SessionClaims, templateId: string, snapshot: Data, changes: string[]) {
-  await insert(user.institutionId, user.accountId, VERSION_SCREEN, { snapshot, changes, by: await actorName(user.accountId) }, templateId);
+  const top = (await versionsOf(user.institutionId, templateId))[0];
+  const seq = top && typeof top.data.seq === "number" ? top.data.seq + 1 : top ? 2 : 1;
+  await insert(user.institutionId, user.accountId, VERSION_SCREEN, { snapshot, changes, seq, by: await actorName(user.accountId) }, templateId);
+}
+
+const TEMPLATE_REFS = ["headerElement", "footerElement", "correspondenceCategory", "correspondenceType"] as const;
+
+async function templateRefLabels(inst: string, data: Data) {
+  const out: Record<string, string> = {};
+  for (const key of TEMPLATE_REFS) {
+    const id = s(data[key]);
+    if (!id) continue;
+    const row = await prisma.heritageRecord.findFirst({ where: { id, institutionId: inst }, select: { dataJson: true, deletedAt: true } });
+    out[key] = row ? `${s(parse(row.dataJson).name)}${row.deletedAt ? " (deleted)" : ""}` : "(deleted)";
+  }
+  return out;
 }
 
 export async function templateHistory(user: SessionClaims, id: string) {
   await assertPermission(user, "systemConfiguration", "view");
   const rec = await find(user.institutionId, ENTITIES.documentTemplates.screen, id, "Document template");
-  const versions = (await list(user.institutionId, VERSION_SCREEN, id)).sort((x, y) => y.createdAt.getTime() - x.createdAt.getTime());
+  const versions = await versionsOf(user.institutionId, id);
   return {
     template: { id: rec.id, name: s(rec.data.name) },
     items: versions.map((v, i) => ({ id: v.id, date: v.createdAt.toISOString(), by: s(v.data.by) || "System", changes: arr(v.data.changes).map(s), current: i === 0 })),
@@ -950,11 +1104,21 @@ export async function templateHistory(user: SessionClaims, id: string) {
 
 export async function templateVersion(user: SessionClaims, id: string, versionId: string) {
   await assertPermission(user, "systemConfiguration", "view");
-  await find(user.institutionId, ENTITIES.documentTemplates.screen, id, "Document template");
+  const rec = await find(user.institutionId, ENTITIES.documentTemplates.screen, id, "Document template");
   const v = await find(user.institutionId, VERSION_SCREEN, versionId, "Version");
   if (v.contextKey !== id) throw httpError(404, "Version not found", "NOT_FOUND");
   const snap = (v.data.snapshot ?? {}) as Data;
-  return { id: v.id, date: v.createdAt.toISOString(), by: s(v.data.by), changes: arr(v.data.changes).map(s), name: s(snap.name), content: s(snap.content), snapshot: snap };
+  return {
+    id: v.id,
+    date: v.createdAt.toISOString(),
+    by: s(v.data.by),
+    changes: arr(v.data.changes).map(s),
+    name: s(snap.name),
+    content: s(snap.content),
+    snapshot: snap,
+    labels: await templateRefLabels(user.institutionId, snap),
+    currentLabels: await templateRefLabels(user.institutionId, rec.data),
+  };
 }
 
 export async function restoreTemplate(user: SessionClaims, id: string, versionId: string) {
@@ -964,7 +1128,7 @@ export async function restoreTemplate(user: SessionClaims, id: string, versionId
   const rec = await find(inst, def.screen, id, def.label);
   const v = await find(inst, VERSION_SCREEN, versionId, "Version");
   if (v.contextKey !== id) throw httpError(404, "Version not found", "NOT_FOUND");
-  const versions = (await list(inst, VERSION_SCREEN, id)).sort((x, y) => y.createdAt.getTime() - x.createdAt.getTime());
+  const versions = await versionsOf(inst, id);
   if (versions[0]?.id === versionId) throw httpError(400, "This is already the current version");
   let data: Data;
   try {

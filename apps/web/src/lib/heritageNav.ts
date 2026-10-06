@@ -4,6 +4,12 @@ import type { ModuleGate } from "./access";
 /** Screens built earlier as dedicated pages; sidebar links go straight to them. */
 export const HERITAGE_DEDICATED: Record<string, string> = {
   G04: "/admin/student-search",
+  MC01: "/admin/my-courses",
+  MC02: "/admin/my-courses/attendance",
+  MC03: "/admin/my-courses/repository",
+  MC04: "/admin/my-courses/pending-schedules",
+  MC05: "/admin/my-courses/grades",
+  MC06: "/admin/my-courses/history",
   P01: "/admin/faculty-profile/biography",
   P04: "/admin/faculty-profile/topics",
   P05: "/admin/faculty-profile/availability",
@@ -48,6 +54,27 @@ export const HERITAGE_DEDICATED: Record<string, string> = {
   SC24: "/admin/sysconfig/security",
   SC31: "/admin/sysconfig/localization",
   SC36: "/admin/sysconfig/notification-templates",
+  F01: "/admin/financial/transactions",
+  F02: "/admin/financial/fees",
+  F03: "/admin/financial/invoices",
+  F04: "/admin/financial/disbursements",
+  F05: "/admin/financial/awards",
+  F06: "/admin/financial/adjustments",
+  F07: "/admin/financial/agent-commissions",
+  F08: "/admin/financial/payment-plans",
+  F09: "/admin/financial/documents",
+  F10: "/admin/financial/unallocated-funds",
+  F11: "/admin/financial/alerts",
+  F12: "/admin/financial/lockouts",
+  F13: "/admin/financial/ledger-types",
+  F14: "/admin/financial/payment-methods",
+  F15: "/admin/financial/rate-categories",
+  F16: "/admin/financial/plan-templates",
+  F17: "/admin/financial/tax-rates",
+  F18: "/admin/financial/disbursement-types",
+  F19: "/admin/financial/promotions",
+  F20: "/admin/financial/funding-sources",
+  F21: "/admin/financial/collection-agencies",
 };
 
 export function heritageHref(screen: string, query?: Record<string, string>) {
@@ -58,6 +85,41 @@ export function heritageHref(screen: string, query?: Record<string, string>) {
 export function requestsHref(type: string) {
   return `/admin/requests?${new URLSearchParams({ "f.type": type }).toString()}`;
 }
+
+export function courseManagementHref(slug: string) {
+  return `/admin/course-management/${slug}`;
+}
+
+/** Legacy generic Course Management screens now served by /admin/course-management. */
+export const COURSE_MANAGEMENT_ROUTES: Record<string, string> = {
+  C01: courseManagementHref("courses"),
+  C02: courseManagementHref("courses/new"),
+  C03: courseManagementHref("courses"),
+  C04: courseManagementHref("courses"),
+  C05: courseManagementHref("courses"),
+  C06: courseManagementHref("courses"),
+  C07: courseManagementHref("courses"),
+  C08: courseManagementHref("courses"),
+  C09: courseManagementHref("pending"),
+  C10: courseManagementHref("active"),
+  C11: courseManagementHref("repository"),
+  C12: courseManagementHref("repository/new"),
+  C13: courseManagementHref("repository"),
+  C14: courseManagementHref("backups"),
+  C15: courseManagementHref("textbooks"),
+  C16: courseManagementHref("tests"),
+  C19: courseManagementHref("categories"),
+  C20: courseManagementHref("groups"),
+  C21: courseManagementHref("types"),
+  C22: courseManagementHref("resources"),
+  C24: courseManagementHref("badges"),
+  C25: courseManagementHref("competencies"),
+  C26: courseManagementHref("grading"),
+  C27: courseManagementHref("evaluations"),
+  C28: courseManagementHref("questions"),
+  C29: courseManagementHref("evaluations"),
+  C30: courseManagementHref("results"),
+};
 
 export function workshopEnrolmentsHref(status: string) {
   return `/admin/workshops/enrolments?${new URLSearchParams({ "f.status": status }).toString()}`;
@@ -76,12 +138,23 @@ type Entry = {
 
 const req = (label: string, type: string): Entry => ({ label, screen: "R01", href: requestsHref(type), count: `requests:${type}` });
 
+const STUDENTS = "/admin/student-management";
+
 const st = (label: string, indent = false): Entry => ({
   label,
   screen: "S01",
   section: "STUDENTS BY STATUS",
   indent,
-  query: { "f.status": label },
+  href: `${STUDENTS}/browse?${new URLSearchParams({ "f.status": label }).toString()}`,
+  count: `students:${label}`,
+});
+
+const sm = (label: string, screen: string, path: string, count?: string): Entry => ({
+  label,
+  screen,
+  section: "STUDENT MANAGEMENT",
+  href: `${STUDENTS}/${path}`,
+  ...(count ? { count } : {}),
 });
 
 const ROOTS: Array<{ label: string; icon: string; gate?: ModuleGate; count?: string; entries: Entry[] }> = [
@@ -100,12 +173,12 @@ const ROOTS: Array<{ label: string; icon: string; gate?: ModuleGate; count?: str
     icon: "book",
     gate: { modules: ["courseManagement"] },
     entries: [
-      { label: "All My Courses / Schedule", screen: "MC01" },
-      { label: "Course Attendance", screen: "MC02" },
-      { label: "Course Repository", screen: "MC03" },
-      { label: "Pending Course Schedules", screen: "MC04" },
-      { label: "Grades Submission", screen: "MC05" },
-      { label: "Course History", screen: "MC06" },
+      { label: "All My Courses / Schedule", screen: "MC01", href: "/admin/my-courses" },
+      { label: "Course Attendance", screen: "MC02", href: "/admin/my-courses/attendance" },
+      { label: "Course Repository", screen: "MC03", href: "/admin/my-courses/repository" },
+      { label: "Pending Course Schedules", screen: "MC04", href: "/admin/my-courses/pending-schedules" },
+      { label: "Grades Submission", screen: "MC05", href: "/admin/my-courses/grades", count: "my-courses:gradesSubmission" },
+      { label: "Course History", screen: "MC06", href: "/admin/my-courses/history" },
     ],
   },
   {
@@ -149,20 +222,20 @@ const ROOTS: Array<{ label: string; icon: string; gate?: ModuleGate; count?: str
       st("Refused Visa"),
       st("File not Logged (Offshore student)"),
       st("Prospective Student (Marketing team)"),
-      { label: "Browse All Students", screen: "S01", section: "STUDENT MANAGEMENT" },
-      { label: "Create Student Profile", screen: "S02", section: "STUDENT MANAGEMENT" },
-      { label: "Academic Alerts", screen: "S23", section: "STUDENT MANAGEMENT" },
-      { label: "Student Flags", screen: "S24", section: "STUDENT MANAGEMENT" },
-      { label: "Student Assessments", screen: "S25", section: "STUDENT MANAGEMENT" },
-      { label: "Student Requirements", screen: "S26", section: "STUDENT MANAGEMENT" },
-      { label: "Leave of Absence", screen: "S27", section: "STUDENT MANAGEMENT" },
-      { label: "Course Withdraw Requests", screen: "S28", section: "STUDENT MANAGEMENT" },
-      { label: "Pending Grade Submissions", screen: "S29", section: "STUDENT MANAGEMENT" },
-      { label: "Pending Transcript Changes", screen: "S30", section: "STUDENT MANAGEMENT" },
-      { label: "Pending Entry / Progress Marks", screen: "S31", section: "STUDENT MANAGEMENT" },
-      { label: "Badges / Accomplishments", screen: "S32", section: "STUDENT MANAGEMENT" },
-      { label: "Documents / Exports", screen: "S33", section: "STUDENT MANAGEMENT" },
-      { label: "Bulk / Group Actions", screen: "S34", section: "STUDENT MANAGEMENT" },
+      sm("Browse All Students", "S01", "browse", "students:all"),
+      sm("Create Student Profile", "S02", "create"),
+      sm("Academic Alerts", "S23", "alerts", "queue:alerts"),
+      sm("Student Flags", "S24", "flags", "queue:flags"),
+      sm("Student Assessments", "S25", "assessments", "queue:assessments"),
+      sm("Student Requirements", "S26", "requirements", "queue:requirements"),
+      sm("Leave of Absence", "S27", "leave", "queue:loa"),
+      sm("Course Withdraw Requests", "S28", "withdraw", "queue:withdraw"),
+      sm("Pending Grade Submissions", "S29", "grades", "queue:grades"),
+      sm("Pending Transcript Changes", "S30", "transcript-changes", "queue:transcript"),
+      sm("Pending Entry / Progress Marks", "S31", "entry-marks", "queue:marks"),
+      sm("Badges / Accomplishments", "S32", "badges", "queue:badges"),
+      sm("Documents / Exports", "S33", "exports"),
+      sm("Bulk / Group Actions", "S34", "bulk"),
     ],
   },
   {
@@ -197,7 +270,7 @@ const ROOTS: Array<{ label: string; icon: string; gate?: ModuleGate; count?: str
           ["Unallocated Funds", "F10"],
           ["Financial Alerts", "F11"],
         ] as const
-      ).map(([label, screen]) => ({ label, screen, section: "RECORDS MANAGEMENT" })),
+      ).map(([label, screen]) => ({ label, screen, section: "RECORDS MANAGEMENT", dedicated: true })),
       ...(
         [
           ["Period Lock-Out", "F12"],
@@ -211,7 +284,7 @@ const ROOTS: Array<{ label: string; icon: string; gate?: ModuleGate; count?: str
           ["Funding Sources", "F20"],
           ["Collection Agencies", "F21"],
         ] as const
-      ).map(([label, screen]) => ({ label, screen, section: "CONFIGURATIONS" })),
+      ).map(([label, screen]) => ({ label, screen, section: "CONFIGURATIONS", dedicated: true })),
     ],
   },
   {
@@ -233,35 +306,48 @@ const ROOTS: Array<{ label: string; icon: string; gate?: ModuleGate; count?: str
     entries: [
       ...(
         [
-          ["Courses & Sessions", "C01"],
-          ["Pending Sessions", "C09"],
-          ["Active Courses", "C10"],
-          ["Course Repository", "C11"],
-          ["Course Backups", "C14"],
-          ["Course Textbooks", "C15"],
-          ["Entry & Progress Tests", "C16"],
+          ["Courses & Sessions", "C01", "courses"],
+          ["Pending Sessions", "C09", "pending", "courses:pending"],
+          ["Active Courses", "C10", "active"],
+          ["Course Repository", "C11", "repository"],
+          ["Course Backups", "C14", "backups", "courses:backups"],
+          ["Course Textbooks", "C15", "textbooks"],
+          ["Entry & Progress Tests", "C16", "tests"],
           ["Workshops", "C17"],
-        ] as const
-      ).map(([label, screen]) => ({ label, screen, section: "COURSE MANAGEMENT", dedicated: screen === "C17" })),
+        ] as Array<[string, string, string?, string?]>
+      ).map(([label, screen, slug, count]) => ({
+        label,
+        screen,
+        section: "COURSE MANAGEMENT",
+        dedicated: screen === "C17",
+        ...(slug ? { href: courseManagementHref(slug) } : {}),
+        ...(count ? { count } : {}),
+      })),
       ...(
         [
-          ["Course Categories", "C19"],
-          ["Course Groups", "C20"],
-          ["Course Types", "C21"],
-          ["Course Resources", "C22"],
+          ["Course Categories", "C19", "categories"],
+          ["Course Groups", "C20", "groups"],
+          ["Course Types", "C21", "types"],
+          ["Course Resources", "C22", "resources"],
           ["Workshop Roles", "C23"],
-          ["Badges & Accomplishments", "C24"],
-          ["Competencies", "C25"],
-          ["Grading Schemes", "C26"],
-        ] as const
-      ).map(([label, screen]) => ({ label, screen, section: "COURSE CONFIGURATIONS", dedicated: screen === "C23" })),
+          ["Badges & Accomplishments", "C24", "badges"],
+          ["Competencies", "C25", "competencies"],
+          ["Grading Schemes", "C26", "grading"],
+        ] as Array<[string, string, string?]>
+      ).map(([label, screen, slug]) => ({
+        label,
+        screen,
+        section: "COURSE CONFIGURATIONS",
+        dedicated: screen === "C23",
+        ...(slug ? { href: courseManagementHref(slug) } : {}),
+      })),
       ...(
         [
-          ["Manage Evaluations", "C27"],
-          ["Question Bank", "C28"],
-          ["Assigned / Results", "C30"],
+          ["Manage Evaluations", "C27", "evaluations"],
+          ["Question Bank", "C28", "questions"],
+          ["Assigned / Results", "C30", "results"],
         ] as const
-      ).map(([label, screen]) => ({ label, screen, section: "COURSE EVALUATIONS" })),
+      ).map(([label, screen, slug]) => ({ label, screen, section: "COURSE EVALUATIONS", href: courseManagementHref(slug) })),
     ],
   },
   {

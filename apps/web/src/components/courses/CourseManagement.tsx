@@ -1,0 +1,70 @@
+"use client";
+
+import { useEffect, type ComponentType } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { CourseDirectory, CourseFormPage, CoursePage, SessionFormPage } from "./Courses";
+import { ActiveCourses, PendingSessions, ViewCourse } from "./Delivery";
+import { BackupsScreen, RepositoryDirectory, RepositoryForm, RepositoryManage } from "./Repository";
+import {
+  BadgeForm,
+  BadgeList,
+  CategoryForm,
+  CategoryList,
+  CompetencyForm,
+  CompetencyList,
+  GradingForm,
+  GradingList,
+  GroupForm,
+  GroupList,
+  ResourcesScreen,
+  TestForm,
+  TestList,
+  TextbookForm,
+  TextbookList,
+  TypeForm,
+  TypeList,
+} from "./Config";
+import { AssignEvaluation, AssignedResults, EvaluationForm, EvaluationList, EvaluationResults, QuestionBank } from "./Evaluations";
+import { HREF } from "./kit";
+
+const crud = (list: ComponentType, form: ComponentType, base: string): Record<string, ComponentType> => ({ [base]: list, [`${base}/new`]: form, [`${base}/edit`]: form });
+
+const SCREENS: Record<string, ComponentType> = {
+  courses: CourseDirectory,
+  "courses/new": CourseFormPage,
+  "courses/view": CoursePage,
+  "courses/session": SessionFormPage,
+  pending: PendingSessions,
+  active: ActiveCourses,
+  "active/view": ViewCourse,
+  repository: RepositoryDirectory,
+  "repository/new": RepositoryForm,
+  "repository/edit": RepositoryForm,
+  "repository/manage": RepositoryManage,
+  backups: BackupsScreen,
+  ...crud(TextbookList, TextbookForm, "textbooks"),
+  ...crud(TestList, TestForm, "tests"),
+  ...crud(CategoryList, CategoryForm, "categories"),
+  ...crud(GroupList, GroupForm, "groups"),
+  ...crud(TypeList, TypeForm, "types"),
+  resources: ResourcesScreen,
+  ...crud(BadgeList, BadgeForm, "badges"),
+  ...crud(CompetencyList, CompetencyForm, "competencies"),
+  ...crud(GradingList, GradingForm, "grading"),
+  ...crud(EvaluationList, EvaluationForm, "evaluations"),
+  "evaluations/assign": AssignEvaluation,
+  questions: QuestionBank,
+  results: AssignedResults,
+  "results/view": EvaluationResults,
+};
+
+export function CourseManagement() {
+  const params = useParams<{ slug?: string[] }>();
+  const router = useRouter();
+  const key = (params?.slug ?? []).join("/");
+  const Screen = SCREENS[key];
+  useEffect(() => {
+    if (!Screen) router.replace(HREF.courses);
+  }, [Screen, router]);
+  return Screen ? <Screen key={key} /> : null;
+}

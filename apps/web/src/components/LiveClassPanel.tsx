@@ -5,6 +5,7 @@ import {
   endLiveClass,
   fetchLiveRecordings,
   fetchLiveStatus,
+  liveLauncherHref,
   type LiveRecording,
   type LiveRoomStatus,
 } from "@/lib/liveClass";
@@ -49,7 +50,7 @@ export function LiveClassPanel({ sectionId, note }: { sectionId: string; note?: 
   }, [refresh]);
 
   function join() {
-    window.open(`/live/${sectionId}`, "_blank", "noopener,noreferrer");
+    window.open(liveLauncherHref(sectionId), "_blank", "noopener,noreferrer");
     window.setTimeout(() => void refresh(), 8_000);
   }
 

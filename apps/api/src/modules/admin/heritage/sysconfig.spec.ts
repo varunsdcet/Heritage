@@ -1,5 +1,7 @@
 /* System Configuration (SC01–SC36): field definitions, settings pages and captured seed data. */
 
+import { FIN_ENTITIES, type FinEntityKey } from "./finance.spec.js";
+
 export type Data = Record<string, unknown>;
 
 export type Kind =
@@ -61,9 +63,15 @@ export type Field = {
   rowSave?: string;
   columns?: string[];
   confirm?: boolean;
+  /** Select whose options are the regions of the country chosen in this field (free text when the country has none). */
+  dependsOn?: string;
+  /** refMulti rendering: checkbox list or multi-select list instead of the dual list. */
+  display?: "checks" | "list";
 };
 
-export type EntityKey =
+export type EntityKey = SysEntityKey | FinEntityKey;
+
+type SysEntityKey =
   | "workflows"
   | "assessments"
   | "assessmentCategories"
@@ -115,6 +123,8 @@ export type EntityDef = {
   sortable?: boolean;
   /** Records are created by the system (seed / catalogue) and cannot be added from the UI. */
   noCreate?: boolean;
+  /** Permission module guarding the list (System Configuration when omitted). */
+  perm?: "systemConfiguration" | "financialManagement" | "agentManagement";
 };
 
 const ACTIVE = ["Active", "Inactive"] as const;
@@ -167,7 +177,7 @@ const dyn = (key: string, label: string, list: string, all: string, extra: Parti
 /* Entities                                                             */
 /* ------------------------------------------------------------------ */
 
-export const ENTITIES: Record<EntityKey, EntityDef> = {
+const SYS_ENTITIES: Record<SysEntityKey, EntityDef> = {
   workflows: {
     screen: "SYS:WORKFLOW",
     audit: "SC01",
@@ -873,6 +883,8 @@ export const ENTITIES: Record<EntityKey, EntityDef> = {
     fields: [f("name", "Time Zone Name", "text", { required: true, lang: true }), f("zone", "Time Zone", "text", { required: true, lang: true, hint: "IANA identifier, e.g. America/Vancouver" })],
   },
 };
+
+export const ENTITIES: Record<EntityKey, EntityDef> = { ...SYS_ENTITIES, ...FIN_ENTITIES };
 
 /* ------------------------------------------------------------------ */
 /* Settings pages (one record each)                                     */

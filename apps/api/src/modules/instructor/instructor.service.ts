@@ -234,7 +234,13 @@ function letterFromPct(p: number | null) {
   return "F";
 }
 
-async function loadCtx(user: SessionClaims): Promise<InstructorCtx> {
+/** Course Management admins open any section's course workspace (View Course) through the instructor screens. */
+function adminSectionId(user: SessionClaims, path?: string) {
+  if (!path || !(user.roles.includes("admin") || user.roles.includes("registrar"))) return null;
+  return /^\/instructor\/sections\/([0-9a-f-]{36})(?:[/?]|$)/i.exec(path)?.[1] ?? null;
+}
+
+async function loadCtx(user: SessionClaims, path?: string): Promise<InstructorCtx> {
   const person = await prisma.person.findFirstOrThrow({
     where: { id: user.personId, institutionId: user.institutionId },
   });
@@ -243,8 +249,12 @@ async function loadCtx(user: SessionClaims): Promise<InstructorCtx> {
     orderBy: { startsOn: "desc" },
   });
   const term = termsRaw[0] ?? null;
+  const viewSectionId = adminSectionId(user, path);
   const sectionsRaw = await prisma.section.findMany({
-    where: { institutionId: user.institutionId, instructorPersonId: user.personId },
+    where: {
+      institutionId: user.institutionId,
+      ...(viewSectionId ? { OR: [{ instructorPersonId: user.personId }, { id: viewSectionId }] } : { instructorPersonId: user.personId }),
+    },
     include: {
       course: true,
       term: true,
@@ -290,11 +300,12 @@ async function loadCtx(user: SessionClaims): Promise<InstructorCtx> {
       s.enrolments.filter((e) => e.status === "enrolled").map((e) => e.studentId),
     ),
   );
+  const ctxSectionIds = sectionsRaw.map((s) => s.id);
   const draftGradeCount = await prisma.gradeItem.count({
     where: {
       institutionId: user.institutionId,
       status: "draft",
-      assignment: { section: { instructorPersonId: user.personId } },
+      assignment: { sectionId: { in: ctxSectionIds } },
     },
   });
 
@@ -367,7 +378,7 @@ async function loadCtx(user: SessionClaims): Promise<InstructorCtx> {
   const gradeRows = await prisma.gradeItem.findMany({
     where: {
       institutionId: user.institutionId,
-      assignment: { section: { instructorPersonId: user.personId } },
+      assignment: { sectionId: { in: ctxSectionIds } },
     },
     include: {
       student: { include: { person: true } },
@@ -4313,7 +4324,7 @@ export async function buildInstructorScreen(
   user: SessionClaims,
   opts?: { studentId?: string | null },
 ) {
-  const ctx = await loadCtx(user);
+  const ctx = await loadCtx(user, path);
   const overlay = await loadScreenOverlay(user.institutionId, path);
   const payload = mergeOverlayRows(await routePayload(path, ctx, overlay, opts?.studentId), overlay, path);
   if (overlay?._lastAction) {
@@ -7409,7 +7420,7 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
   const path = input.path;
   const action = input.action.trim();
   const lower = action.toLowerCase();
-  const ctx = await loadCtx(user);
+  const ctx = await loadCtx(user, path);
   let message = `Saved · ${action}`;
   let result: Record<string, unknown> = {};
 

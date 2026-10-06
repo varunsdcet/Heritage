@@ -391,6 +391,13 @@ check("SC07 user agreements (4)", {"Media Release Agreement", "Studen Handbook R
 dts = sitems("documentTemplates")
 hra = next((d for d in dts if d["name"].startswith("Conditional Letter of Acceptance")), None)
 check("SC10 document templates + audit history", bool(hra) and hra.get("_versions", 0) >= 2, f"{len(dts)} templates")
+if hra:
+    c, h = req("GET", f"{S}/document-templates/{hra['id']}/history", token=T)
+    hi = h.get("items", []) if c == 200 else []
+    check("SC12 newest version is current, created is oldest", len(hi) >= 2 and hi[0]["current"] and hi[-1]["changes"][0] == "Template created")
+    if len(hi) >= 2:
+        c, v = req("GET", f"{S}/document-templates/{hra['id']}/history/{hi[-1]['id']}", token=T)
+        check("SC12 original version differs + element labels", c == 200 and v["snapshot"].get("header") == "None" and bool(v.get("currentLabels", {}).get("headerElement")))
 check("SC11 inputs / elements / fonts", len(sitems("documentInputs")) >= 10 and len(sitems("runningElements")) >= 6 and len(sitems("documentFonts")) >= 4)
 check("SC13 correspondence categories", {"Admissions Documents", "SIN NUMBER", "TRANSCRIPT RECORD"} <= {x["name"] for x in sitems("correspondenceCategories")})
 forms = sitems("forms")
@@ -532,10 +539,12 @@ hub = by(plugins, "name", "Hubspot")
 if hub:
     c, r = req("PATCH", f"{S}/e/plugins/{hub['id']}", {"status": "Enabled"}, T)
     check("enabled plug-in needs URL (400)", c == 400)
-    c, r = req("PATCH", f"{S}/e/plugins/{hub['id']}", {"status": "Enabled", "endpoint": "https://api.hubapi.com", "apiKey": "smoke-key", "name": "Renamed"}, T)
+    c, r = req("PATCH", f"{S}/e/plugins/{hub['id']}", {"status": "Enabled", "environment": "Production", "endpoint": "https://api.hubapi.com", "apiKey": "smoke-key", "name": "Renamed"}, T)
     c2, r2 = req("GET", f"{S}/e/plugins/{hub['id']}", token=T)
     check("plug-in settings saved, key hidden, name read-only", c == 200 and r2.get("_has_apiKey") is True and "apiKey" not in r2 and r2.get("name") == "Hubspot")
     req("PATCH", f"{S}/e/plugins/{hub['id']}", {"status": "Disabled", "notes": ""}, T)
+    c2, r2 = req("GET", f"{S}/e/plugins/{hub['id']}", token=T)
+    check("disabled plug-in keeps its default environment", r2.get("status") == "Disabled" and r2.get("environment") == "Production")
 smk("customEndpoints", {"name": f"Smoke Hook {tag}", "url": "https://example.com/hook", "authType": "Bearer Token", "credential": "t"}, "SC18 create custom endpoint")
 
 # SC19 / SC20

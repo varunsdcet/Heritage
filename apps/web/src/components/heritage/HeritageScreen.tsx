@@ -402,7 +402,7 @@ function HeritageScreen({ screenId, onCrumbs }: { screenId: string; onCrumbs: (c
       {view.dedicated ? (
         <div className="hx-banner hx-banner--info">
           <span>This screen also has a dedicated full editor built earlier.</span>
-          <Link className="mh-sa__btn mh-sa__btn--sm mh-sa__btn--primary" href={view.dedicated}>
+          <Link className="mh-sa__btn mh-sa__btn--sm mh-sa__btn--primary" href={ctx ? `${view.dedicated}${view.dedicated.includes("?") ? "&" : "?"}ctx=${encodeURIComponent(ctx)}` : view.dedicated}>
             Open dedicated screen
           </Link>
         </div>

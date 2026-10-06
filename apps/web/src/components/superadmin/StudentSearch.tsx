@@ -330,7 +330,7 @@ export function SuperStudentSearch() {
                   results.items.map((s) => (
                     <tr key={s.studentId}>
                       <td>
-                        <Link href={`/admin/f/rg-01-student-360?student=${encodeURIComponent(s.studentNumber)}`}>{s.studentNumber}</Link>
+                        <Link href={`/admin/student-management/student/${encodeURIComponent(s.studentId)}/status/overview`}>{s.studentNumber}</Link>
                       </td>
                       <td>
                         {s.name}

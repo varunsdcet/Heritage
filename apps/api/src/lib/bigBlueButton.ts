@@ -22,9 +22,23 @@ export type BbbRecording = {
   lengthMinutes: number | null;
 };
 
+/**
+ * Blindside Networks' public BigBlueButton test install (documented test credentials). Development only:
+ * meetings there are public and recordings are purged, so production must set its own BBB_URL/BBB_SECRET.
+ */
+const DEV_TEST_SERVER = {
+  url: "https://test-install.blindsidenetworks.com/bigbluebutton/",
+  secret: "8cd8ef52e8e101574e400365b55e11a6",
+};
+
 export function bbbConfig(): BbbConfig | null {
-  const rawUrl = process.env.BBB_URL?.trim();
-  const secret = process.env.BBB_SECRET?.trim();
+  let rawUrl = process.env.BBB_URL?.trim();
+  let secret = process.env.BBB_SECRET?.trim();
+  if (rawUrl?.toLowerCase() === "off") return null;
+  if (!rawUrl && !secret && process.env.NODE_ENV !== "production") {
+    rawUrl = DEV_TEST_SERVER.url;
+    secret = DEV_TEST_SERVER.secret;
+  }
   if (!rawUrl || !secret) return null;
   let url = rawUrl.replace(/\/+$/, "");
   url = url.replace(/\/api$/, "");

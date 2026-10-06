@@ -268,7 +268,7 @@ export function DocumentTemplateForm({ mode }: { mode: "create" | "edit" }) {
 /* ------------------------------------------------------------------ */
 
 type Version = { id: string; date: string; by: string; changes: string[]; current: boolean };
-type VersionDetail = { id: string; date: string; by: string; name: string; content: string; snapshot: Row };
+type VersionDetail = { id: string; date: string; by: string; name: string; content: string; snapshot: Row; labels?: Record<string, string>; currentLabels?: Record<string, string> };
 
 export function TemplateAudit() {
   const sp = useSearchParams();
@@ -389,7 +389,7 @@ export function TemplateAudit() {
           {view.mode === "review" ? (
             <div className="sx-doc-preview" dangerouslySetInnerHTML={{ __html: view.v.content || "<p><em>No content</em></p>" }} />
           ) : (
-            <VersionDiff snapshot={view.v.snapshot} current={current} />
+            <VersionDiff snapshot={view.v.snapshot} current={current} labels={view.v.labels ?? {}} currentLabels={view.v.currentLabels ?? {}} />
           )}
         </SaModal>
       ) : null}
@@ -419,8 +419,13 @@ const DIFF_LABELS: Record<string, string> = {
   name: "Template Name",
   language: "Language",
   documentType: "Document Type",
+  defaultType: "Default Document Type",
+  correspondenceCategory: "Correspondence Category",
+  correspondenceType: "Correspondence Type",
   header: "Header",
+  headerElement: "Header Element",
   footer: "Footer",
+  footerElement: "Footer Element",
   pageSize: "Page Size",
   orientation: "Page Orientation",
   marginTop: "Top Margin",
@@ -434,9 +439,9 @@ const DIFF_LABELS: Record<string, string> = {
   content: "Content",
 };
 
-function VersionDiff({ snapshot, current }: { snapshot: Row; current: Row | null }) {
+function VersionDiff({ snapshot, current, labels, currentLabels }: { snapshot: Row; current: Row | null; labels: Record<string, string>; currentLabels: Record<string, string> }) {
   const plain = (v: unknown) => (typeof v === "string" ? v.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim() : v === true ? "Yes" : v === false ? "No" : str(v));
-  const rows = Object.entries(DIFF_LABELS).map(([k, label]) => ({ k, label, then: plain(snapshot[k]), now: plain(current?.[k]) }));
+  const rows = Object.entries(DIFF_LABELS).map(([k, label]) => ({ k, label, then: labels[k] ?? plain(snapshot[k]), now: currentLabels[k] ?? plain(current?.[k]) }));
   return (
     <div className="mh-sa__table-wrap">
       <table className="mh-sa__table lx-table">

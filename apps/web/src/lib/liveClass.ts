@@ -36,9 +36,21 @@ export function liveSectionId(url: string | null | undefined) {
   return m ? m[1] : null;
 }
 
+/** In-app launcher link that remembers the opening page (new tabs are opened with noreferrer). */
+export function liveLauncherHref(sectionId: string) {
+  if (typeof window === "undefined") return `/live/${sectionId}`;
+  const from = `${window.location.pathname}${window.location.search}`;
+  return `/live/${sectionId}?from=${encodeURIComponent(from)}`;
+}
+
 export function openClassLink(url: string | null | undefined) {
   if (!url) return false;
-  if (liveSectionId(url) || url.startsWith("https://") || url.startsWith("http://")) {
+  const section = liveSectionId(url);
+  if (section) {
+    window.open(liveLauncherHref(section), "_blank", "noopener,noreferrer");
+    return true;
+  }
+  if (url.startsWith("https://") || url.startsWith("http://")) {
     window.open(url, "_blank", "noopener,noreferrer");
     return true;
   }

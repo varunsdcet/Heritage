@@ -21,7 +21,10 @@ export function useNavCounts(enabled: boolean, pathname: string) {
       void Promise.allSettled([
         api<RequestCounts>("/admin/heritage/requests/counts", {}, token, quiet),
         api<WorkshopCounts>("/admin/heritage/workshops/counts", {}, token, quiet),
-      ]).then(([requests, workshops]) => {
+        api<{ gradesSubmission: number }>("/admin/heritage/my-courses/counts", {}, token, quiet),
+        api<{ pending: number; backups: number }>("/admin/heritage/courses/counts", {}, token, quiet),
+        api<Record<string, number>>("/admin/heritage/students/counts", {}, token, quiet),
+      ]).then(([requests, workshops, myCourses, courses, students]) => {
         if (cancelled) return;
         const next: Record<string, number> = {};
         if (requests.status === "fulfilled") {
@@ -31,6 +34,12 @@ export function useNavCounts(enabled: boolean, pathname: string) {
         if (workshops.status === "fulfilled") {
           for (const [key, n] of Object.entries(workshops.value)) next[`workshops:${key}`] = n;
         }
+        if (myCourses.status === "fulfilled") next["my-courses:gradesSubmission"] = myCourses.value.gradesSubmission;
+        if (courses.status === "fulfilled") {
+          next["courses:pending"] = courses.value.pending;
+          next["courses:backups"] = courses.value.backups;
+        }
+        if (students.status === "fulfilled") Object.assign(next, students.value);
         setCounts(next);
       });
     };

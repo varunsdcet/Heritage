@@ -65,6 +65,10 @@ export type DirectoryProps = {
   groups?: (rows: Row[]) => Array<{ title: string; rows: Row[]; actions?: ReactNode }>;
   initialNotice?: string | null;
   pageSize?: number;
+  /** Module breadcrumb (System Configuration when omitted). */
+  section?: string;
+  /** Delete popup title and confirm button (e.g. "Delete Funding Source"). */
+  confirmLabel?: string;
 };
 
 export function Directory(p: DirectoryProps) {
@@ -293,9 +297,9 @@ export function Directory(p: DirectoryProps) {
       </section>
       {confirm ? (
         <ConfirmDelete
-          title={`${p.deleteLabel ?? "Delete"} ${p.noun}`}
+          title={p.confirmLabel ?? `${p.deleteLabel ?? "Delete"} ${p.noun}`}
           body={p.confirmText?.(confirm) ?? `Delete the ${p.noun} "${str(confirm.name || confirm.question || confirm.email || confirm._userLabel)}"? This cannot be undone.`}
-          okLabel={p.deleteLabel ?? "Delete"}
+          okLabel={p.confirmLabel ?? p.deleteLabel ?? "Delete"}
           onCancel={() => setConfirm(null)}
           onOk={() => {
             const r = confirm;
@@ -330,7 +334,7 @@ export function Directory(p: DirectoryProps) {
 
   if (p.embedded) return body;
   return (
-    <SuperFrame title={p.title} breadcrumbs={["Home", SC, ...(p.crumbs ?? [p.title ?? ""])]} activeHref={p.activeHref} actions={headActions}>
+    <SuperFrame title={p.title} breadcrumbs={["Home", p.section ?? SC, ...(p.crumbs ?? [p.title ?? ""])]} activeHref={p.activeHref} actions={headActions}>
       {body}
     </SuperFrame>
   );
@@ -439,6 +443,7 @@ export function EntityFormPage({
   saveLabel,
   children,
   afterSave,
+  section = SC,
 }: {
   entity: string;
   mode: "create" | "edit";
@@ -450,6 +455,7 @@ export function EntityFormPage({
   saveLabel: string;
   children?: (form: SysForm) => ReactNode;
   afterSave?: (id: string) => string | null;
+  section?: string;
 }) {
   const router = useRouter();
   const sp = useSearchParams();
@@ -462,7 +468,7 @@ export function EntityFormPage({
   useLeaveGuard(form.dirty && !form.busy && !leaving.current);
   const title = mode === "create" ? createTitle : editTitle(form.record);
   return (
-    <SuperFrame title={title} breadcrumbs={["Home", SC, crumb, mode === "create" ? createTitle : "Edit"]} activeHref={activeHref ?? base}>
+    <SuperFrame title={title} breadcrumbs={["Home", section, crumb, mode === "create" ? createTitle : "Edit"]} activeHref={activeHref ?? base}>
       <form
         className="lx sx"
         onSubmit={(e) => {

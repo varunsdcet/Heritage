@@ -18,7 +18,9 @@ function portalHome(roles: string[]) {
 function LiveLauncher() {
   const router = useRouter();
   const { sectionId } = useParams<{ sectionId: string }>();
-  const left = useSearchParams().get("left") === "1";
+  const searchParams = useSearchParams();
+  const left = searchParams.get("left") === "1";
+  const from = searchParams.get("from") || "";
   const [state, setState] = useState<"joining" | "waiting" | "error" | "left">(left ? "left" : "joining");
   const [title, setTitle] = useState("");
   const [error, setError] = useState("");
@@ -47,12 +49,25 @@ function LiveLauncher() {
       router.replace(`/login?next=${encodeURIComponent(`/live/${sectionId}${left ? "?left=1" : ""}`)}`);
       return;
     }
-    setHome(portalHome(session.roles ?? []));
+    // BigBlueButton's logout redirect drops the referrer, so remember the in-app page that opened the class.
+    const returnKey = `mh.live.return.${sectionId}`;
+    const inApp = (p: string) => p.startsWith("/") && !p.startsWith("//") && !p.startsWith("/live/");
+    try {
+      const ref = document.referrer ? new URL(document.referrer) : null;
+      if (from && inApp(from)) {
+        sessionStorage.setItem(returnKey, from);
+      } else if (ref && ref.origin === window.location.origin && inApp(ref.pathname)) {
+        sessionStorage.setItem(returnKey, `${ref.pathname}${ref.search}`);
+      }
+    } catch {
+      // Ignore malformed referrers.
+    }
+    setHome(sessionStorage.getItem(returnKey) || portalHome(session.roles ?? []));
     if (!left) void attempt();
     return () => {
       if (timer.current) window.clearTimeout(timer.current);
     };
-  }, [attempt, left, router, sectionId]);
+  }, [attempt, from, left, router, sectionId]);
 
   return (
     <main className="mh-live-launch">

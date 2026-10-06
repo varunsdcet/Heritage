@@ -153,6 +153,104 @@ function buildBrandedPdf(lines: DrawLine[]): Buffer {
   return Buffer.from(pdf, "latin1");
 }
 
+export type DocLine =
+  | { kind: "title"; text: string }
+  | { kind: "text"; text: string; size?: number; bold?: boolean }
+  | { kind: "row"; cells: Array<{ text: string; x: number; right?: boolean; bold?: boolean }>; size?: number }
+  | { kind: "rule" }
+  | { kind: "gap"; h?: number };
+
+/** Multi-page branded document (receipts, invoices, statements). Cell x positions are in points from the left margin. */
+export function buildDocumentPdf(lines: DocLine[], footer: string): Buffer {
+  const pageW = 612;
+  const pageH = 792;
+  const margin = 54;
+  const pages: string[][] = [[]];
+  let ops = pages[0]!;
+  let y = pageH - 56;
+  const ensure = (h: number) => {
+    if (y - h >= 70) return;
+    ops = [];
+    pages.push(ops);
+    y = pageH - 56;
+  };
+  const textAt = (t: string, x: number, size: number, bold: boolean) => {
+    ops.push("BT", `/${bold ? "F2" : "F1"} ${size} Tf`, "0.08 0.12 0.22 rg", `${x.toFixed(1)} ${y.toFixed(1)} Td`, `(${pdfEscape(winAnsi(t))}) Tj`, "ET");
+  };
+  for (const line of lines) {
+    if (line.kind === "gap") {
+      y -= line.h ?? 8;
+      continue;
+    }
+    if (line.kind === "rule") {
+      ensure(14);
+      ops.push("q", "0.12 0.22 0.45 RG", "0.8 w", `${margin} ${y} m ${pageW - margin} ${y} l S`, "Q");
+      y -= 14;
+      continue;
+    }
+    if (line.kind === "title") {
+      ensure(26);
+      textAt(line.text, margin, 17, true);
+      y -= 24;
+      continue;
+    }
+    if (line.kind === "text") {
+      const size = line.size ?? 10;
+      for (const w of wrapLine(line.text, Math.floor(88 * (10 / size)))) {
+        ensure(size + 5);
+        textAt(w, margin, size, Boolean(line.bold));
+        y -= size + 5;
+      }
+      continue;
+    }
+    const size = line.size ?? 9.5;
+    ensure(size + 6);
+    for (const c of line.cells) {
+      const t = winAnsi(c.text);
+      const width = t.length * size * 0.5;
+      textAt(t, margin + (c.right ? c.x - width : c.x), size, Boolean(c.bold));
+    }
+    y -= size + 6;
+  }
+
+  const fontObjs = ["<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>", "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>"];
+  const objects: string[] = ["", "", ...fontObjs];
+  const kids: number[] = [];
+  pages.forEach((p, i) => {
+    const footerOps = [
+      "q",
+      "0.12 0.22 0.45 rg",
+      `${margin} 36 ${pageW - margin * 2} 18 re f`,
+      "Q",
+      "BT",
+      "/F1 8 Tf",
+      "1 1 1 rg",
+      `${margin + 8} 41 Td`,
+      `(${pdfEscape(winAnsi(`${footer}  |  Page ${i + 1} of ${pages.length}`))}) Tj`,
+      "ET",
+    ];
+    const stream = [...p, ...footerOps].join("\n");
+    objects.push(`<< /Length ${Buffer.byteLength(stream, "latin1")} >>\nstream\n${stream}\nendstream`);
+    const contentRef = objects.length;
+    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageW} ${pageH}] /Contents ${contentRef} 0 R /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> >>`);
+    kids.push(objects.length);
+  });
+  objects[0] = "<< /Type /Catalog /Pages 2 0 R >>";
+  objects[1] = `<< /Type /Pages /Kids [${kids.map((k) => `${k} 0 R`).join(" ")}] /Count ${kids.length} >>`;
+
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  for (let i = 0; i < objects.length; i += 1) {
+    offsets.push(Buffer.byteLength(pdf, "latin1"));
+    pdf += `${i + 1} 0 obj\n${objects[i]}\nendobj\n`;
+  }
+  const xrefStart = Buffer.byteLength(pdf, "latin1");
+  let xref = `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (let i = 1; i < offsets.length; i += 1) xref += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`;
+  pdf += `${xref}trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF\n`;
+  return Buffer.from(pdf, "latin1");
+}
+
 /** @deprecated Prefer renderTaxCertificatePdf — kept for unit tests of raw PDF assembly. */
 export function buildSimplePdf(title: string, bodyLines: string[]): Buffer {
   return buildBrandedPdf([

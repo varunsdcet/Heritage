@@ -69,12 +69,15 @@ export type Field = {
   rowSave?: string;
   columns?: string[];
   confirm?: boolean;
+  dependsOn?: string;
+  display?: "checks" | "list";
 };
 export type Opt = { id: string; label: string; tag?: string };
 export type Meta = {
   entities: Record<string, { label: string; fields: Field[]; sortable: boolean; noCreate: boolean }>;
   settings: Record<string, { label: string; save: string; fields: Field[] }>;
   lists: Record<string, string[]>;
+  regions?: Record<string, string[]>;
   users: Opt[];
   colours: string[];
   icons: string[];
@@ -627,8 +630,12 @@ export function SysControl({
       );
       break;
     case "select": {
-      const opts = optionsFor(f, meta);
+      const opts = f.dependsOn ? (meta.regions?.[str(values[f.dependsOn])] ?? []) : optionsFor(f, meta);
       const v = str(value);
+      if (f.dependsOn && !opts.length) {
+        control = <input id={id} className="mh-sa__input" value={v} placeholder={f.placeholder} onChange={(e) => onChange(e.target.value)} />;
+        break;
+      }
       control = (
         <span className="lx-num">
           <select id={id} className="mh-sa__input" value={v} onChange={(e) => onChange(e.target.value)}>
@@ -706,9 +713,33 @@ export function SysControl({
     case "dual":
       control = <DualList label={f.label} options={(f.options ?? []).map((o) => ({ id: o, label: o }))} value={Array.isArray(value) ? (value as string[]) : []} onChange={onChange} />;
       break;
-    case "refMulti":
-      control = <DualList label={f.label} options={refs[f.ref!] ?? []} value={Array.isArray(value) ? (value as string[]) : []} onChange={onChange} />;
+    case "refMulti": {
+      const opts = refs[f.ref!] ?? [];
+      const arr = Array.isArray(value) ? (value as string[]) : [];
+      if (f.display === "checks") {
+        control = (
+          <div className="sx-radios">
+            {opts.map((o) => (
+              <label key={o.id} className="mh-sa__check">
+                <input type="checkbox" checked={arr.includes(o.id)} onChange={(e) => onChange(e.target.checked ? [...arr, o.id] : arr.filter((x) => x !== o.id))} /> {o.label}
+              </label>
+            ))}
+            {!opts.length ? <span className="mh-sa__muted">None configured yet.</span> : null}
+          </div>
+        );
+      } else if (f.display === "list") {
+        control = (
+          <select id={id} multiple size={Math.min(8, Math.max(4, opts.length))} className="mh-sa__input sx-multilist" value={arr} onChange={(e) => onChange(Array.from(e.target.selectedOptions).map((o) => o.value))}>
+            {opts.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        );
+      } else control = <DualList label={f.label} options={opts} value={arr} onChange={onChange} />;
       break;
+    }
     case "color":
       control = <ColourPicker id={id} value={str(value)} options={f.options ?? meta.colours} onChange={onChange} />;
       break;

@@ -575,8 +575,9 @@ export async function listStudentFinance(user: SessionClaims, financialTermId?: 
     include: { financialTerm: true },
     orderBy: { postedAt: "desc" },
   });
-  const balance = entries.reduce((sum, e) => {
-    if (e.kind === "charge") return sum + e.amountCad;
+  const counted = entries.filter((e) => e.status !== "waived" && e.status !== "void");
+  const balance = counted.reduce((sum, e) => {
+    if (e.kind === "charge" || e.kind === "refund") return sum + e.amountCad;
     return sum - e.amountCad;
   }, 0);
   const pastDue = entries
@@ -588,9 +589,9 @@ export async function listStudentFinance(user: SessionClaims, financialTermId?: 
     .sort((a, b) => a.getTime() - b.getTime())[0];
 
   const selectedTerm = terms.find((t) => t.id === selectedId) ?? null;
-  const charges = entries.filter((e) => e.kind === "charge");
+  const charges = counted.filter((e) => e.kind === "charge" || e.kind === "refund");
   const totalChargesCad = charges.reduce((sum, e) => sum + e.amountCad, 0);
-  const totalPaymentsCad = entries
+  const totalPaymentsCad = counted
     .filter((e) => e.kind === "payment" || e.kind === "credit")
     .reduce((sum, e) => sum + e.amountCad, 0);
   const gstRatePercent = 0;
@@ -601,10 +602,11 @@ export async function listStudentFinance(user: SessionClaims, financialTermId?: 
 
   const mapEntry = (e: (typeof entries)[number]) => ({
     id: e.id,
-    label: e.label,
+    label: e.kind === "refund" ? `Refund: ${e.label}` : e.label,
     amountCad: e.amountCad,
-    kind: e.kind as "charge" | "credit" | "payment",
-    status: e.status as "open" | "paid" | "waived",
+    // The portal contract predates refunds; a refund raises the balance like a charge.
+    kind: (e.kind === "refund" ? "charge" : e.kind) as "charge" | "credit" | "payment",
+    status: (e.status === "void" ? "waived" : e.status) as "open" | "paid" | "waived",
     source: e.source ?? null,
     dueAt: e.dueAt?.toISOString() ?? null,
     postedAt: e.postedAt.toISOString(),

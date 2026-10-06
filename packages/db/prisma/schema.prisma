@@ -1086,6 +1086,7 @@ model AttendanceRecord {
   classSessionId String?
   meetingLabel   String
   status         String        @default("present")
+  note           String        @default("")
   recordedAt     DateTime      @default(now())
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
@@ -1096,6 +1097,7 @@ model AttendanceRecord {
 
   @@index([institutionId, studentId])
   @@index([sectionId, recordedAt])
+  @@index([sectionId, meetingLabel])
 }
 
 model LabNotebookEntry {

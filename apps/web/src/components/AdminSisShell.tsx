@@ -9,6 +9,7 @@ import { NoModuleAccess, allows, useMyAccess, type MyAccess } from "@/lib/access
 import { AskHeritageFab } from "@/components/AskHeritageFab";
 import { clearSession } from "@/lib/api";
 import { useNavCounts } from "@/lib/navCounts";
+import { MY_COURSES_LABEL, useMyCoursesNav, withMyCourses } from "@/lib/myCoursesNav";
 import { version as APP_VERSION } from "../../package.json";
 
 const SIDEBAR_KEY = "mh.sis.sidebar";
@@ -306,7 +307,9 @@ export function AdminSisShell({
   const [collapsed, setCollapsed] = useState(false);
   const [today, setToday] = useState("");
   const access = useMyAccess();
-  const sidebar = useMemo(() => visibleSidebar(access), [access]);
+  const wantsMyCourses = access !== undefined && visibleSidebar(access).some((e) => e.type === "item" && e.item.label === MY_COURSES_LABEL);
+  const myCourses = useMyCoursesNav(wantsMyCourses, pathname);
+  const sidebar = useMemo(() => withMyCourses(visibleSidebar(access), myCourses), [access, myCourses]);
   const blocked = pageBlocked(pathname, access);
   const wantsCounts = access !== undefined && sidebar.some((e) => e.type === "item" && (e.item.count || e.item.children?.some((c) => c.count)));
   const counts = useNavCounts(wantsCounts, pathname);
@@ -423,6 +426,7 @@ export function AdminSisShell({
                         {child.section && child.section !== item.children?.[ci - 1]?.section ? (
                           <div className="mh-sis__nav-subsection">{child.section}</div>
                         ) : null}
+                        {child.subheading ? <div className="mh-sis__nav-subheading">{child.subheading}</div> : null}
                         <button
                           type="button"
                           className={`mh-sis__nav-subitem${adminChildActive(pathname, child, item.children, activeSearch) ? " is-active" : ""}${child.indent ? " is-indented" : ""}`}

@@ -52,10 +52,13 @@ export const STORE_ALIAS: Record<string, string> = {
 
 /* Screens already built as dedicated pages earlier; the registry screen links to them. */
 export const DEDICATED: Record<string, string> = {
-  G01: "/admin",
-  G02: "/admin/dashboard/edit",
-  G03: "/admin/dashboard/edit?block=new",
   G04: "/admin/student-search",
+  MC01: "/admin/my-courses",
+  MC02: "/admin/my-courses/attendance",
+  MC03: "/admin/my-courses/repository",
+  MC04: "/admin/my-courses/pending-schedules",
+  MC05: "/admin/my-courses/grades",
+  MC06: "/admin/my-courses/history",
   P01: "/admin/faculty-profile/biography",
   P04: "/admin/faculty-profile/topics",
   P05: "/admin/faculty-profile/availability",
@@ -137,6 +140,37 @@ export const DEDICATED: Record<string, string> = {
   SC34: "/admin/sysconfig/localization?tab=timezones",
   SC35: "/admin/sysconfig/security?tab=questions",
   SC36: "/admin/sysconfig/notification-templates",
+  F01: "/admin/financial/transactions",
+  F02: "/admin/financial/fees",
+  F03: "/admin/financial/invoices",
+  F04: "/admin/financial/disbursements",
+  F05: "/admin/financial/awards",
+  F06: "/admin/financial/adjustments",
+  F07: "/admin/financial/agent-commissions",
+  F08: "/admin/financial/payment-plans",
+  F09: "/admin/financial/documents",
+  F10: "/admin/financial/unallocated-funds",
+  F11: "/admin/financial/alerts",
+  F12: "/admin/financial/lockouts",
+  F13: "/admin/financial/ledger-types",
+  F14: "/admin/financial/payment-methods",
+  F15: "/admin/financial/rate-categories",
+  F16: "/admin/financial/plan-templates",
+  F17: "/admin/financial/tax-rates",
+  F18: "/admin/financial/disbursement-types",
+  F19: "/admin/financial/promotions",
+  F20: "/admin/financial/funding-sources",
+  F21: "/admin/financial/collection-agencies",
+  SF01: "/admin/financial/student?tab=overview",
+  SF02: "/admin/financial/student?tab=overview",
+  SF03: "/admin/financial/student?tab=transactions",
+  SF04: "/admin/financial/student?tab=transactions",
+  SF05: "/admin/financial/student?tab=transactions",
+  SF06: "/admin/financial/student?tab=invoices",
+  SF07: "/admin/financial/student?tab=disbursements",
+  SF08: "/admin/financial/student?tab=promotions",
+  SF09: "/admin/financial/student?tab=plans",
+  SF10: "/admin/financial/student?tab=documents",
 };
 
 const MODULE_PERMISSION: Record<string, PermissionModuleKey | null> = {
@@ -857,6 +891,32 @@ async function sysRefLists(inst: string) {
   return Object.fromEntries(Object.entries(out).filter(([, list]) => list.length));
 }
 
+/** Financial Management configuration (finance.spec.ts) replaces the generic F13–F20 lists once seeded. */
+async function finRefLists(inst: string) {
+  const screens = ["FIN:PAYMENT_METHOD", "FIN:LEDGER_TYPE", "FIN:TAX_RATE", "FIN:RATE_CATEGORY", "FIN:DISB_TYPE", "FIN:FUNDING_SOURCE", "FIN:AGENT", "FIN:COLLECTION_AGENCY", "FIN:PROMOTION"];
+  const rows = await prisma.heritageRecord.findMany({
+    where: { institutionId: inst, screenId: { in: screens }, deletedAt: null, singletonKey: null },
+    select: { screenId: true, dataJson: true },
+    orderBy: { createdAt: "asc" },
+  });
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+  const of = (screen: string) => rows.filter((r) => r.screenId === screen).map((r) => parseData(r.dataJson));
+  const names = (list: Data[]) => list.map((d) => str(d.name)).filter(Boolean).sort((a, b) => a.localeCompare(b));
+  const ord = (d: Data) => (typeof d._order === "number" ? d._order : Number.MAX_SAFE_INTEGER);
+  const out: Record<string, string[]> = {
+    paymentMethods: names(of("FIN:PAYMENT_METHOD")),
+    ledgerTypes: names(of("FIN:LEDGER_TYPE")),
+    taxRates: names(of("FIN:TAX_RATE")),
+    rateCategories: of("FIN:RATE_CATEGORY").filter((d) => d.active !== "No").sort((a, b) => ord(a) - ord(b)).map((d) => str(d.name)),
+    disbursementTypes: names(of("FIN:DISB_TYPE")),
+    fundingSources: names(of("FIN:FUNDING_SOURCE").filter((d) => d.status !== "Inactive")),
+    agents: of("FIN:AGENT").map((d) => `${str(d.lastName)}, ${str(d.firstName)} (${str(d.agentNumber)})`).sort((a, b) => a.localeCompare(b)),
+    collectionAgencies: names(of("FIN:COLLECTION_AGENCY")),
+    promotions: names(of("FIN:PROMOTION")),
+  };
+  return Object.fromEntries(Object.entries(out).filter(([, list]) => list.length));
+}
+
 /** Location Management records (stored by location.ts) feed the campus / brand / room dropdowns everywhere. */
 async function locationRefLists(inst: string) {
   const rows = await prisma.heritageRecord.findMany({
@@ -882,7 +942,7 @@ async function locationRefLists(inst: string) {
 
 export async function refs(user: SessionClaims) {
   const inst = user.institutionId;
-  const [loc, sys] = await Promise.all([locationRefLists(inst), sysRefLists(inst)]);
+  const [loc, sys, fin] = await Promise.all([locationRefLists(inst), sysRefLists(inst), finRefLists(inst)]);
   const configRecords = await prisma.heritageRecord.findMany({
     where: { institutionId: inst, screenId: { in: [...new Set(Object.values(REF_SCREENS))] }, deletedAt: null, singletonKey: null },
     select: { screenId: true, dataJson: true },
@@ -899,9 +959,10 @@ export async function refs(user: SessionClaims) {
     prisma.student.findMany({ where: { institutionId: inst }, include: { person: true }, take: 1500, orderBy: { createdAt: "desc" } }),
     prisma.account.findMany({ where: { institutionId: inst }, include: { person: true }, take: 1500 }),
     prisma.workshop.findMany({ where: { institutionId: inst }, orderBy: { startsAt: "desc" } }),
-    prisma.cohort.findMany({ where: { institutionId: inst }, select: { campus: true } }),
+    prisma.cohort.findMany({ where: { institutionId: inst }, select: { campus: true, label: true, code: true } }),
     listAccessLevels(inst),
   ]);
+  const cohortLabels = cohorts.map((c) => ({ label: c.label || c.code }));
   const staff = accounts
     .filter((a) => /instructor|admin|registrar|advisor|staff/.test(a.rolesJson))
     .map((a) => `${a.person.givenName} ${a.person.familyName}`);
@@ -922,7 +983,9 @@ export async function refs(user: SessionClaims) {
     workshops: workshops.map((w) => `${w.code} — ${w.title}`),
     accessLevels: accessLevels.map((l) => l.name),
     statuses: uniq([...STUDENT_STATUSES, ...(byScreen.get("SC09") ?? [])]),
+    schedules: uniq(cohortLabels.map((c) => c.label)),
     ...sys,
+    ...fin,
   };
   for (const [ref, screen] of Object.entries(REF_SCREENS)) {
     if (out[ref]) continue;
