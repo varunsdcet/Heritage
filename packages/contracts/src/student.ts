@@ -192,7 +192,6 @@ export const StudentProfileResponse = z.object({
   dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
   emergencyContactName: z.string().nullable().optional(),
   emergencyContactPhone: z.string().nullable().optional(),
-  sinMasked: z.string().nullable().optional(),
   programName: z.string().min(1),
   standing: z.enum(["good", "warning", "probation", "alert"]),
   timezone: z.string().min(1),

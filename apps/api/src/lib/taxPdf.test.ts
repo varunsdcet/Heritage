@@ -30,7 +30,6 @@ describe("taxPdf", () => {
       programName: "Computer Science diploma",
       eligibleTuitionCad: 2450,
       enrolmentMonths: 8,
-      sinLast4: "1234",
       craStatus: "generated",
       status: "available",
       issuedAt: "2026-02-28T00:00:00.000Z",
@@ -39,7 +38,7 @@ describe("taxPdf", () => {
     expect(text).toContain("HERITAGE COLLEGE");
     expect(text).toContain("12345 King George Blvd");
     expect(text).toContain("Eligible tuition fees: CAD 2450.00");
-    expect(text).toContain("SIN \\(last 4 digits\\): ***1234");
+    expect(text).not.toContain("last 4 digits");
     expect(text).toContain("Official tax document");
     expect(taxPdfFilename("T2202", 2025)).toBe("T2202-2025.pdf");
   });

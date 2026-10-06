@@ -35,7 +35,6 @@ model Person {
   email                 String
   personalEmail         String?
   phone                 String?
-  sinMasked             String?
   emergencyContactName  String?
   emergencyContactPhone String?
   dateOfBirth           String?
@@ -1317,7 +1316,6 @@ model TaxDocument {
   status             String    @default("available")
   eligibleTuitionCad Float?
   enrolmentMonths    Int?
-  sinLast4           String?
   /// pending | generated | submitted | available
   craStatus          String    @default("pending")
   issuedAt           DateTime?

@@ -435,7 +435,6 @@ export async function listTaxDocumentsAdmin(institutionId: string) {
       status: r.status,
       eligibleTuitionCad: r.eligibleTuitionCad,
       enrolmentMonths: r.enrolmentMonths,
-      sinLast4: r.sinLast4,
       craStatus: r.craStatus,
       issuedAt: r.issuedAt?.toISOString() ?? null,
       downloadUrl: `/admin/tax-documents/${r.id}/pdf`,
@@ -468,7 +467,6 @@ export async function getAdminTaxPdf(user: SessionClaims, documentId: string) {
     programName: row.student.programName,
     eligibleTuitionCad: row.eligibleTuitionCad,
     enrolmentMonths: row.enrolmentMonths,
-    sinLast4: row.sinLast4,
     craStatus: row.craStatus,
     status: row.status,
     issuedAt: row.issuedAt,
@@ -502,7 +500,6 @@ export async function generateT2202(user: SessionClaims, body: z.infer<typeof Ge
     charges.map((c) => c.postedAt.getUTCMonth() + 1),
   );
   const enrolmentMonths = Math.max(1, months.size || 1);
-  const sinLast4 = student.person.sinMasked?.replace(/\D/g, "").slice(-4) || null;
 
   const existing = await prisma.taxDocument.findFirst({
     where: {
@@ -521,7 +518,6 @@ export async function generateT2202(user: SessionClaims, body: z.infer<typeof Ge
     status: "available",
     eligibleTuitionCad,
     enrolmentMonths,
-    sinLast4,
     craStatus: "generated",
     issuedAt: new Date(),
   };

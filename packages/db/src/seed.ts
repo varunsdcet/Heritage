@@ -292,7 +292,23 @@ const PORTAL: PortalSeed[] = [
   { screenPath: "/m/instructor/home", role: "instructor", primaryText: "Home record", secondaryText: "Live campus data for /m/instructor/home", metaText: "Open", href: "/m/instructor/home", sortOrder: 1 },
 ];
 
+/** The seed wipes every table first; refuse to run against a database holding real data unless explicitly told to. */
+async function assertSafeToWipe() {
+  if (process.env.SEED_ALLOW_WIPE === "yes-wipe-everything") return;
+  const seeded = Object.values(ids);
+  const realAccounts = await prisma.account.count({ where: { id: { notIn: seeded } } }).catch(() => 0);
+  const production = process.env.NODE_ENV === "production" || process.env.APP_ENV === "production";
+  if (production || realAccounts > 0) {
+    console.error(
+      `Refusing to seed: ${production ? "this is a production environment" : `${realAccounts} non-seed account(s) exist`}. ` +
+        "The seed deletes every table. Set SEED_ALLOW_WIPE=yes-wipe-everything only on a disposable database.",
+    );
+    process.exit(1);
+  }
+}
+
 async function main() {
+  await assertSafeToWipe();
   await prisma.$executeRawUnsafe(`DELETE FROM "MailThreadPlacement"`).catch(() => undefined);
   await prisma.mailThreadPlacement.deleteMany().catch(() => undefined);
   await prisma.mailFolder.deleteMany().catch(() => undefined);

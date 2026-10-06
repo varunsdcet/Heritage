@@ -1155,7 +1155,6 @@ export async function getStudentTaxPdf(user: SessionClaims, documentId: string) 
     programName: row.student.programName,
     eligibleTuitionCad: row.eligibleTuitionCad,
     enrolmentMonths: row.enrolmentMonths,
-    sinLast4: row.sinLast4,
     craStatus: row.craStatus,
     status: row.status,
     issuedAt: row.issuedAt,

@@ -10,6 +10,7 @@ COMPOSE=(docker compose -f deploy/docker-compose.prod.yml --project-directory "$
 ENV_FILE="${ENV_FILE:-$ROOT/.env.production}"
 WITH_NGINX="${WITH_NGINX:-1}"
 # The seed wipes every table first; only pass SEED=1 on a brand-new database.
+# It refuses to run in production or when real accounts exist unless SEED_ALLOW_WIPE=yes-wipe-everything.
 SEED="${SEED:-0}"
 
 if [[ ! -f "$ENV_FILE" ]]; then
@@ -61,6 +62,7 @@ if [[ "$SEED" == "1" ]]; then
   echo "==> Seeding database (FD-07)"
   "${COMPOSE[@]}" --env-file "$ENV_FILE" run --rm --no-deps \
     -e "DATABASE_URL=${MIGRATE_URL}" \
+    -e "SEED_ALLOW_WIPE=${SEED_ALLOW_WIPE:-}" \
     api \
     pnpm --filter @myheritage/db seed
 fi

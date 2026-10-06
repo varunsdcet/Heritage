@@ -15,7 +15,6 @@ export type TaxPdfFields = {
   programName?: string | null;
   eligibleTuitionCad?: number | null;
   enrolmentMonths?: number | null;
-  sinLast4?: string | null;
   craStatus?: string | null;
   status: string;
   issuedAt: Date | string | null;
@@ -313,9 +312,6 @@ export function renderTaxCertificatePdf(fields: TaxPdfFields): Buffer {
       size: 11,
       leading: 15,
     });
-  }
-  if (fields.sinLast4) {
-    lines.push({ kind: "text", text: `SIN (last 4 digits): ***${fields.sinLast4}`, size: 11, leading: 15 });
   }
   lines.push({
     kind: "text",

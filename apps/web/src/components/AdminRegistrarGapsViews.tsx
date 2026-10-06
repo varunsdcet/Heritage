@@ -445,7 +445,7 @@ export function AdminTaxDocumentsView() {
             <div>
               <strong>{String(row.studentName)}</strong> · {String(row.title)}
               <div style={{ fontSize: 12, color: "var(--mh-text-muted)" }}>
-                Year {String(row.taxYear)} · Tuition CAD {String(row.eligibleTuitionCad ?? "—")} · Months {String(row.enrolmentMonths ?? "—")} · SIN ***{String(row.sinLast4 ?? "????")} · CRA {String(row.craStatus)}
+                Year {String(row.taxYear)} · Tuition CAD {String(row.eligibleTuitionCad ?? "—")} · Months {String(row.enrolmentMonths ?? "—")} · CRA {String(row.craStatus)}
               </div>
             </div>
             <Button
