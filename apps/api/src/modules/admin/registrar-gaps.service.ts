@@ -29,7 +29,11 @@ export const GeneratePlanBody = z.object({
 export const LedgerPostBody = z.object({
   studentId: z.string().uuid(),
   label: z.string().trim().min(1).max(200),
-  amountCad: z.number(),
+  amountCad: z
+    .number()
+    .positive()
+    .max(1_000_000)
+    .refine((n) => Math.abs(n * 100 - Math.round(n * 100)) < 1e-6, "Amount can have at most 2 decimal places"),
   kind: z.enum(["charge", "credit", "payment"]),
   financialTermId: z.string().uuid().optional().nullable(),
   source: z.string().trim().max(120).optional().nullable(),
@@ -364,37 +368,43 @@ export async function adjustLedgerEntry(user: SessionClaims, body: z.infer<typeo
     where: { id: body.entryId, institutionId: user.institutionId },
   });
   if (!entry) throw httpError("Ledger entry not found", "NOT_FOUND", 404);
+  if (entry.status === "waived" || entry.status === "void") throw httpError(`This entry is already ${entry.status}`, "CONFLICT", 409);
+  if (entry.source === "reversal" || entry.reversedFromId) throw httpError("A reversal cannot be adjusted", "CONFLICT", 409);
+  const unpaidCharge = entry.kind === "charge" && entry.status === "open";
+  // Only rows still at the status we read are changed, so two concurrent adjustments cannot both apply.
+  const claim = async (tx: Pick<typeof prisma, "financeLedgerEntry">, status: string, note: string | null) => {
+    const res = await tx.financeLedgerEntry.updateMany({
+      where: { id: entry.id, institutionId: user.institutionId, status: entry.status },
+      data: { status, note, rowVersion: { increment: 1 } },
+    });
+    if (res.count !== 1) throw httpError("This entry was changed by someone else. Reload and try again.", "CONFLICT", 409);
+    return tx.financeLedgerEntry.findFirstOrThrow({ where: { id: entry.id } });
+  };
 
   if (body.action === "mark_paid") {
-    const updated = await prisma.financeLedgerEntry.update({
-      where: { id: entry.id },
-      data: { status: "paid", note: body.note ?? entry.note, rowVersion: { increment: 1 } },
-    });
+    if (!unpaidCharge) throw httpError("Only an open charge can be marked paid", "CONFLICT", 409);
+    const updated = await claim(prisma, "paid", body.note ?? entry.note);
     await audit(user, "FinanceLedger.paid", "finance_ar", entry, updated, "admin.finance.adjust");
     return updated;
   }
   if (body.action === "waive") {
-    const updated = await prisma.financeLedgerEntry.update({
-      where: { id: entry.id },
-      data: { status: "waived", note: body.note ?? entry.note, rowVersion: { increment: 1 } },
-    });
+    if (!unpaidCharge) throw httpError("Only an open charge can be waived; reverse payments and paid charges instead", "CONFLICT", 409);
+    const updated = await claim(prisma, "waived", body.note ?? entry.note);
     await audit(user, "FinanceLedger.waived", "finance_ar", entry, updated, "admin.finance.adjust");
     return updated;
   }
 
+  // Waiving the original already removes its effect on the balance; the reversal row is a void memo for the audit trail.
   const reversal = await prisma.$transaction(async (tx) => {
-    const updated = await tx.financeLedgerEntry.update({
-      where: { id: entry.id },
-      data: { status: "waived", note: body.note ?? "Reversed", rowVersion: { increment: 1 } },
-    });
+    const updated = await claim(tx, "waived", body.note ?? "Reversed");
     const created = await tx.financeLedgerEntry.create({
       data: {
         institutionId: user.institutionId,
         studentId: entry.studentId,
         label: `Reversal: ${entry.label}`,
         amountCad: -Math.abs(entry.amountCad),
-        kind: entry.kind === "payment" ? "credit" : "credit",
-        status: "paid",
+        kind: entry.kind === "charge" ? "credit" : "charge",
+        status: "void",
         source: "reversal",
         note: body.note ?? null,
         financialTermId: entry.financialTermId,

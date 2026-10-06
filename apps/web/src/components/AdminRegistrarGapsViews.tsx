@@ -330,7 +330,7 @@ export function AdminFinancePostingView() {
               <option value="credit">Credit</option>
             </select>
           </Field>
-          <Field label="Amount (CAD)"><input style={inputStyle} type="number" step="0.01" required value={form.amountCad} onChange={(e) => setForm({ ...form, amountCad: Number(e.target.value) })} /></Field>
+          <Field label="Amount (CAD)"><input style={inputStyle} type="number" step="0.01" min="0.01" max="1000000" required value={form.amountCad} onChange={(e) => setForm({ ...form, amountCad: Number(e.target.value) })} /></Field>
           <Field label="Description"><input style={inputStyle} required value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} /></Field>
           <Field label="Financial term">
             <select style={inputStyle} value={form.financialTermId} onChange={(e) => setForm({ ...form, financialTermId: e.target.value })}>

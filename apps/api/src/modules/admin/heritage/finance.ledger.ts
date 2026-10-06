@@ -6,6 +6,7 @@ import { buildDocumentPdf, type DocLine } from "../../../lib/taxPdf.js";
 import { ensureSeed, type Rec } from "./sysconfig.js";
 import { ADVANCE_CREDIT } from "./finance.spec.js";
 import { withStudentMoneyLock } from "./studentLock.js";
+import { effectiveAccess } from "../superAdmin.service.js";
 import {
   EPS,
   S,
@@ -326,6 +327,12 @@ export async function applyPayment(user: SessionClaims, studentId: string, body:
   notFuture(date, "Payment Date");
   const method = paymentMethod(c.cfg, body.method);
   const note = text(body.note);
+  if (amount < 0) {
+    if (!(await effectiveAccess(user.institutionId, user.accountId)).administrator) {
+      throw httpError(403, "Only an administrator can post a negative correction", "FORBIDDEN");
+    }
+    if (!note) throw httpError(400, "A note explaining the negative correction is required");
+  }
   await assertPeriodOpen(user, c.cfg, c.st.campus, date, "This payment");
   const { entry, number } = await postEntry(
     user,

@@ -47,6 +47,7 @@ import {
   type StudentInfo,
 } from "./finance.core.js";
 import { postCredit, postFee, setCreditStatus, studentCtx, type StudentCtx } from "./finance.ledger.js";
+import { withStudentMoneyLock } from "./studentLock.js";
 
 /* ------------------------------------------------------------------ */
 /* Academic facts used by promotion requirements and the profile header */
@@ -138,6 +139,7 @@ export function commissionFor(agent: Rec | undefined, book: Book | undefined) {
 
 export async function createBonus(user: SessionClaims, body: Data) {
   await canFinance(user, "edit");
+  await assertPermission(user, "agentManagement", "edit");
   const cfg = await loadConfig(user.institutionId);
   const agent = cfg.agents.find((a) => a.id === s(body.agentId));
   if (!agent) throw httpError(400, "Agent is required");
@@ -152,6 +154,12 @@ export async function createBonus(user: SessionClaims, body: Data) {
 
 export async function payCommission(user: SessionClaims, body: Data) {
   await canFinance(user, "edit");
+  await assertPermission(user, "agentManagement", "edit");
+  if (s(body.bonusId)) return payCommissionLocked(user, body);
+  return withStudentMoneyLock(user.institutionId, s(body.studentId), () => payCommissionLocked(user, body));
+}
+
+async function payCommissionLocked(user: SessionClaims, body: Data) {
   const inst = user.institutionId;
   if (s(body.bonusId)) {
     const r = await row(inst, S.COMMISSION, s(body.bonusId), "Agent bonus");
@@ -350,10 +358,18 @@ export async function createAdjustment(user: SessionClaims, body: Data) {
 
 export async function reviewAdjustment(user: SessionClaims, id: string, body: Data) {
   await canFinance(user, "edit");
+  const first = await row(user.institutionId, S.ADJUSTMENT, id, "Financial adjustment");
+  return withStudentMoneyLock(user.institutionId, first.contextKey, () => reviewAdjustmentLocked(user, id, body));
+}
+
+async function reviewAdjustmentLocked(user: SessionClaims, id: string, body: Data) {
   const r = await row(user.institutionId, S.ADJUSTMENT, id, "Financial adjustment");
   if (r.data.status !== "Pending") throw httpError(400, "Only pending adjustments can be reviewed");
   const decision = s(body.decision);
   if (decision !== "Approved / Complete" && decision !== "Declined") throw httpError(400, "Decision must be Approved / Complete or Declined");
+  if (decision === "Approved / Complete" && s(r.data.requestedBy) === user.accountId) {
+    throw httpError(403, "You requested this adjustment; another user must approve it", "FORBIDDEN");
+  }
   const c = await studentCtx(user, r.contextKey, "edit");
   const amount = num(r.data.amount);
   let entryId = "";
@@ -645,6 +661,10 @@ export async function deleteFund(user: SessionClaims, id: string) {
 
 export async function allocateFunds(user: SessionClaims, id: string, body: Data) {
   await canFinance(user, "edit");
+  return withStudentMoneyLock(user.institutionId, `fund:${id}`, () => allocateFundsLocked(user, id, body));
+}
+
+async function allocateFundsLocked(user: SessionClaims, id: string, body: Data) {
   const r = await row(user.institutionId, S.FUND, id, "Unallocated fund");
   const lines = arr<Data>(body.rows).filter((x) => s(x.studentId) || s(x.amount));
   if (!lines.length) throw httpError(400, "Add at least one student allocation");
@@ -652,12 +672,16 @@ export async function allocateFunds(user: SessionClaims, id: string, body: Data)
   let left = r2(num(r.data.amount) - allocs.reduce((a, x) => a + x.amount, 0));
   const total = r2(lines.reduce((a, x) => a + num(x.amount), 0));
   if (total > left + EPS) throw httpError(400, `Only ${cad(left)} of this fund is unallocated`);
+  const planned: Array<{ c: StudentCtx; amount: number; typeId: string; type: Rec | undefined }> = [];
   for (const [k, line] of lines.entries()) {
     const c = await studentCtx(user, s(line.studentId), "edit");
     const amount = amountOf(line.amount, `Allocation ${k + 1} amount`);
     const typeId = s(line.typeId);
     const type = typeId ? c.cfg.disbursementTypes.find((t) => t.id === typeId) : undefined;
     if (typeId && !type) throw httpError(400, `Allocation ${k + 1}: disbursement type not found`);
+    planned.push({ c, amount, typeId, type });
+  }
+  for (const { c, amount, typeId, type } of planned) {
     const note = `Allocated from unallocated fund #${num(r.data.number)}`;
     let entryId: string;
     if (type) entryId = (await postCredit(c, { typeName: nameOf(type), typeId: type.id, amount, note, extra: { fundId: r.id } })).id;
@@ -674,8 +698,8 @@ export async function allocateFunds(user: SessionClaims, id: string, body: Data)
     }
     allocs.push({ id: randomUUID(), studentId: c.st.id, amount, entryId, as: type ? nameOf(type) : "Payment", typeId, at: new Date().toISOString() });
     left = r2(left - amount);
+    await save(user, r.id, { ...r.data, allocations: allocs });
   }
-  await save(user, r.id, { ...r.data, allocations: allocs });
   return { message: "Funds allocated successfully" };
 }
 

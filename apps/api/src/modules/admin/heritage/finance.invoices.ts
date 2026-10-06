@@ -6,6 +6,7 @@ import type { SessionClaims } from "@myheritage/contracts";
 import { buildDocumentPdf, type DocLine } from "../../../lib/taxPdf.js";
 import { mailConfigured, sendMailViaHumanitix } from "../../../lib/mailer.js";
 import { type Rec } from "./sysconfig.js";
+import { audit } from "./service.js";
 import {
   EPS,
   S,
@@ -41,7 +42,7 @@ import {
   type Row,
   type StudentInfo,
 } from "./finance.core.js";
-import { defaultFee, institutionName, postFee, studentCtx, type StudentCtx } from "./finance.ledger.js";
+import { defaultFee, institutionName, postFee, removeFee, studentCtx, type StudentCtx } from "./finance.ledger.js";
 import { studentAgentId } from "./finance.records.js";
 
 export const INVOICE_TYPES = ["Student", "Agent", "Funding Source"] as const;
@@ -286,6 +287,17 @@ export async function updateInvoice(user: SessionClaims, id: string, body: Data)
 export async function deleteInvoice(user: SessionClaims, id: string) {
   await canFinance(user, "edit");
   const r = await row(user.institutionId, S.INVOICE, id, "Invoice");
+  const sid = s(r.data.studentId);
+  if (sid) {
+    const c = await studentCtx(user, sid, "edit");
+    const itemIds = new Set(arr<Item>(r.data.items).map((i) => i.id));
+    const posted = c.book.charges.filter((ch) => !ch.hidden && itemIds.has(s(ch.meta.invoiceItem)));
+    const paid = posted.filter((ch) => ch.paid > EPS);
+    if (paid.length) {
+      throw httpError(409, `Fee${paid.length === 1 ? "" : "s"} ${paid.map((ch) => `#${ch.number}`).join(", ")} on this invoice already have payments. Refund them before deleting the invoice.`, "CONFLICT");
+    }
+    for (const ch of posted) await removeFee(user, ch.id);
+  }
   await drop(user, [r.id]);
   if (s(r.data.studentId)) await finAudit(user, s(r.data.studentId), "Invoice deleted", `Invoice #${num(r.data.number)}`, { due: s(r.data.dueDate) }, r.id);
   return { message: "Invoice deleted successfully" };
@@ -427,6 +439,7 @@ export async function generateDocument(user: SessionClaims, body: Data) {
     return { filename: `statement-${c.st.number}.pdf`, pdf: buildDocumentPdf(statementLines(school, c.st, c.book), `${school} - Financial Statement - ${c.st.number}`) };
   }
   const year = Number(doc.slice(6));
+  if (!sid) await canFinance(user, "edit");
   const students = await studentsInfo(inst, sid ? [sid] : undefined);
   if (sid && !students.size) throw httpError(404, "Student not found", "NOT_FOUND");
   const books = await loadBooks(inst, cfg, sid ? [sid] : undefined);
@@ -442,6 +455,7 @@ export async function generateDocument(user: SessionClaims, body: Data) {
   }
   if (!count) throw httpError(404, `No students paid eligible tuition in ${year}`, "NOT_FOUND");
   if (sid) await finAudit(user, sid, "Document generated", item.label, {});
+  else await audit(user, "F17", "", "bulk T2202 generated", { note: `${item.label}: ${count} students` });
   const only = sid ? students.get(sid)! : null;
   return { filename: only ? `T2202-${year}-${only.number}.pdf` : `T2202-${year}-all-students.pdf`, pdf: buildDocumentPdf(lines, `${school} - T2202 ${year}`) };
 }

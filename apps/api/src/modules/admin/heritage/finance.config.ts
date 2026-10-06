@@ -51,6 +51,13 @@ function singleDefault(entity: "rateCategories" | "collectionAgencies", key: str
   };
 }
 
+/** The rate field doubles as a CAD amount for "Fixed"; a percentage above 100 would pay out more than the money it is taken from. */
+async function commissionRateValid(_user: SessionClaims, d: Record<string, unknown>) {
+  const rate = Number(d.commissionRate);
+  if ((s(d.commissionType) || "Percentage") === "Percentage" && rate > 100) throw httpError(400, "Commission Rate cannot exceed 100%");
+  if (s(d.commissionType) === "Fixed" && rate > 100_000) throw httpError(400, "A fixed commission cannot exceed $100,000");
+}
+
 const names = (ids: unknown, list: Rec[]) => arr<string>(ids).map((id) => s(list.find((r) => r.id === id)?.data.name)).filter(Boolean);
 
 registerEntityHooks({
@@ -97,6 +104,7 @@ registerEntityHooks({
   },
   rateCategories: { afterSave: singleDefault("rateCategories", "defaultRate", "Yes", "No") },
   collectionAgencies: {
+    validate: commissionRateValid,
     afterSave: singleDefault("collectionAgencies", "defaultAgency", "Enabled", "Disabled"),
     beforeDelete: async (user, rec) => {
       const n = await usage(user.institutionId, S.COLLECTION, (d) => d.agencyId === rec.id && d.status === "Active");
@@ -125,6 +133,7 @@ registerEntityHooks({
     },
   },
   agents: {
+    validate: commissionRateValid,
     beforeDelete: async (user, rec) => {
       const n = (await usage(user.institutionId, S.STUDENT_AGENT, (d) => d.agentId === rec.id)) + (await usage(user.institutionId, S.COMMISSION, (d) => d.agentId === rec.id));
       if (n) throw conflict(`Agent ${s(rec.data.agentNumber)} is assigned to students or has commissions on record and cannot be deleted.`);
