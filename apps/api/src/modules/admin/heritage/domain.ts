@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
-import { CAMPUSES, STUDENT_STATUSES, patchStudentMeta, studentMetaMap } from "../superAdmin.service.js";
+import { CAMPUSES, STUDENT_STATUSES, assertPermission, patchStudentMeta, studentMetaMap, type PermissionModuleKey } from "../superAdmin.service.js";
+import { withStudentMoneyLock } from "./studentLock.js";
 
 export type DomainRow = {
   id: string;
@@ -924,22 +925,34 @@ export const WRITE_THROUGH: Record<string, (user: SessionClaims, data: Data, con
   },
 
   async SF04(user, d, studentId) {
-    const amount = num(d.refund_amount);
-    if (!studentId || amount <= 0) throw Object.assign(new Error("Refund Amount must be greater than zero"), { status: 400 });
-    const e = await prisma.financeLedgerEntry.create({
-      data: {
-        institutionId: user.institutionId,
-        studentId,
-        label: `Refund${str(d.refund_type) ? ` — ${str(d.refund_type)}` : ""}`,
-        amountCad: amount,
-        kind: "refund",
-        status: "paid",
-        source: str(d.refund_method) || "heritage_admin",
-        note: str(d.note_comment) || null,
-        postedAt: str(d.refund_date) ? new Date(str(d.refund_date)) : new Date(),
-      },
+    const amount = money(num(d.refund_amount));
+    if (!studentId || !(amount > 0)) throw Object.assign(new Error("Refund Amount must be greater than zero"), { status: 400 });
+    return withStudentMoneyLock(user.institutionId, studentId, async () => {
+      const sums = await prisma.financeLedgerEntry.groupBy({
+        by: ["kind"],
+        where: { institutionId: user.institutionId, studentId, kind: { in: ["payment", "refund"] }, status: { not: "waived" } },
+        _sum: { amountCad: true },
+      });
+      const total = (k: string) => sums.find((x) => x.kind === k)?._sum.amountCad ?? 0;
+      const refundable = money(total("payment") - total("refund"));
+      if (amount > refundable + 0.005) {
+        throw Object.assign(new Error(`Refund Amount cannot exceed $${Math.max(0, refundable).toFixed(2)} (paid minus already refunded)`), { status: 400, code: "VALIDATION_ERROR" });
+      }
+      const e = await prisma.financeLedgerEntry.create({
+        data: {
+          institutionId: user.institutionId,
+          studentId,
+          label: `Refund${str(d.refund_type) ? ` — ${str(d.refund_type)}` : ""}`,
+          amountCad: amount,
+          kind: "refund",
+          status: "paid",
+          source: str(d.refund_method) || "heritage_admin",
+          note: str(d.note_comment) || null,
+          postedAt: str(d.refund_date) ? new Date(str(d.refund_date)) : new Date(),
+        },
+      });
+      return { domainId: `ledger:${e.id}`, message: `Refund of $${amount.toFixed(2)} issued` };
     });
-    return { domainId: `ledger:${e.id}`, message: `Refund of $${amount.toFixed(2)} issued` };
   },
 
   async W04(user, d) {
@@ -999,10 +1012,24 @@ export const WRITE_THROUGH: Record<string, (user: SessionClaims, data: Data, con
   },
 };
 
+/** The screen's own module gate is not enough: a domain row belongs to the module that owns the underlying table. */
+const DOMAIN_MODULE: Record<string, PermissionModuleKey> = {
+  workshopreg: "courseManagement",
+  loa: "userRequests",
+  request: "userRequests",
+  ledger: "financialManagement",
+};
+
+function domainError(status: number, message: string, code: string) {
+  return Object.assign(new Error(message), { status, code });
+}
+
 /* Status changes on domain rows (approve / decline / etc.). */
 export async function domainStatus(user: SessionClaims, domainId: string, status: string, note?: string): Promise<string | null> {
   const [kind, id] = [domainId.slice(0, domainId.indexOf(":")), domainId.slice(domainId.indexOf(":") + 1)];
   const lower = status.toLowerCase();
+  const module = DOMAIN_MODULE[kind];
+  if (module) await assertPermission(user, module, "edit");
   if (kind === "workshopreg") {
     await prisma.workshopRegistration.updateMany({
       where: { id, institutionId: user.institutionId },
@@ -1026,7 +1053,15 @@ export async function domainStatus(user: SessionClaims, domainId: string, status
     return `Request ${lower}`;
   }
   if (kind === "ledger" && /refund|waive|void|removed|inactive/.test(lower)) {
-    await prisma.financeLedgerEntry.updateMany({ where: { id, institutionId: user.institutionId }, data: { status: "waived", rowVersion: { increment: 1 } } });
+    const entry = await prisma.financeLedgerEntry.findFirst({ where: { id, institutionId: user.institutionId }, select: { kind: true, status: true } });
+    if (!entry) throw domainError(404, "Ledger entry not found", "NOT_FOUND");
+    if (entry.status === "waived") return "Ledger entry already waived";
+    // Money that moved (payments, refunds, paid or part-paid fees) must go through Financial Management so refunds stay capped and audited.
+    const allocated = await prisma.heritageRecord.count({ where: { institutionId: user.institutionId, screenId: "FIN:ALLOC", deletedAt: null, dataJson: { contains: id } } });
+    if (entry.kind !== "charge" || entry.status !== "open" || allocated > 0) {
+      throw domainError(409, "Only an unpaid fee can be waived here. Use Financial Management to refund payments or paid fees.", "CONFLICT");
+    }
+    await prisma.financeLedgerEntry.updateMany({ where: { id, institutionId: user.institutionId, status: "open" }, data: { status: "waived", rowVersion: { increment: 1 } } });
     return "Ledger entry waived";
   }
   return null;

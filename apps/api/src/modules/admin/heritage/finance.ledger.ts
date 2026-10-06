@@ -5,6 +5,7 @@ import type { SessionClaims } from "@myheritage/contracts";
 import { buildDocumentPdf, type DocLine } from "../../../lib/taxPdf.js";
 import { ensureSeed, type Rec } from "./sysconfig.js";
 import { ADVANCE_CREDIT } from "./finance.spec.js";
+import { withStudentMoneyLock } from "./studentLock.js";
 import {
   EPS,
   S,
@@ -252,20 +253,9 @@ async function refundFrom(c: StudentCtx, fund: Fund | null, r: RefundInput, amou
   return number;
 }
 
-const studentLocks = new Map<string, Promise<unknown>>();
-
-/** Serialises refunds per student (single API process) so two concurrent requests cannot both pass the refundable check. */
 async function withStudentLock<T>(user: SessionClaims, entryId: string, run: () => Promise<T>): Promise<T> {
   const row = await prisma.financeLedgerEntry.findFirst({ where: { id: entryId, institutionId: user.institutionId }, select: { studentId: true } });
-  const key = `${user.institutionId}:${row?.studentId ?? entryId}`;
-  const next = (studentLocks.get(key) ?? Promise.resolve()).catch(() => undefined).then(run);
-  const tail = next.catch(() => undefined);
-  studentLocks.set(key, tail);
-  try {
-    return await next;
-  } finally {
-    if (studentLocks.get(key) === tail) studentLocks.delete(key);
-  }
+  return withStudentMoneyLock(user.institutionId, row?.studentId ?? entryId, run);
 }
 
 export function refundPayment(user: SessionClaims, entryId: string, body: Data) {
