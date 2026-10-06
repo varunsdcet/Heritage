@@ -69,12 +69,18 @@ export async function decideApproval(input: {
     if (!requiredRoles.some((r) => input.actorRoles.includes(r))) {
       throw Object.assign(new Error("Insufficient role to decide"), { code: "FORBIDDEN", status: 403 });
     }
+    if (input.decision === "approve" && row.requestedBy === input.actorId) {
+      throw Object.assign(new Error("You cannot approve your own request; another approver must decide it"), { code: "FORBIDDEN", status: 403 });
+    }
     const decisions = JSON.parse(row.decisionsJson) as Array<{
       actorId: string;
       decision: string;
       comment?: string;
       decidedAt: string;
     }>;
+    if (decisions.some((d) => d.actorId === input.actorId)) {
+      throw Object.assign(new Error("You have already decided this request"), { code: "CONFLICT", status: 409 });
+    }
     decisions.push({
       actorId: input.actorId,
       decision: input.decision,
@@ -84,14 +90,19 @@ export async function decideApproval(input: {
 
     let status = row.status;
     if (input.decision === "reject") status = "rejected";
-    else if (decisions.filter((d) => d.decision === "approve").length >= row.requiredCount) {
+    else if (new Set(decisions.filter((d) => d.decision === "approve").map((d) => d.actorId)).size >= row.requiredCount) {
       status = "approved";
     }
 
-    const updated = await tx.approvalRequest.update({
-      where: { id: row.id },
+    // Guarded on rowVersion so two approvers deciding at the same moment cannot overwrite each other's decision.
+    const claimed = await tx.approvalRequest.updateMany({
+      where: { id: row.id, rowVersion: row.rowVersion, status: "pending" },
       data: { decisionsJson: JSON.stringify(decisions), status, rowVersion: { increment: 1 } },
     });
+    if (claimed.count !== 1) {
+      throw Object.assign(new Error("This request was decided by someone else. Reload and try again."), { code: "CONFLICT", status: 409 });
+    }
+    const updated = await tx.approvalRequest.findFirstOrThrow({ where: { id: row.id } });
 
     await writeAuditAndOutbox(tx, {
       institutionId: input.institutionId,
@@ -108,9 +119,13 @@ export async function decideApproval(input: {
   });
 }
 
+const GRADE_APPROVAL_TYPES = new Set(["grade_publish", "grade.publish"]);
+
 export async function applyApproval(input: {
   approvalId: string;
   institutionId: string;
+  /** Who applied it; defaults to the requester for older callers. */
+  actorId?: string;
   applyFn: (proposedDiff: unknown, tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0]) => Promise<void>;
 }) {
   const correlationId = randomUUID();
@@ -122,16 +137,20 @@ export async function applyApproval(input: {
     if (row.status !== "approved") {
       throw Object.assign(new Error("Approval not approved"), { code: "CONFLICT", status: 409 });
     }
-    const diff = JSON.parse(row.proposedDiffJson);
-    await input.applyFn(diff, tx);
-    const updated = await tx.approvalRequest.update({
-      where: { id: row.id },
+    const claimed = await tx.approvalRequest.updateMany({
+      where: { id: row.id, rowVersion: row.rowVersion, status: "approved" },
       data: { status: "applied", rowVersion: { increment: 1 } },
     });
+    if (claimed.count !== 1) {
+      throw Object.assign(new Error("This approval has already been applied"), { code: "CONFLICT", status: 409 });
+    }
+    const diff = JSON.parse(row.proposedDiffJson);
+    await input.applyFn(diff, tx);
+    const updated = await tx.approvalRequest.findFirstOrThrow({ where: { id: row.id } });
     await writeAuditAndOutbox(tx, {
       institutionId: input.institutionId,
-      actorId: row.requestedBy,
-      eventName: "GradeItem.published",
+      actorId: input.actorId ?? row.requestedBy,
+      eventName: GRADE_APPROVAL_TYPES.has(row.type) ? "GradeItem.published" : "ApprovalRequest.applied",
       purpose: "apply_approval",
       before: null,
       after: diff,

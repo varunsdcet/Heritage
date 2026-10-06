@@ -46,6 +46,7 @@ export const EVENT_CATALOGUE = [
   "GradeItem.publishRequested",
   "GradeItem.published",
   "ApprovalRequest.decided",
+  "ApprovalRequest.applied",
   "Message.sent",
   "Student.grades.view",
   "StudentSubmission.fileUploaded",
