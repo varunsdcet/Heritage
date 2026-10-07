@@ -18,6 +18,7 @@ type FinalCourse = {
   startsOn?: string | null;
   endsOn?: string | null;
   status: string;
+  final: boolean;
   letter: string;
   averagePercent: number | null;
   gradePoints: number | null;
@@ -33,6 +34,14 @@ type FinalMarksPayload = {
   cgpa: number | null;
   courses: FinalCourse[];
 };
+
+/** Mirrors the server's credit-weighted Final Marks summary for a filtered subset (one term or program). */
+function creditWeighted(rows: Array<{ credits: number; value: number }>) {
+  if (!rows.length) return null;
+  const credits = rows.reduce((n, r) => n + Math.max(r.credits, 0), 0);
+  const v = credits ? rows.reduce((n, r) => n + r.value * Math.max(r.credits, 0), 0) / credits : rows.reduce((n, r) => n + r.value, 0) / rows.length;
+  return Number(v.toFixed(2));
+}
 
 function fmtCredits(n: number) {
   return n.toFixed(2);
@@ -79,19 +88,14 @@ export default function StudentGradesPage() {
 
   const summary = useMemo(() => {
     if (!data) return { credits: 0, average: null as number | null, cgpa: null as number | null };
-    const completed = filtered.filter((c) => c.status === "completed" && c.countsTowardCgpa !== false);
-    const credits = completed.reduce((n, c) => n + c.credits, 0);
-    const withPct = completed.filter((c) => c.averagePercent != null);
-    const average =
-      withPct.length > 0
-        ? Number((withPct.reduce((n, c) => n + (c.averagePercent ?? 0), 0) / withPct.length).toFixed(2))
-        : data.averagePercent;
-    const withGp = completed.filter((c) => c.gradePoints != null);
-    const cgpa =
-      withGp.length > 0
-        ? Number((withGp.reduce((n, c) => n + (c.gradePoints ?? 0), 0) / withGp.length).toFixed(2))
-        : data.cgpa;
-    return { credits, average, cgpa };
+    if (filtered.length === data.courses.length) return { credits: data.earnedCredits, average: data.averagePercent, cgpa: data.cgpa };
+    const finals = filtered.filter((c) => c.final && c.countsTowardCgpa !== false);
+    const credits = finals.filter((c) => c.letter !== "F" && c.gradePoints !== 0).reduce((n, c) => n + c.credits, 0);
+    return {
+      credits,
+      average: creditWeighted(finals.filter((c) => c.averagePercent != null).map((c) => ({ credits: c.credits, value: c.averagePercent! }))),
+      cgpa: creditWeighted(finals.filter((c) => c.gradePoints != null).map((c) => ({ credits: c.credits, value: c.gradePoints! }))),
+    };
   }, [data, filtered]);
 
   const programTitle = data?.programName || "Programme";

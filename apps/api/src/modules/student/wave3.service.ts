@@ -27,6 +27,7 @@ import {
 } from "../instructor/courseLmsScreens.js";
 import { sectionLmsMeta } from "../instructor/sectionLmsMeta.js";
 import { liveClassUrl } from "../../lib/liveClass.js";
+import { isSafeLink } from "../../lib/safeLink.js";
 import { requireStudent } from "./surfaces.service.js";
 
 function httpError(message: string, code: string, status: number) {
@@ -246,6 +247,23 @@ export async function getStudentCourseLms(user: SessionClaims, sectionId: string
           storyboard: a.storyboard,
           hidden: false,
           joinUrl: type === "BIGBLUEBUTTON" ? a.joinUrl || joinUrl : null,
+          description: a.description || undefined,
+          url: a.url && /^https?:\/\//i.test(a.url) && isSafeLink(a.url) ? a.url : undefined,
+          assignmentId: a.assignmentId,
+          assignment: a.assignment
+            ? {
+                instructions: a.assignment.instructions,
+                availableFrom: a.assignment.availableFrom,
+                dueAt: a.assignment.dueAt,
+                cutoffAt: a.assignment.cutoffAt,
+                maxScore: a.assignment.maxScore,
+                fileSubmissions: a.assignment.fileSubmissions,
+                onlineText: a.assignment.onlineText,
+                maxFiles: a.assignment.maxFiles,
+                maxFileBytes: a.assignment.maxFileBytes,
+                acceptedTypes: a.assignment.acceptedTypes,
+              }
+            : undefined,
           gradingMethod: /final\s*exam/i.test(a.name) ? "Highest grade" : a.note?.includes("Grading method") ? a.note : undefined,
         };
         if (type === "QUIZ") {
@@ -910,6 +928,13 @@ function parseRoles(json: string) {
   }
 }
 
+/** "To" is relative to the thread's original sender, not the viewer, so recipients see themselves listed. */
+export function threadRecipients(participantIds: string[], senderId: string | undefined, ccIds: string[] = [], bccIds: string[] = []) {
+  const copied = new Set([...ccIds, ...bccIds]);
+  const to = participantIds.filter((id) => id !== senderId && !copied.has(id));
+  return to.length ? to : senderId ? [senderId] : [];
+}
+
 export async function getMailThread(user: SessionClaims, threadId: string) {
   const placement = await prisma.mailThreadPlacement.findFirst({
     where: { institutionId: user.institutionId, accountId: user.accountId, threadId },
@@ -960,7 +985,7 @@ export async function getMailThread(user: SessionClaims, threadId: string) {
         ? { accountId: first.senderAccountId, name: nameOf(first.senderAccountId), email: emailOf(first.senderAccountId) }
         : null;
     })(),
-    to: participantIds.filter((id) => id !== user.accountId).map((id) => ({ accountId: id, name: nameOf(id), email: emailOf(id) })),
+    to: threadRecipients(participantIds, placement.thread.messages[0]?.senderAccountId, ccIds, bccIds).map((id) => ({ accountId: id, name: nameOf(id), email: emailOf(id) })),
     cc: ccIds.map((id) => ({ accountId: id, name: nameOf(id), email: emailOf(id) })),
     bcc: bccIds.map((id) => ({ accountId: id, name: nameOf(id), email: emailOf(id) })),
     messages: placement.thread.messages.map((m) => ({

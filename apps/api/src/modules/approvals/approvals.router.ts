@@ -1,12 +1,14 @@
 import { Router } from "express";
 import { z } from "zod";
-import { ApprovalInboxResponse, DecideApprovalRequest, type RoleName } from "@myheritage/contracts";
-import { decideApproval } from "@myheritage/auth";
+import { ApprovalInboxResponse, DecideApprovalRequest } from "@myheritage/contracts";
+import { canDecideApproval, decideApproval, parseApproverRoles } from "@myheritage/auth";
 import { prisma } from "@myheritage/db";
 import { requireAuth, requireRoles, type AuthedRequest } from "../../middleware/auth.js";
 import { applyApprovedRequest, settleRejectedApproval } from "./approvals.service.js";
 
 export const approvalsRouter: Router = Router();
+
+const GRADE_PUBLISH_TYPES = new Set(["grade.publish", "grade_publish"]);
 
 approvalsRouter.get("/", requireAuth, requireRoles("admin", "registrar"), async (req, res, next) => {
   try {
@@ -16,7 +18,7 @@ approvalsRouter.get("/", requireAuth, requireRoles("admin", "registrar"), async 
         where: { institutionId: user.institutionId, status: { in: ["pending", "approved"] } },
         orderBy: { createdAt: "desc" },
       })
-    ).filter((r) => (JSON.parse(r.requiredApproverRolesJson) as RoleName[]).some((role) => user.roles.includes(role)));
+    ).filter((r) => canDecideApproval(user.roles, parseApproverRoles(r.requiredApproverRolesJson)));
 
     const studentIdOf = (subjectRef: string) => subjectRef.replace(/^student:/, "");
     const studentIds = [...new Set(rows.map((r) => studentIdOf(r.subjectRef)))];
@@ -53,11 +55,60 @@ approvalsRouter.get("/", requireAuth, requireRoles("admin", "registrar"), async 
       requesters.map((a) => [a.id, `${a.person.givenName} ${a.person.familyName}`.trim() || a.email]),
     );
 
+    const gradeIdsOf = (r: (typeof rows)[number]) => {
+      if (!GRADE_PUBLISH_TYPES.has(r.type)) return [];
+      const ids = (JSON.parse(r.proposedDiffJson) as { gradeItemIds?: unknown }).gradeItemIds;
+      return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
+    };
+    const allGradeIds = [...new Set(rows.flatMap(gradeIdsOf))];
+    const gradeItems = allGradeIds.length
+      ? await prisma.gradeItem.findMany({
+          where: { institutionId: user.institutionId, id: { in: allGradeIds } },
+          select: {
+            id: true,
+            score: true,
+            maxScore: true,
+            letter: true,
+            feedback: true,
+            student: { select: { studentNumber: true, person: { select: { givenName: true, familyName: true } } } },
+            assignment: {
+              select: {
+                title: true,
+                section: { select: { id: true, code: true, course: { select: { code: true, title: true } } } },
+              },
+            },
+          },
+        })
+      : [];
+    const gradeById = new Map(gradeItems.map((g) => [g.id, g]));
+    const sectionLabelOf = (s: { code: string; course: { code: string; title: string } }) =>
+      `${s.code.includes(s.course.code) ? s.code : `${s.course.code} ${s.code}`} — ${s.course.title}`;
+    const gradeMetaOf = (r: (typeof rows)[number]) => {
+      const items = gradeIdsOf(r)
+        .map((id) => gradeById.get(id))
+        .filter((g): g is NonNullable<typeof g> => Boolean(g));
+      if (!items.length) return {};
+      const sectionLabels = [...new Set(items.map((g) => sectionLabelOf(g.assignment.section)))];
+      return {
+        gradeSection: sectionLabels.join("; "),
+        gradeRows: items.map((g) => ({
+          studentName: `${g.student.person.givenName} ${g.student.person.familyName}`.trim(),
+          studentNumber: g.student.studentNumber,
+          assignment: g.assignment.title,
+          score: g.score,
+          maxScore: g.maxScore,
+          letter: g.letter,
+          feedback: g.feedback,
+        })),
+      };
+    };
+
     res.json(
       ApprovalInboxResponse.parse({
         items: rows.map((r) => {
           const proposedDiff = JSON.parse(r.proposedDiffJson) as Record<string, unknown>;
           const student = byId.get(studentIdOf(r.subjectRef));
+          const gradeMeta = gradeMetaOf(r);
           const currentValues =
             student && r.type === "student_profile_change"
               ? {
@@ -91,8 +142,13 @@ approvalsRouter.get("/", requireAuth, requireRoles("admin", "registrar"), async 
                       currentValues,
                     }
                   : {}),
-                subjectLabel: sectionById.get(r.subjectRef.replace(/^section:/, "")) ?? null,
+                ...gradeMeta,
+                subjectLabel: sectionById.get(r.subjectRef.replace(/^section:/, "")) ?? gradeMeta.gradeSection ?? null,
                 requestedByName: requesterById.get(r.requestedBy) ?? null,
+                requestedByMe: r.requestedBy === user.accountId,
+                decidedByMe: (JSON.parse(r.decisionsJson) as Array<{ actorId?: string }>).some(
+                  (d) => d.actorId === user.accountId,
+                ),
               },
             },
             requestedBy: r.requestedBy,

@@ -6,10 +6,12 @@ import {
   buildInstructorScreen,
   runInstructorAction,
 } from "./instructor.service.js";
+import { submissionsRouter } from "./submissions.router.js";
 
 export const instructorRouter: Router = Router();
 
 instructorRouter.use(requireAuth, requireRoles("instructor", "admin", "registrar"));
+instructorRouter.use(submissionsRouter);
 
 instructorRouter.post("/ai-draft", async (req, res, next) => {
   try {

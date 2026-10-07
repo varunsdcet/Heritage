@@ -369,7 +369,7 @@ export function TeacherSisShell({
   subtitle,
   shell = "campus",
   studioActive,
-  userName = "Instructor",
+  userName: userNameProp,
   userRole = "INSTRUCTOR",
   studentCount,
   hideSignOut = false,
@@ -411,6 +411,15 @@ export function TeacherSisShell({
   const [upcoming, setUpcoming] = useState<
     Array<{ id: string; courseCode: string; title: string; label: string; joinUrl?: string | null; minutesUntil: number }>
   >([]);
+  const [sessionName, setSessionName] = useState("");
+
+  useEffect(() => {
+    const s = loadSession();
+    setSessionName(s ? `${s.givenName ?? ""} ${s.familyName ?? ""}`.trim() : "");
+  }, []);
+
+  const propName = userNameProp?.trim() || "";
+  const userName = (propName && propName !== "Instructor" ? propName : sessionName) || propName || "Instructor";
 
   async function signOut() {
     await logout();
@@ -528,7 +537,7 @@ export function TeacherSisShell({
               <span className="mh-teacher__avatar mh-teacher__avatar--sm" aria-hidden>
                 {initials}
               </span>
-              <span>Dr. Vance</span>
+              <span>{userName}</span>
             </div>
           </div>
         </header>

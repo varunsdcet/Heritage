@@ -45,9 +45,12 @@ export const SessionClaims = z.object({
   accountStatus: z.enum(["active", "paused"]).optional(),
 });
 
+export const GradeFeedback = z.string().trim().max(4000);
+
 export const UpsertGradeRequest = z.object({
   score: z.number().min(0),
   rowVersion: z.number().int().positive(),
+  feedback: GradeFeedback.nullable().optional(),
 });
 
 export const PublishGradesRequest = z.object({
@@ -89,6 +92,7 @@ export const StudentGradesResponse = z.object({
           title: z.string(),
           weightPercent: z.number(),
           underReview: z.boolean(),
+          feedback: z.string().nullable().optional(),
         }),
       ),
     }),
@@ -121,6 +125,16 @@ export const GradebookResponse = z.object({
           maxScore: z.number(),
           status: GradeItem.shape.status,
           rowVersion: z.number().int(),
+          feedback: z.string().nullable().optional(),
+          submission: z
+            .object({
+              id: Uuid,
+              status: z.enum(["draft", "submitted", "returned"]),
+              submittedAt: z.string().nullable(),
+              fileCount: z.number().int().nonnegative(),
+            })
+            .nullable()
+            .optional(),
         }),
       ),
     }),

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "@myheritage/db";
 import { hashPassword } from "@myheritage/auth";
 import type { SessionClaims } from "@myheritage/contracts";
-import { assertPermission, patchStudentMeta, studentMetaMap } from "../superAdmin.service.js";
+import { assertPermission, canEdit, effectiveAccess, patchStudentMeta, studentMetaMap } from "../superAdmin.service.js";
 import { audit, refs } from "./service.js";
 import {
   COLOURS,
@@ -706,10 +706,22 @@ export const ctxFor = (user: SessionClaims): Ctx => {
 export async function sysMeta(user: SessionClaims) {
   await assertAnyView(user);
   await ensureSeed(user);
-  const [lists, users, regions] = await Promise.all([dynLists(user), userList(user.institutionId), regionMap(user.institutionId)]);
+  const [lists, users, regions, access] = await Promise.all([
+    dynLists(user),
+    userList(user.institutionId),
+    regionMap(user.institutionId),
+    effectiveAccess(user.institutionId, user.accountId),
+  ]);
+  const editable = (perm: "systemConfiguration" | "financialManagement" | "agentManagement") => canEdit(access.permissions[perm]);
   return {
     regions,
-    entities: Object.fromEntries(Object.entries(ENTITIES).map(([k, e]) => [k, { label: e.label, fields: e.fields, sortable: Boolean(e.sortable), noCreate: Boolean(e.noCreate) }])),
+    entities: Object.fromEntries(
+      Object.entries(ENTITIES).map(([k, e]) => [
+        k,
+        { label: e.label, fields: e.fields, sortable: Boolean(e.sortable), noCreate: Boolean(e.noCreate), canEdit: editable(e.perm ?? "systemConfiguration") },
+      ]),
+    ),
+    canEditSettings: editable("systemConfiguration"),
     settings: Object.fromEntries(Object.entries(SETTINGS).map(([k, t]) => [k, { label: t.label, save: t.save, fields: t.fields }])),
     lists,
     users: users.map((u) => ({ id: u.id, label: `${u.label} (${u.email})` })),

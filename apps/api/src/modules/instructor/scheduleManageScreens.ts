@@ -233,7 +233,7 @@ export function buildScheduleManagePayload(scheduleIdRaw: string) {
   const sessions = meta.sessions || DIB_SESSIONS.slice(0, 8);
   return {
     title: meta.programTitle.replace(/^Schedule:\s*/i, "Schedule: "),
-    subtitle: "SYS.PROGRAM_MGMT // SCHEDULE_MANAGE",
+    subtitle: "Manage schedule and fees",
     breadcrumbs: ["Home", "Scheduling", "Manage Schedule"],
     scheduleManage: {
       scheduleId,

@@ -1,11 +1,17 @@
 const MONTHS = ["Jan.", "Feb.", "Mar.", "Apr.", "May", "Jun.", "Jul.", "Aug.", "Sep.", "Oct.", "Nov.", "Dec."] as const;
 const WEEKDAYS_SHORT = ["Sun.", "Mon.", "Tue.", "Wed.", "Thu.", "Fri.", "Sat."] as const;
 
-function parseDate(value: string) {
-  const raw = value.includes("T") ? value : `${value}T12:00:00`;
+/** Date-only values (YYYY-MM-DD) are calendar days, so they are read at local noon instead of UTC midnight. */
+export function parseDate(value: string) {
+  const raw = value.includes("T") ? value : `${value.slice(0, 10)}T12:00:00`;
   const d = new Date(raw);
   return Number.isNaN(d.getTime()) ? null : d;
 }
+
+const todayIso = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
 
 /** HCC-style: "Aug. 4, 2026 (Tue.)" */
 export function formatHccDate(value: string | null | undefined) {
@@ -26,8 +32,9 @@ export function formatHccDateRange(startsOn: string | null | undefined, endsOn: 
   return end ? fmt(end) : null;
 }
 
-export function statusLabel(enrolmentStatus: string) {
-  if (enrolmentStatus === "enrolled") return "In Progress";
+export function statusLabel(enrolmentStatus: string, startsOn?: string | null) {
+  if (enrolmentStatus === "enrolled") return startsOn && startsOn.slice(0, 10) > todayIso() ? "Not Started" : "In Progress";
+  if (enrolmentStatus === "waitlisted") return "Waitlisted";
   if (enrolmentStatus === "completed") return "Completed";
   if (enrolmentStatus === "withdrawn") return "Withdrawn";
   return enrolmentStatus;
@@ -35,6 +42,7 @@ export function statusLabel(enrolmentStatus: string) {
 
 export function statusTone(enrolmentStatus: string) {
   if (enrolmentStatus === "enrolled") return "progress";
+  if (enrolmentStatus === "waitlisted") return "muted";
   if (enrolmentStatus === "completed") return "done";
   if (enrolmentStatus === "withdrawn") return "muted";
   return "muted";

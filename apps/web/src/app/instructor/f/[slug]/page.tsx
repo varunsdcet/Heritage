@@ -1,11 +1,11 @@
-"use client";
-
+import { notFound } from "next/navigation";
 import { LiveScreen } from "@/components/LiveScreen";
-import { useParams } from "next/navigation";
+import { getTeacherScreen } from "@/lib/teacherCatalog";
 
 /** Fallback so instructor SIS screens are reachable even if a dedicated folder is missing. */
-export default function InstructorFigmaSlugPage() {
-  const params = useParams<{ slug: string }>();
-  const slug = String(params?.slug ?? "").trim();
-  return <LiveScreen path={`/instructor/f/${slug}`} />;
+export default async function InstructorFigmaSlugPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  const path = `/instructor/f/${decodeURIComponent(String(slug ?? "")).trim()}`;
+  if (!getTeacherScreen(path)) notFound();
+  return <LiveScreen path={path} />;
 }

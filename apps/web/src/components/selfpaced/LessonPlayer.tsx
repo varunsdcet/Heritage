@@ -106,7 +106,7 @@ export function LessonPlayer({
     markActivityComplete(slug, activity.id);
     if (totalActivities > 0) {
       const issued = ensureCertificate(slug, totalActivities);
-      setCourseDone(Boolean(issued?.certificateId));
+      setCourseDone(Boolean(issued));
     }
     setDone(true);
     setBlockers([]);
@@ -131,7 +131,7 @@ export function LessonPlayer({
     markActivityComplete(slug, activity.id);
     if (totalActivities > 0) {
       const issued = ensureCertificate(slug, totalActivities);
-      setCourseDone(Boolean(issued?.certificateId));
+      setCourseDone(Boolean(issued));
     }
     setDone(true);
     setBlockers([]);

@@ -138,6 +138,21 @@ export type CourseLmsGroup = {
   members: Array<{ id: string; name: string }>;
 };
 
+export type LmsAssignmentSettings = {
+  instructions?: string;
+  availableFrom?: string;
+  dueAt?: string;
+  cutoffAt?: string;
+  gradeBy?: string;
+  maxScore?: number;
+  weightPercent?: number;
+  fileSubmissions?: boolean;
+  onlineText?: boolean;
+  maxFiles?: number;
+  maxFileBytes?: number;
+  acceptedTypes?: string;
+};
+
 export type CourseLmsState = {
   session: string;
   location: string;
@@ -163,12 +178,30 @@ export type CourseLmsState = {
       hidden?: boolean;
       joinUrl?: string | null;
       storyboard?: import("@/lib/aiDraftSamples").AiDraftStoryboard;
+      description?: string;
+      url?: string;
+      settings?: Record<string, string>;
+      assignmentId?: string;
+      assignment?: LmsAssignmentSettings;
     }>;
   }>;
   activityTypes?: Array<{ code: string; label: string; kind: string }>;
   gradeColumns: string[];
   gradeWeights?: string[];
   gradeEmpty?: string;
+  /** Live gradebook for the section (enrolled students × assignments); replaces the template columns when present. */
+  gradeBoard?: {
+    assignments: Array<{ id: string; title: string; weightPercent: number; maxScore: number; submitted: number }>;
+    rows: Array<{
+      studentId: string;
+      name: string;
+      studentNumber: string;
+      cells: Array<{ assignmentId: string; mark: string; status: string }>;
+      total: string;
+    }>;
+    gradebookHref: string;
+    submissionsHref: string;
+  };
   attendanceDates?: string[];
   evaluationRows?: Array<{ component: string; weight: string }>;
   logParticipants?: string[];
@@ -222,6 +255,7 @@ export type TeacherScreenConfig = {
   searchPlaceholder?: string;
   filters?: string[];
   countLabel?: string;
+  emptyMessage?: string;
   columns?: string[];
   columnTemplate?: string;
   rows?: Array<{
@@ -526,6 +560,7 @@ export type TeacherScreenConfig = {
     dateFilter?: string;
     studentFilter?: string;
     courseFilter?: string;
+    sectionId?: string;
     centerLabel?: string;
     prevLabel?: string;
     nextLabel?: string;
@@ -594,13 +629,17 @@ export type TeacherScreenConfig = {
     resolved?: string;
     template?: string;
     results: number;
+    flagTypes?: string[];
     rows: Array<{
       id: string;
       student: string;
       description: string;
       status: string;
+      resolved?: string;
       appliesHold: string;
       date: string;
+      canEdit?: boolean;
+      href?: string;
     }>;
   };
   hccEmpty?: { empty: string };
@@ -1065,6 +1104,7 @@ export type TeacherScreenConfig = {
     current: Array<{ label: string; value: string }>;
     proposed: Array<{ label: string; value?: string; added?: string; removed?: string }>;
     comments: Array<{ author: string; role: string; when: string; body: string }>;
+    emptyMessage?: string;
   };
   workshops?: {
     tabs: string[];
@@ -1248,6 +1288,9 @@ export type TeacherScreenConfig = {
     fieldLabel: string;
     fieldValue: string;
     cta: string;
+    ctaHref?: string;
+    secondaryCta?: string;
+    secondaryHref?: string;
     help: string;
     extraFields?: Array<{ label: string; value: string }>;
   };
@@ -1316,7 +1359,13 @@ export type TeacherScreenConfig = {
   modal?: {
     title: string;
     description: string;
-    fields: Array<{ label: string; value: string; type?: "text" | "select" | "time" | "textarea" }>;
+    fields: Array<{
+      label: string;
+      value: string;
+      type?: "text" | "select" | "time" | "textarea";
+      options?: string[];
+      required?: boolean;
+    }>;
     confirmLabel: string;
     cancelLabel: string;
     backdropHref?: string;
@@ -1418,7 +1467,9 @@ export type TeacherScreenConfig = {
   notifications?: {
     filters: Array<{ label: string; count?: number }>;
     termLabel?: string;
+    total?: number;
     items: Array<{
+      id?: string;
       title: string;
       body: string;
       when: string;
@@ -1440,7 +1491,7 @@ export type TeacherScreenConfig = {
     days: Array<{
       label: string;
       date: string;
-      events: Array<{ title: string; time: string; tone: "blue" | "green" | "purple" | "orange" }>;
+      events: Array<{ id?: string; title: string; time: string; tone: "blue" | "green" | "purple" | "orange" }>;
     }>;
   };
   fileManager?: {
@@ -1508,6 +1559,8 @@ export type TeacherScreenConfig = {
     crumb: string[];
     heading: string;
     description: string;
+    sectionId?: string | null;
+    sections?: Array<{ id: string; label: string }>;
     title: string;
     type: string;
     weight: string;
@@ -1829,7 +1882,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
       greeting: "Good Morning,",
       name: "Dr. Sarah Mitchell",
       meta: "Associate Professor • Fall 2026 Term • Business Administration Department",
-      statusBadge: "DEPT_CHAIR_REVIEWS: PENDING",
+      statusBadge: "Department reviews pending",
       quickActions: [
         { label: "Mark Attendance", href: "/instructor/attendance", variant: "primary" },
         { label: "Enter Grades", href: "/instructor/gradebook", variant: "secondary" },
@@ -2424,7 +2477,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t37-course-repository",
     figmaId: "4:11353",
     title: "Course Content Repository",
-    subtitle: "SYS.COURSE_MGMT // CONTENT_REPOSITORY",
+    subtitle: "Course content repository",
     breadcrumbs: ["Home", "Content Repository"],
     activeHref: "/instructor/f/t14-course-management",
     shell: "campus",
@@ -2521,7 +2574,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t54-courses-sessions",
     figmaId: "4:14505",
     title: "Manage Courses & Sessions",
-    subtitle: "SYS.COURSE_MGMT // SESSIONS_CATALOG",
+    subtitle: "Courses and their scheduled sessions",
     breadcrumbs: ["Home", "Courses & Sessions"],
     activeHref: "/instructor/f/t14-course-management",
     shell: "campus",
@@ -2540,7 +2593,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t77-course-admin",
     figmaId: "4:14506",
     title: "Course Sessions & Offerings",
-    subtitle: "SYS.COURSE_MGMT // COURSE_ADMIN",
+    subtitle: "Sessions and offerings for this course",
     breadcrumbs: ["Home", "Courses & Sessions", "Course Sessions"],
     activeHref: "/instructor/f/t14-course-management",
     shell: "campus",
@@ -2593,7 +2646,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t78-add-session-offering",
     figmaId: "4:14507",
     title: "Add Session / Offering: 0",
-    subtitle: "SYS.COURSE_MGMT // SESSION_CREATE",
+    subtitle: "Add a session or offering",
     breadcrumbs: ["Home", "Courses & Sessions", "Course Sessions", "Add Session"],
     activeHref: "/instructor/f/t14-course-management",
     shell: "campus",
@@ -2608,7 +2661,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t55-add-course-form",
     figmaId: "4:14670",
     title: "Add New Course Instance",
-    subtitle: "SYS.COURSE_MANAGER // WORKSPACE_VERIFIER",
+    subtitle: "Course workspace overview",
     breadcrumbs: ["Home", "Course Management", "Add Course"],
     activeHref: "/instructor/f/t14-course-management",
     archetype: "form",
@@ -3053,7 +3106,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t57-course-textbooks",
     figmaId: "4:15104",
     title: "Course Textbooks",
-    subtitle: "SYS.COURSE_MGMT // TEXTBOOKS",
+    subtitle: "Course textbooks",
     breadcrumbs: ["Home", "Course Textbooks"],
     activeHref: "/instructor/f/t14-course-management",
     shell: "campus",
@@ -3069,7 +3122,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t79-add-textbook",
     figmaId: "4:15105",
     title: "Add Textbook",
-    subtitle: "SYS.COURSE_MGMT // TEXTBOOK_CREATE",
+    subtitle: "Add a textbook",
     breadcrumbs: ["Home", "Course Textbooks", "Add Textbook"],
     activeHref: "/instructor/f/t14-course-management",
     shell: "campus",
@@ -3127,7 +3180,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t80-create-content-course",
     figmaId: "4:11354",
     title: "Create Content Course",
-    subtitle: "SYS.COURSE_MGMT // CONTENT_COURSE_CREATE",
+    subtitle: "Create a content course",
     breadcrumbs: ["Home", "Content Repository", "Create Content Course"],
     activeHref: "/instructor/f/t14-course-management",
     shell: "campus",
@@ -3219,7 +3272,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t58-course-categories",
     figmaId: "4:15486",
     title: "Course Categories",
-    subtitle: "SYS.COURSE_MGMT // CATEGORIES_EDITOR",
+    subtitle: "Course categories",
     breadcrumbs: ["Home", "Course Management", "Categories"],
     activeHref: "/instructor/f/t14-course-management",
     primaryAction: "Quick-Create Category",
@@ -3258,7 +3311,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t59-course-groups-types",
     figmaId: "4:15699",
     title: "Course Groups",
-    subtitle: "SYS.COURSE_MGMT // GROUPS",
+    subtitle: "Course groups and types",
     breadcrumbs: ["Home", "Course Management", "Course Groups"],
     activeHref: "/instructor/f/t14-course-management",
     primaryAction: "Add Course Group",
@@ -3298,7 +3351,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t60-course-resources-management",
     figmaId: "4:15877",
     title: "Manage Course Resources",
-    subtitle: "SYS.COURSE_MGMT // FILE_REPOSITORY",
+    subtitle: "Course files",
     breadcrumbs: ["Home", "Course Management", "Resources"],
     activeHref: "/instructor/f/t14-course-management",
     archetype: "splitPane",
@@ -3451,49 +3504,19 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
   "/instructor/f/in-17-course-approval": {
     path: "/instructor/f/in-17-course-approval",
     figmaId: "17:7922",
-    title: "Course Version Approval Review",
-    subtitle: "Review detailed modifications for Syllabus CS-301 (Spring 2026)",
+    title: "Course Approval Review",
+    subtitle: "Requests you have submitted for approval",
     breadcrumbs: ["Studio", "Approval"],
     activeHref: "/instructor/f/in-17-course-approval",
     shell: "studio",
     archetype: "syllabusDiff",
-    primaryAction: "Approve proposed syllabus",
-    secondaryAction: "Request changes",
     syllabusDiff: {
-      badge: "Pending Review",
-      currentTitle: "Current Syllabus Structure",
-      proposedTitle: "Proposed Changes (v3.0)",
-      current: [
-        { label: "Prerequisites:", value: "Prerequisite: MATH-101 Calculus I" },
-        { label: "Week 4 Topic:", value: "Simple linear search and array lists sorting algorithms." },
-        { label: "Total Assessments:", value: "Four localized in-class assignments worth 40% total." },
-      ],
-      proposed: [
-        {
-          label: "Prerequisites:",
-          added: "Prerequisite: MATH-101 Calculus I AND CS-201 Discrete Structures",
-        },
-        {
-          label: "Week 4 Topic:",
-          removed: "Simple linear search and array lists sorting algorithms.",
-          added: "Complex recursion trees and master-method analysis computations.",
-        },
-        { label: "Total Assessments:", value: "Four localized in-class assignments worth 40% total." },
-      ],
-      comments: [
-        {
-          author: "Dean Eleanor Vance",
-          role: "Faculty Chair",
-          when: "Yesterday",
-          body: "The addition of discrete structures is vital before jumping into advanced recursion bounds. Recommended change looks good.",
-        },
-        {
-          author: "Prof. Art Pendelton",
-          role: "Peer Reviewer",
-          when: "2h ago",
-          body: "Ensure the syllabus specifies the edition of CLRS being used so the bookstores can update.",
-        },
-      ],
+      badge: "",
+      currentTitle: "Latest request",
+      proposedTitle: "All requests",
+      current: [],
+      proposed: [],
+      comments: [],
     },
   },
 
@@ -3701,8 +3724,8 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
   "/instructor/notifications": {
     path: "/instructor/notifications",
     figmaId: "4:6347",
-    title: "Notification Center",
-    subtitle: "Manage critical system alerts and compliance dispatch logs.",
+    title: "Notifications",
+    subtitle: "Alerts and updates about your courses, students and account.",
     breadcrumbs: ["Home", "Notifications"],
     activeHref: "/instructor/notifications",
     shell: "campus",
@@ -3950,9 +3973,9 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
   "/instructor/attendance": {
     path: "/instructor/attendance",
     figmaId: "3:4952",
-    title: "Attendance Session",
-    subtitle: "ACC201 // ACTIVE_SESSION_DRAFT // SEC_A",
-    breadcrumbs: ["Attendance session", "ACC201"],
+    title: "Course Attendance",
+    subtitle: "Mark and submit attendance for your course sections",
+    breadcrumbs: ["Home", "Course Attendance"],
     activeHref: "/instructor/attendance",
     shell: "campus",
     archetype: "attendanceSession",
@@ -3960,11 +3983,11 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     secondaryAction: "Save Draft State",
     attendanceSession: {
       alert:
-        "System Deviation Alert: 3 students are below the 75% attendance compliance threshold in this section. Affected: Aris Thorne, Chloe Miller, Dave Patel.",
+        "3 students are below the 75% attendance threshold in this section.",
       classNode: "ACC201 Sec-A",
       dateLabel: "Oct 7, 2026 (09:00 AM)",
       rosterTitle: "Student Roster (32 Total)",
-      draftStatus: "STATUS: DRAFT // 28_MARKED",
+      draftStatus: "Draft · 28 marked",
       students: [
         {
           name: "Aris Thorne",
@@ -4023,7 +4046,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t21-attendance-correction-review",
     figmaId: "4:7002",
     title: "Attendance Reviews",
-    subtitle: "SYS.ATTENDANCE_DESK // DR_SARAH_MITCHELL",
+    subtitle: "Attendance correction requests",
     breadcrumbs: ["Home", "Attendance Reviews"],
     activeHref: "/instructor/f/t21-attendance-correction-review",
     shell: "campus",
@@ -4071,7 +4094,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t19-create-edit-assessment",
     figmaId: "4:6721",
     title: "Create Assessment",
-    subtitle: "SYS.STUDIO_WRITER // ACC201 // DR_SARAH_MITCHELL",
+    subtitle: "Create or edit an assessment",
     breadcrumbs: ["My Courses", "ACC201 Sec-A", "New Assessment"],
     activeHref: "/instructor/f/t14-course-management",
     shell: "campus",
@@ -4110,40 +4133,17 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t20-grade-correction-workflow",
     figmaId: "4:6864",
     title: "Grade Correction Review",
-    subtitle: "Review the requested ACC201 grade correction for Aris Thorne.",
+    subtitle: "Grade changes submitted for your course sections",
     breadcrumbs: ["Home", "Grades", "Grade Correction"],
     activeHref: "/instructor/f/t14-course-management",
     archetype: "syllabusDiff",
-    primaryAction: "Approve correction",
-    secondaryAction: "Return request",
     syllabusDiff: {
-      badge: "Pending Review",
-      currentTitle: "Current Grade",
-      proposedTitle: "Proposed Correction",
-      current: [
-        { label: "Student", value: "Aris Thorne · HCC-2026-1842" },
-        { label: "Course", value: "ACC201 · Financial Accounting I" },
-        { label: "Recorded Grade", value: "C+" },
-      ],
-      proposed: [
-        { label: "Student", value: "Aris Thorne · HCC-2026-1842" },
-        { label: "Course", value: "ACC201 · Financial Accounting I" },
-        { label: "Corrected Grade", removed: "C+", added: "B-" },
-      ],
-      comments: [
-        {
-          author: "Dr. Sarah Mitchell",
-          role: "Course Instructor",
-          when: "Today",
-          body: "The final project regrade adds six points and changes the calculated final grade from C+ to B-.",
-        },
-        {
-          author: "Heritage Community College Registrar",
-          role: "Records Review",
-          when: "1h ago",
-          body: "Supporting rubric and calculation worksheet received. Awaiting faculty approval.",
-        },
-      ],
+      badge: "",
+      currentTitle: "Request",
+      proposedTitle: "Grades in this request",
+      current: [],
+      proposed: [],
+      comments: [],
     },
   },
 
@@ -4151,7 +4151,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t61-grading-schemes",
     figmaId: "4:16047",
     title: "Manage Grading Schemes",
-    subtitle: "SYS.COURSE_MGMT // GRADING_SCHEMES",
+    subtitle: "Grading schemes",
     breadcrumbs: ["Home", "Grading Schemes"],
     activeHref: "/instructor/f/t14-course-management",
     shell: "campus",
@@ -4168,7 +4168,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t64-add-grading-scheme",
     figmaId: "4:16048",
     title: "Add Grading Scheme",
-    subtitle: "SYS.COURSE_MGMT // GRADING_SCHEME_CREATE",
+    subtitle: "Add a grading scheme",
     breadcrumbs: ["Home", "Grading Schemes", "Add Grading Schemes"],
     activeHref: "/instructor/f/t14-course-management",
     shell: "campus",
@@ -4262,7 +4262,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t65-course-backups",
     figmaId: "4:16501",
     title: "Course Backups",
-    subtitle: "SYS.COURSE_MGMT // BACKUPS",
+    subtitle: "Course backups",
     breadcrumbs: ["Home", "Course Management", "Course Backups"],
     activeHref: "/instructor/f/t14-course-management",
     countLabel: "0 backups",
@@ -4347,7 +4347,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t67-course-types",
     figmaId: "4:16503",
     title: "Manage Course Types",
-    subtitle: "SYS.COURSE_MGMT // COURSE_TYPES",
+    subtitle: "Course types and groups",
     breadcrumbs: ["Home", "Course Types"],
     activeHref: "/instructor/f/t14-course-management",
     shell: "campus",
@@ -4367,7 +4367,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t68-add-course-group",
     figmaId: "4:16504",
     title: "Add Course Group",
-    subtitle: "SYS.COURSE_MGMT // GROUP_CREATE",
+    subtitle: "Add a course group",
     breadcrumbs: ["Home", "Course Groups", "Add Course Group"],
     activeHref: "/instructor/f/t14-course-management",
     shell: "campus",
@@ -4393,7 +4393,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t69-add-course-type",
     figmaId: "4:16505",
     title: "Add Course Type",
-    subtitle: "SYS.COURSE_MGMT // TYPE_CREATE",
+    subtitle: "Add a course type",
     breadcrumbs: ["Home", "Course Types", "Add Course Type"],
     activeHref: "/instructor/f/t14-course-management",
     shell: "campus",
@@ -4452,7 +4452,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t70-add-badge",
     figmaId: "4:16506",
     title: "Add Badge / Accomplishment",
-    subtitle: "SYS.COURSE_MGMT // BADGE_CREATE",
+    subtitle: "Add a badge or accomplishment",
     breadcrumbs: ["Home", "Badges & Accomplishments", "Add Badge / Accomplishment"],
     activeHref: "/instructor/f/t14-course-management",
     shell: "campus",
@@ -4542,7 +4542,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t62-pending-grade-submissions",
     figmaId: "4:16245",
     title: "Pending Grade Submissions",
-    subtitle: "SYS.STUDENTS // GRADES_REVIEW",
+    subtitle: "Grades awaiting review",
     breadcrumbs: ["Home", "Grades", "Pending Submissions"],
     activeHref: "/instructor/f/t14-course-management",
     shell: "campus",
@@ -4731,7 +4731,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t43-create-student-profile",
     figmaId: "4:12383",
     title: "Create Student Profile",
-    subtitle: "STUDENTS // DIRECT_REGISTRATION // TERMINAL",
+    subtitle: "Create a student profile",
     breadcrumbs: ["Home", "Students", "Create Profile"],
     activeHref: "/instructor/f/t12-students-view",
     archetype: "form",
@@ -4766,7 +4766,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t44-academic-alerts",
     figmaId: "4:12498",
     title: "Academic Alerts",
-    subtitle: "STUDENTS // DISCIPLINARY_AND_PERFORMANCE_MONITOR",
+    subtitle: "Academic alerts for your students",
     breadcrumbs: ["Home", "Students", "Academic Alerts"],
     activeHref: "/instructor/f/t12-students-view",
     archetype: "alertList",
@@ -4777,7 +4777,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t45-student-flags",
     figmaId: "4:12620",
     title: "Student Flags",
-    subtitle: "STUDENTS // RED_FLAGS_AND_ACCOLADES // SYSTEM",
+    subtitle: "Flags raised for your students",
     breadcrumbs: ["Home", "Students", "Student Flags"],
     activeHref: "/instructor/f/t12-students-view",
     primaryAction: "Create Flag",
@@ -4847,7 +4847,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t46-student-assessments",
     figmaId: "4:12840",
     title: "Student Assessments",
-    subtitle: "SYS.STUDENT_HUB // ASSESSMENTS_OVERVIEW",
+    subtitle: "Student assessments overview",
     breadcrumbs: ["Home", "Students", "Assessments"],
     activeHref: "/instructor/f/t12-students-view",
     countLabel: "45 tasks · 8 pending grading · 12 missing",
@@ -4887,7 +4887,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t47-student-requirements",
     figmaId: "4:13060",
     title: "Student Requirements",
-    subtitle: "SYS.STUDENT_HUB // COMPLIANCE_AND_REQUIREMENTS",
+    subtitle: "Student requirements",
     breadcrumbs: ["Home", "Students", "Requirements"],
     activeHref: "/instructor/f/t12-students-view",
     countLabel: "23 unmet critical · 5 deadlines this week",
@@ -4941,7 +4941,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t48-leave-of-absence",
     figmaId: "4:13242",
     title: "Leave of Absence (LOA)",
-    subtitle: "SYS.STUDENT_HUB // LEAVE_MANAGEMENT",
+    subtitle: "Leave of absence requests",
     breadcrumbs: ["Home", "Students", "Leave of Absence"],
     activeHref: "/instructor/f/t12-students-view",
     primaryAction: "Submit New LOA",
@@ -4991,7 +4991,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t49-course-withdraw-requests",
     figmaId: "4:13392",
     title: "Withdraw Requests",
-    subtitle: "SYS.STUDENT_HUB // WITHDRAWAL_QUEUE",
+    subtitle: "Course withdrawal requests",
     breadcrumbs: ["Home", "Students", "Course Withdrawals"],
     activeHref: "/instructor/f/t12-students-view",
     countLabel: "Pending Review · Approved 12 · Denied",
@@ -5040,7 +5040,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t63-students-by-status-filter",
     figmaId: "4:16388",
     title: "Student Directory",
-    subtitle: "SYS.STUDENTS // COHORT_EXPLORER",
+    subtitle: "Students by status",
     breadcrumbs: ["Home", "Students", "Status Filter"],
     activeHref: "/instructor/f/t12-students-view",
     archetype: "hccStudents",
@@ -5050,7 +5050,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t64-pending-transcript-changes",
     figmaId: "4:16400",
     title: "Pending Transcript Changes",
-    subtitle: "SYS.TRANSCRIPT // PENDING",
+    subtitle: "Pending transcript changes",
     breadcrumbs: ["Home", "Pending Transcript Changes"],
     activeHref: "/instructor/f/t64-pending-transcript-changes",
     archetype: "hccTranscriptPending",
@@ -5161,7 +5161,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t74-add-program",
     figmaId: "4:16600",
     title: "ADD PROGRAM",
-    subtitle: "SYS.PROGRAM_ADMIN // PROGRAM_CREATE",
+    subtitle: "Add a program",
     breadcrumbs: ["Home", "Faculties & Programs", "Add Program"],
     activeHref: "/instructor/f/t13-program-management",
     archetype: "form",
@@ -5250,7 +5250,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t27-program-change-request",
     figmaId: "4:8112",
     title: "New Program Change Request",
-    subtitle: "BBA_PROGRAM_STUDIES // CURRICULUM_AMENDMENT",
+    subtitle: "Request a change to a program's curriculum",
     breadcrumbs: ["Home", "Program Management", "Change Request"],
     activeHref: "/instructor/f/t13-program-management",
     archetype: "form",
@@ -5294,7 +5294,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t50-program-types",
     figmaId: "4:13533",
     title: "Manage Program Types",
-    subtitle: "SYS.PROGRAM_ADMIN // PROGRAM_TYPES",
+    subtitle: "Program types used across faculties",
     breadcrumbs: ["Home", "Program Types"],
     activeHref: "/instructor/f/t13-program-management",
     shell: "campus",
@@ -5311,7 +5311,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t75-add-program-type",
     figmaId: "4:13534",
     title: "Add Program Type",
-    subtitle: "SYS.PROGRAM_ADMIN // PROGRAM_TYPE_CREATE",
+    subtitle: "Add a program type",
     breadcrumbs: ["Home", "Program Types", "Add Program Type"],
     activeHref: "/instructor/f/t13-program-management",
     shell: "campus",
@@ -5346,7 +5346,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t51-manage-terms",
     figmaId: "4:13710",
     title: "Manage Terms",
-    subtitle: "SYS.PROGRAM_ADMIN // TERM_SCHEDULER",
+    subtitle: "Academic terms and their dates",
     breadcrumbs: ["Home", "Manage Terms"],
     activeHref: "/instructor/f/t13-program-management",
     shell: "campus",
@@ -5369,7 +5369,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t76-add-term",
     figmaId: "4:13711",
     title: "Add Term",
-    subtitle: "SYS.PROGRAM_ADMIN // TERM_CREATE",
+    subtitle: "Add a term",
     breadcrumbs: ["Home", "Manage Terms", "Add Term"],
     activeHref: "/instructor/f/t13-program-management",
     shell: "campus",
@@ -5443,7 +5443,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t84-review-term",
     figmaId: "4:13712",
     title: "Review Term",
-    subtitle: "SYS.PROGRAM_ADMIN // TERM_REVIEW",
+    subtitle: "Review term details",
     breadcrumbs: ["Home", "Manage Terms", "Review Term"],
     activeHref: "/instructor/f/t13-program-management",
     shell: "campus",
@@ -5462,7 +5462,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t85-manage-schedule",
     figmaId: "4:14308",
     title: "Manage Schedule",
-    subtitle: "SYS.PROGRAM_MGMT // SCHEDULE_MANAGE",
+    subtitle: "Manage schedule and fees",
     breadcrumbs: ["Home", "Scheduling", "Manage Schedule"],
     activeHref: "/instructor/f/t13-program-management",
     shell: "campus",
@@ -5483,7 +5483,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t10-assessments-gradebook",
     figmaId: "3:5121",
     title: "Assessments & Gradebook",
-    subtitle: "ACC201 // GRADES_AUDIT_PUBLISH",
+    subtitle: "Review and publish grades",
     breadcrumbs: ["Home", "My Courses", "ACC201", "Gradebook"],
     activeHref: "/instructor/f/t10-assessments-gradebook",
     archetype: "gradebook",
@@ -5528,8 +5528,6 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
         },
       ],
       legend: [
-        "Spreadsheet Ledger Mode · FORMULA_MODE: ISO_3901_AUTO",
-        "Active Audit Selection · ST-1029 // DIST_L5",
         "Performances show a +4.2% deviation above section average. Final exam draft complete. Attendance validated at 98.4%.",
       ],
     },
@@ -5539,7 +5537,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     path: "/instructor/f/t29-password-reset-flow",
     figmaId: "4:8499",
     title: "Password Reset",
-    subtitle: "Secure account recovery for faculty terminals.",
+    subtitle: "Reset your account password securely.",
     breadcrumbs: ["Home", "System", "Password Reset"],
     activeHref: "/instructor/f/t29-password-reset-flow",
     archetype: "authGate",
@@ -5576,28 +5574,21 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
   "/instructor/f/t31-first-login-profile-completion": {
     path: "/instructor/f/t31-first-login-profile-completion",
     figmaId: "4:8650",
-    title: "Welcome Aboard — Faculty Onboarding",
-    subtitle: "SYS.ONBOARDING // NEW_FACULTY_NODE",
-    breadcrumbs: ["Home", "Onboarding", "Profile Completion"],
+    title: "Profile Completion",
+    subtitle: "Complete your faculty profile",
+    breadcrumbs: ["Home", "My Profile", "Profile Completion"],
     activeHref: "/instructor/f/t31-first-login-profile-completion",
     archetype: "authGate",
     shell: "campus",
     authGate: {
-      heading: "Temporary Password Update",
-      description: "Please complete your primary contact details. This will be validated by the registrar.",
-      fieldLabel: "Current Temporary Password",
-      fieldValue: "••••••••",
-      cta: "Save & Continue",
-      help: "Need assistance with academic credentials? Contact Academic Operations",
-      extraFields: [
-        { label: "Full Name", value: "Dr. Sarah Mitchell" },
-        { label: "Preferred Name", value: "Sarah" },
-        { label: "Phone Number", value: "+1 (416) 555-0142" },
-        { label: "Office Location", value: "Hall A · Office 312" },
-        { label: "Emergency Contact (Name, Phone, Relation)", value: "" },
-        { label: "New Secure Password", value: "" },
-        { label: "Confirm New Password", value: "" },
-      ],
+      heading: "Complete your faculty profile",
+      description: "Add your contact and education details so students and the registrar can reach you.",
+      fieldLabel: "Course sections assigned",
+      fieldValue: "",
+      cta: "Complete Profile",
+      ctaHref: "/instructor/f/t02-profile-biography?edit=1",
+      help: "Need help with your account? Contact the Registrar's Office",
+      extraFields: [],
     },
   },
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import type { CourseLmsState } from "@/lib/teacherCatalog";
+import type { CourseLmsState, LmsAssignmentSettings } from "@/lib/teacherCatalog";
 import { useOptionalTeacherLive } from "@/lib/useTeacherSisLive";
 import { liveSectionId, openClassLink } from "@/lib/liveClass";
 import { LiveClassPanel } from "@/components/LiveClassPanel";
@@ -183,30 +183,104 @@ export function GradesBoard({
           Expand
         </button>
       </div>
+      {lms.gradeBoard ? (
+        <LiveGradeTable board={lms.gradeBoard} emptyMessage={lms.gradeEmpty} />
+      ) : (
+        <>
+          <div className="mh-lms-grade-wrap">
+            <table className="mh-lms-grade-table">
+              <thead>
+                <tr>
+                  {lms.gradeColumns.map((col) => (
+                    <th key={col} scope="col">
+                      {col}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {lms.gradeWeights ? (
+                  <tr className="mh-lms-grade-table__row--muted">
+                    {lms.gradeWeights.map((w, i) => (
+                      <td key={`${lms.gradeColumns[i] ?? i}-w`}>{w || "—"}</td>
+                    ))}
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+          <p className="mh-teacher-muted mh-lms-grade-empty">{lms.gradeEmpty || "No students registered"}</p>
+        </>
+      )}
+    </section>
+  );
+}
+
+function LiveGradeTable({
+  board,
+  emptyMessage,
+}: {
+  board: NonNullable<CourseLmsState["gradeBoard"]>;
+  emptyMessage?: string;
+}) {
+  const statusLabel = (status: string) => (status === "pending_publish" ? "pending approval" : status.replace("_", " "));
+  return (
+    <>
+      <div className="mh-lms-toolbar">
+        <a className="mh-teacher-link" href={board.gradebookHref}>
+          Open full gradebook
+        </a>
+        <a className="mh-teacher-link" href={board.submissionsHref}>
+          View submissions
+        </a>
+      </div>
       <div className="mh-lms-grade-wrap">
         <table className="mh-lms-grade-table">
           <thead>
             <tr>
-              {lms.gradeColumns.map((col) => (
-                <th key={col} scope="col">
-                  {col}
+              <th scope="col">Student</th>
+              {board.assignments.map((a) => (
+                <th key={a.id} scope="col">
+                  {a.title}
                 </th>
               ))}
+              <th scope="col">Weighted total</th>
             </tr>
           </thead>
           <tbody>
-            {lms.gradeWeights ? (
-              <tr className="mh-lms-grade-table__row--muted">
-                {lms.gradeWeights.map((w, i) => (
-                  <td key={`${lms.gradeColumns[i] ?? i}-w`}>{w || "—"}</td>
+            <tr className="mh-lms-grade-table__row--muted">
+              <td>Weight · submitted</td>
+              {board.assignments.map((a) => (
+                <td key={`${a.id}-w`}>
+                  {a.weightPercent}% · {a.submitted} submitted
+                </td>
+              ))}
+              <td>—</td>
+            </tr>
+            {board.rows.map((row) => (
+              <tr key={row.studentId}>
+                <td>
+                  <strong>{row.name}</strong>
+                  <div className="mh-teacher-muted">{row.studentNumber}</div>
+                </td>
+                {row.cells.map((cell) => (
+                  <td key={`${row.studentId}-${cell.assignmentId}`}>
+                    {cell.mark ?? "—"}
+                    <div className="mh-teacher-muted">{statusLabel(cell.status)}</div>
+                  </td>
                 ))}
+                <td>{row.total ?? "—"}</td>
               </tr>
-            ) : null}
+            ))}
           </tbody>
         </table>
       </div>
-      <p className="mh-teacher-muted mh-lms-grade-empty">{lms.gradeEmpty || "No students registered"}</p>
-    </section>
+      {!board.rows.length ? (
+        <p className="mh-teacher-muted mh-lms-grade-empty">{emptyMessage || "No students registered"}</p>
+      ) : !board.assignments.length ? (
+        <p className="mh-teacher-muted mh-lms-grade-empty">No graded items yet. Add an assignment to start grading.</p>
+      ) : null}
+    </>
   );
 }
 
@@ -722,7 +796,89 @@ type Activity = {
   modified?: string;
   joinUrl?: string | null;
   storyboard?: AiDraftStoryboard;
+  description?: string;
+  url?: string;
+  settings?: Record<string, string>;
+  assignmentId?: string;
+  assignment?: LmsAssignmentSettings;
 };
+
+function formatWhen(iso?: string) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+}
+
+/** Absolute http(s) links only; anything else is shown as text, never as a clickable href. */
+export function safeExternalUrl(value?: string) {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+export function LmsUrlCard({ url, description }: { url?: string; description?: string }) {
+  const href = safeExternalUrl(url);
+  return (
+    <div className="mh-lms-pagebody">
+      {description ? <p style={{ whiteSpace: "pre-wrap" }}>{description}</p> : null}
+      {href ? (
+        <p>
+          <a className="mh-teacher-btn" href={href} target="_blank" rel="noopener noreferrer">
+            Open link
+          </a>{" "}
+          <span className="mh-teacher-muted" style={{ wordBreak: "break-all" }}>
+            {href}
+          </span>
+        </p>
+      ) : (
+        <p className="mh-teacher-muted">No link has been added to this activity.</p>
+      )}
+    </div>
+  );
+}
+
+/** Assignment rules shown identically to the instructor (preview) and the student. */
+export function LmsAssignmentSummary({ assignment, description }: { assignment?: LmsAssignmentSettings; description?: string }) {
+  const a = assignment || {};
+  const types = [a.fileSubmissions !== false ? "File submissions" : "", a.onlineText ? "Online text" : ""].filter(Boolean);
+  const rows: Array<[string, string]> = [
+    ["Opens", formatWhen(a.availableFrom)],
+    ["Due", formatWhen(a.dueAt)],
+    ["Cut-off", formatWhen(a.cutoffAt)],
+    ["Maximum grade", a.maxScore != null ? String(a.maxScore) : ""],
+    ["Submission types", types.join(", ")],
+    ["Maximum files", a.fileSubmissions !== false && a.maxFiles ? String(a.maxFiles) : ""],
+    ["Maximum file size", a.fileSubmissions !== false && a.maxFileBytes ? formatFileSize(a.maxFileBytes) : ""],
+    ["Accepted file types", a.fileSubmissions !== false && a.acceptedTypes ? a.acceptedTypes.split(",").join(", ") : ""],
+  ];
+  return (
+    <div className="mh-lms-pagebody">
+      {description ? <p style={{ whiteSpace: "pre-wrap" }}>{description}</p> : null}
+      {a.instructions ? (
+        <>
+          <h3>Instructions</h3>
+          <p style={{ whiteSpace: "pre-wrap" }}>{a.instructions}</p>
+        </>
+      ) : null}
+      <table className="mh-lms-eval">
+        <tbody>
+          {rows
+            .filter(([, v]) => v)
+            .map(([k, v]) => (
+              <tr key={k}>
+                <td>{k}</td>
+                <td>{v}</td>
+              </tr>
+            ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 /** FILE / FOLDER activity card shared by the admin, instructor and student course views. */
 export function LmsFileCard({
@@ -965,13 +1121,33 @@ export function ResourceView({
             {publishMsg ? <p className="mh-teacher-muted">{publishMsg}</p> : null}
           </div>
         </div>
-      ) : type === "FILE" && /evaluation/i.test(activity.name) ? (
+      ) : type === "FILE" && activity.id === "act-evaluation-criteria" && !activity.fileId ? (
         <EvaluationTable rows={evaluationRows || []} />
-      ) : type === "FILE" && (activity.id === "act-course-syllabus" || /syllabus/i.test(activity.name)) && !activity.fileId ? (
+      ) : type === "FILE" && activity.id === "act-course-syllabus" && !activity.fileId ? (
         <p className="mh-teacher-muted">
           Students download the syllabus file uploaded on the admin course record (Course Catalogue → this course → Syllabus) once
           its privacy is set to Enrolled Students or Public.
         </p>
+      ) : type === "URL" ? (
+        <LmsUrlCard url={activity.url} description={activity.description} />
+      ) : type === "ASSIGNMENT" ? (
+        <>
+          <LmsAssignmentSummary assignment={activity.assignment} description={activity.description} />
+          {activity.assignmentId && sectionId ? (
+            <p>
+              <a
+                className="mh-teacher-btn mh-teacher-btn--secondary"
+                href={`/instructor/submissions?sectionId=${encodeURIComponent(sectionId)}&assignmentId=${encodeURIComponent(activity.assignmentId)}`}
+              >
+                View submissions
+              </a>
+            </p>
+          ) : (
+            <p className="mh-teacher-muted">
+              Students cannot submit to this item yet. Use Settings and save it once to open submissions for this section.
+            </p>
+          )}
+        </>
       ) : (type === "FOLDER" || type === "FILE") && !activity.body ? (
         <LmsFileCard activity={activity} sectionId={sectionId} audience="staff" />
       ) : (

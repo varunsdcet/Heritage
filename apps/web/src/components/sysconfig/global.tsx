@@ -33,11 +33,13 @@ export function Plugins() {
         canDelete={() => false}
         modalTitle={(r) => `Plug-in Settings: ${str(r?.name)}`}
         saveLabel="Save Plug-in Settings"
-        headerActions={() => (
-          <button type="button" className="mh-sa__btn mh-sa__btn--primary" onClick={() => setEndpoint(true)}>
-            Create Custom Endpoint
-          </button>
-        )}
+        headerActions={(ctx) =>
+          ctx.canEdit ? (
+            <button type="button" className="mh-sa__btn mh-sa__btn--primary" onClick={() => setEndpoint(true)}>
+              Create Custom Endpoint
+            </button>
+          ) : null
+        }
         groups={(rows) => {
           const order: string[] = [];
           for (const r of rows) if (!order.includes(str(r.group))) order.push(str(r.group));

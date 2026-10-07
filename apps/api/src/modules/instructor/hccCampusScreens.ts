@@ -5,6 +5,7 @@ import { agentCatalogue, fullName, profilesFor, s as str, staffAccounts, statusO
 import { entityRecords } from "../admin/heritage/sysconfig.js";
 import { STATUS_TREE } from "../admin/heritage/students.spec.js";
 import { dateBoundsFromSessions, instructorDisplayName, scheduleTextFromSessions } from "../courses/sectionSchedule.js";
+import { FLAG_TYPES, listInstructorFlags } from "./instructorFlags.js";
 import {
   FILTER_ALL_LABELS,
   NO_VALUE,
@@ -15,6 +16,13 @@ import {
   type FilterKey,
   type FilterMenu,
 } from "./studentFilterCatalog.js";
+
+/** Class-session instants are shown in campus wall-clock time, not the server's (UTC) zone. */
+const DISPLAY_TZ = process.env.INSTITUTION_TZ || "America/Vancouver";
+const WEEKDAY_INDEX: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+function campusWeekday(d: Date) {
+  return WEEKDAY_INDEX[d.toLocaleDateString("en-US", { timeZone: DISPLAY_TZ, weekday: "short" })] ?? d.getUTCDay();
+}
 
 /**
  * Status labels used by the instructor side-nav (`statusCounts[label]` lookups). Counts are always
@@ -114,13 +122,13 @@ function locationLabel(sessions: SessionRow[], sectionCode: string) {
 }
 
 function formatClock(d: Date) {
-  return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).toLowerCase().replace(" ", "");
+  return d.toLocaleTimeString("en-US", { timeZone: DISPLAY_TZ, hour: "numeric", minute: "2-digit" }).toLowerCase().replace(" ", "");
 }
 
 function scheduleLabel(sessions: SessionRow[], sectionCode: string) {
   const mine = sessions.filter((s) => s.sectionCode === sectionCode);
   if (!mine.length) return "TBA";
-  const days = [...new Set(mine.map((s) => s.startsAt.getDay()))].sort();
+  const days = [...new Set(mine.map((s) => campusWeekday(s.startsAt)))].sort();
   const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const dayLabel =
     days.length >= 4 && days[0] === 1 && days[days.length - 1] === 4
@@ -130,8 +138,8 @@ function scheduleLabel(sessions: SessionRow[], sectionCode: string) {
         : days.map((d) => dayNames[d]).join(", ");
   const first = mine[0]!;
   const end = first.endsAt ?? new Date(first.startsAt.getTime() + 90 * 60 * 1000);
-  const startIso = first.startsAt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-  const endIso = end.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const startIso = first.startsAt.toLocaleDateString("en-US", { timeZone: DISPLAY_TZ, month: "short", day: "numeric", year: "numeric" });
+  const endIso = end.toLocaleDateString("en-US", { timeZone: DISPLAY_TZ, month: "short", day: "numeric", year: "numeric" });
   return `${startIso} - ${endIso}\n${dayLabel}, ${formatClock(first.startsAt)} - ${formatClock(end)}`;
 }
 
@@ -418,13 +426,13 @@ export async function buildHccCourseHistory(ctx: {
       const start =
         meta?.startsOn ||
         (first
-          ? first.startsAt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+          ? first.startsAt.toLocaleDateString("en-US", { timeZone: DISPLAY_TZ, month: "short", day: "numeric", year: "numeric" })
           : null);
       const endRaw = last?.endsAt ?? last?.startsAt ?? null;
       const end =
         meta?.endsOn ||
         (endRaw
-          ? endRaw.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+          ? endRaw.toLocaleDateString("en-US", { timeZone: DISPLAY_TZ, month: "short", day: "numeric", year: "numeric" })
           : null);
       const dates =
         start && end && start !== end ? `${start} - ${end}` : start || end || meta?.name || s.termCode || "—";
@@ -701,6 +709,7 @@ export async function buildHccPendingGradeSubmissions(
     dates: p.dates,
     submittedBy: p.submittedBy,
     submittedAt: p.submittedAt.toLocaleDateString("en-US", {
+      timeZone: DISPLAY_TZ,
       month: "short",
       day: "numeric",
       year: "numeric",
@@ -772,7 +781,7 @@ function sessionMetaForDate(sessions: SessionRow[], sectionCode: string, dateIso
 type AttendanceDraft = {
   savedAt?: string;
   finalized?: boolean;
-  roster: Array<{ studentId: string; status: string; sectionId?: string }>;
+  roster: Array<{ studentId: string; status: string; note?: string; sectionId?: string }>;
 };
 
 /** Unsubmitted "Save Draft" roster for this date (stored by the attendance action in screen state). */
@@ -802,10 +811,13 @@ export async function buildHccAttendance(ctx: {
   classSessions: SessionRow[];
   term: { code: string; name: string } | null;
   dateIso?: string;
+  sectionId?: string | null;
 }) {
   const dateIso = /^\d{4}-\d{2}-\d{2}$/.test(ctx.dateIso || "") ? ctx.dateIso! : localIsoDate(new Date());
+  const selected = ctx.sectionId ? ctx.sections.find((s) => s.id === ctx.sectionId) ?? null : null;
   const inTerm = ctx.term ? ctx.sections.filter((s) => s.termCode === ctx.term!.code) : ctx.sections;
-  const current = inTerm.length ? inTerm : ctx.sections;
+  const termSections = inTerm.length ? inTerm : ctx.sections;
+  const current = selected && !termSections.includes(selected) ? [...termSections, selected] : termSections;
   const sectionIds = current.map((s) => s.id);
 
   const [records, draft] = await Promise.all([
@@ -838,7 +850,7 @@ export async function buildHccAttendance(ctx: {
         studentNumber: e.studentNumber,
         // Empty status leaves both Present/Absent unselected: not yet marked for this date.
         status: rec ? attendanceLabel(rec.status) : pending ? attendanceLabel(pending.status) : "",
-        note: rec?.note || "",
+        note: rec ? rec.note || "" : pending?.note || "",
       };
     });
 
@@ -856,7 +868,7 @@ export async function buildHccAttendance(ctx: {
       state = `Attendance submitted: ${parts}${missing ? ` · ${missing} not yet marked` : ""}`;
     } else if (students.some((st) => st.status)) {
       const saved = draft?.savedAt ? new Date(draft.savedAt) : null;
-      state = `Draft saved${saved && !Number.isNaN(saved.getTime()) ? ` ${saved.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` : ""} · not submitted yet`;
+      state = `Draft saved${saved && !Number.isNaN(saved.getTime()) ? ` ${saved.toLocaleString("en-US", { timeZone: DISPLAY_TZ, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` : ""} · not submitted yet`;
     } else {
       state = "Attendance not yet taken for this date";
     }
@@ -883,8 +895,15 @@ export async function buildHccAttendance(ctx: {
   next.setDate(d.getDate() + 1);
   const navLabel = (x: Date) =>
     x.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const selectedGroup = selected ? groups.find((g) => g.sectionId === selected.id) : undefined;
+  const subtitle = selectedGroup
+    ? `${selectedGroup.course} (${selectedGroup.offering}) — ${selectedGroup.title} · ${navLabel(d)} · ${sessionMetaForDate(ctx.classSessions, selectedGroup.offering, dateIso)}`
+    : current.length
+      ? `${current.map((s) => `${s.courseCode} (${s.code})`).join(", ")} · ${navLabel(d)}`
+      : "No course sections are assigned to you";
   return {
     title: "COURSE ATTENDANCE",
+    subtitle,
     breadcrumbs: ["Home", "Course Attendance"],
     archetype: "hccAttendance",
     primaryAction: "Submit Attendance",
@@ -892,7 +911,8 @@ export async function buildHccAttendance(ctx: {
     hccAttendance: {
       dateFilter: dateIso,
       studentFilter: "",
-      courseFilter: "All Courses",
+      courseFilter: selectedGroup ? `${selectedGroup.course} (${selectedGroup.offering})` : "All Courses",
+      sectionId: selectedGroup?.sectionId ?? "",
       centerLabel: `ATTENDANCE FOR: ${label.toUpperCase()}`,
       prevLabel: navLabel(prev),
       nextLabel: navLabel(next),
@@ -951,8 +971,8 @@ export async function buildHccPendingSchedules(
       tone = "danger";
     }
     const requested = sessions[0]?.startsAt
-      ? sessions[0].startsAt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-      : new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+      ? sessions[0].startsAt.toLocaleDateString("en-US", { timeZone: DISPLAY_TZ, month: "short", day: "numeric", year: "numeric" })
+      : new Date().toLocaleDateString("en-US", { timeZone: DISPLAY_TZ, month: "short", day: "numeric", year: "numeric" });
     return {
       id: s.id,
       course: s.courseCode,
@@ -1126,6 +1146,7 @@ async function loadDirectoryStudents(institutionId: string, scopePersonId: strin
       programTerm: orDash(st.enrolments[0]?.section.term.name),
       admissionTerm: orDash(m.admissionTerm),
       date: st.createdAt.toLocaleString("en-US", {
+        timeZone: DISPLAY_TZ,
         month: "short",
         day: "numeric",
         year: "numeric",
@@ -1338,11 +1359,14 @@ export async function buildHccStudentsDirectory(user: SessionClaims, path: strin
 }
 
 export async function buildHccStudentFlags(user: SessionClaims) {
+  const raised = await listInstructorFlags(user);
+  const seesAll = user.roles.includes("admin") || user.roles.includes("registrar");
   const rows = await prisma.portalRecord.findMany({
     where: {
       institutionId: user.institutionId,
       screenPath: "/instructor/f/t45-student-flags",
       role: "instructor",
+      ...(seesAll ? {} : { audienceAccountId: user.accountId }),
     },
     orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
     take: 60,
@@ -1358,13 +1382,18 @@ export async function buildHccStudentFlags(user: SessionClaims) {
       id: r.id,
       student: r.primaryText,
       description: r.secondaryText || "",
-      status: meta.status || "Unresolved",
+      status: meta.status || "Active",
+      resolved: "No",
       appliesHold: meta.hold || "No",
-      date: meta.date || r.createdAt.toLocaleString(),
+      date: meta.date || r.createdAt.toISOString().slice(0, 10),
+      canEdit: false,
+      href: "",
     };
   });
+  const all = [...raised, ...mapped];
   return {
-    title: "STUDENT FLAGS",
+    title: "Student Flags",
+    subtitle: seesAll ? `${all.length} student flag(s)` : `${all.length} flag(s) you have raised`,
     breadcrumbs: ["Home", "Student Flags"],
     archetype: "hccFlags",
     hccFlags: {
@@ -1372,10 +1401,11 @@ export async function buildHccStudentFlags(user: SessionClaims) {
       status: "Active",
       resolved: "No",
       template: "All Flags",
-      results: mapped.length,
-      rows: mapped,
+      results: all.length,
+      rows: all,
+      flagTypes: FLAG_TYPES,
     },
-    countLabel: `${mapped.length} flag(s)`,
+    countLabel: `${all.length} flag(s)`,
   };
 }
 

@@ -1,6 +1,7 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { z } from "zod";
 import { prisma } from "@myheritage/db";
+import { registerApplicant } from "./apply.js";
 
 export const publicRouter: Router = Router();
 
@@ -8,7 +9,7 @@ const WINDOW_MS = 15 * 60 * 1000;
 const MAX_REQUESTS = 30;
 const hits = new Map<string, { count: number; resetAt: number }>();
 
-function rateLimit(bucket: string) {
+function rateLimit(bucket: string, max = MAX_REQUESTS, message = "Too many verification attempts. Try again later.") {
   return (req: Request, res: Response, next: NextFunction) => {
     const client = req.header("x-forwarded-for")?.split(",")[0]?.trim() || req.ip || "unknown";
     const key = `${bucket}|${client}`;
@@ -21,13 +22,21 @@ function rateLimit(bucket: string) {
       return;
     }
     entry.count += 1;
-    if (entry.count > MAX_REQUESTS) {
-      res.status(429).json({ error: { code: "RATE_LIMITED", message: "Too many verification attempts. Try again later." } });
+    if (entry.count > max) {
+      res.status(429).json({ error: { code: "RATE_LIMITED", message } });
       return;
     }
     next();
   };
 }
+
+publicRouter.post("/apply", rateLimit("apply", 5, "Too many sign-up attempts from this network. Try again later."), async (req, res, next) => {
+  try {
+    res.status(201).json(await registerApplicant(req.body));
+  } catch (err) {
+    next(err);
+  }
+});
 
 /**
  * Identity match needs both the student number and the registered family name, so a

@@ -445,7 +445,7 @@ export function Awards() {
 
 type AdjRow = { id: string; number: number; studentId: string; student?: Who; direction: string; amount: number; reason: string; status: string; requestedAt: string; reviewedAt: string; reviewNote: string };
 
-const ADJ_FILTERS: FilterDef[] = [{ ...campus, label: "Campus" }, { ...student, label: "Student" }, { key: "status", label: "Adjustment Status", kind: "select", all: "ALL PROMOTION STATUSES", options: () => ["Pending", "Approved / Complete", "Declined"] }];
+const ADJ_FILTERS: FilterDef[] = [{ ...campus, label: "Campus" }, { ...student, label: "Student" }, { key: "status", label: "Adjustment Status", kind: "select", all: "ALL ADJUSTMENT STATUSES", options: () => ["Pending", "Approved / Complete", "Declined"] }];
 
 export function Adjustments() {
   return (

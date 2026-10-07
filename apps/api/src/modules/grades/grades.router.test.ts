@@ -23,12 +23,15 @@ const db = vi.hoisted(() => ({
   person: { findMany: vi.fn() },
   auditEvent: { create: vi.fn() },
   institution: { findFirst: vi.fn() },
-  term: { findFirst: vi.fn() },
+  term: { findFirst: vi.fn(), findMany: vi.fn() },
   gradeItem: { findMany: vi.fn() },
   portalRecord: { findMany: vi.fn() },
 }));
 
+const transcript = vi.hoisted(() => ({ getTranscriptSummary: vi.fn() }));
+
 vi.mock("@myheritage/db", () => ({ prisma: db }));
+vi.mock("../academic/program-plan.service.js", () => transcript);
 vi.mock("../../middleware/auth.js", () => ({
   requireAuth(req: Request, _res: Response, next: NextFunction) {
     Object.assign(req, { user: testClaims, correlationId: "test-correlation" });
@@ -132,7 +135,9 @@ beforeEach(() => {
   db.auditEvent.create.mockResolvedValue({});
   db.institution.findFirst.mockResolvedValue({ name: "Heritage Community College", city: "Surrey", region: "BC" });
   db.term.findFirst.mockResolvedValue({ name: "Fall 2026", code: "2026F" });
+  db.term.findMany.mockResolvedValue([{ name: "Fall 2026", code: "2026F", startsOn: "2026-09-01", endsOn: "2026-12-18" }]);
   db.gradeItem.findMany.mockResolvedValue([publishedGrade, draftGrade]);
+  transcript.getTranscriptSummary.mockResolvedValue({ cgpa: 3.67 });
 });
 
 describe("ST-07 student grade visibility", () => {
@@ -155,6 +160,8 @@ describe("ST-07 student grade visibility", () => {
       }),
     );
     expect(course.currentPercent).toBe(88);
+    expect(payload.cumulativeGpa).toBe(3.67);
+    expect(transcript.getTranscriptSummary).toHaveBeenCalledWith(testClaims.institutionId, "20000000-0000-4000-8000-000000000001");
     expect(JSON.stringify(payload)).not.toContain(draftGrade.id);
     expect(JSON.stringify(payload)).not.toContain('"score":92');
     expect(db.enrolment.findMany).toHaveBeenCalledWith(

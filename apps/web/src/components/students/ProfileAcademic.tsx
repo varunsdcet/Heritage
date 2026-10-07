@@ -33,41 +33,57 @@ const enc = encodeURIComponent;
 /* Grades & Transcript                                                  */
 /* ------------------------------------------------------------------ */
 
-type Marks = { programs: Array<{ value: string; label: string }>; items: Array<{ id: string; course: string; term: string; credits: number; finalGrade: string; gradePoint: number | null; completed: string }>; cgpa: number | null };
+type Marks = {
+  terms: Array<{ code: string; name: string }>;
+  items: Array<{ id: string; course: string; term: string; credits: number; percent: number | null; finalGrade: string; gradePoint: number | null; status: string; completed: string }>;
+  cgpa: number | null;
+  earnedCredits: number;
+  attemptedCredits: number;
+  averagePercent: number | null;
+  currentAverage: number | null;
+};
 
 export function FinalMarks() {
   const { id } = useProfile();
   const [draft, setDraft] = useState("all");
   const [applied, setApplied] = useState("all");
-  const { data, error } = useLoad<Marks>(`/${enc(id)}/final-marks${qs({ program: applied })}`);
+  const { data, error } = useLoad<Marks>(`/${enc(id)}/final-marks${qs({ term: applied })}`);
   return (
     <>
       <Card>
         <Filters submit="Search" onSubmit={() => setApplied(draft)}>
-          <F label="Program Profile">
-            <Sel value={draft} onChange={setDraft} options={data?.programs.filter((p, i, a) => p.value && a.findIndex((x) => x.value === p.value) === i) ?? [{ value: "all", label: "All Programs" }]} />
+          <F label="Term">
+            <Sel value={draft} onChange={setDraft} options={(data?.terms ?? [{ code: "all", name: "All Terms" }]).map((t) => ({ value: t.code, label: t.name }))} />
           </F>
         </Filters>
       </Card>
       <Card>
         <ErrorLine>{error}</ErrorLine>
         {data && !data.items.length ? (
-          <Empty>No final marks were found.</Empty>
+          <Empty>No course marks were found.</Empty>
         ) : (
-          <Table head={["Course", "Term", "Credits", "Final Grade", "Grade Point", "Completion Date"]}>
+          <Table head={["Course", "Term", "Credits", "Percent", "Final Grade", "Grade Point", "Status", "Completion Date"]}>
             {(data?.items ?? []).map((m) => (
               <tr key={m.id}>
                 <td>{m.course}</td>
                 <td>{m.term || "—"}</td>
                 <td>{m.credits}</td>
+                <td>{m.percent === null ? "—" : `${m.percent.toFixed(2)}%`}</td>
                 <td>{m.finalGrade || "—"}</td>
                 <td>{m.gradePoint === null ? "—" : m.gradePoint.toFixed(2)}</td>
+                <td>{m.status}</td>
                 <td>{m.completed ? fmtDate(m.completed) : "—"}</td>
               </tr>
             ))}
           </Table>
         )}
-        {data && data.items.length ? <p className="pm-note">CGPA: {data.cgpa ?? "—"}</p> : null}
+        {data && data.items.length ? (
+          <p className="pm-note">
+            Credits earned: {data.earnedCredits.toFixed(2)} of {data.attemptedCredits.toFixed(2)} attempted · Average: {data.averagePercent == null ? "—" : `${data.averagePercent.toFixed(2)}%`} · CGPA:{" "}
+            {data.cgpa == null ? "—" : data.cgpa.toFixed(2)}
+            {data.currentAverage != null ? ` · Current average of courses in progress: ${data.currentAverage.toFixed(2)}%` : ""}
+          </p>
+        ) : null}
       </Card>
     </>
   );
@@ -118,35 +134,64 @@ export function GenerateTranscript() {
 /* Program Plan                                                         */
 /* ------------------------------------------------------------------ */
 
+type Seats = { capacity: number | null; waitlist: boolean; waitlistSize: number | null; enrolled: number; waitlisted: number };
+
 type Plan = {
   enrolled: boolean;
   status: string;
   rateCategory: string;
+  defaultRateCategory: string;
+  rateCategories: string[];
   enrolments: Array<{ id: string; program: string; schedule: string; feedIn: string; status: string; startDate: string; date: string }>;
   programs: Array<{ id: string; name: string }>;
   schedules: Array<{ id: string; program: string; name: string; description: string }>;
-  feedIns: Array<{ id: string; schedule: string; course: string; startDate: string; endDate: string; campus: string }>;
+  feedIns: Array<{
+    id: string;
+    schedule: string;
+    course: string;
+    startDate: string;
+    endDate: string;
+    campus: string;
+    sectionId: string;
+    fee: { amount: number; included: boolean; termName: string } | null;
+    seats: Seats | null;
+  }>;
   statuses: string[];
 };
 
-function EnrolmentEntry({ plan, onSaved }: { plan: Plan; onSaved: () => void }) {
+type EnrolOut = { id: string; courses: Array<{ course: string; status: string; feeNote: string | null; fee: { amount: number } | null }> };
+
+const money = (n: number) => n.toLocaleString("en-CA", { style: "currency", currency: "CAD" });
+
+function seatLine(seats: Seats) {
+  if (seats.capacity === null) return `${seats.enrolled} enrolled, no seat limit`;
+  const left = seats.capacity - seats.enrolled;
+  if (left > 0) return `${left} of ${seats.capacity} seats left`;
+  return seats.waitlist ? `Full (${seats.enrolled}/${seats.capacity}); new students are waitlisted` : `Full (${seats.enrolled}/${seats.capacity}) and the waitlist is disabled`;
+}
+
+function EnrolmentEntry({ plan, onSaved }: { plan: Plan; onSaved: (message: string) => void }) {
   const { id } = useProfile();
-  const [f, setF] = useState({ programId: "", scheduleId: "", sessionId: "", status: "" });
+  const [f, setF] = useState({ programId: "", scheduleId: "", sessionId: "", status: "", rateCategory: plan.rateCategory || plan.defaultRateCategory, courseScope: "schedule", postFee: true });
   const { busy, error, setError, run } = useSubmit();
   const schedules = plan.schedules.filter((s) => s.program === f.programId);
   const feedIns = plan.feedIns.filter((x) => x.schedule === f.scheduleId);
   const session = feedIns.find((x) => x.id === f.sessionId);
   const save = async () => {
-    const missing = [!f.programId && "Program", !f.scheduleId && "Schedule", !f.sessionId && "Feed-in Course", !f.status && "Student Status"].filter(Boolean);
+    const missing = [!f.programId && "Program", !f.scheduleId && "Schedule", !f.sessionId && "Feed-in Course", !f.status && "Student Status", !f.rateCategory && "Rate Category / Fee Status"].filter(Boolean);
     if (missing.length) return setError(`Please complete: ${missing.join(", ")}`);
-    if (await run(() => send(`/${enc(id)}/plan/enrol`, "POST", f), "Could not save the program enrolment")) onSaved();
+    const out = await run(() => send<EnrolOut>(`/${enc(id)}/plan/enrol`, "POST", f), "Could not save the program enrolment");
+    if (!out) return;
+    const courses = out.courses.map((c) => `${c.course}${c.status === "waitlisted" ? " (waitlisted)" : c.status === "existing" ? " (already enrolled)" : ""}`);
+    const fees = out.courses.reduce((t, c) => t + (c.fee?.amount ?? 0), 0);
+    onSaved(`Program enrolment saved.${courses.length ? ` Course enrolments: ${courses.join(", ")}.` : ""}${fees > 0 ? ` Course fees posted: ${money(fees)}.` : ""}`);
   };
   return (
     <Card title="Program Enrolment">
       <ErrorLine>{error}</ErrorLine>
       <Grid>
         <F label="Program" req>
-          <Sel value={f.programId} onChange={(v) => setF({ programId: v, scheduleId: "", sessionId: "", status: f.status })} empty="— Select —" options={plan.programs.map((p) => ({ value: p.id, label: p.name }))} />
+          <Sel value={f.programId} onChange={(v) => setF((s) => ({ ...s, programId: v, scheduleId: "", sessionId: "" }))} empty="— Select —" options={plan.programs.map((p) => ({ value: p.id, label: p.name }))} />
         </F>
         <F label="Schedule" req>
           <Sel value={f.scheduleId} onChange={(v) => setF((s) => ({ ...s, scheduleId: v, sessionId: "" }))} disabled={!f.programId} empty={f.programId ? (schedules.length ? "— Select —" : "No schedules for this program") : "Select a program first"} options={schedules.map((s) => ({ value: s.id, label: s.description ? `${s.name} — ${s.description}` : s.name }))} />
@@ -157,10 +202,41 @@ function EnrolmentEntry({ plan, onSaved }: { plan: Plan; onSaved: () => void }) 
         <F label="Student Status" req>
           <Sel value={f.status} onChange={(v) => setF((s) => ({ ...s, status: v }))} empty="— Select —" options={plan.statuses} />
         </F>
+        <F label="Rate Category / Fee Status" req hint={!plan.rateCategory && plan.defaultRateCategory ? `Defaulted from residency (${plan.defaultRateCategory}); saved to the profile with the enrolment.` : undefined}>
+          <Sel value={f.rateCategory} onChange={(v) => setF((s) => ({ ...s, rateCategory: v }))} empty="— Select —" options={plan.rateCategories} />
+        </F>
         <F label="Start Date">
           <input className="mh-sa__input" readOnly value={session?.startDate ? fmtDate(session.startDate) : ""} placeholder="Set by the feed-in course" />
         </F>
+        <F label="Course Enrolments">
+          <Sel
+            value={f.courseScope}
+            onChange={(v) => setF((s) => ({ ...s, courseScope: v }))}
+            options={[
+              { value: "schedule", label: "Feed-in course and the schedule's later courses" },
+              { value: "feedIn", label: "Feed-in course only" },
+            ]}
+          />
+        </F>
       </Grid>
+      {session ? (
+        <div style={{ marginTop: 10 }}>
+          {!session.sectionId ? <p className="mh-sa__muted">This feed-in session is linked to a course section when the enrolment is saved.</p> : null}
+          {session.seats ? <p className="mh-sa__muted">Feed-in section: {seatLine(session.seats)}.</p> : null}
+          <div className="lx-checks">
+            <Check checked={f.postFee} onChange={(on) => setF((s) => ({ ...s, postFee: on }))}>
+              Post course fee
+              {session.fee
+                ? session.fee.included
+                  ? " (feed-in tuition is included in the program cost)"
+                  : session.fee.amount > 0
+                    ? ` — ${money(session.fee.amount)} for the feed-in course${session.fee.termName ? `, ${session.fee.termName}` : ""}`
+                    : " (no course cost set for the feed-in course)"
+                : ""}
+            </Check>
+          </div>
+        </div>
+      ) : null}
       <div className="st-filters__actions" style={{ marginTop: 12 }}>
         <Btn tone="primary" disabled={busy} onClick={() => void save()}>
           Save Program Enrolment
@@ -225,8 +301,8 @@ export function PlanGate({ view }: { view: "overview" | "customize" | "transfer"
   const { id, notice, reloadHeader } = useProfile();
   const { data: plan, error, reload } = useLoad<Plan>(`/${enc(id)}/plan`);
   if (!plan) return error ? <ErrorLine>{error}</ErrorLine> : <Empty>Loading…</Empty>;
-  const saved = () => {
-    notice.ok("Program enrolment saved.");
+  const saved = (message: string) => {
+    notice.ok(message);
     reload();
     reloadHeader();
   };
@@ -235,7 +311,7 @@ export function PlanGate({ view }: { view: "overview" | "customize" | "transfer"
     return (
       <>
         <p className="st-warning">This student is currently not enrolled or active in any programs. Enrol the student in a program to manage the program plan.</p>
-        {!plan.rateCategory ? <p className="pm-warn" style={{ marginBottom: 12 }}>Rate Category / Fee Status is not set on this profile. Registered Student, Active Student and Graduated cannot be selected until it is set.</p> : null}
+        {!plan.rateCategory ? <p className="pm-warn" style={{ marginBottom: 12 }}>Rate Category / Fee Status is not set on this profile yet. Choose it below; it is saved with the program enrolment.</p> : null}
         {showEntry ? <EnrolmentEntry plan={plan} onSaved={saved} /> : null}
       </>
     );

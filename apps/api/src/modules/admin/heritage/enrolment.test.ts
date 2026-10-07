@@ -1,0 +1,142 @@
+import type { SessionClaims } from "@myheritage/contracts";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const user = { sub: "acct-1", accountId: "acct-1", personId: "p-admin", institutionId: "inst-1", roles: ["admin"], sessionId: "s-1" } as SessionClaims;
+
+const tx = vi.hoisted(() => ({
+  $executeRaw: vi.fn(),
+  enrolment: { findFirst: vi.fn(), count: vi.fn(), create: vi.fn(), update: vi.fn() },
+  auditEvent: { create: vi.fn() },
+}));
+
+const db = vi.hoisted(() => ({
+  student: { findFirst: vi.fn() },
+  section: { findFirst: vi.fn() },
+  account: { findFirst: vi.fn() },
+  notification: { create: vi.fn() },
+  $transaction: vi.fn(),
+}));
+
+const courses = vi.hoisted(() => ({ settingsOf: vi.fn() }));
+const fin = vi.hoisted(() => ({
+  postEntry: vi.fn(),
+  ensureFinancialTerm: vi.fn(),
+  loadConfig: vi.fn(),
+  assertPeriodOpen: vi.fn(),
+  finAudit: vi.fn(),
+  requireStudent: vi.fn(),
+}));
+
+vi.mock("@myheritage/db", () => ({ prisma: db }));
+vi.mock("./courses.js", () => ({ S: { session: "CM:SESSION", courseSettings: "CM:COURSE" }, settingsOf: courses.settingsOf }));
+vi.mock("./finance.core.js", async (importOriginal) => ({ ...(await importOriginal<typeof import("./finance.core.js")>()), ...fin }));
+vi.mock("./finance.ledger.js", () => ({ isInternational: (st: { rateCategory?: string }) => /international/i.test(st.rateCategory ?? "") }));
+vi.mock("./studentLock.js", () => ({ withStudentMoneyLock: (_inst: string, _student: string, work: () => Promise<unknown>) => work() }));
+
+import { courseFeeQuote, enrolInSections, seatDecision, seatRule } from "./enrolment.js";
+
+const section = {
+  id: "sec-1",
+  courseId: "course-1",
+  code: "01",
+  course: { code: "CS101", title: "Intro to Computing", credits: 3 },
+  term: { id: "term-1", code: "2026F", name: "Fall 2026", startsOn: "2026-09-01", endsOn: "2026-12-18" },
+};
+
+function settings(session: Record<string, unknown> | undefined, course: Record<string, unknown> | undefined) {
+  courses.settingsOf.mockImplementation(async (_inst: string, screen: string, ids: string[]) => {
+    const data = screen === "CM:SESSION" ? session : course;
+    return new Map(data ? [[ids[0], { data }]] : []);
+  });
+}
+
+function seats(enrolled: number, waitlisted: number) {
+  tx.enrolment.count.mockImplementation(async ({ where }: { where: { status: string } }) => (where.status === "enrolled" ? enrolled : waitlisted));
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  db.student.findFirst.mockResolvedValue({ id: "stu-1", personId: "p-stu" });
+  db.section.findFirst.mockResolvedValue(section);
+  db.account.findFirst.mockResolvedValue(null);
+  db.$transaction.mockImplementation(async (work: (client: typeof tx) => Promise<unknown>) => work(tx));
+  tx.enrolment.findFirst.mockResolvedValue(null);
+  tx.enrolment.create.mockImplementation(async ({ data }: { data: { status: string } }) => ({ id: "enr-1", ...data }));
+  tx.auditEvent.create.mockResolvedValue({});
+  fin.requireStudent.mockResolvedValue({ id: "stu-1", campus: "Surrey", rateCategory: "Domestic" });
+  fin.loadConfig.mockResolvedValue({ ledgerTypes: [{ id: "lt-fee", data: { name: "Course Fee" } }] });
+  fin.ensureFinancialTerm.mockResolvedValue({ id: "fin-term-1" });
+  fin.postEntry.mockResolvedValue({ entry: { id: "entry-1" }, number: 42 });
+});
+
+describe("seat rules", () => {
+  it("reads capacity and waitlist from the session settings", () => {
+    expect(seatRule({ maxEnrolments: "20", waitlist: "Disabled", waitlistSize: "" })).toEqual({ capacity: 20, waitlist: false, waitlistSize: null });
+    expect(seatRule(undefined)).toEqual({ capacity: null, waitlist: true, waitlistSize: null });
+  });
+
+  it("enrols while seats remain, waitlists when full with an open waitlist, refuses otherwise", () => {
+    expect(seatDecision({ capacity: 2, waitlist: false, waitlistSize: null }, { enrolled: 1, waitlisted: 0 }, "CS101 01")).toBe("enrolled");
+    expect(seatDecision({ capacity: 2, waitlist: true, waitlistSize: null }, { enrolled: 2, waitlisted: 5 }, "CS101 01")).toBe("waitlisted");
+    expect(() => seatDecision({ capacity: 2, waitlist: false, waitlistSize: null }, { enrolled: 2, waitlisted: 0 }, "CS101 01")).toThrow(expect.objectContaining({ status: 409, code: "SECTION_FULL" }));
+    expect(() => seatDecision({ capacity: 2, waitlist: true, waitlistSize: 1 }, { enrolled: 2, waitlisted: 1 }, "CS101 01")).toThrow(expect.objectContaining({ status: 409, code: "WAITLIST_FULL" }));
+  });
+});
+
+describe("course fee quote", () => {
+  it("prefers a session fee, then the course cost per credit, else tuition is included", () => {
+    expect(courseFeeQuote({ tuitionIncluded: false, domestic: 100 }, { tuitionIncluded: false, domestic: 250, international: 900 }, 3, true)).toMatchObject({ amount: 900, source: "session" });
+    expect(courseFeeQuote({ tuitionIncluded: false, costCalculation: "Per Credit", domestic: 100, international: 300 }, undefined, 3, false)).toMatchObject({ amount: 300, source: "course" });
+    expect(courseFeeQuote({ tuitionIncluded: true }, undefined, 3, false)).toEqual({ amount: 0, included: true, source: "none", domestic: 0, international: 0 });
+  });
+});
+
+describe("enrolInSections", () => {
+  it("returns a 409 and writes nothing when the section is full and its waitlist is disabled", async () => {
+    settings({ maxEnrolments: 1, waitlist: "Disabled" }, undefined);
+    seats(1, 0);
+    await expect(enrolInSections(user, "stu-1", ["sec-1"], { source: "test" })).rejects.toMatchObject({ status: 409, code: "SECTION_FULL" });
+    expect(tx.enrolment.create).not.toHaveBeenCalled();
+  });
+
+  it("waitlists over capacity when the waitlist is enabled and does not charge the fee", async () => {
+    settings({ maxEnrolments: 1, waitlist: "Enabled" }, { tuitionIncluded: false, costCalculation: "Flat", domestic: 400 });
+    seats(1, 0);
+    const [out] = await enrolInSections(user, "stu-1", ["sec-1"], { source: "test", postFee: true });
+    expect(out).toMatchObject({ status: "waitlisted", fee: null });
+    expect(out!.feeNote).toMatch(/waitlisted/);
+    expect(tx.enrolment.create).toHaveBeenCalledWith({ data: expect.objectContaining({ status: "waitlisted" }) });
+    expect(fin.postEntry).not.toHaveBeenCalled();
+  });
+
+  it("posts the course fee in the enrolment transaction, linked to the course, section and the section's term", async () => {
+    settings({ maxEnrolments: 10 }, { tuitionIncluded: false, costCalculation: "Flat", domestic: 400, international: 1200 });
+    seats(3, 0);
+    const [out] = await enrolInSections(user, "stu-1", ["sec-1"], { source: "test", postFee: true });
+    expect(out).toMatchObject({ status: "enrolled", fee: { id: "entry-1", number: 42, amount: 400 } });
+    expect(fin.ensureFinancialTerm).toHaveBeenCalledWith("inst-1", section.term, tx);
+    expect(fin.postEntry).toHaveBeenCalledWith(
+      user,
+      expect.objectContaining({ studentId: "stu-1", kind: "charge", amount: 400, termId: "fin-term-1", courseId: "course-1", sectionId: "sec-1" }),
+      expect.objectContaining({ ledgerTypeId: "lt-fee", enrolmentId: "enr-1" }),
+      tx,
+    );
+  });
+
+  it("does not post a fee when the option is off", async () => {
+    settings({ maxEnrolments: 10 }, { tuitionIncluded: false, costCalculation: "Flat", domestic: 400 });
+    seats(0, 0);
+    const [out] = await enrolInSections(user, "stu-1", ["sec-1"], { source: "test", postFee: false });
+    expect(out).toMatchObject({ status: "enrolled", fee: null, feeNote: null });
+    expect(fin.postEntry).not.toHaveBeenCalled();
+  });
+
+  it("leaves an existing enrolment alone for program enrolment and refuses a duplicate otherwise", async () => {
+    settings({ maxEnrolments: 10 }, undefined);
+    seats(0, 0);
+    tx.enrolment.findFirst.mockResolvedValue({ id: "enr-old", status: "enrolled" });
+    await expect(enrolInSections(user, "stu-1", ["sec-1"], { source: "test", skipExisting: true })).resolves.toEqual([expect.objectContaining({ enrolmentId: "enr-old", status: "existing" })]);
+    await expect(enrolInSections(user, "stu-1", ["sec-1"], { source: "test" })).rejects.toMatchObject({ status: 409, code: "ALREADY_ENROLLED" });
+    expect(tx.enrolment.create).not.toHaveBeenCalled();
+  });
+});

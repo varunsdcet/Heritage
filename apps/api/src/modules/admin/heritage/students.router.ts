@@ -17,6 +17,7 @@ import {
   listFlags,
   newProgramProfile,
   overview,
+  setRateCategory,
   studentsMeta,
   updateFlag,
   uploadStudentFile,
@@ -46,6 +47,7 @@ import {
   approveGradeSubmission,
   badgeQueue,
   bulkLog,
+  decideBadge,
   declineGradeSubmission,
   gradeSubmission,
   gradeSubmissions,
@@ -125,6 +127,7 @@ studentsRouter.post("/queues/grades/:approvalId/decline", handle((req) => declin
 studentsRouter.get("/queues/transcript-changes", handle((req) => transcriptChanges(user(req))));
 studentsRouter.get("/queues/entry-marks", handle((req) => pendingEntryMarks(user(req))));
 studentsRouter.get("/queues/badges", handle((req) => badgeQueue(user(req), query(req))));
+studentsRouter.post("/queues/badges/:badgeId/decide", handle((req) => decideBadge(user(req), p(req, "badgeId"), body(req))));
 studentsRouter.get("/queues/bulk-log", handle((req) => bulkLog(user(req))));
 
 /* Profile: Status & Profile */
@@ -133,6 +136,7 @@ studentsRouter.get("/:id/overview", handle((req) => overview(user(req), p(req, "
 studentsRouter.post("/:id/files", handle((req) => uploadStudentFile(user(req), p(req, "id"), body(req)), 201));
 studentsRouter.get("/:id/files/:fileId", handle((req) => downloadStudentFile(user(req), p(req, "id"), p(req, "fileId"))));
 studentsRouter.post("/:id/status", handle((req) => changeStatus(user(req), p(req, "id"), body(req))));
+studentsRouter.put("/:id/rate-category", handle((req) => setRateCategory(user(req), p(req, "id"), body(req))));
 studentsRouter.post("/:id/program-profile", handle((req) => newProgramProfile(user(req), p(req, "id"), body(req)), 201));
 studentsRouter.get("/:id/flags", handle((req) => listFlags(user(req), p(req, "id"), query(req))));
 studentsRouter.post("/:id/flags", handle((req) => addFlag(user(req), p(req, "id"), body(req)), 201));

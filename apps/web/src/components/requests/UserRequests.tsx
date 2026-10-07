@@ -343,38 +343,60 @@ export function UserRequestsList() {
 /* Shared frame for a single request                                    */
 /* ------------------------------------------------------------------ */
 
+const isRequestNumber = (n: number) => Number.isSafeInteger(n) && n > 0;
+
 function useRequest(number: number) {
+  const valid = isRequestNumber(number);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const reload = useCallback(
-    () =>
-      rq<Detail>(`/${number}`)
-        .then((d) => {
-          setDetail(d);
-          setError(null);
-        })
-        .catch((e) => setError(errMsg(e, "Could not load the request"))),
-    [number],
-  );
+  const [notFound, setNotFound] = useState(!valid);
+  const reload = useCallback(async () => {
+    if (!valid) return;
+    try {
+      setDetail(await rq<Detail>(`/${number}`));
+      setError(null);
+    } catch (e) {
+      if (e instanceof ApiError && (e.status === 404 || e.status === 400)) setNotFound(true);
+      else setError(errMsg(e, "Could not load the request"));
+    }
+  }, [number, valid]);
   useEffect(() => {
     void reload();
   }, [reload]);
-  return { detail, error, setError, reload };
+  return { detail, error, setError, reload, notFound };
 }
 
 function RequestFrame({
   number,
   detail,
   edit,
+  notFound,
   children,
 }: {
   number: number;
   detail: Detail | null;
   edit?: boolean;
+  notFound?: boolean;
   children: ReactNode;
 }) {
   const form = detail?.form ?? "";
   const listing = detail ? requestsHref(detail.type) : "/admin/requests";
+  if (notFound) {
+    return (
+      <SuperFrame title="User request not found" breadcrumbs={["Home", "User Requests", "Not found"]} breadcrumbHrefs={["/admin", "/admin/requests"]} activeHref="/admin/requests">
+        <div className="ur">
+          <SaCard title="Not found">
+            <p>There is no user request with this number. It may have been deleted, or the link may be mistyped.</p>
+            <p>
+              <Link className="mh-sa__btn mh-sa__btn--primary" href="/admin/requests">
+                Back to User Requests
+              </Link>
+            </p>
+          </SaCard>
+        </div>
+      </SuperFrame>
+    );
+  }
   const title = `${edit ? "EDIT " : ""}USER REQUEST #${number}${form ? `: ${form.toUpperCase()}` : ""}`;
   return (
     <SuperFrame
@@ -420,7 +442,7 @@ function Dl({ rows }: { rows: Array<[string, ReactNode]> }) {
 
 export function UserRequestReview({ number }: { number: number }) {
   const meta = useMeta();
-  const { detail, error, setError, reload } = useRequest(number);
+  const { detail, error, setError, reload, notFound } = useRequest(number);
   const [settings, setSettings] = useState<LoaSettings | null>(null);
   const [comments, setComments] = useState("");
   const [confirming, setConfirming] = useState(false);
@@ -456,7 +478,7 @@ export function UserRequestReview({ number }: { number: number }) {
   }
 
   return (
-    <RequestFrame number={number} detail={detail}>
+    <RequestFrame number={number} detail={detail} notFound={notFound}>
       {notice ? (
         <SaNotice tone="success" onClose={() => setNotice(null)}>
           {notice}
@@ -690,7 +712,7 @@ function Req({ label, required }: { label: string; required: boolean }) {
 }
 
 export function UserRequestEdit({ number }: { number: number }) {
-  const { detail, error, setError, reload } = useRequest(number);
+  const { detail, error, setError, reload, notFound } = useRequest(number);
   const [profile, setProfile] = useState<ProfileFields | null>(null);
   const [loa, setLoa] = useState<{ reason: string; startsOn: string; endsOn: string } | null>(null);
   const [service, setService] = useState<{ subject: string; details: string } | null>(null);
@@ -739,7 +761,7 @@ export function UserRequestEdit({ number }: { number: number }) {
   );
 
   return (
-    <RequestFrame number={number} detail={detail} edit>
+    <RequestFrame number={number} detail={detail} edit notFound={notFound}>
       {notice ? (
         <SaNotice tone="success" onClose={() => setNotice(null)}>
           {notice}.{" "}

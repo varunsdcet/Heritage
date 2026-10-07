@@ -26,6 +26,7 @@ import {
   qs,
   send,
   useLoad,
+  useStudentsMeta,
   useSubmit,
   type FileRef,
 } from "./kit";
@@ -65,10 +66,41 @@ function DL({ items }: { items: Array<[string, string | undefined | null]> }) {
   );
 }
 
+function RateCategoryModal({ current, onClose, onSaved }: { current: string; onClose: () => void; onSaved: () => void }) {
+  const { id, notice } = useProfile();
+  const { meta } = useStudentsMeta();
+  const [value, setValue] = useState(current);
+  const { busy, error, setError, run } = useSubmit();
+  const save = async () => {
+    if (!value) return setError("Select a Rate Category / Fee Status");
+    if (await run(() => send(`/${enc(id)}/rate-category`, "PUT", { rateCategory: value }), "Could not save the rate category")) {
+      notice.ok("Rate Category / Fee Status saved.");
+      onSaved();
+    }
+  };
+  return (
+    <Modal
+      title="Rate Category / Fee Status"
+      onClose={onClose}
+      footer={
+        <Btn tone="primary" disabled={busy} onClick={() => void save()}>
+          Save
+        </Btn>
+      }
+    >
+      <ErrorLine>{error}</ErrorLine>
+      <F label="Rate Category / Fee Status" req>
+        <Sel value={value} onChange={setValue} empty="— Select —" options={meta?.options.rateCategories ?? []} />
+      </F>
+    </Modal>
+  );
+}
+
 export function StudentOverview() {
   const { id } = useProfile();
-  const { data, error } = useLoad<Overview>(`/${enc(id)}/overview`);
+  const { data, error, reload } = useLoad<Overview>(`/${enc(id)}/overview`);
   const [deleting, setDeleting] = useState(false);
+  const [editingRate, setEditingRate] = useState(false);
   if (!data) return error ? <ErrorLine>{error}</ErrorLine> : <Empty>Loading…</Empty>;
   const c = data.contact;
   return (
@@ -139,6 +171,19 @@ export function StudentOverview() {
             ["Rate Category / Fee Status", data.rateCategory],
           ]}
         />
+        <p>
+          <LinkBtn onClick={() => setEditingRate(true)}>{data.rateCategory ? "Change Rate Category / Fee Status" : "Set Rate Category / Fee Status"}</LinkBtn>
+        </p>
+        {editingRate ? (
+          <RateCategoryModal
+            current={data.rateCategory || data.residency}
+            onClose={() => setEditingRate(false)}
+            onSaved={() => {
+              setEditingRate(false);
+              reload();
+            }}
+          />
+        ) : null}
       </Card>
       <p>
         <LinkBtn danger onClick={() => setDeleting(true)}>

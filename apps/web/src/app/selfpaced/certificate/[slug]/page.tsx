@@ -6,11 +6,11 @@ import { useEffect, useState } from "react";
 import { LearnerShell } from "@/components/selfpaced/LearnerShell";
 import { SelfpacedCertificate } from "@/components/selfpaced/SelfpacedCertificate";
 import {
-  ensureCertificate,
   isCourseComplete,
   isEnrolled,
   loadProgress,
   loadSelfpacedUser,
+  requestCertificate,
   type EnrollmentRecord,
 } from "@/lib/selfpacedAuth";
 import { allAssessmentsPassed } from "@/lib/selfpacedEngine";
@@ -26,9 +26,11 @@ export default function SelfpacedCertificatePage() {
   const [enrollment, setEnrollment] = useState<EnrollmentRecord | null>(null);
   const [finished, setFinished] = useState(false);
   const [pct, setPct] = useState(0);
+  const [issue, setIssue] = useState<{ signIn: boolean; message: string } | null>(null);
 
   useEffect(() => {
     if (!program) return;
+    let cancelled = false;
     const user = loadSelfpacedUser();
     if (!user) {
       router.replace(`/selfpaced/dashboard?auth=login&next=/selfpaced/certificate/${program.slug}`);
@@ -44,13 +46,21 @@ export default function SelfpacedCertificatePage() {
     const complete = isCourseComplete(program.slug, total) && allAssessmentsPassed(program.slug);
     setFinished(complete);
     setName(user.name || "Learner");
-    if (complete) {
-      const issued = ensureCertificate(program.slug, total);
-      setEnrollment(issued);
-    } else {
-      setEnrollment(null);
+    setEnrollment(null);
+    setIssue(null);
+    if (!complete) {
+      setReady(true);
+      return;
     }
-    setReady(true);
+    void requestCertificate(program.slug, total).then((out) => {
+      if (cancelled) return;
+      if (out.ok) setEnrollment(out.record);
+      else setIssue({ signIn: out.reason === "sign_in", message: out.message });
+      setReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [program, router]);
 
   if (!program) {
@@ -106,6 +116,28 @@ export default function SelfpacedCertificatePage() {
                 >
                   Public verify page
                 </Link>
+                <Link href={`/selfpaced/learn/${program.slug}`} className="sp-linkish">
+                  ← Back to course
+                </Link>
+              </div>
+            </>
+          ) : finished && issue ? (
+            <>
+              <p className="sp-kicker">COURSE COMPLETE</p>
+              <h1>One more step to issue your certificate</h1>
+              <p className="sp-lede" role="status">
+                {issue.message}
+              </p>
+              <div className="sp-hero__cta">
+                {issue.signIn ? (
+                  <Link href={`/login?next=${encodeURIComponent(`/selfpaced/certificate/${program.slug}`)}`} className="sp-btn sp-btn--primary">
+                    Sign in to issue certificate
+                  </Link>
+                ) : (
+                  <button type="button" className="sp-btn sp-btn--primary" onClick={() => window.location.reload()}>
+                    Try again
+                  </button>
+                )}
                 <Link href={`/selfpaced/learn/${program.slug}`} className="sp-linkish">
                   ← Back to course
                 </Link>

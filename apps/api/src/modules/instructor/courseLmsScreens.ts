@@ -51,6 +51,27 @@ export type CourseLmsActivity = {
   joinUrl?: string | null;
   /** Narrated slideshow ("AI video lesson") played by the avatar player. */
   storyboard?: AiDraftStoryboard;
+  description?: string;
+  /** URL activities: validated absolute http(s) link. */
+  url?: string;
+  /** Raw add/edit form values so the settings form reopens as the instructor left it. */
+  settings?: Record<string, string>;
+  /** Graded workspace assignment backed by an `Assignment` row. */
+  assignmentId?: string;
+  assignment?: {
+    instructions?: string;
+    availableFrom?: string;
+    dueAt?: string;
+    cutoffAt?: string;
+    gradeBy?: string;
+    maxScore?: number;
+    weightPercent?: number;
+    fileSubmissions?: boolean;
+    onlineText?: boolean;
+    maxFiles?: number;
+    maxFileBytes?: number;
+    acceptedTypes?: string;
+  };
 };
 
 export type CourseLmsQuestion = {
@@ -783,7 +804,7 @@ export function mergeCourseLmsOverlay(
   );
   const activityEdits =
     overlay.activityEdits && typeof overlay.activityEdits === "object"
-      ? (overlay.activityEdits as Record<string, Partial<Pick<CourseLmsActivity, "name" | "body" | "modified">>>)
+      ? (overlay.activityEdits as Record<string, Partial<CourseLmsActivity>>)
       : {};
   const topics = [...lms.topics, ...extraTopics.filter((t) => !lms.topics.some((base) => base.id === t.id))].map(
     (topic) => ({

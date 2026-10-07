@@ -3,6 +3,28 @@ import type { RoleName } from "@myheritage/contracts";
 import { prisma, type Prisma } from "@myheritage/db";
 import { writeAuditAndOutbox } from "@myheritage/events";
 
+/** Roles that may also act for a required approver role: a System Administrator (`admin`) covers registrar approvals. */
+const COVERING_ROLES: Partial<Record<RoleName, RoleName[]>> = { registrar: ["admin"] };
+
+export function canDecideApproval(actorRoles: readonly RoleName[], requiredRoles: readonly RoleName[]) {
+  return requiredRoles.some((r) => actorRoles.includes(r) || (COVERING_ROLES[r] ?? []).some((c) => actorRoles.includes(c)));
+}
+
+export function parseApproverRoles(json: string): RoleName[] {
+  try {
+    const roles = JSON.parse(json) as unknown;
+    return Array.isArray(roles) ? (roles.filter((r) => typeof r === "string") as RoleName[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+const GRADE_APPROVAL_TYPES = new Set(["grade_publish", "grade.publish"]);
+
+export function approvalRequestedEventName(type: string) {
+  return GRADE_APPROVAL_TYPES.has(type) ? "GradeItem.publishRequested" : "ApprovalRequest.requested";
+}
+
 export async function requireApproval(input: {
   institutionId: string;
   type: string;
@@ -35,7 +57,7 @@ export async function requireApproval(input: {
     await writeAuditAndOutbox(tx, {
       institutionId: input.institutionId,
       actorId: input.requestedBy,
-      eventName: input.eventName ?? "GradeItem.publishRequested",
+      eventName: input.eventName ?? approvalRequestedEventName(input.type),
       purpose: input.purpose ?? "consequential_write",
       before: null,
       after: { approvalRequestId: row.id, type: input.type },
@@ -65,8 +87,7 @@ export async function decideApproval(input: {
     if (row.status !== "pending") {
       throw Object.assign(new Error("Approval is not pending"), { code: "CONFLICT", status: 409 });
     }
-    const requiredRoles = JSON.parse(row.requiredApproverRolesJson) as RoleName[];
-    if (!requiredRoles.some((r) => input.actorRoles.includes(r))) {
+    if (!canDecideApproval(input.actorRoles, parseApproverRoles(row.requiredApproverRolesJson))) {
       throw Object.assign(new Error("Insufficient role to decide"), { code: "FORBIDDEN", status: 403 });
     }
     if (input.decision === "approve" && row.requestedBy === input.actorId) {
@@ -118,8 +139,6 @@ export async function decideApproval(input: {
     return updated;
   });
 }
-
-const GRADE_APPROVAL_TYPES = new Set(["grade_publish", "grade.publish"]);
 
 export async function applyApproval(input: {
   approvalId: string;

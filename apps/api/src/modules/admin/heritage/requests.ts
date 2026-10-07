@@ -254,6 +254,18 @@ async function ensureNumbers(user: SessionClaims, loaded: Loaded) {
   return { items: loaded.items, metas: new Map(metaRows.map((m) => [m.contextKey, { id: m.id, data: parse<Meta>(m.dataJson, { number: 0 }) }])) };
 }
 
+/** Request numbers for `loa:<id>` / `service:<id>` refs, so other queues can link to the User Request review page. */
+export async function requestNumbersFor(user: SessionClaims, refs: string[]) {
+  if (!refs.length) return new Map<string, number>();
+  const loaded = await ensureNumbers(user, await loadAll(user.institutionId));
+  const out = new Map<string, number>();
+  for (const ref of refs) {
+    const meta = loaded.metas.get(ref)?.data;
+    if (meta?.number && !meta.deleted) out.set(ref, meta.number);
+  }
+  return out;
+}
+
 function visible(loaded: Loaded) {
   return loaded.items.filter((i) => !loaded.metas.get(i.ref)?.data.deleted);
 }

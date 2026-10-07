@@ -462,7 +462,7 @@ export function HccAttendanceView({ config }: { config: TeacherScreenConfig }) {
   const router = useRouter();
   const live = useOptionalTeacherLive();
   const d = config.hccAttendance;
-  const [date, setDate] = useState(d?.dateFilter || "2026-09-18");
+  const [date, setDate] = useState(d?.dateFilter || new Date().toLocaleDateString("en-CA"));
   const [studentFilter, setStudentFilter] = useState(d?.studentFilter || "");
   const [courseFilter, setCourseFilter] = useState(d?.courseFilter || "All Courses");
   const [groups, setGroups] = useState(d?.groups ?? []);
@@ -484,6 +484,8 @@ export function HccAttendanceView({ config }: { config: TeacherScreenConfig }) {
   function load(nextDate = date) {
     const qs = new URLSearchParams();
     if (nextDate) qs.set("date", nextDate);
+    const picked = (d?.groups ?? []).find((g) => courseFilter === `${g.course} (${g.offering})`);
+    if (picked?.sectionId) qs.set("sectionId", picked.sectionId);
     router.push(`/instructor/attendance?${qs.toString()}`);
   }
 
@@ -1025,47 +1027,73 @@ export function HccStudentsView({ config }: { config: TeacherScreenConfig }) {
 }
 
 export function HccFlagsView({ config }: { config: TeacherScreenConfig }) {
+  const router = useRouter();
+  const live = useOptionalTeacherLive();
   const d = config.hccFlags;
   const rows = d?.rows ?? [];
+  const [student, setStudent] = useState("");
+  const [status, setStatus] = useState("Active");
+  const [resolved, setResolved] = useState("All");
+  const [flagType, setFlagType] = useState("All Flags");
+  const needle = student.trim().toLowerCase();
+  const visible = rows.filter((r) => {
+    if (needle && !r.student.toLowerCase().includes(needle)) return false;
+    if (status !== "All" && r.status !== status) return false;
+    if (resolved !== "All" && (r.resolved || "No") !== resolved) return false;
+    if (flagType !== "All Flags" && !r.description.toUpperCase().startsWith(flagType)) return false;
+    return true;
+  });
+
+  async function act(action: "Dismiss Flag" | "Delete Flag", id: string) {
+    if (action === "Delete Flag" && !window.confirm("Delete this flag? This cannot be undone.")) return;
+    await live?.runAction(action, id);
+  }
+
   return (
     <div className="mh-hcc-page">
       <Crumb items={["Home", "Student Flags"]} />
-      <h1>STUDENT FLAGS</h1>
+      <div className="mh-hcc-page__head">
+        <h1>STUDENT FLAGS</h1>
+        <button type="button" className="mh-hcc-btn" onClick={() => router.push("/instructor/f/t45-create-flag")}>
+          Create Flag
+        </button>
+      </div>
       <div className="mh-hcc-filters">
         <label>
-          <span>CAMPUS FILTER</span>
-          <select defaultValue={d?.campus || "ALL CAMPUSES"}>
-            <option>ALL CAMPUSES</option>
-          </select>
-        </label>
-        <label>
           <span>STUDENT FILTER</span>
-          <input placeholder="Enter student # or last name" />
+          <input
+            placeholder="Enter student # or name"
+            value={student}
+            onChange={(e) => setStudent(e.target.value)}
+          />
         </label>
         <label>
           <span>STATUS</span>
-          <select defaultValue={d?.status || "Active"}>
+          <select value={status} onChange={(e) => setStatus(e.target.value)}>
             <option>Active</option>
+            <option>Dismissed</option>
+            <option>All</option>
           </select>
         </label>
         <label>
           <span>RESOLVED</span>
-          <select defaultValue={d?.resolved || "No"}>
+          <select value={resolved} onChange={(e) => setResolved(e.target.value)}>
+            <option>All</option>
             <option>No</option>
             <option>Yes</option>
           </select>
         </label>
         <label>
-          <span>FLAG TEMPLATES</span>
-          <select defaultValue={d?.template || "All Flags"}>
+          <span>FLAG TYPE</span>
+          <select value={flagType} onChange={(e) => setFlagType(e.target.value)}>
             <option>All Flags</option>
+            {(d?.flagTypes ?? []).map((t) => (
+              <option key={t}>{t}</option>
+            ))}
           </select>
         </label>
-        <button type="button" className="mh-hcc-btn">
-          Search Flags
-        </button>
       </div>
-      <p className="mh-hcc-results">Results: {d?.results ?? rows.length}</p>
+      <p className="mh-hcc-results">Results: {visible.length}</p>
       <table className="mh-hcc-table">
         <thead>
           <tr>
@@ -1079,23 +1107,58 @@ export function HccFlagsView({ config }: { config: TeacherScreenConfig }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
+          {visible.length === 0 ? (
+            <tr>
+              <td colSpan={7}>
+                {live?.loading
+                  ? "Loading flags…"
+                  : rows.length
+                    ? "No flags match these filters."
+                    : "You have not raised any student flags yet. Use Create Flag to add one."}
+              </td>
+            </tr>
+          ) : null}
+          {visible.map((r) => (
             <tr key={r.id}>
               <td>
                 <span className="mh-hcc-avatar" />
               </td>
-              <td>{r.student}</td>
+              <td>
+                {r.href ? (
+                  <button type="button" className="mh-hcc-link" onClick={() => router.push(r.href!)}>
+                    {r.student}
+                  </button>
+                ) : (
+                  r.student
+                )}
+              </td>
               <td>{r.description}</td>
               <td>{r.status}</td>
               <td>{r.appliesHold}</td>
               <td>{r.date}</td>
               <td>
-                <button type="button" className="mh-hcc-link">
-                  DISMISS
-                </button>{" "}
-                <button type="button" className="mh-hcc-link">
-                  DELETE
-                </button>
+                {r.canEdit ? (
+                  <>
+                    {r.status !== "Dismissed" ? (
+                      <button
+                        type="button"
+                        className="mh-hcc-link"
+                        disabled={live?.busy}
+                        onClick={() => void act("Dismiss Flag", r.id)}
+                      >
+                        DISMISS
+                      </button>
+                    ) : null}{" "}
+                    <button
+                      type="button"
+                      className="mh-hcc-link"
+                      disabled={live?.busy}
+                      onClick={() => void act("Delete Flag", r.id)}
+                    >
+                      DELETE
+                    </button>
+                  </>
+                ) : null}
               </td>
             </tr>
           ))}

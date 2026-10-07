@@ -69,7 +69,7 @@ export type EntityDef = {
   label: string;
   parent?: { entity: EntityKey | "schedule"; label: string };
   fields: Field[];
-  unique: Array<{ key: string; label: string; scope: "all" | "parent" }>;
+  unique: Array<{ key: string; label: string; scope: "all" | "parent"; within?: string }>;
   search: string[];
   sortable?: boolean;
 };
@@ -584,7 +584,7 @@ export const ENTITIES: Record<EntityKey, EntityDef> = {
     audit: "PR17",
     label: "Master schedule",
     search: ["abbreviation", "description"],
-    unique: [],
+    unique: [{ key: "abbreviation", label: "Schedule Abbreviation", scope: "all", within: "program" }],
     fields: [
       ...MASTER_DETAILS,
       ...DELIVERY,

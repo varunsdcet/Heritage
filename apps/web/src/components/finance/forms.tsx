@@ -152,6 +152,8 @@ export type FundRow = {
   allocations: Array<{ id: string; studentId: string; amount: number; as: string; at: string; student: string; studentNumber: string }>;
 };
 
+type FeeSection = { sectionId: string; courseId: string; label: string; termName: string; enrolmentStatus: string };
+
 const QTY = Array.from({ length: 20 }, (_, i) => String(i + 1));
 const num = (v: string) => (v.trim() === "" ? undefined : Number(v));
 const isIntl = (rate?: string) => /international/i.test(rate ?? "");
@@ -176,6 +178,24 @@ export function AddFeeModal({ meta, onClose, onDone, studentId, rateCategory }: 
   const [term, setTerm] = useState("");
   const [status, setStatus] = useState(meta.constants.paymentStatuses?.[0] ?? "Pending / Not Paid");
   const [note, setNote] = useState("");
+  const [sectionId, setSectionId] = useState("");
+  const [courseId, setCourseId] = useState("");
+  const [sections, setSections] = useState<FeeSection[]>([]);
+  const [courses, setCourses] = useState<Array<{ id: string; name: string }>>([]);
+  useEffect(() => {
+    let live = true;
+    Promise.all([fin<{ items: FeeSection[] }>(`/student/${studentId}/fee-sections`), fin<Array<{ id: string; label: string }>>("/courses")])
+      .then(([s, c]) => {
+        if (!live) return;
+        setSections(s.items);
+        setCourses(c.map((x) => ({ id: x.id, name: x.label })));
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [studentId]);
+  const section = sections.find((x) => x.sectionId === sectionId);
   const pick = (id: string) => {
     setTypeId(id);
     const t = meta.ledgerTypes.find((x) => x.id === id);
@@ -187,21 +207,40 @@ export function AddFeeModal({ meta, onClose, onDone, studentId, rateCategory }: 
       submitLabel="Save Fee"
       onClose={onClose}
       onSubmit={async () => {
-        const out = await fin<{ message: string }>(`/student/${studentId}/fees`, json("POST", { ledgerTypeId: typeId, amount: num(amount), quantity: Number(qty), termId: term, paymentStatus: status, note }));
+        const out = await fin<{ message: string }>(
+          `/student/${studentId}/fees`,
+          json("POST", { ledgerTypeId: typeId, amount: num(amount), quantity: Number(qty), termId: term, paymentStatus: status, note, sectionId: sectionId || undefined, courseId: sectionId ? undefined : courseId || undefined }),
+        );
         onDone(out.message);
       }}
     >
       <Field label="Tuition / Ledger Type" required>
         <Select value={typeId} onChange={pick} options={meta.ledgerTypes} placeholder="Select a Tuition / Ledger Type" />
       </Field>
+      <Field label="Course Section" hint={sections.length ? "Links the fee to one of the student's course sections." : "The student has no course enrolments yet."}>
+        <Select
+          value={sectionId}
+          onChange={(v) => {
+            setSectionId(v);
+            if (v) setCourseId("");
+          }}
+          options={sections.map((x) => ({ id: x.sectionId, name: `${x.label} · ${x.termName}${x.enrolmentStatus === "enrolled" ? "" : ` (${x.enrolmentStatus})`}` }))}
+          placeholder="Not linked to a section"
+        />
+      </Field>
+      {!sectionId ? (
+        <Field label="Course">
+          <Select value={courseId} onChange={setCourseId} options={courses} placeholder="Not linked to a course" />
+        </Field>
+      ) : null}
       <Field label="Fee Amount" required hint={type && !type.overridable ? "This type is not overridable; the default amount applies." : undefined}>
         <input className="mh-sa__input" type="number" step="0.01" min="0" value={amount} readOnly={Boolean(type && !type.overridable)} onChange={(e) => setAmount(e.target.value)} />
       </Field>
       <Field label="Quantity">
         <Select value={qty} onChange={setQty} options={QTY} />
       </Field>
-      <Field label="Apply to Term">
-        <Select value={term} onChange={setTerm} options={meta.terms} placeholder="No term" />
+      <Field label="Apply to Term" hint={section && !term ? `Defaults to the section's term (${section.termName}).` : undefined}>
+        <Select value={term} onChange={setTerm} options={meta.terms} placeholder={section ? `Section term (${section.termName})` : "No term"} />
       </Field>
       <Field label="Payment Status">
         <Select value={status} onChange={setStatus} options={meta.constants.paymentStatuses ?? []} />

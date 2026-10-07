@@ -448,7 +448,7 @@ export function buildCourseTextbooksList(overlay?: Record<string, unknown> | nul
   const textbooks = mergeTextbookList(DEFAULT_TEXTBOOKS, overlay);
   return {
     title: "Course Textbooks",
-    subtitle: "SYS.COURSE_MGMT // TEXTBOOKS",
+    subtitle: "Course textbooks",
     primaryAction: "Add Textbook",
     primaryActionHref: "/instructor/f/t79-add-textbook",
     courseTextbooks: {
@@ -465,7 +465,7 @@ export function buildAddTextbookForm(overlay?: Record<string, unknown> | null, p
   const courseOptions = contentCourseOptions();
   return {
     title: existing ? "Edit Textbook" : "Add Textbook",
-    subtitle: "SYS.COURSE_MGMT // TEXTBOOK_CREATE",
+    subtitle: "Add a textbook",
     primaryAction: "Save Textbook",
     secondaryAction: "Cancel",
     secondaryActionHref: TEXTBOOKS_LIST_PATH,
@@ -518,7 +518,7 @@ export function buildContentRepositoryList(overlay?: Record<string, unknown> | n
   const courses = mergeRepositoryList(buildRepositoryCatalog(), overlay);
   return {
     title: "Course Content Repository",
-    subtitle: "SYS.COURSE_MGMT // CONTENT_REPOSITORY",
+    subtitle: "Course content repository",
     primaryAction: "Create Content Course",
     primaryActionHref: "/instructor/f/t80-create-content-course",
     contentRepository: {
@@ -548,7 +548,7 @@ export function buildCreateContentCourseForm(overlay?: Record<string, unknown> |
   const editing = Boolean(existing);
   return {
     title: editing ? "Edit Content Course" : "Create Content Course",
-    subtitle: "SYS.COURSE_MGMT // CONTENT_COURSE_CREATE",
+    subtitle: "Create a content course",
     primaryAction: editing ? "Save Content Course" : "Create Content Course",
     secondaryAction: "Cancel",
     secondaryActionHref: REPOSITORY_LIST_PATH,

@@ -6,6 +6,7 @@ import { Banner, Button, EmptyState, Panel, StatusPill } from "@myheritage/ui";
 import { ApiError, api, loadSession, type Session } from "@/lib/api";
 import { StudentFrame } from "@/components/StudentSisShell";
 import { DEFAULT_HCC_TIME_ZONE, HCC_TIME_ZONES, formatCurrentTime } from "@/lib/timeZones";
+import { SUBMISSION_EXTENSIONS, fetchSubmissionFile, formatMegabytes, submissionFileProblem } from "@/lib/submissionFiles";
 
 type LoadState = "loading" | "ready" | "offline" | "forbidden" | "error";
 
@@ -144,6 +145,22 @@ type Assignment = {
     status: "draft" | "submitted" | "returned";
     submittedAt: string | null;
     files: SubmissionFile[];
+    textBody?: string | null;
+  };
+  instructions?: string | null;
+  availableFrom?: string | null;
+  cutoffAt?: string | null;
+  maxFiles?: number | null;
+  maxFileBytes?: number | null;
+  acceptedTypes?: string[];
+  fileSubmissions?: boolean;
+  onlineText?: boolean;
+  grade?: null | {
+    score: number | null;
+    maxScore: number;
+    letter: string | null;
+    feedback: string | null;
+    publishedAt: string | null;
   };
 };
 
@@ -653,9 +670,8 @@ export function StudentAssignmentsView() {
 }
 
 function mimeForFile(file: File) {
-  if (file.type) return file.type;
   const extension = file.name.split(".").pop()?.toLowerCase();
-  return ({ pdf: "application/pdf", doc: "application/msword", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", xls: "application/vnd.ms-excel", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", csv: "text/csv", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", zip: "application/zip" } as Record<string, string>)[extension ?? ""] ?? "";
+  return ({ pdf: "application/pdf", doc: "application/msword", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", xls: "application/vnd.ms-excel", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", csv: "text/csv", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", zip: "application/zip" } as Record<string, string>)[extension ?? ""] ?? file.type;
 }
 
 function toBase64(bytes: Uint8Array) {
@@ -680,12 +696,18 @@ export function StudentAssignmentDetailView({ assignmentId }: { assignmentId: st
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [textDraft, setTextDraft] = useState<string | null>(null);
 
   async function upload(file: File | undefined) {
     if (!file || !resource.session) return;
     setNotice(null);
-    if (file.size > 10 * 1024 * 1024) {
-      setActionError("Files must be 10 MB or smaller");
+    const problem = submissionFileProblem(file, {
+      acceptedTypes: assignment?.acceptedTypes,
+      maxFileBytes: assignment?.maxFileBytes,
+      fileSubmissions: assignment?.fileSubmissions,
+    });
+    if (problem) {
+      setActionError(problem);
       return;
     }
     setBusy(true);
@@ -730,12 +752,47 @@ export function StudentAssignmentDetailView({ assignmentId }: { assignmentId: st
     }
   }
 
+  async function saveText() {
+    if (!resource.session || textDraft == null) return false;
+    await api(
+      `/student/assignments/${assignmentId}/text`,
+      { method: "PUT", body: JSON.stringify({ text: textDraft }) },
+      resource.session.accessToken,
+    );
+    setTextDraft(null);
+    return true;
+  }
+
+  async function saveTextOnly() {
+    setBusy(true);
+    setNotice(null);
+    setActionError(null);
+    try {
+      if (await saveText()) setNotice("Online text saved as a draft.");
+      await resource.refresh();
+    } catch (caught) {
+      setActionError(caught instanceof Error ? caught.message : "Could not save online text");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openFile(fileId: string, mode: "open" | "download") {
+    setActionError(null);
+    try {
+      await fetchSubmissionFile(`/student/submission-files/${encodeURIComponent(fileId)}`, mode);
+    } catch (caught) {
+      setActionError(caught instanceof Error ? caught.message : "Could not open the file");
+    }
+  }
+
   async function submit() {
     if (!resource.session) return;
     setBusy(true);
     setNotice(null);
     setActionError(null);
     try {
+      await saveText();
       await api(`/student/assignments/${assignmentId}/submit`, { method: "POST", body: "{}" }, resource.session.accessToken);
       setNotice("Assignment submitted successfully.");
       await resource.refresh();
@@ -750,6 +807,14 @@ export function StudentAssignmentDetailView({ assignmentId }: { assignmentId: st
   const canUpload = assignment?.submission?.status !== "submitted" && assignment?.state !== "graded";
   const canRemove = assignment?.submission?.status === "draft";
   const submittedLocked = !canUpload;
+  const allowsFiles = assignment?.fileSubmissions !== false;
+  const allowsText = Boolean(assignment?.onlineText);
+  const savedText = assignment?.submission?.textBody ?? "";
+  const textValue = textDraft ?? savedText;
+  const hasContent = files.length > 0 || (allowsText && textValue.trim().length > 0);
+  const acceptList = assignment?.acceptedTypes?.length ? assignment.acceptedTypes : SUBMISSION_EXTENSIONS;
+  const sizeLimit = Math.min(assignment?.maxFileBytes || Infinity, 10 * 1024 * 1024);
+  const grade = assignment?.grade ?? null;
 
   return (
     <StudentFrame
@@ -840,8 +905,52 @@ export function StudentAssignmentDetailView({ assignmentId }: { assignmentId: st
                         {assignment.maxScore} points · {assignment.weightPercent}% weight
                       </div>
                     </label>
+                    {assignment.availableFrom ? (
+                      <label>
+                        <span>Opens</span>
+                        <div className="mh-teacher-field">{formatDate(assignment.availableFrom)}</div>
+                      </label>
+                    ) : null}
+                    {assignment.cutoffAt ? (
+                      <label>
+                        <span>Late submissions until</span>
+                        <div className="mh-teacher-field">{formatDate(assignment.cutoffAt)}</div>
+                      </label>
+                    ) : null}
+                    <label>
+                      <span>Submission type</span>
+                      <div className="mh-teacher-field">
+                        {[allowsFiles ? "File upload" : null, allowsText ? "Online text" : null].filter(Boolean).join(" and ")}
+                      </div>
+                    </label>
                   </div>
                 </div>
+                {assignment.instructions ? (
+                  <div className="mh-teacher-section">
+                    <div className="mh-teacher-section__label">INSTRUCTIONS</div>
+                    <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>{assignment.instructions}</p>
+                  </div>
+                ) : null}
+                {grade ? (
+                  <div className="mh-teacher-section">
+                    <div className="mh-teacher-section__label">YOUR MARK</div>
+                    <div className="mh-teacher-fields">
+                      <label>
+                        <span>Mark</span>
+                        <div className="mh-teacher-field">
+                          {grade.score == null ? "—" : `${grade.score} / ${grade.maxScore}`}
+                          {grade.letter ? ` · ${grade.letter}` : ""}
+                        </div>
+                      </label>
+                      <label>
+                        <span>Published</span>
+                        <div className="mh-teacher-field">{formatDate(grade.publishedAt)}</div>
+                      </label>
+                    </div>
+                    <div className="mh-teacher-section__label" style={{ marginTop: 12 }}>INSTRUCTOR FEEDBACK</div>
+                    <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>{grade.feedback || "No written feedback was given."}</p>
+                  </div>
+                ) : null}
                 {submittedLocked && assignment.submission?.submittedAt ? (
                   <div className="mh-teacher-banner" style={{ background: "#e8f5ee", borderColor: "rgba(1,127,63,0.22)", color: "#2563EB" }}>
                     Submitted {formatDate(assignment.submission.submittedAt)}
@@ -868,33 +977,59 @@ export function StudentAssignmentDetailView({ assignmentId }: { assignmentId: st
                             Version {file.version} · {(file.sizeBytes / 1024).toFixed(1)} KB · {formatDate(file.createdAt)}
                           </span>
                         </div>
-                        {canRemove ? (
-                          <button
-                            type="button"
-                            className="mh-teacher-btn mh-teacher-btn--secondary"
-                            disabled={busy}
-                            onClick={() => void archive(file.id)}
-                          >
-                            Remove
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary" onClick={() => void openFile(file.id, "open")}>
+                            Open
                           </button>
-                        ) : null}
+                          <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary" onClick={() => void openFile(file.id, "download")}>
+                            Download
+                          </button>
+                          {canRemove ? (
+                            <button
+                              type="button"
+                              className="mh-teacher-btn mh-teacher-btn--secondary"
+                              disabled={busy}
+                              onClick={() => void archive(file.id)}
+                            >
+                              Remove
+                            </button>
+                          ) : null}
+                        </div>
                       </div>
                     ))}
                   </div>
-                ) : (
+                ) : allowsFiles ? (
                   <p className="mh-teacher-muted" style={{ margin: 0 }}>
                     No files uploaded yet.
                   </p>
-                )}
+                ) : null}
+
+                {allowsText ? (
+                  <label style={{ display: "grid", gap: 6 }}>
+                    <span style={{ fontWeight: 600 }}>Online text</span>
+                    {canUpload ? (
+                      <textarea
+                        rows={8}
+                        value={textValue}
+                        disabled={busy}
+                        maxLength={50_000}
+                        onChange={(event) => setTextDraft(event.target.value)}
+                      />
+                    ) : (
+                      <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>{savedText || "No online text was submitted."}</p>
+                    )}
+                  </label>
+                ) : null}
 
                 {canUpload ? (
                   <>
+                    {allowsFiles ? (
                     <label className="mh-teacher-dropzone mh-student-assign__drop">
                       <input
                         aria-label="Choose submission file"
                         type="file"
                         disabled={busy}
-                        accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,.zip"
+                        accept={acceptList.join(",")}
                         onChange={(event) => {
                           void upload(event.target.files?.[0]);
                           event.target.value = "";
@@ -911,13 +1046,27 @@ export function StudentAssignmentDetailView({ assignmentId }: { assignmentId: st
                         <path d="M8 19h8" stroke="#2563EB" strokeWidth="1.6" strokeLinecap="round" />
                       </svg>
                       <strong>{busy ? "Uploading…" : "Choose a file to upload"}</strong>
-                      <span>PDF, Office, images, or ZIP · up to 10 MiB</span>
+                      <span>
+                        {acceptList.join(", ")} · up to {formatMegabytes(sizeLimit)}
+                        {assignment.maxFiles ? ` · at most ${assignment.maxFiles} file${assignment.maxFiles === 1 ? "" : "s"}` : ""}
+                      </span>
                     </label>
+                    ) : null}
                     <div className="mh-teacher-actions">
+                      {allowsText ? (
+                        <button
+                          type="button"
+                          className="mh-teacher-btn mh-teacher-btn--secondary"
+                          disabled={busy || textDraft == null}
+                          onClick={() => void saveTextOnly()}
+                        >
+                          Save draft
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         className="mh-teacher-btn mh-teacher-btn--primary"
-                        disabled={busy || !files.length}
+                        disabled={busy || !hasContent}
                         onClick={() => void submit()}
                       >
                         {busy ? "Working…" : "Submit assignment"}

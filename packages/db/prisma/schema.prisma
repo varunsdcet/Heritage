@@ -49,25 +49,25 @@ model Person {
 }
 
 model Account {
-  id            String         @id @default(uuid())
-  institutionId String
-  personId      String
-  email         String
-  passwordHash  String
-  status        String         @default("active")
-  mfaEnabled    Boolean        @default(false)
-  timezone      String         @default("America/Vancouver")
-  rolesJson     String         @default("[]")
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  rowVersion    Int            @default(1)
-  person        Person         @relation(fields: [personId], references: [id])
-  sessions      Session[]
-  notifications Notification[]
-  aiInteractions AiInteraction[]
-  mailFolders   MailFolder[]
-  mailboxSettings MailboxSettings?
-  mailPlacements MailThreadPlacement[]
+  id                    String                 @id @default(uuid())
+  institutionId         String
+  personId              String
+  email                 String
+  passwordHash          String
+  status                String                 @default("active")
+  mfaEnabled            Boolean                @default(false)
+  timezone              String                 @default("America/Vancouver")
+  rolesJson             String                 @default("[]")
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  rowVersion            Int                    @default(1)
+  person                Person                 @relation(fields: [personId], references: [id])
+  sessions              Session[]
+  notifications         Notification[]
+  aiInteractions        AiInteraction[]
+  mailFolders           MailFolder[]
+  mailboxSettings       MailboxSettings?
+  mailPlacements        MailThreadPlacement[]
   mailDistributionLists MailDistributionList[]
 
   @@unique([institutionId, email])
@@ -105,44 +105,44 @@ model SecurityPolicy {
 }
 
 model Student {
-  id               String            @id @default(uuid())
-  institutionId    String
-  personId         String
-  studentNumber    String
-  programName      String
-  programVersionId String?
-  cohortId         String?
-  standing         String            @default("good")
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-  rowVersion       Int               @default(1)
-  person           Person            @relation(fields: [personId], references: [id])
-  programVersion   ProgramVersion?   @relation(fields: [programVersionId], references: [id])
-  cohort           Cohort?           @relation(fields: [cohortId], references: [id])
-  enrolments       Enrolment[]
-  gradeItems       GradeItem[]
-  submissions      Submission[]
-  degreeScenarios  DegreePlanScenario[]
-  advisingAppointments AdvisingAppointment[]
-  successCases     SuccessCase[]
-  transferCredits  TransferCredit[]
-  assessmentAttempts AssessmentAttempt[]
-  attendanceRecords  AttendanceRecord[]
-  labNotebookEntries LabNotebookEntry[]
-  serviceRequests    ServiceRequest[]
-  financeLedgerEntries FinanceLedgerEntry[]
-  credentialRecords  CredentialRecord[]
-  placements         Placement[]
-  programPlans       ProgramPlan[]
-  courseEvaluations  CourseEvaluation[]
-  workshopRegistrations WorkshopRegistration[]
-  workshopAttendance    WorkshopAttendance[]
+  id                     String                  @id @default(uuid())
+  institutionId          String
+  personId               String
+  studentNumber          String
+  programName            String
+  programVersionId       String?
+  cohortId               String?
+  standing               String                  @default("good")
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  rowVersion             Int                     @default(1)
+  person                 Person                  @relation(fields: [personId], references: [id])
+  programVersion         ProgramVersion?         @relation(fields: [programVersionId], references: [id])
+  cohort                 Cohort?                 @relation(fields: [cohortId], references: [id])
+  enrolments             Enrolment[]
+  gradeItems             GradeItem[]
+  submissions            Submission[]
+  degreeScenarios        DegreePlanScenario[]
+  advisingAppointments   AdvisingAppointment[]
+  successCases           SuccessCase[]
+  transferCredits        TransferCredit[]
+  assessmentAttempts     AssessmentAttempt[]
+  attendanceRecords      AttendanceRecord[]
+  labNotebookEntries     LabNotebookEntry[]
+  serviceRequests        ServiceRequest[]
+  financeLedgerEntries   FinanceLedgerEntry[]
+  credentialRecords      CredentialRecord[]
+  placements             Placement[]
+  programPlans           ProgramPlan[]
+  courseEvaluations      CourseEvaluation[]
+  workshopRegistrations  WorkshopRegistration[]
+  workshopAttendance     WorkshopAttendance[]
   leaveOfAbsenceRequests LeaveOfAbsenceRequest[]
-  requiredTasks      RequiredTask[]
-  taxDocuments       TaxDocument[]
+  requiredTasks          RequiredTask[]
+  taxDocuments           TaxDocument[]
   extracurricularRecords ExtracurricularRecord[]
-  badges             StudentBadge[]
-  documents          StudentDocument[]
+  badges                 StudentBadge[]
+  documents              StudentDocument[]
 
   @@unique([institutionId, studentNumber])
   @@index([institutionId])
@@ -236,21 +236,21 @@ model ProgramPlanItem {
 }
 
 model CourseEvaluation {
-  id             String    @id @default(uuid())
-  institutionId  String
-  studentId      String
-  sectionId      String?
-  courseCode     String
-  courseTitle    String
-  status         String    @default("pending")
-  dueAt          DateTime?
-  submittedAt    DateTime?
-  overallRating  Int?
-  responsesJson  String?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  rowVersion     Int       @default(1)
-  student        Student   @relation(fields: [studentId], references: [id])
+  id            String    @id @default(uuid())
+  institutionId String
+  studentId     String
+  sectionId     String?
+  courseCode    String
+  courseTitle   String
+  status        String    @default("pending")
+  dueAt         DateTime?
+  submittedAt   DateTime?
+  overallRating Int?
+  responsesJson String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  rowVersion    Int       @default(1)
+  student       Student   @relation(fields: [studentId], references: [id])
 
   @@index([institutionId, studentId, status])
 }
@@ -295,32 +295,32 @@ model DegreeRequirement {
 }
 
 model CoursePrerequisite {
-  id                 String   @id @default(uuid())
-  institutionId      String
-  courseId           String
+  id                   String   @id @default(uuid())
+  institutionId        String
+  courseId             String
   prerequisiteCourseId String
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-  rowVersion         Int      @default(1)
-  course             Course   @relation("CourseHasPrereqs", fields: [courseId], references: [id])
-  prerequisiteCourse Course   @relation("CourseIsPrereq", fields: [prerequisiteCourseId], references: [id])
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  rowVersion           Int      @default(1)
+  course               Course   @relation("CourseHasPrereqs", fields: [courseId], references: [id])
+  prerequisiteCourse   Course   @relation("CourseIsPrereq", fields: [prerequisiteCourseId], references: [id])
 
   @@unique([institutionId, courseId, prerequisiteCourseId])
   @@index([institutionId])
 }
 
 model DegreePlanScenario {
-  id            String   @id @default(uuid())
-  institutionId String
-  studentId     String
-  label         String
+  id              String   @id @default(uuid())
+  institutionId   String
+  studentId       String
+  label           String
   assumptionsJson String
-  resultJson    String
-  status        String   @default("draft")
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  rowVersion    Int      @default(1)
-  student       Student  @relation(fields: [studentId], references: [id])
+  resultJson      String
+  status          String   @default("draft")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  rowVersion      Int      @default(1)
+  student         Student  @relation(fields: [studentId], references: [id])
 
   @@index([institutionId, studentId, createdAt])
 }
@@ -360,43 +360,43 @@ model Term {
 }
 
 model Course {
-  id            String               @id @default(uuid())
-  institutionId String
-  code          String
-  title         String
-  credits       Float
-  createdAt     DateTime             @default(now())
-  updatedAt     DateTime             @updatedAt
-  rowVersion    Int                  @default(1)
-  sections      Section[]
-  requirements  DegreeRequirement[]
-  prereqFor     CoursePrerequisite[] @relation("CourseHasPrereqs")
-  isPrereqOf    CoursePrerequisite[] @relation("CourseIsPrereq")
-  coreqFor      CourseCorequisite[]  @relation("CourseHasCoreqs")
-  isCoreqOf     CourseCorequisite[]  @relation("CourseIsCoreq")
-  offerings     CourseOffering[]
-  transferCredits TransferCredit[]
+  id               String               @id @default(uuid())
+  institutionId    String
+  code             String
+  title            String
+  credits          Float
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  rowVersion       Int                  @default(1)
+  sections         Section[]
+  requirements     DegreeRequirement[]
+  prereqFor        CoursePrerequisite[] @relation("CourseHasPrereqs")
+  isPrereqOf       CoursePrerequisite[] @relation("CourseIsPrereq")
+  coreqFor         CourseCorequisite[]  @relation("CourseHasCoreqs")
+  isCoreqOf        CourseCorequisite[]  @relation("CourseIsCoreq")
+  offerings        CourseOffering[]
+  transferCredits  TransferCredit[]
   programPlanItems ProgramPlanItem[]
-  courseResources CourseResource[]
+  courseResources  CourseResource[]
 
   @@unique([institutionId, code])
   @@index([institutionId])
 }
 
 model Section {
-  id                 String          @id @default(uuid())
+  id                 String             @id @default(uuid())
   institutionId      String
   courseId           String
   termId             String
   academicBlockId    String?
   code               String
   instructorPersonId String
-  createdAt          DateTime        @default(now())
-  updatedAt          DateTime        @updatedAt
-  rowVersion         Int             @default(1)
-  course             Course          @relation(fields: [courseId], references: [id])
-  term               Term            @relation(fields: [termId], references: [id])
-  academicBlock      AcademicBlock?  @relation(fields: [academicBlockId], references: [id])
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  rowVersion         Int                @default(1)
+  course             Course             @relation(fields: [courseId], references: [id])
+  term               Term               @relation(fields: [termId], references: [id])
+  academicBlock      AcademicBlock?     @relation(fields: [academicBlockId], references: [id])
   enrolments         Enrolment[]
   assignments        Assignment[]
   classSessions      ClassSession[]
@@ -411,23 +411,23 @@ model Section {
 }
 
 model Enrolment {
-  id                 String      @id @default(uuid())
-  institutionId      String
-  sectionId          String
-  studentId          String
-  /// enrolled | completed | withdrawn
-  status             String      @default("enrolled")
-  attemptNumber      Int         @default(1)
-  countsTowardCgpa   Boolean     @default(true)
-  creditAwarded      Boolean     @default(false)
-  continuous         Boolean     @default(false)
+  id                  String      @id @default(uuid())
+  institutionId       String
+  sectionId           String
+  studentId           String
+  /// enrolled | waitlisted | completed | withdrawn
+  status              String      @default("enrolled")
+  attemptNumber       Int         @default(1)
+  countsTowardCgpa    Boolean     @default(true)
+  creditAwarded       Boolean     @default(false)
+  continuous          Boolean     @default(false)
   originalEnrolmentId String?
-  createdAt          DateTime    @default(now())
-  updatedAt          DateTime    @updatedAt
-  rowVersion         Int         @default(1)
-  section            Section     @relation(fields: [sectionId], references: [id])
-  student            Student     @relation(fields: [studentId], references: [id])
-  gradeItems         GradeItem[]
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+  rowVersion          Int         @default(1)
+  section             Section     @relation(fields: [sectionId], references: [id])
+  student             Student     @relation(fields: [studentId], references: [id])
+  gradeItems          GradeItem[]
 
   @@unique([sectionId, studentId, attemptNumber])
   @@index([institutionId])
@@ -436,21 +436,30 @@ model Enrolment {
 }
 
 model Assignment {
-  id            String       @id @default(uuid())
-  institutionId String
-  sectionId     String
-  title         String
-  maxScore      Float
-  weightPercent Float
-  dueAt         DateTime?
-  rubricId      String?
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-  rowVersion    Int          @default(1)
-  section       Section      @relation(fields: [sectionId], references: [id])
-  rubric        Rubric?      @relation(fields: [rubricId], references: [id])
-  gradeItems    GradeItem[]
-  submissions   Submission[]
+  id              String       @id @default(uuid())
+  institutionId   String
+  sectionId       String
+  title           String
+  maxScore        Float
+  weightPercent   Float
+  dueAt           DateTime?
+  rubricId        String?
+  instructions    String?
+  availableFrom   DateTime?
+  cutoffAt        DateTime?
+  maxFiles        Int?
+  maxFileBytes    Int?
+  acceptedTypes   String?
+  fileSubmissions Boolean      @default(true)
+  onlineText      Boolean      @default(false)
+  hidden          Boolean      @default(false)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  rowVersion      Int          @default(1)
+  section         Section      @relation(fields: [sectionId], references: [id])
+  rubric          Rubric?      @relation(fields: [rubricId], references: [id])
+  gradeItems      GradeItem[]
+  submissions     Submission[]
 
   @@index([institutionId])
   @@index([rubricId])
@@ -463,6 +472,7 @@ model Submission {
   studentId     String
   submittedAt   DateTime?
   status        String       @default("draft")
+  textBody      String?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
   rowVersion    Int          @default(1)
@@ -497,21 +507,21 @@ model FileObject {
 }
 
 model ClassSession {
-  id            String    @id @default(uuid())
-  institutionId String
-  sectionId     String
-  title         String
-  startsAt      DateTime
-  endsAt        DateTime?
-  location      String?
-  joinUrl       String?
-  deliveryMode  String    @default("in_person")
-  sessionKind   String    @default("lecture")
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  rowVersion    Int       @default(1)
-  section       Section   @relation(fields: [sectionId], references: [id])
-  attendanceRecords AttendanceRecord[]
+  id                 String             @id @default(uuid())
+  institutionId      String
+  sectionId          String
+  title              String
+  startsAt           DateTime
+  endsAt             DateTime?
+  location           String?
+  joinUrl            String?
+  deliveryMode       String             @default("in_person")
+  sessionKind        String             @default("lecture")
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  rowVersion         Int                @default(1)
+  section            Section            @relation(fields: [sectionId], references: [id])
+  attendanceRecords  AttendanceRecord[]
   labNotebookEntries LabNotebookEntry[]
 
   @@index([institutionId, startsAt])
@@ -528,6 +538,7 @@ model GradeItem {
   score         Float?
   maxScore      Float
   letter        String?
+  feedback      String?
   status        String     @default("draft")
   publishedAt   DateTime?
   createdAt     DateTime   @default(now())
@@ -660,25 +671,25 @@ model IdempotencyKey {
 }
 
 model AiInteraction {
-  id               String   @id @default(uuid())
-  institutionId    String
-  accountId        String
-  role             String
-  question         String
-  answer           String
-  sourcesJson      String
-  suggestedActionsJson String @default("[]")
-  tier             String   @default("read_only")
-  provider         String   @default("campus_grounding_v1")
-  capability       String   @default("campus_coach")
-  latencyMs        Int      @default(0)
-  estimatedTokens  Int      @default(0)
-  resultStatus     String   @default("completed")
-  status           String   @default("completed")
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  rowVersion       Int      @default(1)
-  account          Account  @relation(fields: [accountId], references: [id])
+  id                   String   @id @default(uuid())
+  institutionId        String
+  accountId            String
+  role                 String
+  question             String
+  answer               String
+  sourcesJson          String
+  suggestedActionsJson String   @default("[]")
+  tier                 String   @default("read_only")
+  provider             String   @default("campus_grounding_v1")
+  capability           String   @default("campus_coach")
+  latencyMs            Int      @default(0)
+  estimatedTokens      Int      @default(0)
+  resultStatus         String   @default("completed")
+  status               String   @default("completed")
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  rowVersion           Int      @default(1)
+  account              Account  @relation(fields: [accountId], references: [id])
 
   @@index([institutionId, accountId, createdAt])
   @@index([institutionId, role, createdAt])
@@ -724,31 +735,32 @@ model SisScreenState {
 }
 
 model PasswordResetToken {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   accountId String
-  tokenHash String   @unique
+  tokenHash String    @unique
   expiresAt DateTime
   usedAt    DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   @@index([accountId])
   @@index([expiresAt])
 }
 
 model AdmissionsApplication {
-  id            String   @id @default(uuid())
+  id            String                     @id @default(uuid())
   institutionId String
   accountId     String
   personId      String
   programName   String
   intakeTerm    String
-  status        String   @default("draft")
-  progressPct   Int      @default(0)
+  status        String                     @default("draft")
+  progressPct   Int                        @default(0)
   notes         String?
+  formJson      String                     @default("{}")
   submittedAt   DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  rowVersion    Int      @default(1)
+  createdAt     DateTime                   @default(now())
+  updatedAt     DateTime                   @updatedAt
+  rowVersion    Int                        @default(1)
   documents     ApplicationDocument[]
   offers        ApplicationOffer[]
   timeline      ApplicationTimelineEvent[]
@@ -758,59 +770,59 @@ model AdmissionsApplication {
 }
 
 model ApplicationDocument {
-  id            String   @id @default(uuid())
+  id            String                @id @default(uuid())
   institutionId String
   applicationId String
   label         String
-  status        String   @default("missing")
+  status        String                @default("missing")
   fileName      String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  rowVersion    Int      @default(1)
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+  rowVersion    Int                   @default(1)
   application   AdmissionsApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
 
   @@index([institutionId, applicationId])
 }
 
 model ApplicationOffer {
-  id            String   @id @default(uuid())
+  id            String                @id @default(uuid())
   institutionId String
   applicationId String
   title         String
-  status        String   @default("pending")
+  status        String                @default("pending")
   conditions    String?
   expiresOn     String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  rowVersion    Int      @default(1)
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+  rowVersion    Int                   @default(1)
   application   AdmissionsApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
 
   @@index([institutionId, applicationId])
 }
 
 model ApplicationTimelineEvent {
-  id            String   @id @default(uuid())
+  id            String                @id @default(uuid())
   institutionId String
   applicationId String
   title         String
   detail        String?
-  occurredAt    DateTime @default(now())
-  createdAt     DateTime @default(now())
+  occurredAt    DateTime              @default(now())
+  createdAt     DateTime              @default(now())
   application   AdmissionsApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
 
   @@index([institutionId, applicationId])
 }
 
 model EmployerOrg {
-  id            String   @id @default(uuid())
+  id            String                 @id @default(uuid())
   institutionId String
   accountId     String?
   name          String
   siteName      String
   contactEmail  String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  rowVersion    Int      @default(1)
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+  rowVersion    Int                    @default(1)
   placements    Placement[]
   agreements    AffiliationAgreement[]
 
@@ -819,20 +831,20 @@ model EmployerOrg {
 }
 
 model Placement {
-  id            String   @id @default(uuid())
+  id            String                @id @default(uuid())
   institutionId String
   employerOrgId String
   studentId     String?
   studentName   String
   programName   String
-  status        String   @default("active")
+  status        String                @default("active")
   startsOn      String?
   endsOn        String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  rowVersion    Int      @default(1)
-  employerOrg   EmployerOrg @relation(fields: [employerOrgId], references: [id], onDelete: Cascade)
-  student       Student? @relation(fields: [studentId], references: [id])
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+  rowVersion    Int                   @default(1)
+  employerOrg   EmployerOrg           @relation(fields: [employerOrgId], references: [id], onDelete: Cascade)
+  student       Student?              @relation(fields: [studentId], references: [id])
   hours         HoursEntry[]
   evaluations   PlacementEvaluation[]
 
@@ -841,46 +853,46 @@ model Placement {
 }
 
 model HoursEntry {
-  id            String   @id @default(uuid())
+  id            String    @id @default(uuid())
   institutionId String
   placementId   String
   weekLabel     String
   hours         Float
-  status        String   @default("pending")
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  rowVersion    Int      @default(1)
+  status        String    @default("pending")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  rowVersion    Int       @default(1)
   placement     Placement @relation(fields: [placementId], references: [id], onDelete: Cascade)
 
   @@index([institutionId, placementId])
 }
 
 model PlacementEvaluation {
-  id            String   @id @default(uuid())
+  id            String    @id @default(uuid())
   institutionId String
   placementId   String
   studentName   String
-  status        String   @default("due")
+  status        String    @default("due")
   score         Int?
   notes         String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  rowVersion    Int      @default(1)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  rowVersion    Int       @default(1)
   placement     Placement @relation(fields: [placementId], references: [id], onDelete: Cascade)
 
   @@index([institutionId, placementId])
 }
 
 model AffiliationAgreement {
-  id            String   @id @default(uuid())
+  id            String      @id @default(uuid())
   institutionId String
   employerOrgId String
   title         String
-  status        String   @default("active")
+  status        String      @default("active")
   renewsOn      String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  rowVersion    Int      @default(1)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  rowVersion    Int         @default(1)
   employerOrg   EmployerOrg @relation(fields: [employerOrgId], references: [id], onDelete: Cascade)
 
   @@index([institutionId, employerOrgId])
@@ -937,18 +949,18 @@ model AdvisingAppointment {
 }
 
 model SuccessCase {
-  id            String              @id @default(uuid())
+  id            String             @id @default(uuid())
   institutionId String
   studentId     String
   level         String
-  status        String              @default("open")
+  status        String             @default("open")
   summary       String
-  signalsJson   String              @default("[]")
+  signalsJson   String             @default("[]")
   ownerPersonId String?
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
-  rowVersion    Int                 @default(1)
-  student       Student             @relation(fields: [studentId], references: [id])
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  rowVersion    Int                @default(1)
+  student       Student            @relation(fields: [studentId], references: [id])
   tasks         InterventionTask[]
 
   @@index([institutionId, studentId, status])
@@ -972,15 +984,15 @@ model InterventionTask {
 }
 
 model CourseCorequisite {
-  id                   String   @id @default(uuid())
-  institutionId        String
-  courseId             String
-  corequisiteCourseId  String
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
-  rowVersion           Int      @default(1)
-  course               Course   @relation("CourseHasCoreqs", fields: [courseId], references: [id])
-  corequisiteCourse    Course   @relation("CourseIsCoreq", fields: [corequisiteCourseId], references: [id])
+  id                  String   @id @default(uuid())
+  institutionId       String
+  courseId            String
+  corequisiteCourseId String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  rowVersion          Int      @default(1)
+  course              Course   @relation("CourseHasCoreqs", fields: [courseId], references: [id])
+  corequisiteCourse   Course   @relation("CourseIsCoreq", fields: [corequisiteCourseId], references: [id])
 
   @@unique([institutionId, courseId, corequisiteCourseId])
   @@index([institutionId])
@@ -1023,17 +1035,17 @@ model CourseOffering {
 }
 
 model CareerOpportunity {
-  id            String   @id @default(uuid())
-  institutionId String
-  title         String
-  employerName  String
-  skillsJson    String   @default("[]")
-  programCodesJson String @default("[]")
-  status        String   @default("open")
-  href          String   @default("/student/messages")
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  rowVersion    Int      @default(1)
+  id               String   @id @default(uuid())
+  institutionId    String
+  title            String
+  employerName     String
+  skillsJson       String   @default("[]")
+  programCodesJson String   @default("[]")
+  status           String   @default("open")
+  href             String   @default("/student/messages")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  rowVersion       Int      @default(1)
 
   @@index([institutionId, status])
 }
@@ -1136,28 +1148,32 @@ model ServiceRequest {
 }
 
 model FinanceLedgerEntry {
-  id               String          @id @default(uuid())
-  institutionId    String
-  studentId        String
-  label            String
-  amountCad        Float
-  kind             String
-  status           String          @default("open")
-  source           String?
-  note             String?
-  dueAt            DateTime?
-  postedAt         DateTime        @default(now())
-  financialTermId  String?
-  reversedFromId   String?
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
-  rowVersion       Int             @default(1)
-  student          Student         @relation(fields: [studentId], references: [id])
-  financialTerm    FinancialTerm?  @relation(fields: [financialTermId], references: [id])
+  id              String         @id @default(uuid())
+  institutionId   String
+  studentId       String
+  label           String
+  amountCad       Float
+  kind            String
+  status          String         @default("open")
+  source          String?
+  note            String?
+  dueAt           DateTime?
+  postedAt        DateTime       @default(now())
+  financialTermId String?
+  reversedFromId  String?
+  /// Course / section the charge is for (course fees posted on enrolment or linked from Add Fee)
+  courseId        String?
+  sectionId       String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  rowVersion      Int            @default(1)
+  student         Student        @relation(fields: [studentId], references: [id])
+  financialTerm   FinancialTerm? @relation(fields: [financialTermId], references: [id])
 
   @@index([institutionId, studentId, postedAt])
   @@index([financialTermId])
   @@index([reversedFromId])
+  @@index([sectionId])
 }
 
 model FinancialTerm {
@@ -1403,11 +1419,13 @@ model CredentialRecord {
   status        String    @default("pending")
   detail        String?
   earnedAt      DateTime?
+  sourceKey     String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   rowVersion    Int       @default(1)
   student       Student   @relation(fields: [studentId], references: [id])
 
+  @@unique([studentId, sourceKey])
   @@index([institutionId, studentId, status])
 }
 
@@ -1543,35 +1561,35 @@ model MailThreadPlacement {
 }
 
 model MailboxSettings {
-  id                    String   @id @default(uuid())
-  institutionId         String
-  accountId             String   @unique
-  forwardingEnabled     Boolean  @default(false)
-  forwardingAddress     String?
-  smsForwardingEnabled  Boolean  @default(false)
-  signature             String?
-  popupNotifications    Boolean  @default(true)
-  notificationSound     Boolean  @default(false)
-  autoResponderEnabled  Boolean  @default(false)
-  autoResponderBody     String?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-  rowVersion            Int      @default(1)
-  account               Account  @relation(fields: [accountId], references: [id])
+  id                   String   @id @default(uuid())
+  institutionId        String
+  accountId            String   @unique
+  forwardingEnabled    Boolean  @default(false)
+  forwardingAddress    String?
+  smsForwardingEnabled Boolean  @default(false)
+  signature            String?
+  popupNotifications   Boolean  @default(true)
+  notificationSound    Boolean  @default(false)
+  autoResponderEnabled Boolean  @default(false)
+  autoResponderBody    String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  rowVersion           Int      @default(1)
+  account              Account  @relation(fields: [accountId], references: [id])
 
   @@index([institutionId])
 }
 
 model MailDistributionList {
-  id                    String   @id @default(uuid())
-  institutionId         String
-  accountId             String
-  name                  String
-  memberAccountIdsJson  String   @default("[]")
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-  rowVersion            Int      @default(1)
-  account               Account  @relation(fields: [accountId], references: [id])
+  id                   String   @id @default(uuid())
+  institutionId        String
+  accountId            String
+  name                 String
+  memberAccountIdsJson String   @default("[]")
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  rowVersion           Int      @default(1)
+  account              Account  @relation(fields: [accountId], references: [id])
 
   @@index([institutionId, accountId])
 }
@@ -1631,23 +1649,23 @@ model BadgeDefinition {
 
 /// Campus compliance: attendance miss escalation, teacher SLAs, explanation locks.
 model ComplianceCase {
-  id             String    @id @default(uuid())
-  institutionId  String
-  subjectType    String
-  subjectRef     String
-  caseKind       String
-  severity       String    @default("warning")
-  status         String    @default("open")
-  title          String
-  detail         String    @default("")
-  missCount      Int       @default(0)
-  explanation    String?
-  resolvedAt     DateTime?
-  resolvedById   String?
-  metaJson       String    @default("{}")
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  rowVersion     Int       @default(1)
+  id            String    @id @default(uuid())
+  institutionId String
+  subjectType   String
+  subjectRef    String
+  caseKind      String
+  severity      String    @default("warning")
+  status        String    @default("open")
+  title         String
+  detail        String    @default("")
+  missCount     Int       @default(0)
+  explanation   String?
+  resolvedAt    DateTime?
+  resolvedById  String?
+  metaJson      String    @default("{}")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  rowVersion    Int       @default(1)
 
   @@index([institutionId, status])
   @@index([institutionId, caseKind, status])

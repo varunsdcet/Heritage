@@ -1,5 +1,6 @@
 import type { DegreePlanAnalysis, AiClaim } from "@myheritage/contracts";
 import { prisma } from "@myheritage/db";
+import { ensureProgramVersion } from "./program-version.js";
 
 type ProgressOptions = {
   institutionId: string;
@@ -14,6 +15,7 @@ function unique(codes: string[]) {
 }
 
 export async function computeDegreeProgress(input: ProgressOptions): Promise<DegreePlanAnalysis> {
+  await ensureProgramVersion(input.institutionId, input.studentId);
   const student = await prisma.student.findFirst({
     where: { id: input.studentId, institutionId: input.institutionId },
     include: {
@@ -29,7 +31,7 @@ export async function computeDegreeProgress(input: ProgressOptions): Promise<Deg
     throw Object.assign(new Error("Student record not found"), { code: "NOT_FOUND", status: 404 });
   }
   if (!student.programVersion) {
-    throw Object.assign(new Error("No program version is assigned for this student"), {
+    throw Object.assign(new Error("No program with a course outline is assigned for this student. Enrol the student in a program whose pathway lists its courses."), {
       code: "NOT_FOUND",
       status: 404,
     });

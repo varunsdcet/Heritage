@@ -97,6 +97,7 @@ export const StudentSubmissionSummary = z.object({
   status: z.enum(["draft", "submitted", "returned"]),
   submittedAt: IsoDateTime.nullable(),
   files: z.array(StudentSubmissionFile),
+  textBody: z.string().nullable().optional(),
 });
 
 export const StudentAssignmentSummary = z.object({
@@ -110,6 +111,25 @@ export const StudentAssignmentSummary = z.object({
   weightPercent: z.number().min(0).max(100),
   state: z.enum(["upcoming", "due", "overdue", "draft", "submitted", "graded"]),
   submission: StudentSubmissionSummary.nullable(),
+  instructions: z.string().nullable().optional(),
+  availableFrom: IsoDateTime.nullable().optional(),
+  cutoffAt: IsoDateTime.nullable().optional(),
+  maxFiles: z.number().int().positive().nullable().optional(),
+  maxFileBytes: z.number().int().positive().nullable().optional(),
+  acceptedTypes: z.array(z.string()).optional(),
+  fileSubmissions: z.boolean().optional(),
+  onlineText: z.boolean().optional(),
+  /** Present only once the mark has been published to the student. */
+  grade: z
+    .object({
+      score: z.number().nullable(),
+      maxScore: z.number(),
+      letter: z.string().nullable(),
+      feedback: z.string().nullable(),
+      publishedAt: IsoDateTime.nullable(),
+    })
+    .nullable()
+    .optional(),
 });
 
 export const StudentAssignmentsResponse = z.object({
@@ -683,6 +703,23 @@ export const StudentLmsActivityView = z.object({
   note: z.string().optional(),
   hidden: z.boolean().optional(),
   joinUrl: z.string().nullable().optional(),
+  description: z.string().optional(),
+  url: z.string().optional(),
+  assignmentId: z.string().optional(),
+  assignment: z
+    .object({
+      instructions: z.string().optional(),
+      availableFrom: z.string().optional(),
+      dueAt: z.string().optional(),
+      cutoffAt: z.string().optional(),
+      maxScore: z.number().optional(),
+      fileSubmissions: z.boolean().optional(),
+      onlineText: z.boolean().optional(),
+      maxFiles: z.number().optional(),
+      maxFileBytes: z.number().optional(),
+      acceptedTypes: z.string().optional(),
+    })
+    .optional(),
   gradingMethod: z.string().optional(),
   questions: z.array(StudentQuizQuestionView).optional(),
   storyboard: z
@@ -886,6 +923,7 @@ export const CreateGradeItemRequest = z.object({
   assignmentId: Uuid,
   studentId: Uuid,
   score: z.number().min(0),
+  feedback: z.string().trim().max(4000).nullable().optional(),
 });
 
 export type StudentModuleId = z.infer<typeof StudentModuleId>;

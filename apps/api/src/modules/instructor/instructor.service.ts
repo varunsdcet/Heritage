@@ -8,6 +8,8 @@ import {
   LMS_ACTIVITY_TYPES,
 } from "../../lib/lifecycle-status.js";
 import { gradeItemsInOpenApproval } from "../../lib/gradeApprovals.js";
+import { assertSeat } from "../admin/heritage/enrolment.js";
+import { DEFAULT_TZ } from "../courses/sectionSchedule.js";
 import { buildAddProgramScreenForm } from "./addProgramForm.js";
 import { buildAddSessionScreenForm } from "./addSessionForm.js";
 import {
@@ -59,6 +61,7 @@ import {
 } from "./workshopScreens.js";
 import {
   AVAILABILITY_PATH,
+  buildProfileCompletionPayload,
   buildProfilePayload,
   loadAvailabilitySlots,
   persistAvailabilitySlot,
@@ -128,6 +131,18 @@ import {
   questionFromFields,
 } from "./courseLmsScreens.js";
 import { normalizeStoryboard, sanitizeLessonHtml } from "./aiDraftContent.js";
+import {
+  activityContentFromForm,
+  findOverlayActivity,
+  linkedLmsAssignment,
+  loadLmsOverlay,
+  retireLmsAssignment,
+  saveLmsAssignment,
+  setLmsAssignmentHidden,
+  workspaceSectionId,
+  type LmsAssignmentSettings,
+} from "./lmsActivities.js";
+import { loadCourseGradeBoard } from "./courseGradeBoard.js";
 import { sectionLmsMeta } from "./sectionLmsMeta.js";
 import {
   buildInstructorAlertQueue,
@@ -142,7 +157,13 @@ import {
   seesAllStudents,
 } from "./adminStudentRecords.js";
 import { classJoinUrl, liveClassUrl, sessionJoinUrl } from "../../lib/liveClass.js";
+import { addDays, hmIn, institutionTimezone, ymdIn, zonedToUtc } from "../../lib/workshopPolicy.js";
 import { createClassSessionWithNotifications } from "../campusCompliance/sessions.js";
+import { writeAttendanceRecords } from "./attendanceSessions.js";
+import { buildCourseApprovalReview, buildGradeCorrectionReview } from "./approvalReviewScreens.js";
+import { buildCourseBackups, buildCourseGroupsList, saveCourseGroup } from "./courseCatalogScreens.js";
+import { FLAG_PRIORITIES, FLAG_TYPES, updateInstructorFlag, validateFlagFields } from "./instructorFlags.js";
+import { markNotificationsRead, notificationPagination } from "../notifications/inbox.js";
 
 export type InstructorLivePayload = Record<string, unknown>;
 
@@ -752,17 +773,18 @@ function buildDashboard(ctx: InstructorCtx): InstructorLivePayload {
 
 function sectionSchedule(ctx: InstructorCtx, section: InstructorCtx["sections"][number]) {
   const sessions = ctx.classSessions.filter(
-    (s) => s.sectionCode === section.code || s.courseCode === section.courseCode,
+    (s) => s.sectionCode === section.code && s.courseCode === section.courseCode,
   );
   const room = sessions.find((s) => s.location)?.location || "Room Not Set";
   if (!sessions.length) {
     return { schedule: "Schedule not set", room };
   }
+  const timeZone = DEFAULT_TZ;
   const byDay = new Map<string, string>();
   for (const s of sessions) {
-    const day = s.startsAt.toLocaleDateString("en-CA", { weekday: "short" });
-    const start = s.startsAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    const end = s.endsAt ? s.endsAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+    const day = s.startsAt.toLocaleDateString("en-CA", { weekday: "short", timeZone });
+    const start = s.startsAt.toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit", timeZone });
+    const end = s.endsAt ? s.endsAt.toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit", timeZone }) : "";
     byDay.set(day, end ? `${start}–${end}` : start);
   }
   return {
@@ -879,7 +901,7 @@ function buildCoursesSessionsList(ctx: InstructorCtx): InstructorLivePayload {
   }
   return {
     title: "Manage Courses & Sessions",
-    subtitle: "SYS.COURSE_MGMT // SESSIONS_CATALOG",
+    subtitle: "Courses and their scheduled sessions",
     primaryAction: "Create Course",
     primaryActionHref: "/instructor/f/t55-add-course-form",
     secondaryAction: "Bulk Actions",
@@ -925,7 +947,7 @@ function buildCourseAdmin(ctx: InstructorCtx, path: string): InstructorLivePaylo
   }));
   return {
     title: "Course Sessions & Offerings",
-    subtitle: "SYS.COURSE_MGMT // COURSE_ADMIN",
+    subtitle: "Sessions and offerings for this course",
     primaryAction: "Create Session / Offering",
     primaryActionHref: `/instructor/f/t78-add-session-offering?courseId=${encodeURIComponent(courseId)}`,
     courseAdmin: {
@@ -996,7 +1018,7 @@ function buildAddSessionOfferingForm(ctx: InstructorCtx, path: string): Instruct
   const form = buildAddSessionScreenForm(number);
   return {
     title: `Add Session / Offering: ${number}`,
-    subtitle: "SYS.COURSE_MGMT // SESSION_CREATE",
+    subtitle: "Add a session or offering",
     primaryAction: "Save Session",
     secondaryAction: "Cancel",
     secondaryActionHref: `/instructor/f/t77-course-admin?courseId=${encodeURIComponent(courseId)}`,
@@ -1333,6 +1355,13 @@ async function buildCourseDetail(ctx: InstructorCtx, path: string): Promise<Inst
   if (detail.lms && attendance.attendanceDates.length) {
     detail.lms.attendanceDates = attendance.attendanceDates;
   }
+  if (detail.lms) {
+    const gradeBoard = await loadCourseGradeBoard(ctx.user.institutionId, sec.id);
+    Object.assign(detail.lms, {
+      gradeBoard,
+      gradeEmpty: gradeBoard.rows.length ? undefined : "No students are currently registered in this course offering.",
+    });
+  }
   return payload;
 }
 
@@ -1393,7 +1422,7 @@ function buildAddCourseForm(ctx: InstructorCtx): InstructorLivePayload {
 
   return {
     title: "Add New Course Instance",
-    subtitle: "SYS.COURSE_MANAGER // WORKSPACE_VERIFIER",
+    subtitle: "Course workspace overview",
     primaryAction: "Save Course",
     secondaryAction: "Cancel",
     secondaryActionHref: "/instructor/f/t54-courses-sessions",
@@ -1992,12 +2021,12 @@ function buildGradebook(ctx: InstructorCtx): InstructorLivePayload {
 
   return {
     title: "Assessments & Gradebook",
-    subtitle: `${sec.courseCode} // ${sec.code} // GRADES`,
+    subtitle: `${sec.courseCode} ${sec.code} · Grades`,
     primaryActionHref: "/instructor/gradebook",
     gradebook: {
       course: `${sec.courseCode} · ${sec.courseTitle}`,
       publishLabel: "Open live gradebook",
-      status: ctx.draftGradeCount ? "GRADE_STATUS: DRAFT" : "GRADE_STATUS: READY",
+      status: ctx.draftGradeCount ? "Grades: draft" : "Grades: ready",
       target: ctx.term?.name ?? "",
       columns: ["STUDENT", ...asgCols, "WEIGHTED TOTAL"],
       rows,
@@ -2144,7 +2173,7 @@ function buildAttendance(ctx: InstructorCtx, saved?: {
     subtitle:
       ctx.sections.length > 1
         ? `${ctx.sections.length} sections · ${students.length} enrolled`
-        : `${sec!.courseCode} // ${sec!.code}`,
+        : `${sec!.courseCode} ${sec!.code}`,
     primaryAction: "Submit & Finalize Session",
     secondaryAction: "Save Draft State",
     attendanceSession: {
@@ -2160,8 +2189,8 @@ function buildAttendance(ctx: InstructorCtx, saved?: {
       dateLabel: new Date().toLocaleString(),
       rosterTitle: `Student Roster (${students.length} Total)`,
       draftStatus: saved?.finalized
-        ? `STATUS: FINALIZED // ${students.length}_RECORDED`
-        : `STATUS: DRAFT // ${students.length}_LOADED`,
+        ? `Finalized · ${students.length} recorded`
+        : `Draft · ${students.length} loaded`,
       sectionId,
       students,
       stats: [
@@ -2319,18 +2348,19 @@ async function sendInstructorMessage(ctx: InstructorCtx, rowKey?: string) {
   };
 }
 
-function buildNotifications(ctx: InstructorCtx): InstructorLivePayload {
-  const unread = ctx.notifications.filter((n) => !n.readAt).length;
+function buildNotifications(ctx: InstructorCtx, total = ctx.notifications.length, unreadTotal?: number): InstructorLivePayload {
+  const unread = unreadTotal ?? ctx.notifications.filter((n) => !n.readAt).length;
   const academic = ctx.notifications.filter((n) => /alert|flag|academic|attendance/i.test(`${n.title} ${n.body}`)).length;
   const system = ctx.notifications.filter((n) => /publish|system|reminder|schedule/i.test(`${n.title} ${n.body}`)).length;
 
   return {
-    title: "Notification Center",
-    subtitle: "Manage critical system alerts and compliance dispatch logs.",
+    title: "Notifications",
+    subtitle: "Alerts and updates about your courses, students and account.",
     primaryAction: "Notification Preferences",
     secondaryAction: "Mark All as Read",
     notifications: {
-      termLabel: "Term: Fall 2026",
+      termLabel: ctx.term ? `Term: ${ctx.term.name}` : "",
+      total,
       filters: [
         { label: "All Alerts" },
         { label: "Unread", count: unread },
@@ -2367,6 +2397,7 @@ function buildNotifications(ctx: InstructorCtx): InstructorLivePayload {
                 ? "/instructor/messages"
                 : "/instructor/students";
         return {
+          id: n.id,
           title: n.title,
           body: n.body,
           when: relativeWhen(n.createdAt),
@@ -2377,7 +2408,7 @@ function buildNotifications(ctx: InstructorCtx): InstructorLivePayload {
           href,
         };
       }),
-      pagination: `Showing 1–${ctx.notifications.length} of ${Math.max(ctx.notifications.length, 24)} notifications`,
+      pagination: notificationPagination(ctx.notifications.length, total),
     },
   };
 }
@@ -2399,59 +2430,69 @@ async function buildProfile(ctx: InstructorCtx, path = "", availabilitySlots: Av
   return (await buildProfilePayload(ctx, path, availabilitySlots)) as InstructorLivePayload;
 }
 
-function buildCalendar(ctx: InstructorCtx): InstructorLivePayload {
-  const dayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri"] as const;
-  const tones = ["blue", "green", "purple", "orange"] as const;
-  const byDay = new Map<number, Array<{ title: string; time: string; tone: (typeof tones)[number] }>>();
-  for (let i = 0; i < 5; i++) byDay.set(i, []);
-
-  ctx.sections.forEach((s, i) => {
-    const day = i % 5;
-    byDay.get(day)!.push({
-      title: s.courseTitle || s.courseCode,
-      time: "09:00–10:30",
-      tone: tones[i % tones.length]!,
+async function buildCalendar(ctx: InstructorCtx): Promise<InstructorLivePayload> {
+  const dayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
+  const tz = await institutionTimezone(ctx.user.institutionId);
+  const today = ymdIn(new Date(), tz);
+  const mondayIso = addDays(today, -((new Date(`${today}T12:00:00Z`).getUTCDay() + 6) % 7));
+  const weekIsos = dayLabels.map((_, i) => addDays(mondayIso, i));
+  type CalEvent = { id: string; title: string; time: string; tone: "blue" | "purple" | "orange" };
+  const byIso = new Map(weekIsos.map((iso) => [iso, [] as CalEvent[]]));
+  const sectionIds = ctx.sections.map((s) => s.id);
+  const sessions = sectionIds.length
+    ? await prisma.classSession.findMany({
+        where: {
+          institutionId: ctx.user.institutionId,
+          sectionId: { in: sectionIds },
+          startsAt: { gte: zonedToUtc(mondayIso, "00:00", tz), lt: zonedToUtc(addDays(mondayIso, 7), "00:00", tz) },
+        },
+        orderBy: { startsAt: "asc" },
+        select: { id: true, title: true, startsAt: true, endsAt: true, sectionId: true },
+      })
+    : [];
+  const sectionById = new Map(ctx.sections.map((s, i) => [s.id, { s, tone: (i % 2 ? "purple" : "blue") as CalEvent["tone"] }]));
+  for (const c of sessions) {
+    const sec = sectionById.get(c.sectionId);
+    const start = hmIn(c.startsAt, tz);
+    byIso.get(ymdIn(c.startsAt, tz))?.push({
+      id: `session:${c.id}`,
+      title: sec ? `${sec.s.courseCode} ${sec.s.code} · ${c.title}` : c.title,
+      time: c.endsAt ? `${start}–${hmIn(c.endsAt, tz)}` : start,
+      tone: sec?.tone ?? "blue",
     });
-  });
-
+  }
   for (const s of ctx.sections) {
-    for (const a of s.assignments.filter((x) => x.dueAt)) {
-      const day = a.dueAt!.getDay(); // 0 Sun … 6 Sat
-      const idx = day >= 1 && day <= 5 ? day - 1 : 0;
-      const hh = a.dueAt!.getHours().toString().padStart(2, "0");
-      const mm = a.dueAt!.getMinutes().toString().padStart(2, "0");
-      byDay.get(idx)!.push({
-        title: `${s.courseCode}: ${a.title}`,
-        time: `${hh}:${mm}`,
+    for (const a of s.assignments) {
+      if (!a.dueAt) continue;
+      byIso.get(ymdIn(a.dueAt, tz))?.push({
+        id: `assignment:${a.id}`,
+        title: `${s.courseCode}: ${a.title} due`,
+        time: hmIn(a.dueAt, tz),
         tone: "orange",
       });
     }
   }
-
-  const now = new Date();
-  const monday = new Date(now);
-  const dow = now.getDay();
-  monday.setDate(now.getDate() - ((dow + 6) % 7));
-
-  const days = dayLabels.map((label, i) => {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
-    return {
-      label,
-      date: String(d.getDate()),
-      events: byDay.get(i) ?? [],
-    };
-  });
+  const days = weekIsos
+    .map((iso, i) => ({
+      label: dayLabels[i]!,
+      date: String(Number(iso.slice(8))),
+      events: (byIso.get(iso) ?? []).sort((x, y) => x.time.localeCompare(y.time)),
+    }))
+    .filter((d, i) => i < 5 || d.events.length > 0);
+  const rangeFmt = (iso: string) =>
+    new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-CA", { month: "short", day: "numeric", timeZone: "UTC" });
 
   return {
     title: "Calendar",
-    subtitle: "Assignment deadlines from your sections",
+    subtitle: days.some((d) => d.events.length)
+      ? "Class sessions and assessment deadlines for your sections this week"
+      : "No class sessions or deadlines scheduled for your sections this week",
     timetable: {
-      rangeLabel: "This week",
-      termLabel: ctx.term?.name ?? "Term",
-      views: ["Week", "Day"],
+      rangeLabel: `Week of ${rangeFmt(mondayIso)} – ${rangeFmt(weekIsos[6]!)}`,
+      termLabel: ctx.term?.name ?? "",
+      views: ["Week"],
       activeView: "Week",
-      filters: ["Show All", "Classes"],
+      filters: ["Show All", "Classes", "Deadlines"],
       days,
     },
   };
@@ -2622,7 +2663,7 @@ async function buildAlerts(ctx: InstructorCtx): Promise<InstructorLivePayload> {
 
   return {
     title: "Academic Alerts",
-    subtitle: `STUDENTS // ${items.length} ACTIVE`,
+    subtitle: `${items.length} active student${items.length === 1 ? "" : "s"}`,
     primaryAction: "Create alert",
     alertList: {
       badge: `${items.length} ACTIVE`,
@@ -2880,7 +2921,7 @@ function buildStudentFlags(ctx: InstructorCtx): InstructorLivePayload {
   });
   return {
     title: "Student Flags",
-    subtitle: "STUDENTS // RED_FLAGS_AND_ACCOLADES // SYSTEM",
+    subtitle: "Flags raised for your students",
     countLabel: `${rows.length} flag(s)`,
     columns: ["Student Name", "Flag Type", "Description", "Priority", "Status"],
     columnTemplate: "minmax(160px,1.2fr) minmax(120px,0.9fr) minmax(180px,1.4fr) minmax(80px,0.5fr) minmax(80px,0.5fr)",
@@ -2890,21 +2931,20 @@ function buildStudentFlags(ctx: InstructorCtx): InstructorLivePayload {
 
 function buildCreateFlagForm(ctx: InstructorCtx): InstructorLivePayload {
   const roster = rosterRows(ctx);
-  const first = roster[0];
-  const studentOptions = roster.map((r) => `${r.primary} · ${r.secondary}`).join(" | ") || "No roster students";
+  const studentOptions = [...new Set(roster.map((r) => `${r.primary} · ${r.secondary}`))];
   return {
     title: "Create Flag",
     subtitle: "Add a student flag from your assigned sections.",
     modal: {
       title: "Create Student Flag",
-      description: first
-        ? `Roster options: ${studentOptions}`
-        : "No students in your sections yet — flags can still be drafted.",
+      description: studentOptions.length
+        ? "Choose a student from your sections, the type of flag and a note explaining it."
+        : "There are no students in your sections yet, so a flag cannot be created.",
       fields: [
-        { label: "Student Name", value: first ? `${first.primary} · ${first.secondary}` : "", type: "text" },
-        { label: "Flag Type", value: "ACADEMIC RISK", type: "select" },
-        { label: "Description", value: "", type: "text" },
-        { label: "Priority", value: "High", type: "select" },
+        { label: "Student Name", value: "", type: "select", options: studentOptions, required: true },
+        { label: "Flag Type", value: "", type: "select", options: FLAG_TYPES, required: true },
+        { label: "Description", value: "", type: "textarea", required: true },
+        { label: "Priority", value: "Medium", type: "select", options: FLAG_PRIORITIES, required: true },
       ],
       confirmLabel: "Create Flag",
       cancelLabel: "Cancel",
@@ -3996,15 +4036,16 @@ async function routePayload(
     return buildHccStudentsDirectory(ctx.user, path);
   }
   if (p.includes("attendance") && !p.includes("workshop")) {
-    const dateMatch = path.match(/[?&]date=([^&]+)/);
-    const today = new Date().toISOString().slice(0, 10);
+    const { query } = parseScreenQuery(path);
+    const today = ymdIn(new Date(), await institutionTimezone(ctx.user.institutionId));
     return buildHccAttendance({
       ...ctx,
-      dateIso: dateMatch ? decodeURIComponent(dateMatch[1]!) : today,
+      dateIso: query.get("date")?.trim() || today,
+      sectionId: query.get("sectionId")?.trim() || null,
     });
   }
   if (p.includes("t19") || p.includes("create-edit-assessment")) {
-    return buildAssessmentBuilder(ctx, overlay);
+    return buildAssessmentBuilder(ctx, overlay, path);
   }
   // Assessments nav = list of published assessments (not the gradebook matrix)
   if (
@@ -4029,7 +4070,17 @@ async function routePayload(
   }
   if (p.includes("message") || p.includes("t16")) return buildMessages(ctx);
   if (p.includes("announcement") || p.includes("t23")) return buildAnnouncements(ctx, path);
-  if (p.includes("notification") || p.includes("t17")) return buildNotifications(ctx);
+  if (p.includes("notification") || p.includes("t17")) {
+    const mine = { institutionId: ctx.user.institutionId, recipientAccountId: ctx.user.accountId };
+    const [total, unread] = await Promise.all([
+      prisma.notification.count({ where: mine }),
+      prisma.notification.count({ where: { ...mine, readAt: null } }),
+    ]);
+    return buildNotifications(ctx, total, unread);
+  }
+  if (p.includes("t31") || p.includes("first-login")) {
+    return buildProfileCompletionPayload(ctx);
+  }
   if (
     p.includes("profile") ||
     p.includes("t02") ||
@@ -4107,6 +4158,22 @@ async function routePayload(
   }
   if (p.includes("t66") || p.includes("course-configuration")) {
     return hydrateCourseConfigurations(ctx, path);
+  }
+  if (p.includes("t59") || p.includes("course-groups")) {
+    return buildCourseGroupsList(ctx.user.institutionId);
+  }
+  if (p.includes("t65") || p.includes("course-backups")) {
+    return buildCourseBackups(ctx.sections.length);
+  }
+  if (parseScreenQuery(path).pathname.replace(/\/+$/, "") === "/instructor/studio") {
+    const picked = (parseScreenQuery(path).query.get("sectionId") || "").trim();
+    return buildCourseDetail(ctx, picked ? `/instructor/studio?view=${encodeURIComponent(picked)}` : path);
+  }
+  if (p.includes("in-17") || p.includes("course-approval")) {
+    return buildCourseApprovalReview(ctx);
+  }
+  if (p.includes("t20") || p.includes("grade-correction")) {
+    return buildGradeCorrectionReview(ctx);
   }
   return buildEmptyDomain("Instructor", `${ctx.displayName} · live`);
 }
@@ -5178,7 +5245,7 @@ function mergeProgramTypeList(
 function buildProgramTypes(_ctx: InstructorCtx): InstructorLivePayload {
   return {
     title: "Manage Program Types",
-    subtitle: "SYS.PROGRAM_ADMIN // PROGRAM_TYPES",
+    subtitle: "Program types used across faculties",
     primaryAction: "Create Program Type",
     primaryActionHref: "/instructor/f/t75-add-program-type",
     programTypes: {
@@ -5203,7 +5270,7 @@ async function buildAddProgramTypeForm(ctx: InstructorCtx, path: string): Promis
   const isEdit = Boolean(existing);
   return {
     title: isEdit ? "Edit Program Type" : "Add Program Type",
-    subtitle: isEdit ? "SYS.PROGRAM_ADMIN // PROGRAM_TYPE_EDIT" : "SYS.PROGRAM_ADMIN // PROGRAM_TYPE_CREATE",
+    subtitle: isEdit ? "Edit program type" : "Add a program type",
     primaryAction: "Save Program Type",
     secondaryAction: "Cancel",
     secondaryActionHref: PROGRAM_TYPES_LIST_PATH,
@@ -5448,7 +5515,7 @@ function buildManageTerms(ctx: InstructorCtx): InstructorLivePayload {
   });
   return {
     title: "Manage Terms",
-    subtitle: "SYS.PROGRAM_ADMIN // TERM_SCHEDULER",
+    subtitle: "Academic terms and their dates",
     primaryAction: "Create Term",
     primaryActionHref: "/instructor/f/t76-add-term",
     manageTerms: {
@@ -5498,7 +5565,7 @@ async function buildAddTermForm(ctx: InstructorCtx, path: string): Promise<Instr
     : { startsOn: "", endsOn: "" };
   return {
     title: isEdit ? `Edit Term: ${existing?.name || "Term"}` : "Add Term",
-    subtitle: isEdit ? "SYS.PROGRAM_ADMIN // TERM_EDIT" : "SYS.PROGRAM_ADMIN // TERM_CREATE",
+    subtitle: isEdit ? "Edit term" : "Add a term",
     breadcrumbs: isEdit
       ? ["Home", "Manage Terms", "Edit Term"]
       : ["Home", "Manage Terms", "Add Term"],
@@ -5598,7 +5665,7 @@ async function buildReviewTerm(ctx: InstructorCtx, path: string): Promise<Instru
   const code = existing?.code || "";
   return {
     title: `Review Term: ${name}${code ? ` (${code})` : ""}`,
-    subtitle: "SYS.PROGRAM_ADMIN // TERM_REVIEW",
+    subtitle: "Review term details",
     breadcrumbs: ["Home", "Manage Terms", "Review Term"],
     reviewTerm: {
       id: existing?.id || termId || "",
@@ -5724,7 +5791,7 @@ const DEFAULT_MASTER_SCHEDULE_ROWS = [
 function buildMasterSchedulingList(): InstructorLivePayload {
   return {
     title: "Master Scheduling",
-    subtitle: "SYS.PROGRAM_MGMT // MASTER_SCHEDULING",
+    subtitle: "Master schedules by program",
     primaryAction: "Create Master Schedule",
     primaryActionHref: "/instructor/f/t71-create-master-schedule",
     secondaryAction: "Create Term Schedule",
@@ -5740,7 +5807,7 @@ function buildMasterSchedulingList(): InstructorLivePayload {
 function buildAcademicCalendarsList(): InstructorLivePayload {
   return {
     title: "Manage Academic Calendars",
-    subtitle: "SYS.PROGRAM_MGMT // ACADEMIC_CALENDARS",
+    subtitle: "Academic calendars",
     primaryAction: "Create Academic Calendar",
     primaryActionHref: "/instructor/f/t73-create-academic-calendar",
     academicCalendars: {
@@ -5878,7 +5945,7 @@ async function buildCreateTermScheduleForm(ctx: InstructorCtx): Promise<Instruct
 function buildCreateAcademicCalendarForm(): InstructorLivePayload {
   return {
     title: "Create Academic Calendar",
-    subtitle: "SYS.PROGRAM_MGMT // CALENDAR_CREATE",
+    subtitle: "Create an academic calendar",
     primaryAction: "Save Academic Calendar",
     secondaryAction: "Cancel",
     secondaryActionHref: "/instructor/f/t52-academic-calendars",
@@ -6002,7 +6069,7 @@ function buildCourseCategories(ctx: InstructorCtx): InstructorLivePayload {
   }));
   return {
     title: "Course Categories",
-    subtitle: "SYS.COURSE_MGMT // CATEGORIES_EDITOR",
+    subtitle: "Course categories",
     columns: ["Category Name", "Code", "Description", "Courses", "Parent", "Status"],
     columnTemplate:
       "minmax(120px,1fr) minmax(70px,0.5fr) minmax(180px,1.4fr) minmax(70px,0.5fr) minmax(90px,0.7fr) minmax(80px,0.5fr)",
@@ -6027,7 +6094,7 @@ const DEFAULT_COURSE_TYPES = [
 function buildCourseTypesList(): InstructorLivePayload {
   return {
     title: "Manage Course Types",
-    subtitle: "SYS.COURSE_MGMT // COURSE_TYPES",
+    subtitle: "Course types and groups",
     primaryAction: "Create Course Type",
     primaryActionHref: "/instructor/f/t69-add-course-type",
     courseTypes: {
@@ -6040,7 +6107,7 @@ function buildCourseTypesList(): InstructorLivePayload {
 function buildAddCourseGroupForm(): InstructorLivePayload {
   return {
     title: "Add Course Group",
-    subtitle: "SYS.COURSE_MGMT // GROUP_CREATE",
+    subtitle: "Add a course group",
     primaryAction: "Save Course Group",
     secondaryAction: "Cancel",
     secondaryActionHref: "/instructor/f/t59-course-groups-types",
@@ -6066,7 +6133,7 @@ function buildAddCourseTypeForm(path: string): InstructorLivePayload {
   const existing = DEFAULT_COURSE_TYPES.find((t) => t.id === typeId);
   return {
     title: existing ? "Edit Course Type" : "Add Course Type",
-    subtitle: existing ? "SYS.COURSE_MGMT // TYPE_EDIT" : "SYS.COURSE_MGMT // TYPE_CREATE",
+    subtitle: existing ? "Edit course type" : "Add a course type",
     primaryAction: "Save Course Type",
     secondaryAction: "Cancel",
     secondaryActionHref: COURSE_TYPES_LIST_PATH,
@@ -6169,7 +6236,7 @@ function buildGradingSchemesList(): InstructorLivePayload {
   return {
     title: "MANAGE GRADING SCHEMES",
     breadcrumbs: ["Home", "Grading Schemes"],
-    subtitle: "SYS.COURSE_MGMT // GRADING_SCHEMES",
+    subtitle: "Grading schemes",
     primaryAction: "Create Grading Scheme",
     primaryActionHref: ADD_GRADING_SCHEME_PATH,
     gradingSchemes: {
@@ -6209,7 +6276,7 @@ function buildAddGradingSchemeForm(
     breadcrumbs: editing
       ? ["Home", "Grading Schemes", "Edit Grading Scheme"]
       : ["Home", "Grading Schemes", "Add Grading Schemes"],
-    subtitle: editing ? "SYS.COURSE_MGMT // GRADING_SCHEME_EDIT" : "SYS.COURSE_MGMT // GRADING_SCHEME_CREATE",
+    subtitle: editing ? "Edit grading scheme" : "Add a grading scheme",
     primaryAction: "Save Grading Scheme",
     secondaryAction: "Cancel",
     secondaryActionHref: GRADING_SCHEMES_PATH,
@@ -6299,12 +6366,21 @@ function buildAddGradingSchemeForm(
   };
 }
 
+/** The requested section must be one the user teaches; without a request, falls back to the first taught section. */
+function taughtSection(ctx: InstructorCtx, sectionId?: string | null) {
+  if (!sectionId) return primarySection(ctx);
+  const sec = ctx.sections.find((s) => s.id === sectionId);
+  if (!sec) throw Object.assign(new Error("You do not teach this course section"), { status: 403, code: "FORBIDDEN" });
+  return sec;
+}
+
 async function createAssignmentForInstructor(
   ctx: InstructorCtx,
   title: string,
   daysUntilDue = 14,
+  sectionId?: string | null,
 ) {
-  const sec = primarySection(ctx);
+  const sec = taughtSection(ctx, sectionId);
   if (!sec) throw Object.assign(new Error("No teaching section assigned"), { status: 400 });
   const dueAt = new Date();
   dueAt.setDate(dueAt.getDate() + daysUntilDue);
@@ -6391,6 +6467,7 @@ function buildAssessmentList(ctx: InstructorCtx): InstructorLivePayload {
 }
 
 type AssessmentBuilderFields = {
+  sectionId?: string;
   title?: string;
   type?: string;
   weight?: string;
@@ -6430,9 +6507,11 @@ function formatPreviewDate(d: Date): string {
 function buildAssessmentBuilder(
   ctx: InstructorCtx,
   overlay?: Record<string, unknown> | null,
+  path = "",
 ): InstructorLivePayload {
-  const sec = primarySection(ctx);
   const draft = (overlay?.assessmentDraft as AssessmentBuilderFields | undefined) || null;
+  const requested = parseScreenQuery(path).query.get("sectionId")?.trim() || draft?.sectionId || "";
+  const sec = ctx.sections.find((s) => s.id === requested) || primarySection(ctx);
   const open = parseDateOrOffset(draft?.openDate, 7);
   const due = parseDateOrOffset(draft?.dueDate, 14);
   const title = (draft?.title || (sec ? `${sec.courseCode} Midterm Examination` : "New Assessment")).trim();
@@ -6455,13 +6534,18 @@ function buildAssessmentBuilder(
   return {
     title: "Create Assessment",
     subtitle: sec
-      ? `SYS.STUDIO_WRITER // ${sec.courseCode} // ${ctx.displayName.toUpperCase().replace(/\s+/g, "_")}`
+      ? `${sec.courseCode} ${sec.code} · ${ctx.displayName}`
       : "No teaching section assigned — assign a section before publishing",
     breadcrumbs: ["My Courses", sectionLabel, "New Assessment"],
     assessmentBuilder: {
       crumb: ["My Courses", sectionLabel, "New Assessment"],
       heading: "Design New Assessment",
       description: "Create grade matching rubrics and publish a live assessment for enrolled students.",
+      sectionId: sec?.id ?? null,
+      sections: ctx.sections.map((s) => ({
+        id: s.id,
+        label: `${s.courseCode} ${s.code}${s.termCode ? ` · ${s.termCode}` : ""} — ${s.courseTitle}`,
+      })),
       title,
       type,
       weight,
@@ -6509,10 +6593,13 @@ async function createOrSaveAssessment(
   rowKey: string | undefined,
   publish: boolean,
 ) {
-  const sec = primarySection(ctx);
+  const fields = parseAssessmentPayload(rowKey) || {};
+  const sec = taughtSection(
+    ctx,
+    fields.sectionId?.trim() || parseScreenQuery(path).query.get("sectionId")?.trim() || null,
+  );
   if (!sec) throw Object.assign(new Error("No teaching section assigned"), { status: 400 });
 
-  const fields = parseAssessmentPayload(rowKey) || {};
   const title = (fields.title || `Assessment · ${new Date().toLocaleDateString()}`).trim();
   const type = (fields.type || "Written Exam").trim();
   const weightPercent = parseWeightPercent(fields.weight);
@@ -6539,6 +6626,7 @@ async function createOrSaveAssessment(
         ];
 
   const draftPayload: AssessmentBuilderFields = {
+    sectionId: sec.id,
     title,
     type,
     weight: `${weightPercent}%`,
@@ -6581,6 +6669,7 @@ async function createOrSaveAssessment(
       title,
       maxScore: 100,
       weightPercent,
+      availableFrom: opensAt,
       dueAt: closesAt,
       rubricId: rubric.id,
     },
@@ -6600,20 +6689,6 @@ async function createOrSaveAssessment(
     });
   }
 
-  const assessment = await prisma.assessment.create({
-    data: {
-      id: randomUUID(),
-      institutionId: ctx.user.institutionId,
-      sectionId: sec.id,
-      title,
-      opensAt,
-      closesAt,
-      durationMinutes: 60,
-      maxAttempts: 1,
-      status: "published",
-    },
-  });
-
   await upsertAssessmentDraftState(ctx.user.institutionId, path, null);
 
   return {
@@ -6621,7 +6696,6 @@ async function createOrSaveAssessment(
     title,
     type,
     weightPercent,
-    assessmentId: assessment.id,
     assignmentId: assignment.id,
     rubricId: rubric.id,
     sectionId: sec.id,
@@ -6759,28 +6833,20 @@ async function saveAttendanceSession(ctx: InstructorCtx, path: string, finalize:
       throw Object.assign(new Error("Mark Present, Absent, Late or Excused for at least one student before submitting."), { status: 400 });
     }
     const pathDate = parseScreenQuery(path).query.get("date")?.trim() || "";
+    const tz = await institutionTimezone(ctx.user.institutionId);
     const meetingLabel =
       (/^\d{4}-\d{2}-\d{2}$/.test(dateFromClient) && dateFromClient) ||
       (/^\d{4}-\d{2}-\d{2}$/.test(pathDate) && pathDate) ||
-      new Date().toLocaleDateString("en-CA", { timeZone: "America/Toronto" });
-    await prisma.$transaction(async (tx) => {
-      for (const row of marked) {
-        await tx.attendanceRecord.deleteMany({
-          where: { institutionId: ctx.user.institutionId, studentId: row.studentId, sectionId: row.sectionId, meetingLabel },
-        });
-        await tx.attendanceRecord.create({
-          data: {
-            id: randomUUID(),
-            institutionId: ctx.user.institutionId,
-            studentId: row.studentId,
-            sectionId: row.sectionId,
-            meetingLabel,
-            status: row.status.toLowerCase(),
-            ...(row.note ? { note: row.note.slice(0, 500) } : {}),
-          },
-        });
-      }
-    });
+      ymdIn(new Date(), tz);
+    await prisma.$transaction((tx) =>
+      writeAttendanceRecords(tx, {
+        institutionId: ctx.user.institutionId,
+        meetingLabel,
+        tz,
+        sections: ctx.sections,
+        marks: marked,
+      }),
+    );
     void import("../campusCompliance/sweep.js")
       .then(({ escalateStudentMisses }) => escalateStudentMisses(ctx.user.institutionId))
       .catch(() => undefined);
@@ -6794,7 +6860,17 @@ async function saveAttendanceSession(ctx: InstructorCtx, path: string, finalize:
     savedAt: new Date().toISOString(),
     roster,
   };
-  const next = { ...prev, attendance };
+  // Screen state is keyed per institution path, so another instructor's unsubmitted rows must survive this save.
+  const mySectionIds = new Set(ctx.sections.map((s) => s.id));
+  const othersRows = (existingAttendance?.roster ?? []).filter(
+    (r) => r.sectionId && !mySectionIds.has(r.sectionId) && !(existingAttendance as { finalized?: boolean }).finalized,
+  );
+  const next = {
+    ...prev,
+    attendance: othersRows.length
+      ? { ...attendance, finalized: false, roster: [...othersRows, ...(finalize ? [] : roster)] }
+      : attendance,
+  };
   await prisma.sisScreenState.upsert({
     where: { institutionId_path: { institutionId: ctx.user.institutionId, path } },
     create: { institutionId: ctx.user.institutionId, path, payloadJson: JSON.stringify(next) },
@@ -7065,19 +7141,25 @@ async function createStudentProfile(ctx: InstructorCtx, fields: Record<string, s
   });
   const enrolment =
     existingEnrolment ??
-    (await prisma.enrolment.create({
-      data: {
-        id: randomUUID(),
-        institutionId,
-        sectionId: section.id,
-        studentId: student.id,
-        status: "enrolled",
-      },
+    (await prisma.$transaction(async (tx) => {
+      const status = await assertSeat(tx, institutionId, section.id, `${section.courseCode} ${section.code}`);
+      return tx.enrolment.create({
+        data: {
+          id: randomUUID(),
+          institutionId,
+          sectionId: section.id,
+          studentId: student.id,
+          status,
+        },
+      });
     }));
 
-  const assignments = await prisma.assignment.findMany({
-    where: { institutionId, sectionId: section.id },
-  });
+  const assignments =
+    enrolment.status === "enrolled"
+      ? await prisma.assignment.findMany({
+          where: { institutionId, sectionId: section.id },
+        })
+      : [];
   for (const assignment of assignments) {
     const existingGrade = await prisma.gradeItem.findFirst({
       where: { assignmentId: assignment.id, studentId: student.id },
@@ -7161,6 +7243,18 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
         ? `Published “${saved.title}” on ${saved.sectionCode}`
         : `Draft saved · ${saved.title}`;
       result = saved;
+    } else if (lower === "mark all as read" || lower === "mark notification read") {
+      const ids = lower === "mark all as read" ? undefined : [(input.rowKey || "").trim()];
+      const { count } = await markNotificationsRead(user, ids);
+      message = count ? `${count} notification(s) marked as read` : "No unread notifications";
+      result = { marked: count };
+    } else if (lower === "save course group") {
+      const group = await saveCourseGroup(user.institutionId, parseActionFields(input.rowKey) || {});
+      message = `Course group saved · ${group.name}`;
+      result = { ...group, href: "/instructor/f/t59-course-groups-types" };
+    } else if (lower === "dismiss flag" || lower === "delete flag") {
+      result = await updateInstructorFlag(user, input.rowKey || "", lower === "delete flag" ? "delete" : "dismiss");
+      message = lower === "delete flag" ? "Flag deleted" : "Flag dismissed";
     } else if (lower.includes("announcement") || lower.includes("share with class") || lower.includes("publish announcement")) {
       let title = input.rowKey || `Class update · ${new Date().toLocaleDateString()}`;
       let body = `${ctx.displayName} posted: ${title}`;
@@ -7247,7 +7341,12 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
           : lower.includes("event")
             ? `Event · ${new Date().toLocaleDateString()}`
             : `Scheduled item · ${new Date().toLocaleDateString()}`);
-      const created = await createAssignmentForInstructor(ctx, title);
+      const created = await createAssignmentForInstructor(
+        ctx,
+        title,
+        14,
+        parseScreenQuery(path).query.get("sectionId")?.trim() || null,
+      );
       message = `Scheduled “${created.assignment.title}” on ${created.section.code}`;
       result = { assignmentId: created.assignment.id, sectionId: created.section.id };
     } else if (
@@ -8337,6 +8436,8 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
       let priority = "High";
       let studentResolved = false;
       const fields = parseActionFields(input.rowKey);
+      const flagInput =
+        (path.includes("flag") || path.includes("t45")) && !lower.includes("alert") ? validateFlagFields(fields) : null;
       if (fields) {
         const studentLabel = (fields["Student Name"] || fields.studentName || "").toLowerCase();
         const match = ctx.sections
@@ -8357,6 +8458,11 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
         priority = fields.Priority || fields.priority || priority;
         if (fields.Course || fields["Course Name"]) {
           courseCode = (fields.Course || fields["Course Name"] || courseCode).trim();
+        }
+        if (flagInput) {
+          flagType = flagInput.flagType;
+          description = flagInput.note;
+          priority = flagInput.priority;
         }
       } else if (input.rowKey) {
         const match = ctx.sections
@@ -8410,17 +8516,6 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
         }
 
         if (isFlagPath) {
-          await appendExtraRow(user.institutionId, path.includes("create") ? "/instructor/f/t45-student-flags" : path, {
-            cells: [
-              `${focus?.studentName ?? "Student"} · ${focus?.studentNumber ?? "—"}`,
-              flagType,
-              description || "Flag recorded from instructor workspace.",
-              priority,
-              "Active",
-            ],
-            badge: priority,
-            badgeTone: /high/i.test(priority) ? "danger" : /medium/i.test(priority) ? "warning" : "info",
-          });
           if (studentResolved && focus?.studentId) {
             await recordAdminFlag(user, {
               studentId: focus.studentId,
@@ -8430,7 +8525,9 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
             });
           }
         }
-        message = `Alert created · ${focus?.studentName ?? "roster"} · ${flagType}`;
+        message = flagInput
+          ? `Flag created · ${focus?.studentName ?? "student"} · ${flagType}`
+          : `Alert created · ${focus?.studentName ?? "roster"} · ${flagType}`;
         result = { studentId: focus?.studentId ?? null, flagType, priority, courseCode };
       }
     } else if (
@@ -8695,16 +8792,20 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
     } else if (lower.includes("add an activity or resource") || lower.includes("add activity") || lower.includes("add resource")) {
       const fields = parseActionFields(input.rowKey) || {};
       const topicId = (fields.TopicId || fields.topicId || "").trim();
-      const type = (fields.Type || fields.type || "Page").trim().toUpperCase();
+      const type = (fields.ActivityType || fields.Type || fields.type || "Page").trim().toUpperCase();
       const name = (fields.Name || fields.name || `New ${type}`).trim();
       if (!topicId) {
         message = "Select a topic first";
         result = { error: true };
       } else {
+        const content = activityContentFromForm(type, fields);
         const activity: Record<string, unknown> = {
           id: `act-${Date.now().toString(36)}`,
           type,
           name,
+          settings: content.settings,
+          ...(content.description ? { description: content.description } : {}),
+          ...(content.url ? { url: content.url } : {}),
         };
         const fileId = (fields.FileId || "").trim();
         if (fileId && (type === "FILE" || type === "FOLDER")) {
@@ -8723,10 +8824,22 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
           activity.fileSize = Number(meta.size) || 0;
           activity.modified = new Date().toLocaleString("en-CA", { dateStyle: "full", timeStyle: "short", timeZone: "America/Toronto" });
         }
-        const bodyHtml = (fields.Body || "").trim();
-        if (bodyHtml) {
-          activity.body = sanitizeLessonHtml(bodyHtml);
+        if (content.body) {
+          activity.body = content.body;
           activity.modified = new Date().toLocaleString("en-CA", { dateStyle: "full", timeStyle: "short", timeZone: "America/Toronto" });
+        }
+        if (content.assignment) {
+          activity.assignment = content.assignment;
+          const workspaceId = workspaceSectionId(path);
+          if (workspaceId && ctx.sections.some((s) => s.id === workspaceId)) {
+            activity.assignmentId = await saveLmsAssignment({
+              institutionId: user.institutionId,
+              sectionId: workspaceId,
+              title: name,
+              settings: content.assignment,
+              hidden: content.hidden,
+            });
+          }
         }
         if (fields.Storyboard) {
           let raw: unknown = null;
@@ -8766,8 +8879,67 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
             ...((prev.topicActivities as Record<string, Array<Record<string, unknown>>>) || {}),
           };
           topicActivities[topicId] = [...(topicActivities[topicId] || []), activity];
-          return { ...prev, topicActivities };
+          const hidden = Array.isArray(prev.hiddenActivityIds) ? (prev.hiddenActivityIds as string[]) : [];
+          return {
+            ...prev,
+            topicActivities,
+            hiddenActivityIds: content.hidden ? [...hidden, String(activity.id)] : hidden,
+          };
         });
+      }
+    } else if (lower === "save activity settings") {
+      const fields = parseActionFields(input.rowKey) || {};
+      const activityId = (fields.Id || "").trim();
+      const name = (fields.Name || "").trim();
+      if (!activityId || !name) {
+        message = "Activity name is required";
+        result = { error: true };
+      } else {
+        const existing = findOverlayActivity(await loadLmsOverlay(user.institutionId, path), activityId)?.activity;
+        const type = String(existing?.type || fields.ActivityType || "PAGE").toUpperCase();
+        const content = activityContentFromForm(type, fields);
+        const edit: Record<string, unknown> = {
+          name,
+          settings: content.settings,
+          description: content.description ?? "",
+          modified: new Date().toLocaleString("en-CA", { dateStyle: "full", timeStyle: "short", timeZone: "America/Toronto" }),
+        };
+        if (content.body !== undefined) edit.body = content.body;
+        if (content.url) edit.url = content.url;
+        if (content.assignment) {
+          edit.assignment = content.assignment;
+          const workspaceId = workspaceSectionId(path);
+          if (workspaceId && ctx.sections.some((s) => s.id === workspaceId)) {
+            edit.assignmentId = await saveLmsAssignment({
+              institutionId: user.institutionId,
+              sectionId: workspaceId,
+              assignmentId: typeof existing?.assignmentId === "string" ? existing.assignmentId : null,
+              title: name,
+              settings: content.assignment,
+              hidden: content.hidden,
+            });
+          }
+        }
+        await patchScreenOverlay(user.institutionId, path, (prev) => {
+          const topicActivities = {
+            ...((prev.topicActivities as Record<string, Array<Record<string, unknown>>>) || {}),
+          };
+          let inOverlay = false;
+          for (const key of Object.keys(topicActivities)) {
+            topicActivities[key] = (topicActivities[key] || []).map((row) => {
+              if (String(row.id || "") !== activityId) return row;
+              inOverlay = true;
+              return { ...row, ...edit };
+            });
+          }
+          const activityEdits = { ...((prev.activityEdits as Record<string, Record<string, unknown>>) || {}) };
+          if (!inOverlay) activityEdits[activityId] = { ...(activityEdits[activityId] || {}), ...edit };
+          const hidden = Array.isArray(prev.hiddenActivityIds) ? (prev.hiddenActivityIds as string[]).filter((id) => id !== activityId) : [];
+          if (content.hidden) hidden.push(activityId);
+          return { ...prev, topicActivities, activityEdits, hiddenActivityIds: hidden };
+        });
+        message = `Saved · ${name}`;
+        result = { id: activityId, name, hidden: content.hidden };
       }
     } else if (lower.includes("hide activity") || lower.includes("show activity")) {
       const activityId = (input.rowKey || "").trim();
@@ -8785,6 +8957,8 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
             : hidden.filter((id) => id !== activityId);
           return { ...prev, hiddenActivityIds: next };
         });
+        const linked = await linkedLmsAssignment(user.institutionId, path, activityId);
+        if (linked) await setLmsAssignmentHidden(user.institutionId, linked.sectionId, linked.assignmentId, hide);
         message = hide ? "Activity hidden from students" : "Activity shown";
         result = { id: activityId, hidden: hide };
       }
@@ -8797,10 +8971,25 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
         message = "Select a topic first";
         result = { error: true };
       } else {
-        const activity = { id: `act-${Date.now().toString(36)}`, type, name };
+        const source = fields.Id
+          ? findOverlayActivity(await loadLmsOverlay(user.institutionId, path), fields.Id.trim())?.activity
+          : undefined;
+        const { assignmentId: _sourceAssignment, hidden: _sourceHidden, ...copied } = source || {};
+        const activity: Record<string, unknown> = { ...copied, id: `act-${Date.now().toString(36)}`, type, name };
+        const workspaceId = workspaceSectionId(path);
+        const settings = copied.assignment as LmsAssignmentSettings | undefined;
+        if (type === "ASSIGNMENT" && settings && workspaceId && ctx.sections.some((s) => s.id === workspaceId)) {
+          activity.assignmentId = await saveLmsAssignment({
+            institutionId: user.institutionId,
+            sectionId: workspaceId,
+            title: name,
+            settings,
+            hidden: false,
+          });
+        }
         await patchScreenOverlay(user.institutionId, path, (prev) => {
           const topicActivities = {
-            ...((prev.topicActivities as Record<string, Array<{ type: string; name: string }>>) || {}),
+            ...((prev.topicActivities as Record<string, Array<Record<string, unknown>>>) || {}),
           };
           topicActivities[topicId] = [...(topicActivities[topicId] || []), activity];
           return { ...prev, topicActivities };
@@ -8814,6 +9003,8 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
         message = "Select an activity first";
         result = { error: true };
       } else {
+        const linked = await linkedLmsAssignment(user.institutionId, path, activityId);
+        if (linked) await retireLmsAssignment(user.institutionId, linked.sectionId, linked.assignmentId);
         await patchScreenOverlay(user.institutionId, path, (prev) => {
           const deleted = Array.isArray(prev.deletedActivityIds) ? [...(prev.deletedActivityIds as string[])] : [];
           if (!deleted.includes(activityId)) deleted.push(activityId);
@@ -8860,6 +9051,8 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
           if (hide) hidden.push(activityId);
           return { ...prev, topicActivities, activityEdits, hiddenActivityIds: hidden };
         });
+        const linked = await linkedLmsAssignment(user.institutionId, path, activityId);
+        if (linked) await setLmsAssignmentHidden(user.institutionId, linked.sectionId, linked.assignmentId, hide);
         message = `Page saved · ${name}`;
         result = { id: activityId, name, hidden: hide };
       }

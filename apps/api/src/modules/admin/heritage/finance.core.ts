@@ -445,10 +445,11 @@ export async function patchMeta(user: SessionClaims, e: Entry, patch: Data) {
 /** Creates a ledger entry together with its Financial Management metadata. */
 export async function postEntry(
   user: SessionClaims,
-  input: { studentId: string; kind: "charge" | "payment" | "credit" | "refund"; label: string; amount: number; status?: string; source?: string | null; note?: string | null; postedAt?: Date; dueAt?: Date | null; termId?: string | null; reversedFromId?: string | null },
+  input: { studentId: string; kind: "charge" | "payment" | "credit" | "refund"; label: string; amount: number; status?: string; source?: string | null; note?: string | null; postedAt?: Date; dueAt?: Date | null; termId?: string | null; reversedFromId?: string | null; courseId?: string | null; sectionId?: string | null },
   meta: Data,
+  db: Db = prisma,
 ) {
-  const entry = await prisma.financeLedgerEntry.create({
+  const entry = await db.financeLedgerEntry.create({
     data: {
       institutionId: user.institutionId,
       studentId: input.studentId,
@@ -462,10 +463,12 @@ export async function postEntry(
       dueAt: input.dueAt ?? null,
       financialTermId: input.termId ?? null,
       reversedFromId: input.reversedFromId ?? null,
+      courseId: input.courseId ?? null,
+      sectionId: input.sectionId ?? null,
     },
   });
   const number = num(meta.number) || (await nextNumber(user.institutionId, NUMBER_KIND[input.kind] ?? "transaction"));
-  await writeMeta(user, input.studentId, entry.id, { ...meta, number, managed: true });
+  await putSingle(user, S.META, input.studentId, entry.id, { ...meta, number, managed: true }, db);
   return { entry, number };
 }
 
@@ -560,17 +563,42 @@ export async function finAudit(user: SessionClaims, studentId: string, action: s
   await audit(user, S.STUDENT_AUDIT, studentId, action, { recordId: recordId ?? null, after: { record, ...details } });
 }
 
-export async function termOptions(inst: string) {
-  const terms = await prisma.financialTerm.findMany({ where: { institutionId: inst }, orderBy: { startsOn: "desc" } });
-  return terms.map((t) => ({ id: t.id, name: t.name, startsOn: t.startsOn, endsOn: t.endsOn }));
+/** Prefix for academic terms offered as financial terms before they have a FinancialTerm row. */
+export const ACADEMIC_TERM = "term:";
+
+/** The financial term matching an academic term (same code), created on first use. */
+export async function ensureFinancialTerm(inst: string, term: { code: string; name: string; startsOn: string; endsOn: string }, db: Db = prisma) {
+  const found = await db.financialTerm.findFirst({ where: { institutionId: inst, code: term.code } });
+  if (found) return found;
+  return db.financialTerm.create({ data: { institutionId: inst, code: term.code, name: term.name, startsOn: term.startsOn, endsOn: term.endsOn } });
 }
 
-export async function termId(inst: string, v: unknown) {
+export async function termOptions(inst: string) {
+  const [terms, academic] = await Promise.all([
+    prisma.financialTerm.findMany({ where: { institutionId: inst }, orderBy: { startsOn: "desc" } }),
+    prisma.term.findMany({ where: { institutionId: inst }, orderBy: { startsOn: "desc" } }),
+  ]);
+  const codes = new Set(terms.map((t) => t.code));
+  const out = [
+    ...terms.map((t) => ({ id: t.id, name: t.name, startsOn: t.startsOn, endsOn: t.endsOn })),
+    ...academic.filter((t) => !codes.has(t.code)).map((t) => ({ id: `${ACADEMIC_TERM}${t.id}`, name: t.name, startsOn: t.startsOn, endsOn: t.endsOn })),
+  ];
+  return out.sort((a, b) => b.startsOn.localeCompare(a.startsOn) || a.name.localeCompare(b.name));
+}
+
+export async function termId(inst: string, v: unknown, db: Db = prisma) {
   const t = s(v).trim();
   if (!t) return null;
-  const found = await prisma.financialTerm.findFirst({ where: { institutionId: inst, OR: [{ id: t }, { name: t }, { code: t }] } });
-  if (!found) throw httpError(400, `Term "${t}" was not found`);
-  return found.id;
+  if (t.startsWith(ACADEMIC_TERM)) {
+    const academic = await db.term.findFirst({ where: { id: t.slice(ACADEMIC_TERM.length), institutionId: inst } });
+    if (!academic) throw httpError(400, `Term "${t}" was not found`);
+    return (await ensureFinancialTerm(inst, academic, db)).id;
+  }
+  const found = await db.financialTerm.findFirst({ where: { institutionId: inst, OR: [{ id: t }, { name: t }, { code: t }] } });
+  if (found) return found.id;
+  const academic = await db.term.findFirst({ where: { institutionId: inst, OR: [{ id: t }, { name: t }, { code: t }] } });
+  if (!academic) throw httpError(400, `Term "${t}" was not found`);
+  return (await ensureFinancialTerm(inst, academic, db)).id;
 }
 
 /** Page slice for directory listings. */

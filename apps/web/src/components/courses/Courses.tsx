@@ -1,9 +1,9 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { SaModal } from "@/components/superadmin/shared";
+import { SaModal, SaNotice } from "@/components/superadmin/shared";
 import {
   Confirm,
   EntityModal,
@@ -307,7 +307,7 @@ function BulkActions({ onClose, onSaved }: { onClose: () => void; onSaved: (mess
 /* Add / Edit Course (also the Course Settings tab)                     */
 /* ------------------------------------------------------------------ */
 
-type CourseRec = { id: string; code: string; title: string; credits: number; values: Data };
+type CourseRec = { id: string; code: string; title: string; credits: number; values: Data; sessionDefaults?: { gradingScheme?: string } };
 
 function CourseFormBody({ id, onSaved }: { id: string | null; onSaved: (out: { id?: string; message: string }) => void }) {
   const { meta, error: metaError } = useMeta();
@@ -1371,14 +1371,18 @@ export function SessionFormPage() {
   const [snap, setSnap] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+  const inFlight = useRef(false);
   useEffect(() => {
-    if (!meta || (id && !existing.data) || values) return;
-    const base = id ? existing.data!.values : { gradingScheme: str(course.data?.values.gradingScheme) || undefined };
-    const v = { ...initialValues(fields, base as Data), meetings: arr((base as Data).meetings) };
+    if (!meta || !course.data || (id && !existing.data) || values) return;
+    const base = id
+      ? existing.data!.values
+      : { gradingScheme: str(course.data.sessionDefaults?.gradingScheme) || str(course.data.values.gradingScheme) || undefined, termId: "" };
+    const v = { ...initialValues(fields, base as Data), meetings: arr((base as Data).meetings), termId: str((base as Data).termId) };
     setValues(v);
     setSnap(JSON.stringify(v));
   }, [meta, existing.data, course.data, id, fields, values]);
-  useLeaveGuard(Boolean(values) && JSON.stringify(values) !== snap && !busy);
+  useLeaveGuard(Boolean(values) && JSON.stringify(values) !== snap && !busy && !saved);
   const title = id ? `Edit Session / Offering${existing.data ? `: ${existing.data.course.code} ${existing.data.code}` : ""}` : "Add Session / Offering";
   const backHref = courseHref(courseId, "sessions");
   if (!meta || !values || !course.data)
@@ -1412,19 +1416,25 @@ export function SessionFormPage() {
     return undefined;
   };
   const submit = () => {
+    if (inFlight.current) return;
     setErr(null);
     const missing = missingRequired(fields, values);
     if (missing.length) {
       setErr(`Please complete: ${missing.join(", ")}`);
       return;
     }
+    inFlight.current = true;
     setBusy(true);
     (id ? send(`/sessions/${id}`, "PATCH", values) : send(`/courses/${courseId}/sessions`, "POST", values))
       .then((out) => {
         setSnap(JSON.stringify(values));
+        setSaved(out.message || "Session saved");
         router.push(`${backHref}&notice=${encodeURIComponent(out.message)}`);
       })
-      .catch((e) => setErr(errMsg(e, "Save failed")))
+      .catch((e) => {
+        inFlight.current = false;
+        setErr(errMsg(e, "Save failed"));
+      })
       .finally(() => setBusy(false));
   };
   const medianNote = values.autoMedian ? (
@@ -1446,6 +1456,7 @@ export function SessionFormPage() {
         }}
       >
         {err ? <p className="cm-error" role="alert">{err}</p> : null}
+        {saved ? <SaNotice tone="success">{saved}. Returning to the course…</SaNotice> : null}
         <Sections
           fields={fields}
           values={values}
@@ -1453,15 +1464,31 @@ export function SessionFormPage() {
           meta={meta}
           render={render}
           after={{
-            "Session Schedule": <MeetingsEditor value={meetings} onChange={(v) => setValue("meetings", v)} weekdays={meta.options.weekdays} />,
+            "Session Schedule": (
+              <>
+                <label className="mh-sa__field">
+                  <span className="mh-sa__label">Term</span>
+                  <select className="mh-sa__input" value={str(values.termId)} onChange={(e) => setValue("termId", e.target.value)} aria-label="Term">
+                    <option value="">Pick from the start date</option>
+                    {(meta.refs.terms ?? []).map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="lx-hint">Choose the term when terms overlap; the session dates must fall within it.</span>
+                </label>
+                <MeetingsEditor value={meetings} onChange={(v) => setValue("meetings", v)} weekdays={meta.options.weekdays} />
+              </>
+            ),
             "Additional Session Dates": medianNote,
             Grading: <GradingPreview schemeId={str(values.gradingScheme)} />,
             "Session Tuition": values.tuitionIncluded ? <p className="cm-muted">Tuition for this session is part of the program cost.</p> : null,
           }}
         />
         <div className="lx-sticky-actions">
-          <button type="submit" className="mh-sa__btn mh-sa__btn--primary" disabled={busy}>
-            Save Session
+          <button type="submit" className="mh-sa__btn mh-sa__btn--primary" disabled={busy || Boolean(saved)}>
+            {busy ? "Saving…" : saved ? "Saved" : "Save Session"}
           </button>
         </div>
       </form>

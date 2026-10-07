@@ -6899,6 +6899,11 @@ a.mh-sis-tabs__item {
   min-height: 0;
 }
 
+/* Room for the fixed Ask launcher so the last row of actions can scroll clear of it. */
+.mh-teacher__scroll:not(:has(.mh-hcc-mail, .mh-teacher-chat)) {
+  padding-bottom: 96px;
+}
+
 .mh-teacher__scroll:has(.mh-hcc-mail),
 .mh-student-shell .mh-teacher__scroll:has(.mh-hcc-mail) {
   display: flex;
@@ -17133,6 +17138,13 @@ button.mh-hcc-cal__cell {
   letter-spacing: 0.02em;
   color: #1e3a5f;
 }
+.mh-hcc-page__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
 .mh-hcc-filters {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -18639,6 +18651,15 @@ strong.mh-hcc-plan-course__name {
   }
   .mh-ask-fab__label {
     display: none;
+  }
+}
+/* Forms with a bottom-right submit row (compose, reply) opt out of the launcher so it never covers the action. */
+body:has([data-hide-ask-fab]) .mh-ask-fab {
+  display: none;
+}
+@supports not selector(:has(*)) {
+  [data-hide-ask-fab] .mh-hcc-mail__actions {
+    margin-bottom: 80px;
   }
 }
 

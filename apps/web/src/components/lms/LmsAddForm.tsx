@@ -17,13 +17,34 @@ type Props = {
   busy?: boolean;
   roster?: RosterStudent[];
   sectionId?: string;
+  /** Saved form values when editing an existing activity. */
+  initial?: Record<string, string>;
+  heading?: string;
   onSave: (values: Record<string, string>) => void;
   onCancel: () => void;
 };
 
-export function LmsAddForm({ code, label, busy, roster = [], sectionId, onSave, onCancel }: Props) {
+/** `datetime-local` has no zone, so values travel as ISO instants and are shown in the browser's zone. */
+function toLocalInput(value: string) {
+  const d = new Date(value);
+  if (!value || Number.isNaN(d.getTime())) return value;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function toIso(value: string) {
+  const d = new Date(value);
+  return !value || Number.isNaN(d.getTime()) ? value : d.toISOString();
+}
+
+export function LmsAddForm({ code, label, busy, roster = [], sectionId, initial, heading, onSave, onCancel }: Props) {
   const spec = useMemo(() => formForActivity(code), [code]);
   const isOnlineClass = /bigbluebutton/i.test(code);
+  const editing = Boolean(initial);
+  const dateFields = useMemo(
+    () => spec.sections.flatMap((s) => s.fields.filter((f) => f.type === "datetime").map((f) => f.name)),
+    [spec],
+  );
   const [open, setOpen] = useState<Record<string, boolean>>(() => {
     const next: Record<string, boolean> = {};
     spec.sections.forEach((s, i) => {
@@ -43,12 +64,20 @@ export function LmsAddForm({ code, label, busy, roster = [], sectionId, onSave, 
         if (field.type === "checkbox") next[field.name] = field.checked ? "yes" : "";
       }
     }
+    if (initial) {
+      for (const [key, value] of Object.entries(initial)) next[key] = value;
+      for (const section of spec.sections) {
+        for (const field of section.fields) {
+          if (field.type === "datetime" && next[field.name]) next[field.name] = toLocalInput(next[field.name]);
+        }
+      }
+    }
     return next;
   });
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
-  const needsFile = /^file$/i.test(code) && spec.sections.some((s) => s.fields.some((f) => f.type === "file"));
+  const needsFile = !editing && /^file$/i.test(code) && spec.sections.some((s) => s.fields.some((f) => f.type === "file"));
 
   async function pickFile(fieldName: string, file: File | undefined) {
     if (!file) return;
@@ -95,7 +124,7 @@ export function LmsAddForm({ code, label, busy, roster = [], sectionId, onSave, 
   return (
     <section className="mh-teacher-card mh-lms-addform">
       <div className="mh-lms-toolbar">
-        <h2>{spec.heading}</h2>
+        <h2>{heading || spec.heading}</h2>
         <button
           type="button"
           className="mh-teacher-link"
@@ -181,6 +210,17 @@ export function LmsAddForm({ code, label, busy, roster = [], sectionId, onSave, 
               setError("Name is required.");
               return;
             }
+            const missing = spec.sections
+              .flatMap((s) => s.fields)
+              .find((f) => f.required && (f.type === "text" || f.type === "textarea") && !String(values[f.name] || "").trim());
+            if (missing) {
+              setError(`${missing.label} is required.`);
+              return;
+            }
+            if (values["External URL"] !== undefined && /^url$/i.test(code) && !/^https?:\/\/\S+$/i.test(values["External URL"].trim())) {
+              setError("External URL must be a full address starting with https:// or http://");
+              return;
+            }
             if (needsFile && !values.FileId) {
               setError("Upload a file first.");
               return;
@@ -191,14 +231,16 @@ export function LmsAddForm({ code, label, busy, roster = [], sectionId, onSave, 
             }
             setError("");
             const publishMeeting = /yes/i.test(values["Publish meeting"] || "Yes") ? "yes" : "no";
+            const out = { ...values };
+            for (const name of dateFields) if (out[name]) out[name] = toIso(out[name]);
             onSave({
-              ...values,
+              ...out,
               PublishMeeting: publishMeeting,
               NotifyStudentIds: audienceSelected ? selectedIds.join(",") : "",
             });
           }}
         >
-          {isOnlineClass ? "Publish online class" : "Save and return to course"}
+          {isOnlineClass && !editing ? "Publish online class" : "Save and return to course"}
         </button>
         <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary" onClick={onCancel}>
           Cancel
@@ -321,6 +363,7 @@ function Field({
         {field.label} {field.required ? <em className="mh-lms-required">!</em> : null}
       </span>
       <input className="mh-teacher-field" type={field.type === "number" ? "text" : "text"} inputMode={field.type === "number" ? "decimal" : undefined} value={value} onChange={(e) => onChange(field.name, e.target.value)} />
+      {field.help ? <small className="mh-teacher-muted">{field.help}</small> : null}
     </label>
   );
 }

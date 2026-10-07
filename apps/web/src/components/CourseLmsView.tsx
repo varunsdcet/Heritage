@@ -490,11 +490,11 @@ export function CourseLmsView({ config }: Props) {
               const ok = await live?.runAction?.(
                 "Add an activity or resource",
                 JSON.stringify({
+                  ...values,
                   TopicId: topicParam,
-                  Type: (values.Type || atypeParam).toUpperCase(),
+                  ActivityType: atypeParam.toUpperCase(),
                   Name: values.Name || `New ${atypeParam}`,
                   Code: atypeParam,
-                  ...values,
                 }),
               );
               if (ok) {
@@ -536,6 +536,38 @@ export function CourseLmsView({ config }: Props) {
             Back to page
           </button>
         </section>
+      );
+    }
+    if (actionParam === "edit-activity" && viewedActivity && !/^(PAGE|BIGBLUEBUTTON)$/i.test(viewedActivity.type)) {
+      const code = viewedActivity.type.toLowerCase().replace(/\s+/g, "");
+      return (
+        <LmsAddForm
+          key={viewedActivity.id}
+          code={code}
+          label={viewedActivity.type}
+          busy={Boolean(live?.busy)}
+          roster={c.roster ?? []}
+          sectionId={c.sectionId}
+          heading={`Updating ${viewedActivity.type.toLowerCase()}: ${viewedActivity.name}`}
+          initial={{
+            ...(viewedActivity.description ? { Description: viewedActivity.description } : {}),
+            ...(viewedActivity.url ? { "External URL": viewedActivity.url } : {}),
+            ...(viewedActivity.settings || {}),
+            Name: viewedActivity.name,
+            Availability: viewedActivity.hidden ? "Hide from students" : "Show on course page",
+          }}
+          onSave={(values) => {
+            void live
+              ?.runAction?.(
+                "Save activity settings",
+                JSON.stringify({ ...values, Id: viewedActivity.id, ActivityType: viewedActivity.type }),
+              )
+              .then((ok) => {
+                if (ok) go({ tab: "Course", action: "view-activity", aid: viewedActivity.id });
+              });
+          }}
+          onCancel={() => go({ tab: "Course", action: "view-activity", aid: viewedActivity.id })}
+        />
       );
     }
     if (actionParam === "edit-activity" && viewedActivity) {
@@ -1004,7 +1036,7 @@ function CourseContentPanel({
                               onClick: () =>
                                 void live?.runAction?.(
                                   "Duplicate activity",
-                                  JSON.stringify({ TopicId: topic.id, Type: activity.type, Name: activity.name }),
+                                  JSON.stringify({ TopicId: topic.id, Type: activity.type, Name: activity.name, Id: activity.id || "" }),
                                 ),
                             },
                             { label: "Assign roles", onClick: () => onAssignRoles(activity) },

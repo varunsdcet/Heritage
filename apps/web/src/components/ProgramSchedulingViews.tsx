@@ -218,6 +218,18 @@ export function ScheduleManageView({ config }: { config: TeacherScreenConfig }) 
     if (data?.calendar?.monthLabel) setMonthLabel(data.calendar.monthLabel);
   }, [data?.calendar?.monthLabel]);
 
+  const calendarEvents = data?.calendar?.events;
+  const calendarDays = useMemo(() => {
+    const events = calendarEvents || [];
+    const byDay: Record<number, typeof events> = {};
+    for (const ev of events) {
+      const day = ev.day || 0;
+      if (!byDay[day]) byDay[day] = [];
+      byDay[day].push(ev);
+    }
+    return byDay;
+  }, [calendarEvents]);
+
   if (!data) return null;
 
   const scheduleId = searchParams.get("scheduleId") || data.scheduleId;
@@ -257,17 +269,6 @@ export function ScheduleManageView({ config }: { config: TeacherScreenConfig }) 
     await live?.runAction?.("Update Schedule", payload);
     await live?.refresh?.();
   }
-
-  const calendarDays = useMemo(() => {
-    const events = data.calendar?.events || [];
-    const byDay: Record<number, typeof events> = {};
-    for (const ev of events) {
-      const day = ev.day || 0;
-      if (!byDay[day]) byDay[day] = [];
-      byDay[day].push(ev);
-    }
-    return byDay;
-  }, [data.calendar?.events]);
 
   return (
     <div className="mh-teacher-stack mh-teacher-schedule-manage" data-figma-id={config.figmaId}>

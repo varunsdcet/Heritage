@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { SaModal, SaNotice, SuperFrame } from "@/components/superadmin/shared";
@@ -258,17 +258,28 @@ function Step1({ entity, title, groups, next }: { entity: "programSchedules" | "
   const program = sp?.get("program") ?? "";
   const notice = useNotice();
   const form = useEntityForm(entity, id, { defaults: program ? { program } : undefined });
-  useLeaveGuard(form.dirty && !form.busy);
+  const inFlight = useRef(false);
+  const [leaving, setLeaving] = useState(false);
+  useLeaveGuard(form.dirty && !form.busy && !leaving);
   return (
     <SuperFrame title={title} breadcrumbs={[...CRUMB, "Step 1 of 3"]} breadcrumbHrefs={[null, null, SCHED]} activeHref={SCHED}>
       <form
         className="lx"
         onSubmit={(e) => {
           e.preventDefault();
+          if (inFlight.current) return;
+          inFlight.current = true;
           form
             .save()
-            .then((out) => router.push(next(out.id ?? id ?? "", out.message)))
-            .catch((err) => notice.fail(errMsg(err, "Save failed")));
+            .then((out) => {
+              setLeaving(true);
+              notice.ok(`${out.message || "Saved."} Opening the next step…`);
+              router.push(next(out.id ?? id ?? "", out.message));
+            })
+            .catch((err) => {
+              inFlight.current = false;
+              notice.fail(errMsg(err, "Save failed"));
+            });
         }}
       >
         {form.metaError || form.loadError ? <SaNotice tone="error">{form.metaError ?? form.loadError}</SaNotice> : null}
@@ -278,8 +289,8 @@ function Step1({ entity, title, groups, next }: { entity: "programSchedules" | "
           <Link className="mh-sa__btn" href={SCHED}>
             Cancel
           </Link>
-          <button type="submit" className="mh-sa__btn mh-sa__btn--primary" disabled={form.busy || !form.values}>
-            Continue
+          <button type="submit" className="mh-sa__btn mh-sa__btn--primary" disabled={form.busy || leaving || !form.values}>
+            {form.busy ? "Saving…" : leaving ? "Opening…" : "Continue"}
           </button>
         </div>
       </form>

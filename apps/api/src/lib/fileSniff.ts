@@ -24,6 +24,7 @@ const MIME_KINDS: Array<[RegExp, SniffedKind[]]> = [
   [/^application\/pdf$/, ["pdf"]],
   [/^application\/(msword|vnd\.ms-excel|vnd\.ms-powerpoint)$/, ["ole"]],
   [/^application\/vnd\.openxmlformats-officedocument\./, ["zip"]],
+  [/^application\/(zip|x-zip-compressed)$/, ["zip"]],
   [/^text\/(plain|csv)$/, ["text"]],
 ];
 

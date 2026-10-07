@@ -64,6 +64,7 @@ function InstructorGradebookInner() {
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [feedbackDrafts, setFeedbackDrafts] = useState<Record<string, string>>({});
   const [dirty, setDirty] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -76,13 +77,16 @@ function InstructorGradebookInner() {
     const data = await api<GradebookResponse>(`/gradebooks/${encodeURIComponent(sid)}`, {}, s.accessToken);
     setBook(data);
     const next: Record<string, string> = {};
+    const nextFeedback: Record<string, string> = {};
     for (const row of data.rows) {
       for (const cell of row.cells) {
         const key = `${row.studentId}:${cell.assignmentId}`;
         next[key] = cell.score != null ? String(cell.score) : "";
+        nextFeedback[key] = cell.feedback ?? "";
       }
     }
     setDrafts(next);
+    setFeedbackDrafts(nextFeedback);
     setDirty({});
   }
 
@@ -152,20 +156,22 @@ function InstructorGradebookInner() {
   }, [router, searchParams]);
 
   const counts = useMemo(() => {
-    if (!book) return { draft: 0, pending: 0, published: 0, missing: 0 };
+    if (!book) return { draft: 0, pending: 0, published: 0, missing: 0, toGrade: 0 };
     let draft = 0;
     let pending = 0;
     let published = 0;
     let missing = 0;
+    let toGrade = 0;
     for (const row of book.rows) {
       for (const cell of row.cells) {
         if (cell.status === "published") published += 1;
         else if (cell.status === "pending_publish") pending += 1;
+        else if (cell.score == null && cell.submission?.status === "submitted") toGrade += 1;
         else if (cell.score == null) missing += 1;
         else draft += 1;
       }
     }
-    return { draft, pending, published, missing };
+    return { draft, pending, published, missing, toGrade };
   }, [book]);
 
   const history = useMemo<HistoryRow[]>(() => {
@@ -192,6 +198,11 @@ function InstructorGradebookInner() {
     setDirty((prev) => ({ ...prev, [key]: true }));
   }
 
+  function setFeedbackValue(key: string, value: string) {
+    setFeedbackDrafts((prev) => ({ ...prev, [key]: value }));
+    setDirty((prev) => ({ ...prev, [key]: true }));
+  }
+
   async function saveCell(
     studentId: string,
     assignmentId: string,
@@ -213,17 +224,18 @@ function InstructorGradebookInner() {
     }
     setSaving(key);
     setError(null);
+    const feedback = feedbackDrafts[key]?.trim() ?? "";
     try {
       if (!gradeItemId || gradeItemId === NIL) {
         await api(
           "/grade-items",
-          { method: "POST", body: JSON.stringify({ assignmentId, studentId, score }) },
+          { method: "POST", body: JSON.stringify({ assignmentId, studentId, score, feedback }) },
           session.accessToken,
         );
       } else {
         await api(
           `/grade-items/${gradeItemId}`,
-          { method: "PATCH", body: JSON.stringify({ score, rowVersion }) },
+          { method: "PATCH", body: JSON.stringify({ score, rowVersion, feedback }) },
           session.accessToken,
         );
       }
@@ -277,16 +289,20 @@ function InstructorGradebookInner() {
           setError(`Invalid score for one or more cells (0–${t.maxScore}).`);
           continue;
         }
+        const feedback = feedbackDrafts[t.key]?.trim() ?? "";
         if (!t.gradeItemId || t.gradeItemId === NIL) {
           await api(
             "/grade-items",
-            { method: "POST", body: JSON.stringify({ assignmentId: t.assignmentId, studentId: t.studentId, score }) },
+            {
+              method: "POST",
+              body: JSON.stringify({ assignmentId: t.assignmentId, studentId: t.studentId, score, feedback }),
+            },
             session.accessToken,
           );
         } else {
           await api(
             `/grade-items/${t.gradeItemId}`,
-            { method: "PATCH", body: JSON.stringify({ score, rowVersion: t.rowVersion }) },
+            { method: "PATCH", body: JSON.stringify({ score, rowVersion: t.rowVersion, feedback }) },
             session.accessToken,
           );
         }
@@ -432,8 +448,14 @@ function InstructorGradebookInner() {
               <strong>{counts.published}</strong> published
             </span>
             <span>
+              <strong>{counts.toGrade}</strong> submitted, not graded
+            </span>
+            <span>
               <strong>{counts.missing}</strong> missing
             </span>
+            {sectionId ? (
+              <a href={`/instructor/submissions?sectionId=${encodeURIComponent(sectionId)}`}>View submissions</a>
+            ) : null}
           </div>
         ) : null}
 
@@ -496,6 +518,17 @@ function InstructorGradebookInner() {
                             const key = `${row.studentId}:${cell.assignmentId}`;
                             const isPublished = cell.status === "published";
                             const isPending = cell.status === "pending_publish";
+                            const submitted = cell.submission?.status === "submitted";
+                            const submissionsHref = `/instructor/submissions?sectionId=${encodeURIComponent(
+                              sectionId ?? "",
+                            )}&assignmentId=${encodeURIComponent(cell.assignmentId)}`;
+                            const submissionLink = cell.submission ? (
+                              <a href={submissionsHref} className="mh-teacher-link">
+                                {submitted
+                                  ? `View submission${cell.submission.fileCount ? ` (${cell.submission.fileCount} file${cell.submission.fileCount === 1 ? "" : "s"})` : ""}`
+                                  : "Draft in progress"}
+                              </a>
+                            ) : null;
                             return (
                               <td key={`${row.studentId}-${cell.assignmentId}`}>
                                 {isPublished ? (
@@ -504,6 +537,13 @@ function InstructorGradebookInner() {
                                       {cell.score}/{cell.maxScore}
                                     </strong>
                                     <span className="mh-teacher-badge is-success">published</span>
+                                    {cell.feedback ? (
+                                      <details>
+                                        <summary>Feedback</summary>
+                                        <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>{cell.feedback}</p>
+                                      </details>
+                                    ) : null}
+                                    {submissionLink}
                                   </div>
                                 ) : (
                                   <div className="mh-teacher-gradebook-live__cell">
@@ -535,13 +575,37 @@ function InstructorGradebookInner() {
                                         {saving === key ? "…" : "Save"}
                                       </button>
                                     </div>
+                                    <details open={Boolean(dirty[key] && feedbackDrafts[key])}>
+                                      <summary>{feedbackDrafts[key] ? "Edit feedback" : "Add feedback"}</summary>
+                                      <textarea
+                                        rows={3}
+                                        maxLength={4000}
+                                        value={feedbackDrafts[key] ?? ""}
+                                        disabled={isPending}
+                                        onChange={(e) => setFeedbackValue(key, e.target.value)}
+                                        aria-label={`Feedback for ${row.name}`}
+                                      />
+                                    </details>
                                     <span
                                       className={`mh-teacher-badge ${
-                                        isPending ? "is-info" : cell.score == null ? "is-muted" : "is-warning"
+                                        isPending
+                                          ? "is-info"
+                                          : cell.score == null
+                                            ? submitted
+                                              ? "is-info"
+                                              : "is-muted"
+                                            : "is-warning"
                                       }`}
                                     >
-                                      {isPending ? "pending approval" : cell.score == null ? "missing" : "draft"}
+                                      {isPending
+                                        ? "pending approval"
+                                        : cell.score == null
+                                          ? submitted
+                                            ? "submitted"
+                                            : "missing"
+                                          : "draft"}
                                     </span>
+                                    {submissionLink}
                                   </div>
                                 )}
                               </td>

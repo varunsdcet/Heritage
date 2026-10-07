@@ -338,12 +338,24 @@ export function StudentRequirementsQueue() {
 /* Leave of Absence / Course Withdraw Requests                          */
 /* ------------------------------------------------------------------ */
 
+/** Leave and withdraw requests are decided on the User Request page, which applies status, enrolment and approval changes. */
+function RequestLink({ number, pending, canDecide }: { number: number | null; pending: boolean; canDecide: boolean }) {
+  if (!number) return null;
+  return (
+    <Link className="mh-sa__btn mh-sa__btn--sm" href={`/admin/requests/${number}`}>
+      {pending && canDecide ? "Review / Decide" : "View"}
+    </Link>
+  );
+}
+
 export function LeaveQueue() {
   const { meta } = useStudentsMeta();
   const paging = usePaging(25);
   const [letter, setLetter] = useState("");
   const f = useApplied({ student: "", status: "" });
-  const { data, error } = useLoad<Paged<{ id: string; student: StudentCell; reason: string; startsOn: string; endsOn: string; status: string; requested: string }>>(`/queues/leave${qs({ ...f.applied, letter, page: paging.page, perPage: paging.perPage })}`);
+  const { data, error } = useLoad<Paged<{ id: string; student: StudentCell; reason: string; startsOn: string; endsOn: string; status: string; requested: string; decisionNote: string; requestNumber: number | null }> & { canDecide: boolean }>(
+    `/queues/leave${qs({ ...f.applied, letter, page: paging.page, perPage: paging.perPage })}`,
+  );
   return (
     <Queue title="Leave of Absence" nav="leave">
       <Card>
@@ -370,20 +382,26 @@ export function LeaveQueue() {
         ) : (
           <>
             <PagerFor data={data} paging={paging} />
-            <Table head={["Student", "Start", "End", "Status", "Requested"]}>
+            <Table head={["Student", "Reason", "Start", "End", "Status", "Requested", ""]}>
               {(data?.items ?? []).map((l) => (
                 <tr key={l.id}>
                   <td>
                     <StudentLink s={l.student} />
                   </td>
+                  <td>
+                    {l.reason}
+                    {l.decisionNote ? <div className="mh-sa__muted" style={{ fontSize: 12 }}>Decision note: {l.decisionNote}</div> : null}
+                  </td>
                   <td>{fmtDate(l.startsOn)}</td>
                   <td>{fmtDate(l.endsOn)}</td>
                   <td>{l.status}</td>
                   <td>{fmtStamp(l.requested)}</td>
+                  <td>
+                    <RequestLink number={l.requestNumber} pending={l.status === "Pending"} canDecide={Boolean(data?.canDecide)} />
+                  </td>
                 </tr>
               ))}
             </Table>
-            <SourceNotice>The leave approval / rejection form (dates, reasons, attachments) was not captured from the original system.</SourceNotice>
           </>
         )}
       </Card>
@@ -396,7 +414,9 @@ export function WithdrawQueue() {
   const paging = usePaging(25);
   const [letter, setLetter] = useState("");
   const f = useApplied({ student: "", status: "" });
-  const { data, error } = useLoad<Paged<{ id: string; student: StudentCell; subject: string; status: string; requested: string }>>(`/queues/withdraw${qs({ ...f.applied, letter, page: paging.page, perPage: paging.perPage })}`);
+  const { data, error } = useLoad<Paged<{ id: string; student: StudentCell; subject: string; details: string; status: string; requested: string; requestNumber: number | null }> & { canDecide: boolean }>(
+    `/queues/withdraw${qs({ ...f.applied, letter, page: paging.page, perPage: paging.perPage })}`,
+  );
   return (
     <Queue title="Course Withdraw Requests" nav="withdraw">
       <Card>
@@ -423,19 +443,24 @@ export function WithdrawQueue() {
         ) : (
           <>
             <PagerFor data={data} paging={paging} />
-            <Table head={["Student", "Request", "Status", "Requested"]}>
+            <Table head={["Student", "Request", "Status", "Requested", ""]}>
               {(data?.items ?? []).map((r) => (
                 <tr key={r.id}>
                   <td>
                     <StudentLink s={r.student} />
                   </td>
-                  <td>{r.subject}</td>
+                  <td>
+                    {r.subject}
+                    {r.details ? <div className="mh-sa__muted" style={{ fontSize: 12 }}>{r.details}</div> : null}
+                  </td>
                   <td>{r.status}</td>
                   <td>{fmtStamp(r.requested)}</td>
+                  <td>
+                    <RequestLink number={r.requestNumber} pending={r.status === "Pending"} canDecide={Boolean(data?.canDecide)} />
+                  </td>
                 </tr>
               ))}
             </Table>
-            <SourceNotice>The withdraw request review / approval / decline form was not captured from the original system.</SourceNotice>
           </>
         )}
       </Card>
@@ -699,9 +724,14 @@ export function BadgesQueue() {
   const { meta } = useStudentsMeta();
   const paging = usePaging(25);
   const f = useApplied({ user: "", badge: "", status: "" });
-  const { data, error } = useLoad<Paged<{ id: string; student: StudentCell; badge: string; status: string; earned: string }>>(`/queues/badges${qs({ ...f.applied, page: paging.page, perPage: paging.perPage })}`);
+  const { data, error, reload } = useLoad<Paged<{ id: string; student: StudentCell; badge: string; status: string; earned: string }> & { canDecide: boolean }>(
+    `/queues/badges${qs({ ...f.applied, page: paging.page, perPage: paging.perPage })}`,
+  );
+  const notice = useNotice();
+  const [confirm, setConfirm] = useState<{ id: string; badge: string; student: string; decision: "approve" | "decline" } | null>(null);
   return (
     <Queue title="Badges / Accomplishments" nav="badges">
+      {notice.node}
       <Card>
         <Filters
           submit="Search Badges"
@@ -728,7 +758,7 @@ export function BadgesQueue() {
         ) : (
           <>
             <PagerFor data={data} paging={paging} />
-            <Table head={["Student", "Badge", "Status", "Earned"]}>
+            <Table head={["Student", "Badge", "Status", "Earned", ""]}>
               {(data?.items ?? []).map((b) => (
                 <tr key={b.id}>
                   <td>
@@ -737,13 +767,45 @@ export function BadgesQueue() {
                   <td>{b.badge}</td>
                   <td>{b.status}</td>
                   <td>{b.earned ? fmtDate(b.earned) : "—"}</td>
+                  <td>
+                    {b.status === "Pending" && data?.canDecide ? (
+                      <span className="lx-actions">
+                        <Btn small tone="primary" onClick={() => setConfirm({ id: b.id, badge: b.badge, student: b.student.name, decision: "approve" })}>
+                          Award
+                        </Btn>
+                        <Btn small tone="danger" onClick={() => setConfirm({ id: b.id, badge: b.badge, student: b.student.name, decision: "decline" })}>
+                          Decline
+                        </Btn>
+                      </span>
+                    ) : null}
+                  </td>
                 </tr>
               ))}
             </Table>
-            <SourceNotice>The individual badge review / award form was not captured from the original system.</SourceNotice>
           </>
         )}
       </Card>
+      {confirm ? (
+        <ConfirmModal
+          title={confirm.decision === "approve" ? "Award badge" : "Decline badge"}
+          body={`${confirm.decision === "approve" ? "Award" : "Decline"} "${confirm.badge}" for ${confirm.student}?`}
+          ok={confirm.decision === "approve" ? "Award" : "Decline"}
+          danger={confirm.decision === "decline"}
+          onCancel={() => setConfirm(null)}
+          onOk={() =>
+            send<{ message: string }>(`/queues/badges/${confirm.id}/decide`, "POST", { decision: confirm.decision })
+              .then((out) => {
+                notice.ok(out.message);
+                setConfirm(null);
+                reload();
+              })
+              .catch((e) => {
+                notice.fail(errMsg(e, "Could not save the decision"));
+                setConfirm(null);
+              })
+          }
+        />
+      ) : null}
     </Queue>
   );
 }

@@ -141,29 +141,37 @@ export async function buildWorkshopList(user: SessionClaims, path: string): Prom
   };
 }
 
+function unavailableWorkshop(subtitle: string, description: string): InstructorLivePayload {
+  return {
+    title: "Workshop Detail",
+    subtitle,
+    breadcrumbs: ["Home", "All My Workshops", "Workshop"],
+    workshopDetail: {
+      title: "Workshop",
+      status: "Unavailable",
+      when: "—",
+      where: "—",
+      seats: "—",
+      description,
+      agenda: [],
+      materials: [],
+    },
+  };
+}
+
 export async function buildWorkshopDetail(user: SessionClaims, path: string): Promise<InstructorLivePayload> {
   const scope = await instructorWorkshopScope(user);
-  const requested = pathQuery(path).get("workshopId") || "";
+  const requested = (pathQuery(path).get("workshopId") || "").trim();
   const fallback = requested ? null : (await scopedWorkshops(user.institutionId, scope))[0]?.id;
   const id = requested || fallback;
-  if (!id || !scope.workshopIds.has(id)) {
-    return {
-      title: "Workshop Detail",
-      subtitle: id ? "This workshop is not assigned to you" : "No workshop selected",
-      breadcrumbs: ["Home", "All My Workshops", "Workshop"],
-      workshopDetail: {
-        title: "Workshop",
-        status: "Unavailable",
-        when: "—",
-        where: "—",
-        seats: "—",
-        description: id ? "This workshop is not assigned to you." : "No workshops are assigned to you yet.",
-        agenda: [],
-        materials: [],
-      },
-    };
+  if (!id) return unavailableWorkshop("No workshop selected", "No workshops are assigned to you yet.");
+  if (!scope.workshopIds.has(id)) return unavailableWorkshop("This workshop is not assigned to you", "This workshop is not assigned to you.");
+  let w: Awaited<ReturnType<typeof getWorkshop>>;
+  try {
+    w = await getWorkshop(user, id, scope);
+  } catch (err) {
+    return unavailableWorkshop("Workshop unavailable", errorMessage(err, "This workshop could not be loaded."));
   }
-  const w = await getWorkshop(user, id, scope);
   const st = w.settings;
   const agenda =
     st.scheduleType === "Daily Schedule"

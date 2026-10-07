@@ -7,6 +7,7 @@ import {
   allocatePayment,
   applyPayment,
   createDisbursement,
+  feeSectionOptions,
   generateReceipt,
   receiptInfo,
   receiptPdf,
@@ -152,6 +153,7 @@ r.post("/documents", pdf((u, req) => generateDocument(u, body(req))));
 r.get("/student/:sid", handle((u, req) => studentHeader(u, p(req, "sid"))));
 r.get("/student/:sid/overview", handle((u, req) => studentOverview(u, p(req, "sid"), req.query)));
 r.post("/student/:sid/fees", handle((u, req) => addFee(u, p(req, "sid"), body(req)), 201));
+r.get("/student/:sid/fee-sections", handle((u, req) => feeSectionOptions(u, p(req, "sid"))));
 r.post("/student/:sid/payments", handle((u, req) => applyPayment(u, p(req, "sid"), body(req)), 201));
 r.get("/student/:sid/transactions", handle((u, req) => studentTransactions(u, p(req, "sid"), req.query)));
 r.get("/student/:sid/invoices", handle((u, req) => studentInvoices(u, p(req, "sid"))));

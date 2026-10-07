@@ -232,7 +232,9 @@ describe("student assignment journey", () => {
       }),
     });
     expect(response.status).toBe(413);
-    expect(await response.json()).toMatchObject({ error: { message: "Files must be 10 MB or smaller" } });
+    expect(await response.json()).toMatchObject({
+      error: { message: "This file is 11 MB. Files must be 10 MB or smaller" },
+    });
     expect(db.$transaction).not.toHaveBeenCalled();
   });
 
@@ -245,5 +247,216 @@ describe("student assignment journey", () => {
     expect(response.status).toBe(404);
     expect(await response.json()).toMatchObject({ error: { code: "NOT_FOUND" } });
     expect(db.$transaction).not.toHaveBeenCalled();
+  });
+});
+
+async function uploadFile(filename: string, content: Buffer, mimeType = "application/pdf") {
+  const response = await fetch(`${apiBaseUrl}/student/assignments/${assignmentId}/files`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      filename,
+      mimeType,
+      sizeBytes: content.byteLength,
+      contentBase64: content.toString("base64"),
+    }),
+  });
+  return { status: response.status, body: (await response.json()) as { error?: { message: string; code: string } } };
+}
+
+describe("upload rejections explain the reason", () => {
+  it("names a file type that is not accepted", async () => {
+    const { status, body } = await uploadFile("notes.txt", Buffer.from("hello"), "text/plain");
+    expect(status).toBe(400);
+    expect(body.error?.message).toMatch(/^"\.txt" files are not accepted\. Upload a PDF, Word/);
+    expect(db.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("says the content does not match the extension", async () => {
+    const { status, body } = await uploadFile("report.pdf", Buffer.from("plain text pretending"));
+    expect(status).toBe(400);
+    expect(body.error).toMatchObject({ code: "VALIDATION_ERROR" });
+    expect(body.error?.message).toContain('The content of "report.pdf" does not match its .pdf type');
+  });
+
+  it("trusts the extension over an unreliable browser MIME type", async () => {
+    tx.submission.findUniqueOrThrow.mockResolvedValue({ ...assignment.submissions[0], files: [] });
+    const { status } = await uploadFile("marks.csv", Buffer.from("a,b\n1,2\n"), "application/vnd.ms-excel");
+    expect(status).toBe(201);
+    expect(tx.fileObject.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ filename: "marks.csv", mimeType: "text/csv" }),
+    });
+  });
+
+  it("accepts a real ZIP archive", async () => {
+    tx.submission.findUniqueOrThrow.mockResolvedValue({ ...assignment.submissions[0], files: [] });
+    const zip = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00]);
+    const { status } = await uploadFile("work.zip", zip, "application/x-zip-compressed");
+    expect(status).toBe(201);
+  });
+});
+
+describe("instructor assignment settings are enforced", () => {
+  const pdf = Buffer.from("%PDF-1.4\n");
+
+  it("rejects types outside the assignment's accepted list", async () => {
+    db.assignment.findMany.mockResolvedValue([{ ...assignment, acceptedTypes: ".docx,.zip" }]);
+    const { status, body } = await uploadFile("essay.pdf", pdf);
+    expect(status).toBe(400);
+    expect(body.error?.message).toBe('This assignment only accepts .docx, .zip files. ".pdf" is not one of them.');
+  });
+
+  it("rejects files above the assignment size limit", async () => {
+    db.assignment.findMany.mockResolvedValue([{ ...assignment, maxFileBytes: 4 }]);
+    const { status, body } = await uploadFile("essay.pdf", pdf);
+    expect(status).toBe(413);
+    expect(body.error?.message).toMatch(/This assignment accepts files up to/);
+  });
+
+  it("rejects uploads past the maximum number of files", async () => {
+    const withFile = {
+      ...assignment,
+      maxFiles: 1,
+      submissions: [{ ...assignment.submissions[0], files: [{ id: "f1", version: 1 }] }],
+    };
+    db.assignment.findMany.mockResolvedValue([withFile]);
+    const { status, body } = await uploadFile("essay.pdf", pdf);
+    expect(status).toBe(409);
+    expect(body.error?.message).toBe("This assignment accepts at most 1 file. Remove a file before uploading another.");
+  });
+
+  it("rejects file uploads when only online text is allowed", async () => {
+    db.assignment.findMany.mockResolvedValue([{ ...assignment, fileSubmissions: false, onlineText: true }]);
+    const { status, body } = await uploadFile("essay.pdf", pdf);
+    expect(status).toBe(400);
+    expect(body.error?.message).toBe("This assignment accepts online text only, not file uploads");
+  });
+
+  it("keeps submissions closed before the open date", async () => {
+    db.assignment.findMany.mockResolvedValue([{ ...assignment, availableFrom: new Date("2099-01-01T00:00:00.000Z") }]);
+    const { status, body } = await uploadFile("essay.pdf", pdf);
+    expect(status).toBe(409);
+    expect(body.error?.message).toMatch(/^Submissions open on/);
+  });
+
+  it("allows late uploads until the cut-off date", async () => {
+    tx.submission.findUniqueOrThrow.mockResolvedValue({ ...assignment.submissions[0], files: [] });
+    db.assignment.findMany.mockResolvedValue([
+      { ...assignment, dueAt: new Date("2020-01-01T00:00:00.000Z"), cutoffAt: new Date("2099-01-01T00:00:00.000Z") },
+    ]);
+    const { status } = await uploadFile("essay.pdf", pdf);
+    expect(status).toBe(201);
+  });
+
+  it("hides hidden assignments unless a published grade exists", async () => {
+    await fetch(`${apiBaseUrl}/student/assignments`);
+    expect(db.assignment.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: [{ hidden: false }, { gradeItems: { some: expect.objectContaining({ status: "published" }) } }],
+        }),
+      }),
+    );
+  });
+});
+
+describe("published marks and own files", () => {
+  it("shows the published mark and feedback on the assignment detail", async () => {
+    db.assignment.findMany.mockResolvedValue([
+      {
+        ...assignment,
+        instructions: "Write 500 words",
+        gradeItems: [
+          { id: "g1", score: 42, maxScore: 50, letter: "A-", feedback: "Strong analysis", publishedAt: new Date("2026-10-01T00:00:00.000Z") },
+        ],
+      },
+    ]);
+    const response = await fetch(`${apiBaseUrl}/student/assignments/${assignmentId}`);
+    expect(response.status).toBe(200);
+    const { assignment: body } = (await response.json()) as { assignment: Record<string, unknown> };
+    expect(body).toMatchObject({
+      state: "graded",
+      instructions: "Write 500 words",
+      grade: { score: 42, maxScore: 50, letter: "A-", feedback: "Strong analysis" },
+    });
+    expect(db.assignment.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({
+          gradeItems: expect.objectContaining({ where: expect.objectContaining({ status: "published" }) }),
+        }),
+      }),
+    );
+  });
+
+  it("does not return a grade before it is published", async () => {
+    const response = await fetch(`${apiBaseUrl}/student/assignments/${assignmentId}`);
+    const { assignment: body } = (await response.json()) as { assignment: Record<string, unknown> };
+    expect(body.grade).toBeNull();
+  });
+
+  it("downloads only the student's own submission file", async () => {
+    db.fileObject.findFirst.mockResolvedValue(null);
+    const missing = await fetch(`${apiBaseUrl}/student/submission-files/60000000-0000-4000-8000-000000000001`);
+    expect(missing.status).toBe(404);
+    expect(db.fileObject.findFirst).toHaveBeenCalledWith({
+      where: expect.objectContaining({ submission: { institutionId: claims.institutionId, studentId } }),
+    });
+  });
+
+  it("returns the stored bytes for an owned file", async () => {
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    const relative = path.join("inst", "own-file-1");
+    await mkdir(path.join(storageRoot, "inst"), { recursive: true });
+    await writeFile(path.join(storageRoot, relative), "%PDF-1.4\n");
+    db.fileObject.findFirst.mockResolvedValue({ id: "f1", filename: "mine.pdf", mimeType: "application/pdf", path: relative });
+    const response = await fetch(`${apiBaseUrl}/student/submission-files/f1`);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { name: string; base64: string };
+    expect(body.name).toBe("mine.pdf");
+    expect(Buffer.from(body.base64, "base64").toString()).toBe("%PDF-1.4\n");
+  });
+
+  it("refuses a stored path that escapes the storage root", async () => {
+    db.fileObject.findFirst.mockResolvedValue({ id: "f2", filename: "x.pdf", mimeType: "application/pdf", path: "../../etc/passwd" });
+    const response = await fetch(`${apiBaseUrl}/student/submission-files/f2`);
+    expect(response.status).toBe(404);
+  });
+
+  it("submits online text without a file when the assignment allows it", async () => {
+    db.assignment.findMany.mockResolvedValue([
+      {
+        ...assignment,
+        onlineText: true,
+        submissions: [{ ...assignment.submissions[0], textBody: "My answer", files: [] }],
+      },
+    ]);
+    tx.submission.updateMany.mockResolvedValue({ count: 1 });
+    tx.submission.findUniqueOrThrow.mockResolvedValue({
+      ...assignment.submissions[0],
+      status: "submitted",
+      submittedAt: new Date(),
+      textBody: "My answer",
+      files: [],
+    });
+    const response = await fetch(`${apiBaseUrl}/student/assignments/${assignmentId}/submit`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ submission: { status: "submitted", textBody: "My answer" } });
+    expect(tx.submission.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "submitted" }) }),
+    );
+  });
+
+  it("still requires a file when online text is not enabled", async () => {
+    const response = await fetch(`${apiBaseUrl}/student/assignments/${assignmentId}/submit`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: { message: "Upload at least one file before submitting" } });
   });
 });

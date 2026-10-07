@@ -4,6 +4,7 @@ import { prisma } from "@myheritage/db";
 import { writeAuditAndOutbox, type Tx } from "@myheritage/events";
 import type { SessionClaims } from "@myheritage/contracts";
 import { SAFE_LINK_MESSAGE, isSafeLink } from "../../lib/safeLink.js";
+import { assertSeat } from "./heritage/enrolment.js";
 
 function httpError(message: string, code: string, status: number) {
   return Object.assign(new Error(message), { code, status });
@@ -763,7 +764,7 @@ export async function createRetake(user: SessionClaims, body: z.infer<typeof Ret
     },
     orderBy: { attemptNumber: "desc" },
   });
-  if (prior.some((e) => e.sectionId === body.sectionId && e.status === "enrolled")) {
+  if (prior.some((e) => e.sectionId === body.sectionId && (e.status === "enrolled" || e.status === "waitlisted"))) {
     throw httpError("This student is already actively enrolled in this section", "CONFLICT", 409);
   }
   if (body.originalEnrolmentId && !prior.some((e) => e.id === body.originalEnrolmentId)) {
@@ -773,12 +774,13 @@ export async function createRetake(user: SessionClaims, body: z.infer<typeof Ret
   const originalEnrolmentId = body.originalEnrolmentId ?? prior[prior.length - 1]?.id ?? null;
 
   const enrolment = await prisma.$transaction(async (tx) => {
+    const status = await assertSeat(tx, user.institutionId, section.id, `${section.course.code} ${section.code}`);
     const created = await tx.enrolment.create({
       data: {
         institutionId: user.institutionId,
         sectionId: body.sectionId,
         studentId: body.studentId,
-        status: "enrolled",
+        status,
         attemptNumber,
         countsTowardCgpa: body.countsTowardCgpa,
         creditAwarded: body.creditAwarded,

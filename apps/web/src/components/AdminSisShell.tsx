@@ -466,7 +466,7 @@ export function AdminSisShell({
             </button>
             <div className="mh-sis__crumbs">
               {breadcrumbs.map((crumb, i) => (
-                <span key={crumb} className="mh-sis__crumb">
+                <span key={`${i}:${crumb}`} className="mh-sis__crumb">
                   {i > 0 ? (
                     <img src="/brand/icons/chevron-right.svg" alt="" width={12} height={12} className="mh-sis__crumb-chevron" />
                   ) : null}

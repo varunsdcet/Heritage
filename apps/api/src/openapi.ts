@@ -17,6 +17,9 @@ export const openApiDocument = {
     "/notifications/me/{notificationId}/read": {
       patch: { summary: "Mark own notification read", security: [{ bearer: [] }], "x-idempotent": true },
     },
+    "/notifications/me/read-all": {
+      post: { summary: "Mark all own notifications read", security: [{ bearer: [] }], "x-idempotent": true },
+    },
     "/calendar/me": { get: { summary: "Calendar events", security: [{ bearer: [] }] } },
     "/live/config": { get: { summary: "Live classroom provider (bigbluebutton | jitsi)", security: [{ bearer: [] }] } },
     "/live/sections/{sectionId}": {

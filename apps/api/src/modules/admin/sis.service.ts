@@ -9,6 +9,7 @@ import {
   lifecycleFromStudent,
   LMS_ACTIVITY_TYPES,
 } from "../../lib/lifecycle-status.js";
+import { currentTerm } from "../../lib/currentTerm.js";
 
 export type SisLivePayload = Record<string, unknown>;
 
@@ -114,7 +115,7 @@ async function loadCampus(institutionId: string): Promise<Campus> {
     badges,
   ] = await Promise.all([
     prisma.institution.findFirst({ where: { institutionId } }),
-    prisma.term.findFirst({ where: { institutionId }, orderBy: { code: "desc" } }),
+    currentTerm(institutionId),
     prisma.person.findMany({ where: { institutionId }, orderBy: { familyName: "asc" } }),
     prisma.account.findMany({
       where: { institutionId },
@@ -1737,7 +1738,7 @@ export async function getCampusOverview(institutionId: string): Promise<CampusOv
     audits,
   ] = await Promise.all([
     prisma.institution.findFirst({ where: { institutionId }, select: { name: true } }),
-    prisma.term.findFirst({ where: { institutionId }, orderBy: { code: "desc" } }),
+    currentTerm(institutionId),
     prisma.student.count({ where: { institutionId } }),
     prisma.account.findMany({ where: { institutionId }, select: { rolesJson: true } }),
     prisma.program.findMany({ where: { institutionId }, select: { id: true } }),

@@ -18,6 +18,7 @@ import {
   type Field,
   type RefTarget,
 } from "./programs.spec.js";
+import { releaseSessionSection, syncSessionSection } from "./programs.sections.js";
 
 export { ENTITIES, type EntityKey };
 
@@ -90,7 +91,7 @@ function title(d: Data) {
 const uniq = (xs: string[]) => [...new Set(xs.filter(Boolean))];
 
 async function loadLists(inst: string): Promise<Lists> {
-  const screens = [LOC_CAMPUS, "SYS:STUDENT_STATUS", "SYS:FLAG_TEMPLATE", "F13", "F15", "C26", PM.program];
+  const screens = [LOC_CAMPUS, "SYS:STUDENT_STATUS", "SYS:FLAG_TEMPLATE", "F13", "F15", "C26", "CM:GRADING", PM.program];
   const rows = await prisma.heritageRecord.findMany({
     where: { institutionId: inst, screenId: { in: screens }, deletedAt: null, singletonKey: null },
     select: { screenId: true, dataJson: true },
@@ -108,7 +109,13 @@ async function loadLists(inst: string): Promise<Lists> {
     flags: uniq(of("SYS:FLAG_TEMPLATE").map((d) => s(d.name))),
     ledgerTypes: uniq([...of("F13").map(title), ...CAPTURED_LEDGER_TYPES]),
     rateCategories: uniq(rates.length ? rates : ["Domestic", "International"]),
-    gradingSchemes: uniq(["Pass / Fail", ...of("C26").map(title)]),
+    gradingSchemes: uniq([
+      ...of("CM:GRADING")
+        .filter((d) => d.active !== "Inactive" && d.status !== "Inactive")
+        .map((d) => s(d.name)),
+      "Pass / Fail",
+      ...of("C26").map(title),
+    ]),
     programNames: uniq(of(PM.program).map((d) => s(d.name))).sort((a, b) => a.localeCompare(b)),
   };
 }
@@ -579,15 +586,20 @@ export async function getEntity(user: SessionClaims, entity: EntityKey, id: stri
   return view(rec, extra);
 }
 
-async function assertUnique(inst: string, def: EntityDef, data: Data, parentKey: string, exceptId?: string) {
-  if (!def.unique.length) return;
-  const all = await list(inst, def.screen);
+export function uniqueClash(def: Pick<EntityDef, "unique">, all: Array<Pick<Rec, "id" | "contextKey" | "data">>, data: Data, parentKey: string, exceptId?: string) {
   for (const u of def.unique) {
     const v = lc(data[u.key]);
     if (!v) continue;
-    const clash = all.find((r) => r.id !== exceptId && (u.scope === "all" || r.contextKey === parentKey) && lc(r.data[u.key]) === v);
-    if (clash) throw httpError(409, u.key === "term" ? "A term schedule already exists for this term" : `${u.label} "${s(data[u.key])}" is already in use${u.scope === "parent" ? " here" : ""}`, "CONFLICT");
+    const clash = all.find((r) => r.id !== exceptId && (u.scope === "all" || r.contextKey === parentKey) && (!u.within || s(r.data[u.within]) === s(data[u.within])) && lc(r.data[u.key]) === v);
+    if (clash) return u.key === "term" ? "A term schedule already exists for this term" : `${u.label} "${s(data[u.key])}" is already in use${u.scope === "parent" || u.within ? " here" : ""}`;
   }
+  return null;
+}
+
+async function assertUnique(inst: string, def: EntityDef, data: Data, parentKey: string, exceptId?: string) {
+  if (!def.unique.length) return;
+  const clash = uniqueClash(def, await list(inst, def.screen), data, parentKey, exceptId);
+  if (clash) throw httpError(409, clash, "CONFLICT");
 }
 
 function dateOrder(data: Data, from: string, to: string, label: string) {
@@ -636,7 +648,29 @@ async function placeFeeTerm(inst: string, actorId: string, screen: string, paren
 }
 
 function keyLabel(entity: EntityKey, data: Data) {
-  return s(data.name) || s(data.label) || s(data.ledgerType) || s(data.abbreviation) || s(data.type) || ENTITIES[entity].label;
+  return s(data.name) || s(data.sessionName) || s(data.label) || s(data.ledgerType) || s(data.abbreviation) || s(data.type) || ENTITIES[entity].label;
+}
+
+async function sessionLabel(inst: string, data: Data, schedule: Rec | null) {
+  if (s(data.sessionName)) return s(data.sessionName);
+  const course = await prisma.course.findFirst({ where: { id: s(data.course), institutionId: inst }, select: { code: true } });
+  return [s(schedule?.data.abbreviation), course?.code, String(data._number ?? 1).padStart(2, "0")].filter(Boolean).join(" ");
+}
+
+/** Active schedule sessions are backed by a real Section (see programs.sections.ts); keeps the link on the record. */
+async function linkSessionSection(user: SessionClaims, sessionId: string, schedule: Rec | null) {
+  const rec = await find(user.institutionId, PM.session, sessionId, "Session");
+  if (rec.data._status !== "active") return null;
+  const out = await syncSessionSection(user, rec, s(schedule?.data.abbreviation));
+  if (!out) return null;
+  if (out.sectionId !== s(rec.data._sectionId) || (!s(rec.data.gradingScheme) && out.gradingScheme))
+    await write(user.accountId, rec.id, { ...rec.data, _sectionId: out.sectionId, gradingScheme: s(rec.data.gradingScheme) || out.gradingScheme }, rec.contextKey);
+  return out.sectionId;
+}
+
+export async function linkScheduleSections(user: SessionClaims, scheduleId: string) {
+  const schedule = await find(user.institutionId, PM.schedule, scheduleId, "Schedule");
+  for (const r of await list(user.institutionId, PM.session, scheduleId)) if (r.data._status === "active") await linkSessionSection(user, r.id, schedule);
 }
 
 export async function createEntity(user: SessionClaims, entity: EntityKey, body: Data & { parentId?: string; position?: string }) {
@@ -675,8 +709,10 @@ export async function createEntity(user: SessionClaims, entity: EntityKey, body:
   if ((entity === "feeTerms" || entity === "scheduleFeeTerms") && body.position) await placeFeeTerm(inst, user.accountId, def.screen, ctxKey, rec.id, s(body.position));
   if (entity === "pathways" && data.defaultOutline) await clearOtherDefaults(inst, user.accountId, ctxKey, rec.id);
   if (entity === "programSchedules") await copyProgramFees(inst, user.accountId, s(data.program), rec.id);
-  await audit(user, def.audit, entity === "programs" ? rec.id : ctxKey, `create ${def.label.toLowerCase()}`, { recordId: rec.id, after: data });
-  return { ok: true, id: rec.id, message: `${def.label.replace(/^\w/, (c) => c.toUpperCase())} "${keyLabel(entity, data)}" saved` };
+  const sectionId = entity === "sessions" ? await linkSessionSection(user, rec.id, parent) : null;
+  await audit(user, def.audit, entity === "programs" ? rec.id : ctxKey, `create ${def.label.toLowerCase()}`, { recordId: rec.id, after: sectionId ? { ...data, _sectionId: sectionId } : data });
+  const label = entity === "sessions" ? await sessionLabel(inst, data, parent) : keyLabel(entity, data);
+  return { ok: true, id: rec.id, ...(sectionId ? { sectionId } : {}), message: `${def.label.replace(/^\w/, (c) => c.toUpperCase())} "${label}" saved` };
 }
 
 async function clearOtherDefaults(inst: string, actorId: string, programId: string, keepId: string) {
@@ -720,8 +756,10 @@ export async function updateEntity(user: SessionClaims, entity: EntityKey, id: s
   await write(user.accountId, id, data, ctxKey);
   if ((entity === "feeTerms" || entity === "scheduleFeeTerms") && body.position) await placeFeeTerm(inst, user.accountId, def.screen, ctxKey, id, s(body.position));
   if (entity === "pathways" && data.defaultOutline) await clearOtherDefaults(inst, user.accountId, ctxKey, id);
+  if (entity === "sessions" && parent?.data._kind === "program") await linkSessionSection(user, id, parent);
   await audit(user, def.audit, entity === "programs" ? id : ctxKey, `update ${def.label.toLowerCase()}`, { recordId: id, before: rec.data, after: data });
-  return { ok: true, id, message: `${def.label.replace(/^\w/, (c) => c.toUpperCase())} "${keyLabel(entity, data)}" saved` };
+  const label = entity === "sessions" ? await sessionLabel(inst, data, parent) : keyLabel(entity, data);
+  return { ok: true, id, message: `${def.label.replace(/^\w/, (c) => c.toUpperCase())} "${label}" saved` };
 }
 
 export async function reorderEntity(user: SessionClaims, entity: EntityKey, ids: string[]) {
@@ -790,7 +828,14 @@ export async function deleteEntity(user: SessionClaims, entity: EntityKey, id: s
     const sch = await find(inst, PM.schedule, rec.contextKey, "Schedule");
     if (sch.data._status === "draft" && rec.data._origin === "copied") await write(user.accountId, sch.id, { ...sch.data, _removed: (Number(sch.data._removed) || 0) + 1 });
   }
+  const linkedSections =
+    entity === "sessions"
+      ? [s(rec.data._sectionId)]
+      : isSchedule(entity)
+        ? (await list(inst, PM.session, id)).map((r) => s(r.data._sectionId))
+        : [];
   await remove(inst, user.accountId, [id, ...cascade]);
+  for (const sectionId of linkedSections.filter(Boolean)) await releaseSessionSection(user, sectionId);
   if (entity === "programs" && s(rec.data._prismaId)) {
     const pid = s(rec.data._prismaId);
     const [cohorts, versions] = await Promise.all([prisma.cohort.count({ where: { programId: pid } }), prisma.programVersion.count({ where: { programId: pid } })]);
@@ -1242,6 +1287,7 @@ export async function confirmSchedule(user: SessionClaims, id: string) {
       n++;
     }
   await write(user.accountId, id, { ...sch.data, _status: "active", _removed: 0, _confirmedAt: new Date().toISOString() });
+  await linkScheduleSections(user, id);
   await audit(user, "PR19", id, "confirm schedule", { note: `${n} session(s) activated` });
   return { ok: true, message: `Schedule confirmed — ${sessions.length} session${sessions.length === 1 ? "" : "s"} active` };
 }
@@ -1268,7 +1314,10 @@ export async function addSessions(user: SessionClaims, scheduleId: string, body:
   };
   const sib = await list(inst, PM.session, scheduleId);
   let num = sib.filter((r) => r.data.course === settings.course).reduce((m, r) => Math.max(m, Number(r.data._number) || 0), 0);
-  for (let i = 0; i < count; i++) await insert(inst, user.accountId, PM.session, { ...base, _number: ++num, _origin: "new", _status: sch.data._kind === "program" ? "active" : "pending" }, scheduleId);
+  for (let i = 0; i < count; i++) {
+    const rec = await insert(inst, user.accountId, PM.session, { ...base, _number: ++num, _origin: "new", _status: sch.data._kind === "program" ? "active" : "pending" }, scheduleId);
+    if (sch.data._kind === "program") await linkSessionSection(user, rec.id, sch);
+  }
   const course = await prisma.course.findFirst({ where: { id: s(settings.course) }, select: { code: true } });
   await audit(user, "PR19", scheduleId, "add course sessions", { note: `${count} session(s) of ${course?.code ?? ""}` });
   return { ok: true, message: `${count} session${count === 1 ? "" : "s"} of ${course?.code ?? "the course"} added` };
@@ -1295,9 +1344,10 @@ export async function copySchedule(user: SessionClaims, id: string, body: Data) 
       inst,
       user.accountId,
       PM.session,
-      { ...r.data, startDate: move(r.data.startDate), endDate: move(r.data.endDate), ...(kind === "termSchedules" ? { term: data.term } : {}), _origin: "copied", _status: kind === "termSchedules" ? "pending" : "active", _changed: false },
+      { ...r.data, startDate: move(r.data.startDate), endDate: move(r.data.endDate), ...(kind === "termSchedules" ? { term: data.term } : {}), _origin: "copied", _status: kind === "termSchedules" ? "pending" : "active", _changed: false, _sectionId: "" },
       copy.id,
     );
+  if (kind === "programSchedules") await linkScheduleSections(user, copy.id);
   const feeMap = new Map<string, string>();
   for (const t of await list(inst, PM.scheduleFeeTerm, id)) feeMap.set(t.id, (await insert(inst, user.accountId, PM.scheduleFeeTerm, t.data, copy.id)).id);
   for (const fee of await list(inst, PM.scheduleFee, id)) await insert(inst, user.accountId, PM.scheduleFee, { ...fee.data, feeTerm: feeMap.get(s(fee.data.feeTerm)) ?? "" }, copy.id);
@@ -1334,6 +1384,7 @@ export async function bulkUpdate(user: SessionClaims, scheduleId: string, body: 
     await validateCross(inst, "sessions", data);
     if (sch.data._kind === "term" && r.data._status === "active") data._changed = true;
     await write(user.accountId, r.id, data);
+    if (sch.data._kind === "program" && r.data._status === "active") await linkSessionSection(user, r.id, sch);
   }
   await audit(user, "PR20", scheduleId, `bulk update: ${body.category.toLowerCase()}`, { after: patch, note: `${sessions.length} session(s)` });
   return { ok: true, message: `${body.category} updated on ${sessions.length} session${sessions.length === 1 ? "" : "s"}` };

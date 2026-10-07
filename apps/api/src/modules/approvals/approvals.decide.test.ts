@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const tx = vi.hoisted(() => ({
-  approvalRequest: { findFirst: vi.fn(), updateMany: vi.fn(), findFirstOrThrow: vi.fn() },
+  approvalRequest: { findFirst: vi.fn(), updateMany: vi.fn(), findFirstOrThrow: vi.fn(), create: vi.fn() },
   auditEvent: { create: vi.fn() },
   eventOutbox: { create: vi.fn() },
 }));
@@ -12,7 +12,7 @@ const db = vi.hoisted(() => ({
 
 vi.mock("@myheritage/db", () => ({ prisma: db }));
 
-import { applyApproval, decideApproval } from "@myheritage/auth";
+import { applyApproval, canDecideApproval, decideApproval, parseApproverRoles, requireApproval } from "@myheritage/auth";
 
 const institutionId = "00000000-0000-4000-8000-000000000004";
 const approvalId = "10000000-0000-4000-8000-000000000001";
@@ -117,6 +117,82 @@ describe("decideApproval", () => {
     await decide(approverA);
 
     expect(claimedData().status).toBe("pending");
+  });
+
+  it("lets a System Administrator (admin only) decide a registrar-only request", async () => {
+    tx.approvalRequest.findFirst.mockResolvedValue(
+      pendingRow({ type: "student_profile_change", requiredApproverRolesJson: JSON.stringify(["registrar"]) }),
+    );
+
+    await decideApproval({ approvalId, institutionId, actorId: approverA, actorRoles: ["admin"], decision: "approve" });
+
+    expect(claimedData().status).toBe("approved");
+  });
+
+  it("still refuses an admin approving their own registrar-only request", async () => {
+    tx.approvalRequest.findFirst.mockResolvedValue(pendingRow({ requiredApproverRolesJson: JSON.stringify(["registrar"]) }));
+
+    await expect(
+      decideApproval({ approvalId, institutionId, actorId: requesterId, actorRoles: ["admin"], decision: "approve" }),
+    ).rejects.toMatchObject({ status: 403, code: "FORBIDDEN" });
+    expect(tx.approvalRequest.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("counts an admin and a registrar as two distinct approvers towards a quorum", async () => {
+    tx.approvalRequest.findFirst.mockResolvedValue(
+      pendingRow({
+        requiredCount: 2,
+        requiredApproverRolesJson: JSON.stringify(["registrar"]),
+        decisionsJson: JSON.stringify([{ actorId: approverA, decision: "approve", decidedAt: "2026-10-01T00:00:00.000Z" }]),
+      }),
+    );
+
+    await decideApproval({ approvalId, institutionId, actorId: approverB, actorRoles: ["admin"], decision: "approve" });
+
+    expect(claimedData().status).toBe("approved");
+  });
+
+  it("refuses roles that do not cover the required approver role", async () => {
+    tx.approvalRequest.findFirst.mockResolvedValue(pendingRow({ requiredApproverRolesJson: JSON.stringify(["registrar"]) }));
+
+    await expect(
+      decideApproval({ approvalId, institutionId, actorId: approverA, actorRoles: ["instructor"], decision: "approve" }),
+    ).rejects.toMatchObject({ status: 403, code: "FORBIDDEN" });
+  });
+});
+
+describe("canDecideApproval", () => {
+  it("treats admin as covering registrar but not the reverse", () => {
+    expect(canDecideApproval(["admin"], ["registrar"])).toBe(true);
+    expect(canDecideApproval(["registrar"], ["registrar"])).toBe(true);
+    expect(canDecideApproval(["registrar"], ["admin"])).toBe(false);
+    expect(canDecideApproval(["instructor"], ["registrar", "admin"])).toBe(false);
+    expect(canDecideApproval(["admin"], parseApproverRoles("not json"))).toBe(false);
+  });
+});
+
+describe("requireApproval event name", () => {
+  beforeEach(() => {
+    tx.approvalRequest.create.mockResolvedValue({ id: approvalId });
+  });
+
+  it.each([
+    ["leave_of_absence", "ApprovalRequest.requested"],
+    ["service_request.course_withdrawal", "ApprovalRequest.requested"],
+    ["grade.publish", "GradeItem.publishRequested"],
+    ["grade_publish", "GradeItem.publishRequested"],
+  ])("records a %s request as %s", async (type, eventName) => {
+    await requireApproval({
+      institutionId,
+      type,
+      subjectRef: "student:s-1",
+      proposedDiff: {},
+      requestedBy: requesterId,
+      requiredApproverRoles: ["registrar", "admin"],
+    });
+
+    expect(tx.auditEvent.create).toHaveBeenCalledWith({ data: expect.objectContaining({ eventName }) });
+    expect(tx.eventOutbox.create).toHaveBeenCalledWith({ data: expect.objectContaining({ eventName }) });
   });
 });
 

@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { SaModal, SaNotice, SuperFrame } from "@/components/superadmin/shared";
 import { ConfirmDelete } from "../location/shared";
 import { Directory, EntityModal, SC, SettingsBody, Tabs, useTab } from "./directory";
-import { OutcomeBadge, errMsg, fmtDate, str, sx, useFlash, useSysMeta, type Listing, type Row } from "./kit";
+import { OutcomeBadge, errMsg, fmtDate, str, sx, useCanEdit, useFlash, useSysMeta, type Listing, type Row } from "./kit";
 
 const SEC = "/admin/sysconfig/security";
 const TABS = [
@@ -29,6 +29,7 @@ function SecurityQuestions() {
   const [questions, setQuestions] = useState<Row[]>([]);
   const [modal, setModal] = useState<{ entity: "securityQuestions" | "securityCategories"; id: string | null } | null>(null);
   const [confirm, setConfirm] = useState<{ entity: "securityQuestions" | "securityCategories"; row: Row } | null>(null);
+  const writable = useCanEdit("securityQuestions");
   const load = useCallback(() => {
     Promise.all([sx<Listing>("/e/securityCategories"), sx<Listing>("/e/securityQuestions")])
       .then(([c, q]) => {
@@ -41,14 +42,16 @@ function SecurityQuestions() {
   return (
     <div className="lx sx">
       {flash.node}
-      <div className="sx-tabhead">
-        <button type="button" className="mh-sa__btn" onClick={() => setModal({ entity: "securityCategories", id: null })}>
-          Add Category
-        </button>
-        <button type="button" className="mh-sa__btn mh-sa__btn--primary" onClick={() => setModal({ entity: "securityQuestions", id: null })} disabled={!cats?.length}>
-          Add Question
-        </button>
-      </div>
+      {writable ? (
+        <div className="sx-tabhead">
+          <button type="button" className="mh-sa__btn" onClick={() => setModal({ entity: "securityCategories", id: null })}>
+            Add Category
+          </button>
+          <button type="button" className="mh-sa__btn mh-sa__btn--primary" onClick={() => setModal({ entity: "securityQuestions", id: null })} disabled={!cats?.length}>
+            Add Question
+          </button>
+        </div>
+      ) : null}
       {!cats ? (
         <section className="mh-sa__card">
           <p className="mh-sa__muted">Loading…</p>
@@ -64,14 +67,16 @@ function SecurityQuestions() {
             <section key={c.id} className="mh-sa__card sx-group">
               <div className="sx-group__head">
                 <h3>{str(c.name)}</h3>
-                <span className="lx-actions">
-                  <button type="button" className="mh-sa__btn mh-sa__btn--sm" onClick={() => setModal({ entity: "securityCategories", id: c.id })}>
-                    Edit
-                  </button>
-                  <button type="button" className="mh-sa__btn mh-sa__btn--sm mh-sa__btn--danger" onClick={() => setConfirm({ entity: "securityCategories", row: c })}>
-                    Delete
-                  </button>
-                </span>
+                {writable ? (
+                  <span className="lx-actions">
+                    <button type="button" className="mh-sa__btn mh-sa__btn--sm" onClick={() => setModal({ entity: "securityCategories", id: c.id })}>
+                      Edit
+                    </button>
+                    <button type="button" className="mh-sa__btn mh-sa__btn--sm mh-sa__btn--danger" onClick={() => setConfirm({ entity: "securityCategories", row: c })}>
+                      Delete
+                    </button>
+                  </span>
+                ) : null}
               </div>
               <table className="mh-sa__table lx-table">
                 <tbody>
@@ -79,12 +84,16 @@ function SecurityQuestions() {
                     <tr key={q.id}>
                       <td>{str(q.question)}</td>
                       <td className="lx-actions">
-                        <button type="button" className="mh-sa__btn mh-sa__btn--sm" onClick={() => setModal({ entity: "securityQuestions", id: q.id })}>
-                          Edit
-                        </button>
-                        <button type="button" className="mh-sa__btn mh-sa__btn--sm mh-sa__btn--danger" onClick={() => setConfirm({ entity: "securityQuestions", row: q })}>
-                          Delete
-                        </button>
+                        {writable ? (
+                          <>
+                            <button type="button" className="mh-sa__btn mh-sa__btn--sm" onClick={() => setModal({ entity: "securityQuestions", id: q.id })}>
+                              Edit
+                            </button>
+                            <button type="button" className="mh-sa__btn mh-sa__btn--sm mh-sa__btn--danger" onClick={() => setConfirm({ entity: "securityQuestions", row: q })}>
+                              Delete
+                            </button>
+                          </>
+                        ) : null}
                       </td>
                     </tr>
                   ))}

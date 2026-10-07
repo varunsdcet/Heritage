@@ -3,6 +3,7 @@ import { prisma } from "@myheritage/db";
 import { requireAuth, type AuthedRequest } from "../../middleware/auth.js";
 import { MarkStudentNotificationReadResponse } from "@myheritage/contracts";
 import { writeAuditAndOutbox } from "@myheritage/events";
+import { markNotificationsRead } from "./inbox.js";
 
 export const notificationsRouter: Router = Router();
 
@@ -28,6 +29,16 @@ notificationsRouter.get("/me", requireAuth, async (req, res, next) => {
       items,
       unreadCount: items.filter((i) => i.readAt == null).length,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+notificationsRouter.post("/me/read-all", requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    const { count } = await markNotificationsRead(user);
+    res.json({ changed: count });
   } catch (err) {
     next(err);
   }

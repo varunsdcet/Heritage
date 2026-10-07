@@ -120,7 +120,7 @@ export const TRANSCRIPT_OPTIONS = [
   { key: "overlapping", label: "Show overlapping courses completed in previous in-takes" },
 ] as const;
 
-export const LOA_STATUSES = ["Pending", "Active", "Completed"] as const;
+export const LOA_STATUSES = ["Pending", "Approved", "Active", "Completed", "Declined"] as const;
 export const WITHDRAW_STATUSES = ["Pending", "Approved", "Declined"] as const;
 export const BADGE_STATUSES = ["Pending", "Approved", "Declined"] as const;
 

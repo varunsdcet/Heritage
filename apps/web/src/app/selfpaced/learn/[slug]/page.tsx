@@ -62,7 +62,7 @@ export default function SelfpacedLearnCoursePage() {
     setOpenChapters(open);
     if (isCourseComplete(program.slug, items.length) && allAssessmentsPassed(program.slug)) {
       const issued = ensureCertificate(program.slug, items.length);
-      setHasCert(Boolean(issued?.certificateId));
+      setHasCert(Boolean(issued));
       setEnrollment(issued);
     }
     const plan = todaysPlan(program.slug);
@@ -117,7 +117,7 @@ export default function SelfpacedLearnCoursePage() {
   return (
     <LearnerShell>
       <div className="sp-learn">
-        {complete && hasCert && enrollment?.certificateId ? (
+        {complete && hasCert && enrollment ? (
           <section className="sp-complete">
             <div className="sp-complete__tabs" role="tablist" aria-label="Course completion">
               <Link href={`/selfpaced/learn/${program.slug}`} role="tab" aria-selected className="is-active">
@@ -152,7 +152,7 @@ export default function SelfpacedLearnCoursePage() {
                   hours={program.hours}
                   chapters={chapters.length}
                   issuedAt={enrollment.certificateIssuedAt || new Date().toISOString()}
-                  certificateId={enrollment.certificateId}
+                  certificateId={enrollment.certificateId || "Pending"}
                 />
               </Link>
             </div>

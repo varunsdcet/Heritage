@@ -10,6 +10,9 @@ import { caseView, reqView } from "./students.comms.js";
 import { testView } from "./students.plan.js";
 import { filterFlags, flagView } from "./students.js";
 import { BADGE_STATUSES, LOA_STATUSES, STU, WITHDRAW_STATUSES } from "./students.spec.js";
+import { requestNumbersFor } from "./requests.js";
+import { assertPermission } from "../superAdmin.service.js";
+import { institutionTimezone, ymdIn } from "../../../lib/workshopPolicy.js";
 
 const GRADE_TYPES = ["grade.publish", "grade_publish"];
 const letterOf = (v: unknown) => text(v, 1).toUpperCase();
@@ -118,9 +121,8 @@ export async function studentRequirements(user: SessionClaims, q: Data) {
 /* Leave of Absence                                                     */
 /* ------------------------------------------------------------------ */
 
-function loaStatus(status: string, startsOn: string, endsOn: string) {
+function loaStatus(status: string, startsOn: string, endsOn: string, today: string) {
   const st = status.toLowerCase();
-  const today = new Date().toISOString().slice(0, 10);
   if (st === "pending") return "Pending";
   if (["rejected", "declined"].includes(st)) return "Declined";
   if (["approved", "applied", "active"].includes(st)) {
@@ -140,10 +142,22 @@ export async function leaveOfAbsence(user: SessionClaims, q: Data) {
   const status = s(q.status);
   if (status && !(LOA_STATUSES as readonly string[]).includes(status)) throw httpError(400, "Unknown status");
   const letter = letterOf(q.letter);
+  const today = ymdIn(new Date(), await institutionTimezone(inst));
   const items = loas
-    .map((l) => ({ id: l.id, student: studentCell(info.get(l.studentId), l.studentId), reason: l.reason, startsOn: l.startsOn, endsOn: l.endsOn, status: loaStatus(l.status, l.startsOn, l.endsOn), requested: l.createdAt.toISOString() }))
+    .filter((l) => l.status !== "cancelled")
+    .map((l) => ({ id: l.id, student: studentCell(info.get(l.studentId), l.studentId), reason: l.reason, startsOn: l.startsOn, endsOn: l.endsOn, status: loaStatus(l.status, l.startsOn, l.endsOn, today), requested: l.createdAt.toISOString(), decisionNote: l.decisionNote ?? "" }))
     .filter((l) => (!status || l.status === status) && (!s(q.student) || studentMatches(info.get(l.student.id), s(q.student))) && byLetter(info.get(l.student.id), letter));
-  return page(items, q);
+  return withRequestNumbers(user, page(items, q), "loa");
+}
+
+/** Leave and withdraw decisions are made on the User Request review page, which owns the approval, status and enrolment effects. */
+async function withRequestNumbers<T extends { id: string }>(user: SessionClaims, paged: ReturnType<typeof page<T>>, kind: "loa" | "service") {
+  const numbers = await requestNumbersFor(user, paged.items.map((i) => `${kind}:${i.id}`));
+  const canDecide = await assertPermission(user, "userRequests", "edit").then(
+    () => true,
+    () => false,
+  );
+  return { ...paged, canDecide, items: paged.items.map((i) => ({ ...i, requestNumber: numbers.get(`${kind}:${i.id}`) ?? null })) };
 }
 
 /* ------------------------------------------------------------------ */
@@ -152,7 +166,7 @@ export async function leaveOfAbsence(user: SessionClaims, q: Data) {
 
 function withdrawStatus(status: string) {
   const st = status.toLowerCase();
-  if (["open", "pending", "submitted", "in_review"].includes(st)) return "Pending";
+  if (["open", "pending", "pending_approval", "submitted", "in_review"].includes(st)) return "Pending";
   if (["resolved", "approved", "completed"].includes(st)) return "Approved";
   if (["rejected", "declined"].includes(st)) return "Declined";
   return status;
@@ -167,9 +181,10 @@ export async function withdrawRequests(user: SessionClaims, q: Data) {
   if (status && !(WITHDRAW_STATUSES as readonly string[]).includes(status)) throw httpError(400, "Unknown status");
   const letter = letterOf(q.letter);
   const items = list
+    .filter((r) => r.status !== "cancelled")
     .map((r) => ({ id: r.id, student: studentCell(info.get(r.studentId), r.studentId), subject: r.subject, details: r.details, status: withdrawStatus(r.status), requested: r.createdAt.toISOString() }))
     .filter((r) => (!status || r.status === status) && (!s(q.student) || studentMatches(info.get(r.student.id), s(q.student))) && byLetter(info.get(r.student.id), letter));
-  return page(items, q);
+  return withRequestNumbers(user, page(items, q), "service");
 }
 
 /* ------------------------------------------------------------------ */
@@ -389,7 +404,30 @@ export async function badgeQueue(user: SessionClaims, q: Data) {
     .map((b) => ({ id: b.id, student: studentCell(info.get(b.studentId), b.studentId), email: info.get(b.studentId)?.email ?? "", badge: b.title, code: b.code, status: badgeStatus(b.status), earned: b.earnedAt?.toISOString() ?? "" }))
     .filter((b) => (!status || b.status === status) && (!badge || b.badge === badge || b.code === badge))
     .filter((b) => !userQ || b.student.number.toLowerCase().includes(userQ) || b.email.toLowerCase().includes(userQ) || b.student.name.toLowerCase().startsWith(userQ));
-  return page(items, q);
+  const canDecide = await canStudents(user, "edit").then(
+    () => true,
+    () => false,
+  );
+  return { ...page(items, q), canDecide };
+}
+
+export async function decideBadge(user: SessionClaims, badgeId: string, body: Data) {
+  await canStudents(user, "edit");
+  const inst = user.institutionId;
+  const decision = s(body.decision);
+  if (decision !== "approve" && decision !== "decline") throw httpError(400, "Choose Approve or Decline");
+  const badge = await prisma.studentBadge.findFirst({ where: { id: badgeId, institutionId: inst } });
+  if (!badge) throw httpError(404, "Badge not found", "NOT_FOUND");
+  if (badge.status !== "pending") throw httpError(409, "This badge has already been reviewed", "CONFLICT");
+  const approve = decision === "approve";
+  const claimed = await prisma.studentBadge.updateMany({
+    where: { id: badge.id, rowVersion: badge.rowVersion, status: "pending" },
+    data: { status: approve ? "earned" : "declined", earnedAt: approve ? new Date() : null, rowVersion: { increment: 1 } },
+  });
+  if (claimed.count !== 1) throw httpError(409, "This badge was reviewed by someone else. Reload and try again.", "CONFLICT");
+  const note = text(body.comments, 1000);
+  await stuAudit(user, "Assessments", badge.studentId, approve ? `Badge "${badge.title}" awarded` : `Badge "${badge.title}" declined`, { status: approve ? "earned" : "declined", note: note || null }, badge.id, { status: badge.status });
+  return { message: `${badge.title} ${approve ? "awarded" : "declined"}`, status: approve ? "Approved" : "Declined" };
 }
 
 export async function bulkLog(user: SessionClaims) {

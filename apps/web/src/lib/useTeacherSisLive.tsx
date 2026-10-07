@@ -54,6 +54,8 @@ type TeacherLiveContextValue = {
 
 const TeacherLiveContext = createContext<TeacherLiveContextValue | null>(null);
 
+const SCREEN_TIMEOUT_MS = 30_000;
+
 /**
  * Only layout/chrome from catalog is kept.
  * Every data field must come from `/instructor/sis/screen` — never catalog fixtures.
@@ -246,22 +248,31 @@ export function TeacherLiveProvider({
     setError(null);
     // Drop stale rows immediately so filter changes never show the previous result set.
     setPayload(null);
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), SCREEN_TIMEOUT_MS);
     try {
       const qs = new URLSearchParams();
       qs.set("path", path);
       if (studentId) qs.set("studentId", studentId);
       const res = await api<TeacherLiveResponse>(
         `/instructor/sis/screen?${qs.toString()}`,
-        {},
+        { signal: controller.signal },
         session.accessToken,
       );
       setSource(res.source ?? "domain");
       setPayload(res.payload ?? null);
       setBootstrap(res.bootstrap ?? null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load live data");
+      setError(
+        controller.signal.aborted
+          ? "This page took too long to load. Refresh to try again."
+          : err instanceof Error
+            ? err.message
+            : "Failed to load live data",
+      );
       setPayload(null);
     } finally {
+      window.clearTimeout(timer);
       setLoading(false);
     }
   }, [path, studentId]);

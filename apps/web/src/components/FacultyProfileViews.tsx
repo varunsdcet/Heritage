@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { TeacherScreenConfig } from "@/lib/teacherCatalog";
 import { useOptionalTeacherLive } from "@/lib/useTeacherSisLive";
 import { DEFAULT_HCC_TIME_ZONE, HCC_TIME_ZONES } from "@/lib/timeZones";
@@ -83,11 +83,13 @@ export function FacultyProfileLayout({
   tabs,
   children,
   contentClassName,
+  onUpdate,
 }: {
   config: TeacherScreenConfig;
   tabs?: Array<{ label: string; href: string; active?: boolean }>;
   children: ReactNode;
   contentClassName?: string;
+  onUpdate?: () => void;
 }) {
   const router = useRouter();
   const live = useOptionalTeacherLive();
@@ -139,7 +141,7 @@ export function FacultyProfileLayout({
           <button
             type="button"
             className="mh-ct-profile__btn"
-            onClick={() => router.push("/instructor/f/t02-profile-biography")}
+            onClick={() => (onUpdate ? onUpdate() : router.push("/instructor/f/t02-profile-biography?edit=1"))}
           >
             Update
           </button>
@@ -177,7 +179,12 @@ export function ProfileBioView({ config }: { config: TeacherScreenConfig }) {
   const education = p?.education;
   const email = connect?.email || config.profileHeader?.email || p?.personal?.find((f) => f.label === "Email")?.value || "";
   const phone = connect?.phone || p?.personal?.find((f) => f.label === "Phone")?.value || "";
-  const [modal, setModal] = useState<"connect" | "education" | null>(null);
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const [modal, setModal] = useState<"connect" | "education" | "profile" | null>(
+    searchParams.get("edit") === "1" ? "profile" : null,
+  );
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [zoom, setZoom] = useState(false);
   const [phoneVal, setPhoneVal] = useState(phone === "—" ? "" : phone);
   const [emailVal, setEmailVal] = useState(email);
@@ -218,6 +225,38 @@ export function ProfileBioView({ config }: { config: TeacherScreenConfig }) {
     await live?.refresh();
   }
 
+  function closeModal() {
+    setModal(null);
+    setSaveError(null);
+    if (searchParams.get("edit")) router.replace("/instructor/f/t02-profile-biography");
+  }
+
+  async function saveProfile(e: FormEvent) {
+    e.preventDefault();
+    setSaveError(null);
+    const okConnect = await live?.runAction(
+      "Save Content",
+      JSON.stringify({ __kind: "connect", Phone: phoneVal, "E-mail": emailVal }),
+    );
+    const okEducation =
+      okConnect &&
+      (await live?.runAction(
+        "Save Content",
+        JSON.stringify({
+          __kind: "education",
+          "Education background": eduBg,
+          "Summary of professional experience": eduExp,
+          "Membership in professional organizations": eduOrg,
+        }),
+      ));
+    if (!okConnect || !okEducation) {
+      setSaveError("Your profile could not be saved. Check the fields and try again.");
+      return;
+    }
+    closeModal();
+    await live?.refresh();
+  }
+
   const personal = p?.personal || [];
   const academic = p?.academic || [];
   const val = (label: string, fallback = "—") =>
@@ -238,7 +277,7 @@ export function ProfileBioView({ config }: { config: TeacherScreenConfig }) {
   ];
 
   return (
-    <FacultyProfileLayout config={config} tabs={p?.tabs}>
+    <FacultyProfileLayout config={config} tabs={p?.tabs} onUpdate={() => setModal("profile")}>
       <section className="mh-ct-profile__block">
         <h2>Teacher Information</h2>
         <div className="mh-ct-profile__info">
@@ -309,6 +348,47 @@ export function ProfileBioView({ config }: { config: TeacherScreenConfig }) {
       </section>
 
       <AvatarZoom open={zoom} onClose={() => setZoom(false)} name={p?.name || "Instructor"} />
+
+      {modal === "profile" ? (
+        <ModalShell
+          title="UPDATE PROFILE"
+          section="CONTACT AND EDUCATION"
+          onClose={closeModal}
+          footer={
+            <button type="submit" form="profile-form" className="mh-hcc-modal__save" disabled={live?.busy}>
+              {live?.busy ? "Saving…" : "Save Profile"}
+            </button>
+          }
+        >
+          <form id="profile-form" className="mh-hcc-modal__form" onSubmit={saveProfile}>
+            {saveError ? (
+              <p className="mh-teacher-muted" role="alert">
+                {saveError}
+              </p>
+            ) : null}
+            <label>
+              <span>Phone</span>
+              <input value={phoneVal} onChange={(e) => setPhoneVal(e.target.value)} />
+            </label>
+            <label>
+              <span>E-mail</span>
+              <input value={emailVal} onChange={(e) => setEmailVal(e.target.value)} type="email" required />
+            </label>
+            <label>
+              <span>Education background</span>
+              <textarea rows={3} value={eduBg} onChange={(e) => setEduBg(e.target.value)} />
+            </label>
+            <label>
+              <span>Summary of professional experience</span>
+              <textarea rows={3} value={eduExp} onChange={(e) => setEduExp(e.target.value)} />
+            </label>
+            <label>
+              <span>Membership in professional organizations</span>
+              <textarea rows={3} value={eduOrg} onChange={(e) => setEduOrg(e.target.value)} />
+            </label>
+          </form>
+        </ModalShell>
+      ) : null}
 
       {modal === "connect" ? (
         <ModalShell
@@ -770,6 +850,17 @@ function MonthCalendar({
   );
 }
 
+function isoDay(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function addDays(iso: string, n: number) {
+  const d = new Date(`${iso}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return new Date();
+  d.setDate(d.getDate() + n);
+  return d;
+}
+
 function AvailabilityModal({
   open,
   onClose,
@@ -790,9 +881,10 @@ function AvailabilityModal({
   const [startM, setStartM] = useState("00");
   const [endH, setEndH] = useState("10");
   const [endM, setEndM] = useState("00");
-  const [date, setDate] = useState(defaultDate || "2026-09-18");
+  const [date, setDate] = useState(() => defaultDate || isoDay(new Date()));
   const [recur, setRecur] = useState(true);
-  const [endDate, setEndDate] = useState("2026-09-25");
+  const [endDate, setEndDate] = useState(() => isoDay(addDays(defaultDate || isoDay(new Date()), 7)));
+  const [error, setError] = useState("");
   const [days, setDays] = useState<string[]>(["Mon", "Tue", "Wed", "Thu", "Fri"]);
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
@@ -800,25 +892,36 @@ function AvailabilityModal({
   useEffect(() => {
     if (!open) return;
     setType(defaultType);
-    if (defaultDate) {
-      setDate(defaultDate);
-      const end = new Date(`${defaultDate}T12:00:00`);
-      if (!Number.isNaN(end.getTime())) {
-        end.setDate(end.getDate() + 7);
-        setEndDate(
-          `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, "0")}-${String(end.getDate()).padStart(2, "0")}`,
-        );
-      }
-    }
+    setError("");
+    const start = defaultDate || isoDay(new Date());
+    setDate(start);
+    setEndDate(isoDay(addDays(start, 7)));
   }, [open, defaultType, defaultDate]);
 
   if (!open) return null;
 
+  const startTime = `${startH}:${startM}`;
+  const endTime = `${endH}:${endM}`;
+  const problem = !date
+    ? "Choose a date."
+    : endTime <= startTime
+      ? "End time must be after the start time."
+      : recur && endDate && endDate < date
+        ? "The recurrence end date cannot be before the start date."
+        : recur && days.length === 0
+          ? "Pick at least one day of the week."
+          : "";
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    if (problem) {
+      setError(problem);
+      return;
+    }
     setSaving(true);
+    setError("");
     try {
-      await live?.runAction(
+      const ok = await live?.runAction(
         "Save Availability",
         JSON.stringify({
           "Title / Name (optional)": title,
@@ -834,6 +937,10 @@ function AvailabilityModal({
           Note: note,
         }),
       );
+      if (ok === false) {
+        setError("Availability could not be saved. Check the date and times, then try again.");
+        return;
+      }
       onClose();
       await onSaved();
     } finally {
@@ -935,6 +1042,11 @@ function AvailabilityModal({
           <span>Note</span>
           <textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} />
         </label>
+        {error || problem ? (
+          <p className="mh-teacher-muted" role="alert">
+            {error || problem}
+          </p>
+        ) : null}
       </form>
     </ModalShell>
   );

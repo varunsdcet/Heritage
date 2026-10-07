@@ -487,7 +487,7 @@ export function HccMailViews({
           {notice ? <p className="mh-hcc-mail__alert is-ok">{notice}</p> : null}
 
           {view === "compose" ? (
-            <div className="mh-hcc-mail__panel mh-hcc-mail__compose">
+            <div className="mh-hcc-mail__panel mh-hcc-mail__compose" data-hide-ask-fab="">
               <header className="mh-hcc-mail__panel-head">
                 <div>
                   <h2>Compose e-mail / message</h2>
@@ -845,7 +845,7 @@ export function HccMailViews({
               </div>
 
               {showReply ? (
-                <div className="mh-hcc-mail__reply">
+                <div className="mh-hcc-mail__reply" data-hide-ask-fab="">
                   <p className="mh-hcc-mail__hint">
                     Reply all · goes to {thread.to.map((p) => p.name).join(", ") || "everyone on this thread"}
                     {thread.cc.length ? ` · Cc ${thread.cc.map((p) => p.name).join(", ")}` : ""}

@@ -1,7 +1,7 @@
 "use client";
 
-import { LiveScreen } from "@/components/LiveScreen";
+import { ApplicationWizard } from "@/components/applicant/ApplicationWizard";
 
 export default function Page() {
-  return <LiveScreen path="/applicant/application" />;
+  return <ApplicationWizard />;
 }

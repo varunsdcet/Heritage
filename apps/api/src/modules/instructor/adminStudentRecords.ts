@@ -103,7 +103,12 @@ function parseMeta(text: string | null): Record<string, unknown> {
 /* Same buckets as admin Student Management › Leave of Absence / Course Withdraw Requests queues (students.queues.ts). */
 export function loaStatus(status: string, startsOn: string, endsOn: string) {
   const st = status.toLowerCase();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = new Intl.DateTimeFormat("en-CA", {
+    timeZone: process.env.INSTITUTION_TZ || "America/Vancouver",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
   if (st === "pending") return "Pending";
   if (["rejected", "declined"].includes(st)) return "Declined";
   if (["approved", "applied", "active"].includes(st)) {
@@ -248,7 +253,7 @@ export async function buildInstructorAlertQueue(user: SessionClaims, sections: S
   const items = (await loadAlertItems(user, studentScope(user, sections))).map(({ studentId: _s, createdAt: _c, ...item }) => item);
   return {
     title: "Academic Alerts",
-    subtitle: `STUDENTS // ${items.length} ACTIVE`,
+    subtitle: `${items.length} active student${items.length === 1 ? "" : "s"}`,
     archetype: "alertList",
     primaryAction: "Create alert",
     alertList: { badge: `${items.length} ACTIVE`, items },

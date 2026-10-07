@@ -45,6 +45,12 @@ function LoginForm() {
     setExisting(session);
   }, []);
 
+  const registered = searchParams.get("registered") === "1";
+  useEffect(() => {
+    const prefill = searchParams.get("email");
+    if (prefill) setEmail(prefill);
+  }, [searchParams]);
+
   const emailTrimmed = email.trim();
   const emailError = useMemo(() => {
     if (!touchedEmail && !submitted) return null;
@@ -275,6 +281,12 @@ function LoginForm() {
             </div>
           ) : null}
 
+          {registered && !existing ? (
+            <p role="status" style={{ margin: 0, padding: "12px 14px", borderRadius: 12, background: "#F0F4F1", border: "1px solid #D5DED8", fontSize: 14, color: "#1F2937", lineHeight: 1.4 }}>
+              Your applicant account is ready. Sign in to start your application.
+            </p>
+          ) : null}
+
           {error && !passwordError && !emailError ? (
             <div style={{ display: "flex", gap: 6, alignItems: "center", color: "#BA1A1A", fontSize: 13 }}>
               <img src="/brand/login/alert.svg" alt="" width={16} height={16} />
@@ -429,6 +441,12 @@ function LoginForm() {
             >
               {loading ? "Signing in…" : "Sign in"}
             </button>
+            <p style={{ margin: 0, fontSize: 14, color: "#5C5F5A", textAlign: "center" }}>
+              Applying to Heritage?{" "}
+              <a href="/apply" style={{ color: "#2563EB", fontWeight: 600, textDecoration: "none" }}>
+                Create an applicant account
+              </a>
+            </p>
           </div>
 
         </form>

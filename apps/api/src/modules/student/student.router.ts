@@ -4,6 +4,7 @@ import path from "node:path";
 import { Router } from "express";
 import {
   MAX_STUDENT_FILE_BYTES,
+  StudentAssignmentSummary,
   StudentAssignmentsResponse,
   SubmitStudentAssignmentResponse,
   UploadStudentSubmissionFileRequest,
@@ -55,24 +56,34 @@ import {
   updateMailboxSettings,
 } from "./wave3.service.js";
 import { sessionJoinUrl } from "../../lib/liveClass.js";
+import { bytesMatchMime, decodeBase64 } from "../../lib/fileSniff.js";
+import { readSubmissionFile, submissionStorageRoot } from "../../lib/submissionFiles.js";
 import { currentStudentId } from "../me/studentAlignment.js";
 
 export const studentRouter: Router = Router();
 
-const extensionByMime: Record<string, string[]> = {
-  "application/pdf": [".pdf"],
-  "application/msword": [".doc"],
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
-  "application/vnd.ms-excel": [".xls"],
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
-  "text/csv": [".csv"],
-  "image/png": [".png"],
-  "image/jpeg": [".jpg", ".jpeg"],
-  "application/zip": [".zip"],
+const mimeByExtension: Record<string, string> = {
+  ".pdf": "application/pdf",
+  ".doc": "application/msword",
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".xls": "application/vnd.ms-excel",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".csv": "text/csv",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".zip": "application/zip",
 };
+
+const ALLOWED_TYPES_LABEL = "PDF, Word (.doc, .docx), Excel (.xls, .xlsx), CSV, PNG, JPEG or ZIP";
 
 function httpError(message: string, code: string, status: number) {
   return Object.assign(new Error(message), { code, status });
+}
+
+function formatMegabytes(bytes: number) {
+  const mb = bytes / (1024 * 1024);
+  return `${mb >= 10 ? Math.round(mb) : Math.round(mb * 10) / 10} MB`;
 }
 
 function assertUploadSize(body: unknown) {
@@ -80,58 +91,118 @@ function assertUploadSize(body: unknown) {
   const tooLarge =
     (typeof sizeBytes === "number" && sizeBytes > MAX_STUDENT_FILE_BYTES) ||
     (typeof contentBase64 === "string" && contentBase64.length > Math.ceil(MAX_STUDENT_FILE_BYTES / 3) * 4);
-  if (tooLarge) throw httpError("Files must be 10 MB or smaller", "FILE_TOO_LARGE", 413);
+  if (tooLarge) {
+    const size = typeof sizeBytes === "number" ? `This file is ${formatMegabytes(sizeBytes)}. ` : "";
+    throw httpError(`${size}Files must be 10 MB or smaller`, "FILE_TOO_LARGE", 413);
+  }
 }
 
+/**
+ * Names the actual problem (type, size, content) instead of a generic validation failure. The file's
+ * extension decides its type; the declared browser MIME type is unreliable (e.g. CSV sent as Excel).
+ */
 function parseUploadBody(body: unknown) {
-  const parsed = UploadStudentSubmissionFileRequest.safeParse(body);
+  const raw = (body ?? {}) as { filename?: unknown; mimeType?: unknown };
+  const filename = typeof raw.filename === "string" ? raw.filename.trim() : "";
+  if (!filename) throw httpError("Choose a file to upload", "VALIDATION_ERROR", 400);
+  if (path.basename(filename) !== filename || filename.includes("\0")) {
+    throw httpError("The file name must not contain folder separators", "VALIDATION_ERROR", 400);
+  }
+  const extension = path.extname(filename).toLowerCase();
+  const mimeType = mimeByExtension[extension];
+  if (!mimeType) {
+    throw httpError(
+      `${extension ? `"${extension}" files are` : "Files without an extension are"} not accepted. Upload a ${ALLOWED_TYPES_LABEL} file.`,
+      "VALIDATION_ERROR",
+      400,
+    );
+  }
+  const parsed = UploadStudentSubmissionFileRequest.safeParse({ ...(body as object), filename, mimeType });
   if (!parsed.success) {
-    throw Object.assign(new Error("Invalid upload"), {
-      code: "VALIDATION_ERROR",
-      status: 400,
-      issues: parsed.error.issues,
-    });
+    const issue = parsed.error.issues[0];
+    const field = String(issue?.path[0] ?? "");
+    const message =
+      field === "filename"
+        ? "The file name must be 255 characters or fewer"
+        : field === "sizeBytes"
+          ? "The file is empty or its size could not be read. Choose the file again."
+          : field === "contentBase64"
+            ? "The file content was not received. Choose the file again."
+            : "The upload could not be read. Choose the file again.";
+    throw Object.assign(httpError(message, "VALIDATION_ERROR", 400), { issues: parsed.error.issues });
   }
   return parsed.data;
 }
 
 function decodeAndValidateFile(input: ReturnType<typeof parseUploadBody>) {
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(input.contentBase64) || input.contentBase64.length % 4 !== 0) {
-    throw httpError("File content is not valid base64", "VALIDATION_ERROR", 400);
+    throw httpError("The file content was damaged during upload. Choose the file again.", "VALIDATION_ERROR", 400);
   }
-  if (path.basename(input.filename) !== input.filename || input.filename.includes("\0")) {
-    throw httpError("Filename must not contain a path", "VALIDATION_ERROR", 400);
-  }
-  const allowedExtensions = extensionByMime[input.mimeType] ?? [];
-  const extension = path.extname(input.filename).toLowerCase();
-  if (!allowedExtensions.includes(extension)) {
-    throw httpError("Filename extension does not match the file type", "VALIDATION_ERROR", 400);
-  }
-
-  const content = Buffer.from(input.contentBase64, "base64");
+  const content = decodeBase64(input.contentBase64);
   if (content.byteLength !== input.sizeBytes) {
-    throw httpError("Decoded file size does not match sizeBytes", "VALIDATION_ERROR", 400);
+    throw httpError("The file was only partly received. Choose the file again.", "VALIDATION_ERROR", 400);
   }
-
-  const startsWith = (...bytes: number[]) => bytes.every((byte, index) => content[index] === byte);
-  const isZip = startsWith(0x50, 0x4b, 0x03, 0x04) || startsWith(0x50, 0x4b, 0x05, 0x06);
-  const signatureValid =
-    (input.mimeType === "application/pdf" && content.subarray(0, 5).toString() === "%PDF-") ||
-    (input.mimeType === "image/png" && startsWith(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) ||
-    (input.mimeType === "image/jpeg" && startsWith(0xff, 0xd8, 0xff)) ||
-    ([
-      "application/zip",
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    ].includes(input.mimeType) && isZip) ||
-    (["application/msword", "application/vnd.ms-excel"].includes(input.mimeType) &&
-      startsWith(0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1)) ||
-    (input.mimeType === "text/csv" && !content.includes(0));
-
-  if (!signatureValid) {
-    throw httpError("File signature does not match the declared type", "VALIDATION_ERROR", 400);
+  if (!bytesMatchMime(content, input.mimeType)) {
+    const extension = path.extname(input.filename).toLowerCase();
+    throw httpError(
+      `The content of "${input.filename}" does not match its ${extension} type. It may have been renamed from another format or be damaged — export or save it again as a real ${extension} file.`,
+      "VALIDATION_ERROR",
+      400,
+    );
   }
   return content;
+}
+
+type SubmissionRules = {
+  fileSubmissions: boolean;
+  maxFiles: number | null;
+  maxFileBytes: number | null;
+  acceptedTypes: string | null;
+};
+
+/** Per-assignment limits set by the instructor in the course workspace. */
+function assertAssignmentFileRules(rules: SubmissionRules, input: { filename: string; sizeBytes: number }, activeFiles: number) {
+  if (!rules.fileSubmissions) {
+    throw httpError("This assignment accepts online text only, not file uploads", "VALIDATION_ERROR", 400);
+  }
+  const accepted = (rules.acceptedTypes || "").split(",").map((t) => t.trim()).filter(Boolean);
+  const extension = path.extname(input.filename).toLowerCase();
+  if (accepted.length && !accepted.includes(extension)) {
+    throw httpError(
+      `This assignment only accepts ${accepted.join(", ")} files. "${extension}" is not one of them.`,
+      "VALIDATION_ERROR",
+      400,
+    );
+  }
+  if (rules.maxFileBytes && input.sizeBytes > rules.maxFileBytes) {
+    throw httpError(
+      `This file is ${formatMegabytes(input.sizeBytes)}. This assignment accepts files up to ${formatMegabytes(rules.maxFileBytes)}.`,
+      "FILE_TOO_LARGE",
+      413,
+    );
+  }
+  if (rules.maxFiles && activeFiles >= rules.maxFiles) {
+    throw httpError(
+      `This assignment accepts at most ${rules.maxFiles} file${rules.maxFiles === 1 ? "" : "s"}. Remove a file before uploading another.`,
+      "SUBMISSION_LOCKED",
+      409,
+    );
+  }
+}
+
+function submissionDeadline(row: { dueAt: Date | null; cutoffAt?: Date | null }) {
+  return row.cutoffAt ?? row.dueAt;
+}
+
+function assertSubmissionWindow(row: { dueAt: Date | null; cutoffAt?: Date | null; availableFrom?: Date | null }) {
+  const now = Date.now();
+  if (row.availableFrom && row.availableFrom.getTime() > now) {
+    throw httpError(`Submissions open on ${row.availableFrom.toISOString()}`, "SUBMISSION_LOCKED", 409);
+  }
+  const deadline = submissionDeadline(row);
+  if (deadline && deadline.getTime() < now) {
+    throw httpError("The submission deadline has passed", "SUBMISSION_LOCKED", 409);
+  }
 }
 
 async function getStudent(user: AuthedRequest["user"]) {
@@ -153,6 +224,7 @@ async function getAssignments(institutionId: string, studentId: string, assignme
         institutionId,
         enrolments: { some: { institutionId, studentId, status: { in: ["enrolled", "completed"] } } },
       },
+      OR: [{ hidden: false }, { gradeItems: { some: { institutionId, studentId, status: "published" } } }],
     },
     include: {
       section: { include: { course: true } },
@@ -160,7 +232,10 @@ async function getAssignments(institutionId: string, studentId: string, assignme
         where: { institutionId, studentId },
         include: { files: { where: { institutionId, archivedAt: null }, orderBy: { version: "asc" } } },
       },
-      gradeItems: { where: { institutionId, studentId, status: "published" }, select: { id: true } },
+      gradeItems: {
+        where: { institutionId, studentId, status: "published" },
+        select: { id: true, score: true, maxScore: true, letter: true, feedback: true, publishedAt: true },
+      },
     },
     orderBy: [{ dueAt: "asc" }, { title: "asc" }],
   });
@@ -180,6 +255,7 @@ function presentSubmission(submission: AssignmentRow["submissions"][number] | un
       version: file.version,
       createdAt: file.createdAt.toISOString(),
     })),
+    textBody: submission.textBody ?? null,
   };
 }
 
@@ -187,17 +263,19 @@ function presentAssignment(row: AssignmentRow) {
   const submission = row.submissions[0];
   const now = Date.now();
   const dueSoon = row.dueAt != null && row.dueAt.getTime() >= now && row.dueAt.getTime() - now < 72 * 60 * 60 * 1000;
+  const deadline = submissionDeadline(row);
   const state = row.gradeItems.length
     ? "graded"
     : submission?.status === "submitted"
       ? "submitted"
       : submission
         ? "draft"
-        : row.dueAt && row.dueAt.getTime() < now
+        : deadline && deadline.getTime() < now
           ? "overdue"
           : dueSoon
             ? "due"
             : "upcoming";
+  const published = row.gradeItems[0];
   return {
     id: row.id,
     sectionId: row.sectionId,
@@ -209,6 +287,23 @@ function presentAssignment(row: AssignmentRow) {
     weightPercent: row.weightPercent,
     state,
     submission: presentSubmission(submission),
+    instructions: row.instructions ?? null,
+    availableFrom: row.availableFrom?.toISOString() ?? null,
+    cutoffAt: row.cutoffAt?.toISOString() ?? null,
+    maxFiles: row.maxFiles ?? null,
+    maxFileBytes: row.maxFileBytes ?? null,
+    acceptedTypes: (row.acceptedTypes || "").split(",").map((t) => t.trim()).filter(Boolean),
+    fileSubmissions: row.fileSubmissions ?? true,
+    onlineText: row.onlineText ?? false,
+    grade: published
+      ? {
+          score: published.score,
+          maxScore: published.maxScore,
+          letter: published.letter,
+          feedback: published.feedback ?? null,
+          publishedAt: published.publishedAt?.toISOString() ?? null,
+        }
+      : null,
   };
 }
 
@@ -231,7 +326,7 @@ studentRouter.get("/assignments/:assignmentId", async (req, res, next) => {
     const student = await getStudent(user);
     const [row] = await getAssignments(user.institutionId, student.id, req.params.assignmentId);
     if (!row) throw httpError("Assignment not found", "NOT_FOUND", 404);
-    res.json({ assignment: presentAssignment(row) });
+    res.json({ assignment: StudentAssignmentSummary.parse(presentAssignment(row)) });
   } catch (error) {
     next(error);
   }
@@ -250,16 +345,24 @@ studentRouter.post("/assignments/:assignmentId/files", async (req, res, next) =>
     if (assignment.gradeItems.length > 0) {
       throw httpError("Graded work is locked", "SUBMISSION_LOCKED", 409);
     }
-    if (assignment.dueAt && assignment.dueAt.getTime() < Date.now()) {
-      throw httpError("The submission deadline has passed", "SUBMISSION_LOCKED", 409);
-    }
+    assertSubmissionWindow(assignment);
     const existing = assignment.submissions[0];
     if (existing?.status === "submitted") {
       throw httpError("The submission is already submitted", "SUBMISSION_LOCKED", 409);
     }
+    assertAssignmentFileRules(
+      {
+        fileSubmissions: assignment.fileSubmissions ?? true,
+        maxFiles: assignment.maxFiles ?? null,
+        maxFileBytes: assignment.maxFileBytes ?? null,
+        acceptedTypes: assignment.acceptedTypes ?? null,
+      },
+      input,
+      existing?.files.length ?? 0,
+    );
 
     const fileId = randomUUID();
-    const storageRoot = path.resolve(process.env.FILE_STORAGE_ROOT ?? path.join(process.cwd(), "var", "uploads"));
+    const storageRoot = submissionStorageRoot();
 
     const submission = await prisma.$transaction(async (tx) => {
       // The upsert locks the submission row, so concurrent uploads number their versions one after another.
@@ -358,7 +461,7 @@ studentRouter.delete("/submission-files/:fileId", async (req, res, next) => {
     if (
       file.submission.status !== "draft" ||
       file.submission.assignment.gradeItems.length > 0 ||
-      (file.submission.assignment.dueAt?.getTime() ?? Infinity) < Date.now()
+      (submissionDeadline(file.submission.assignment)?.getTime() ?? Infinity) < Date.now()
     ) {
       throw httpError("The submission file is locked", "SUBMISSION_LOCKED", 409);
     }
@@ -386,6 +489,78 @@ studentRouter.delete("/submission-files/:fileId", async (req, res, next) => {
   }
 });
 
+studentRouter.put("/assignments/:assignmentId/text", async (req, res, next) => {
+  try {
+    const user = (req as unknown as AuthedRequest).user;
+    const student = await getStudent(user);
+    const text = typeof req.body?.text === "string" ? req.body.text : null;
+    if (text == null) throw httpError("Online text is required", "VALIDATION_ERROR", 400);
+    if (text.length > 50_000) throw httpError("Online text must be 50,000 characters or fewer", "VALIDATION_ERROR", 400);
+    const [assignment] = await getAssignments(user.institutionId, student.id, req.params.assignmentId);
+    if (!assignment) throw httpError("Assignment not found", "NOT_FOUND", 404);
+    if (!assignment.onlineText) {
+      throw httpError("This assignment accepts file uploads only", "VALIDATION_ERROR", 400);
+    }
+    if (assignment.gradeItems.length > 0) throw httpError("Graded work is locked", "SUBMISSION_LOCKED", 409);
+    assertSubmissionWindow(assignment);
+    const existing = assignment.submissions[0];
+    if (existing?.status === "submitted") {
+      throw httpError("The submission is already submitted", "SUBMISSION_LOCKED", 409);
+    }
+    const saved = await prisma.$transaction(async (tx) => {
+      const row = await tx.submission.upsert({
+        where: { assignmentId_studentId: { assignmentId: assignment.id, studentId: student.id } },
+        create: {
+          id: existing?.id ?? randomUUID(),
+          institutionId: user.institutionId,
+          assignmentId: assignment.id,
+          studentId: student.id,
+          status: "draft",
+          textBody: text,
+        },
+        update: { textBody: text, rowVersion: { increment: 1 } },
+      });
+      await writeAuditAndOutbox(tx, {
+        institutionId: user.institutionId,
+        actorId: user.accountId,
+        eventName: "StudentSubmission.textSaved",
+        purpose: "assignment_submission",
+        before: null,
+        after: { submissionId: row.id, assignmentId: assignment.id, length: text.length },
+        source: "student.assignments",
+        correlationId: (req as unknown as AuthedRequest).correlationId,
+      });
+      return tx.submission.findUniqueOrThrow({
+        where: { id: row.id },
+        include: { files: { where: { archivedAt: null }, orderBy: { version: "asc" } } },
+      });
+    });
+    res.json(UploadStudentSubmissionFileResponse.parse({ submission: presentSubmission(saved) }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+studentRouter.get("/submission-files/:fileId", async (req, res, next) => {
+  try {
+    const user = (req as unknown as AuthedRequest).user;
+    const student = await getStudent(user);
+    const file = await prisma.fileObject.findFirst({
+      where: {
+        id: req.params.fileId,
+        institutionId: user.institutionId,
+        archivedAt: null,
+        submission: { institutionId: user.institutionId, studentId: student.id },
+      },
+    });
+    if (!file) throw httpError("Submission file not found", "NOT_FOUND", 404);
+    const content = await readSubmissionFile(file.path);
+    res.json({ name: file.filename, mime: file.mimeType, base64: content.toString("base64") });
+  } catch (error) {
+    next(error);
+  }
+});
+
 studentRouter.post("/assignments/:assignmentId/submit", async (req, res, next) => {
   try {
     const user = (req as unknown as AuthedRequest).user;
@@ -393,7 +568,12 @@ studentRouter.post("/assignments/:assignmentId/submit", async (req, res, next) =
     const [assignment] = await getAssignments(user.institutionId, student.id, req.params.assignmentId);
     if (!assignment) throw httpError("Assignment not found", "NOT_FOUND", 404);
     const submission = assignment.submissions[0];
-    if (!submission) throw httpError("Upload at least one file before submitting", "VALIDATION_ERROR", 400);
+    const emptyMessage = assignment.onlineText
+      ? assignment.fileSubmissions === false
+        ? "Write your online text before submitting"
+        : "Upload a file or write your online text before submitting"
+      : "Upload at least one file before submitting";
+    if (!submission) throw httpError(emptyMessage, "VALIDATION_ERROR", 400);
     if (submission.status === "submitted") {
       res.json(SubmitStudentAssignmentResponse.parse({ submission: presentSubmission(submission), alreadySubmitted: true }));
       return;
@@ -401,12 +581,11 @@ studentRouter.post("/assignments/:assignmentId/submit", async (req, res, next) =
     if (assignment.gradeItems.length > 0) {
       throw httpError("Graded work is locked", "SUBMISSION_LOCKED", 409);
     }
-    if (submission.files.length === 0) {
-      throw httpError("Upload at least one file before submitting", "VALIDATION_ERROR", 400);
+    const hasText = Boolean(assignment.onlineText && submission.textBody?.trim());
+    if (submission.files.length === 0 && !hasText) {
+      throw httpError(emptyMessage, "VALIDATION_ERROR", 400);
     }
-    if (assignment.dueAt && assignment.dueAt.getTime() < Date.now()) {
-      throw httpError("The submission deadline has passed", "SUBMISSION_LOCKED", 409);
-    }
+    assertSubmissionWindow(assignment);
 
     const submittedAt = new Date();
     const updated = await prisma.$transaction(async (tx) => {

@@ -1,3 +1,4 @@
+import { ApiError, api, loadSession } from "./api";
 import { isKnownSelfpacedSlug } from "./selfpacedPrograms";
 
 const STORAGE_USER = "hcc-selfpaced-user";
@@ -381,37 +382,70 @@ export function isCourseComplete(slug: string, totalActivities: number): boolean
   return true;
 }
 
-function makeCertificateId(slug: string, email: string): string {
-  const base = `${slug}|${email}|${new Date().toISOString().slice(0, 10)}`;
-  let hash = 0;
-  for (let i = 0; i < base.length; i++) hash = (hash * 31 + base.charCodeAt(i)) >>> 0;
-  const code = hash.toString(36).toUpperCase().padStart(6, "0").slice(0, 6);
-  const prefix = slug
-    .split("-")
-    .map((p) => p[0]?.toUpperCase() || "")
-    .join("")
-    .slice(0, 4);
-  return `HCC-${prefix || "SP"}-${code}`;
+const SERVER_CERTIFICATE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Only ids issued by the server (CredentialRecord) resolve on the public verify page. */
+export function isIssuedCertificateId(id: string | undefined): id is string {
+  return Boolean(id && SERVER_CERTIFICATE_ID.test(id));
 }
 
-/** Issue (or return existing) certificate when course + assessments are complete. */
+export type CertificateIssue =
+  | { ok: true; record: EnrollmentRecord }
+  | { ok: false; reason: "incomplete" | "not_enrolled" | "sign_in" | "error"; message: string };
+
+const pendingIssues = new Map<string, Promise<CertificateIssue>>();
+
+/** Records completion on the server, which issues the credential once per learner and course. */
+export function requestCertificate(slug: string, totalActivities: number): Promise<CertificateIssue> {
+  const inFlight = pendingIssues.get(slug);
+  if (inFlight) return inFlight;
+  const run = (async (): Promise<CertificateIssue> => {
+    if (!isCourseComplete(slug, totalActivities)) return { ok: false, reason: "incomplete", message: "Finish every activity first." };
+    const current = getEnrollment(slug);
+    if (!current) return { ok: false, reason: "not_enrolled", message: "You are not enrolled in this course." };
+    if (isIssuedCertificateId(current.certificateId)) return { ok: true, record: current };
+    const session = loadSession();
+    if (!session) return { ok: false, reason: "sign_in", message: "Sign in with your Heritage account to issue your verifiable certificate." };
+    try {
+      const out = await api<{ certificateId: string; issuedAt: string }>(
+        "/selfpaced/certificates",
+        {
+          method: "POST",
+          body: JSON.stringify({ slug, completedActivityIds: loadProgress(slug).completedActivityIds, assessmentsPassed: true }),
+        },
+        session.accessToken,
+        { skipAuthRedirect: true },
+      );
+      const records = loadEnrollmentRecords();
+      const idx = records.findIndex((r) => r.slug === slug);
+      const record: EnrollmentRecord = { ...current, certificateId: out.certificateId, certificateIssuedAt: out.issuedAt };
+      if (idx >= 0) {
+        records[idx] = record;
+        saveEnrollmentRecords(records);
+      }
+      return { ok: true, record };
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        return { ok: false, reason: "sign_in", message: "Your session expired. Sign in again to issue your certificate." };
+      }
+      return { ok: false, reason: "error", message: err instanceof Error ? err.message : "Could not issue the certificate." };
+    }
+  })().finally(() => pendingIssues.delete(slug));
+  pendingIssues.set(slug, run);
+  return run;
+}
+
+/**
+ * Returns the enrollment once the course is complete. Its certificateId is set only after the server has issued
+ * the credential; issuance is started in the background when the learner is signed in.
+ */
 export function ensureCertificate(slug: string, totalActivities: number): EnrollmentRecord | null {
   if (!isCourseComplete(slug, totalActivities)) return null;
-  const records = loadEnrollmentRecords();
-  const idx = records.findIndex((r) => r.slug === slug);
-  if (idx < 0) return null;
-  const current = records[idx];
-  if (current.certificateId) return current;
-  const user = loadSelfpacedUser();
-  const certificateId = makeCertificateId(slug, user?.email || "guest");
-  const updated: EnrollmentRecord = {
-    ...current,
-    certificateId,
-    certificateIssuedAt: new Date().toISOString(),
-  };
-  records[idx] = updated;
-  saveEnrollmentRecords(records);
-  return updated;
+  const current = getEnrollment(slug);
+  if (!current) return null;
+  if (isIssuedCertificateId(current.certificateId)) return current;
+  if (typeof window !== "undefined" && loadSession()) void requestCertificate(slug, totalActivities);
+  return { ...current, certificateId: undefined, certificateIssuedAt: undefined };
 }
 
 /** Lookup enrollment by certificate id (public verify). */

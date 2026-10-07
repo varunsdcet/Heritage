@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { TeacherSisShell } from "@/components/TeacherSisShell";
 import { api, loadSession, type Session } from "@/lib/api";
@@ -590,17 +591,8 @@ export function InstructorSearchView() {
               <article
                 key={`${group.type}-${item.id}`}
                 className={`mh-teacher-search__card${item.href ? " is-clickable" : ""}`}
-                role={item.href ? "link" : undefined}
-                tabIndex={item.href ? 0 : undefined}
-                onClick={() => {
-                  if (item.href) router.push(item.href);
-                }}
-                onKeyDown={(e) => {
-                  if (!item.href) return;
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    router.push(item.href);
-                  }
+                onClick={(e) => {
+                  if (item.href && !(e.target as HTMLElement).closest("a")) router.push(item.href);
                 }}
               >
                 <div className="mh-teacher-search__icon">
@@ -614,16 +606,9 @@ export function InstructorSearchView() {
                   {item.sub ? <p className="mh-teacher-search__meta">{item.sub}</p> : null}
                 </div>
                 {item.href ? (
-                  <button
-                    type="button"
-                    className="mh-teacher-btn mh-teacher-btn--secondary"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      router.push(item.href!);
-                    }}
-                  >
+                  <Link href={item.href} role="button" className="mh-teacher-btn mh-teacher-btn--secondary">
                     {actionLabel(group.type)}
-                  </button>
+                  </Link>
                 ) : null}
               </article>
             )),

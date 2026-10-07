@@ -9,6 +9,7 @@ import {
   SysGrid,
   SysSections,
   applies,
+  canEditIn,
   errMsg,
   invalidateMeta,
   json,
@@ -29,7 +30,7 @@ import {
 
 export const SC = "System Configuration";
 
-export type Ctx = { reload: () => void; ok: (t: string) => void; fail: (t: string) => void; meta: Meta | null; rows: Row[] };
+export type Ctx = { reload: () => void; ok: (t: string) => void; fail: (t: string) => void; meta: Meta | null; rows: Row[]; canEdit: boolean };
 export type Column = { label: string; render: (r: Row, ctx: Ctx) => ReactNode; className?: string };
 export type SelectFilter = { key: string; label: string; all: string; initial?: string; options: (rows: Row[], meta: Meta | null) => string[]; match: (r: Row, v: string) => boolean };
 
@@ -99,7 +100,9 @@ export function Directory(p: DirectoryProps) {
   }, [p.entity, parentQs, p.noun, fail]);
   useEffect(load, [load]);
 
-  const ctx: Ctx = { reload: load, ok, fail, meta, rows: rows ?? [] };
+  const writable = canEditIn(meta, p.entity);
+  const sortable = p.sortable && writable;
+  const ctx: Ctx = { reload: load, ok, fail, meta, rows: rows ?? [], canEdit: writable };
   const live = !p.filter?.submitLabel;
   const needle = (live ? q : applied).trim().toLowerCase();
   const activeSel = live ? sel : appliedSel;
@@ -139,7 +142,7 @@ export function Directory(p: DirectoryProps) {
   };
 
   const createBtn =
-    mode !== "none" && p.createLabel ? (
+    writable && mode !== "none" && p.createLabel ? (
       <button type="button" className="mh-sa__btn mh-sa__btn--primary" onClick={openCreate}>
         {p.createLabel}
       </button>
@@ -157,7 +160,7 @@ export function Directory(p: DirectoryProps) {
       <table className="mh-sa__table lx-table">
         <thead>
           <tr>
-            {p.sortable ? <th className="sx-handle-col" aria-label="Order" /> : null}
+            {sortable ? <th className="sx-handle-col" aria-label="Order" /> : null}
             {p.columns.map((c) => (
               <th key={c.label} className={c.className}>
                 {c.label}
@@ -171,10 +174,10 @@ export function Directory(p: DirectoryProps) {
             <tr
               key={r.id}
               className={dragId === r.id ? "sx-dragging" : undefined}
-              draggable={p.sortable && !filtering}
+              draggable={sortable && !filtering}
               onDragStart={() => setDragId(r.id)}
               onDragEnd={() => setDragId(null)}
-              onDragOver={(e) => p.sortable && dragId && e.preventDefault()}
+              onDragOver={(e) => sortable && dragId && e.preventDefault()}
               onDrop={(e) => {
                 e.preventDefault();
                 if (!dragId || dragId === r.id) return;
@@ -184,7 +187,7 @@ export function Directory(p: DirectoryProps) {
                 void reorder(ids);
               }}
             >
-              {p.sortable ? (
+              {sortable ? (
                 <td className="sx-handle-col">
                   <span className="sx-handle" title="Drag to reorder" aria-hidden>
                     ⋮⋮
@@ -204,12 +207,12 @@ export function Directory(p: DirectoryProps) {
               ))}
               <td className="lx-actions">
                 {p.rowActions?.(r, ctx)}
-                {(p.canEdit?.(r) ?? true) ? (
+                {writable && (p.canEdit?.(r) ?? true) ? (
                   <button type="button" className="mh-sa__btn mh-sa__btn--sm" onClick={() => openEdit(r)}>
                     {p.editLabel ?? "Edit"}
                   </button>
                 ) : null}
-                {(p.canDelete?.(r) ?? !r._protected) ? (
+                {writable && (p.canDelete?.(r) ?? !r._protected) ? (
                   <button type="button" className="mh-sa__btn mh-sa__btn--sm mh-sa__btn--danger" onClick={() => setConfirm(r)}>
                     {p.deleteLabel ?? "Delete"}
                   </button>
@@ -220,7 +223,7 @@ export function Directory(p: DirectoryProps) {
           ))}
           {list.length === 0 ? (
             <tr>
-              <td colSpan={p.columns.length + (p.sortable ? 2 : 1)} className="mh-sa__empty-cell">
+              <td colSpan={p.columns.length + (sortable ? 2 : 1)} className="mh-sa__empty-cell">
                 {filtering ? `No ${p.noun}s match this filter.` : p.empty}
               </td>
             </tr>
@@ -290,7 +293,7 @@ export function Directory(p: DirectoryProps) {
                 ))
               : table(visible)}
             {perPage ? <Pager total={shown.length} page={current} pages={pages} perPage={perPage} onPage={setPage} onPerPage={(n) => { setPerPage(n); setPage(1); }} /> : null}
-            {p.sortable && rows.length > 1 ? <p className="lx-hint">Drag rows (or use the arrows) to change the order. The new order is saved immediately.</p> : null}
+            {sortable && rows.length > 1 ? <p className="lx-hint">Drag rows (or use the arrows) to change the order. The new order is saved immediately.</p> : null}
           </>
         )}
         {p.below?.(ctx)}
@@ -467,6 +470,7 @@ export function EntityFormPage({
   const leaving = useRef(false);
   useLeaveGuard(form.dirty && !form.busy && !leaving.current);
   const title = mode === "create" ? createTitle : editTitle(form.record);
+  const writable = canEditIn(form.meta, entity);
   return (
     <SuperFrame title={title} breadcrumbs={["Home", section, crumb, mode === "create" ? createTitle : "Edit"]} activeHref={activeHref ?? base}>
       <form
@@ -486,15 +490,18 @@ export function EntityFormPage({
         }}
       >
         {form.error ? <SaNotice tone="error">{form.error}</SaNotice> : null}
+        {form.meta && !writable ? <p className="mh-sa__muted" role="status">Your access level is read-only for this area. Changes cannot be saved.</p> : null}
         {flash.node}
         {!form.values || !form.meta ? <p className="mh-sa__muted">Loading…</p> : children ? children(form) : <SysSections form={form} />}
         <div className="mh-sa__actions lx-sticky-actions">
           <Link className="mh-sa__btn" href={base}>
-            Cancel
+            {writable ? "Cancel" : "Back"}
           </Link>
-          <button type="submit" className="mh-sa__btn mh-sa__btn--primary" disabled={form.busy || !form.values}>
-            {form.busy ? "Saving…" : saveLabel}
-          </button>
+          {writable ? (
+            <button type="submit" className="mh-sa__btn mh-sa__btn--primary" disabled={form.busy || !form.values}>
+              {form.busy ? "Saving…" : saveLabel}
+            </button>
+          ) : null}
         </div>
       </form>
     </SuperFrame>
@@ -549,6 +556,7 @@ export function SettingsBody({
   const flash = useFlash(null);
   useLeaveGuard(form.dirty && !form.busy);
   const label = form.meta?.settings[settingsKey]?.save ?? "Save Settings";
+  const writable = canEditIn(form.meta);
   return (
     <form
       className={`lx sx${embedded ? " sx-embedded" : ""}`}
@@ -568,13 +576,16 @@ export function SettingsBody({
       }}
     >
       {form.error ? <SaNotice tone="error">{form.error}</SaNotice> : null}
+      {form.meta && !writable ? <p className="mh-sa__muted" role="status">Your access level is read-only for System Configuration. Changes cannot be saved.</p> : null}
       {flash.node}
       {!form.values || !form.meta ? <p className="mh-sa__muted">Loading…</p> : children ? children(form) : <SysSections form={form} />}
       <div className="mh-sa__actions lx-sticky-actions">
         {form.updatedAt ? <span className="mh-sa__muted sx-stamp">Last saved {new Date(form.updatedAt).toLocaleString("en-CA")}</span> : null}
-        <button type="submit" className="mh-sa__btn mh-sa__btn--primary" disabled={form.busy || !form.values}>
-          {form.busy ? "Saving…" : label}
-        </button>
+        {writable ? (
+          <button type="submit" className="mh-sa__btn mh-sa__btn--primary" disabled={form.busy || !form.values}>
+            {form.busy ? "Saving…" : label}
+          </button>
+        ) : null}
       </div>
     </form>
   );

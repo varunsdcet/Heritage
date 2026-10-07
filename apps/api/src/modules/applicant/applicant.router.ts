@@ -1,9 +1,25 @@
 import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, type AuthedRequest } from "../../middleware/auth.js";
-import { buildApplicantView, runApplicantAction } from "./applicant.service.js";
+import { buildApplicantView, getApplicationForm, runApplicantAction, saveApplicationForm } from "./applicant.service.js";
 
 export const applicantRouter: Router = Router();
+
+applicantRouter.get("/application/form", requireAuth, async (req, res, next) => {
+  try {
+    res.json(await getApplicationForm((req as AuthedRequest).user));
+  } catch (err) {
+    next(err);
+  }
+});
+
+applicantRouter.put("/application/form", requireAuth, async (req, res, next) => {
+  try {
+    res.json(await saveApplicationForm((req as AuthedRequest).user, req.body));
+  } catch (err) {
+    next(err);
+  }
+});
 
 applicantRouter.get("/bootstrap", requireAuth, async (req, res, next) => {
   try {

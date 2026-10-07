@@ -74,8 +74,9 @@ export type Field = {
 };
 export type Opt = { id: string; label: string; tag?: string };
 export type Meta = {
-  entities: Record<string, { label: string; fields: Field[]; sortable: boolean; noCreate: boolean }>;
+  entities: Record<string, { label: string; fields: Field[]; sortable: boolean; noCreate: boolean; canEdit?: boolean }>;
   settings: Record<string, { label: string; save: string; fields: Field[] }>;
+  canEditSettings?: boolean;
   lists: Record<string, string[]>;
   regions?: Record<string, string[]>;
   users: Opt[];
@@ -108,6 +109,16 @@ export function useSysMeta() {
     });
   }, []);
   return { meta, error };
+}
+
+/** Whether the signed-in access level may change this entity (or the settings pages when no entity is given); false until meta loads. */
+export function canEditIn(meta: Meta | null, entity?: string) {
+  if (!meta) return false;
+  return entity ? meta.entities[entity]?.canEdit !== false : meta.canEditSettings !== false;
+}
+export function useCanEdit(entity?: string) {
+  const { meta } = useSysMeta();
+  return canEditIn(meta, entity);
 }
 
 export function refTargets(fields: Field[]): string[] {

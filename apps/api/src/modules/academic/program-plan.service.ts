@@ -1,5 +1,8 @@
 import { prisma } from "@myheritage/db";
+import { ymdIn } from "../../lib/workshopPolicy.js";
+import { sectionOfferings } from "../courses/sectionOffering.js";
 import {
+  DEFAULT_TZ,
   dateBoundsFromSessions,
   instructorDisplayName,
   roomFromSessions,
@@ -189,6 +192,28 @@ export async function getProgramPlan(institutionId: string, studentId: string) {
   };
 }
 
+/**
+ * Course mark used by every role: published scores weighted by assignment weight, the same formula as the instructor
+ * gradebook total and the student's course grades page. Falls back to an even weighting when no weights are set.
+ */
+export function weightedPercent(items: Array<{ score: number | null; maxScore: number; weightPercent?: number | null }>) {
+  const scored = items.filter((g) => g.score != null && g.maxScore > 0);
+  if (!scored.length) return null;
+  const weight = scored.reduce((n, g) => n + Math.max(Number(g.weightPercent) || 0, 0), 0);
+  const pct = weight
+    ? scored.reduce((n, g) => n + ((g.score ?? 0) / g.maxScore) * Math.max(Number(g.weightPercent) || 0, 0), 0) / weight
+    : scored.reduce((n, g) => n + (g.score ?? 0) / g.maxScore, 0) / scored.length;
+  return Number((pct * 100).toFixed(1));
+}
+
+/** Credit-weighted mean; an all-zero-credit set falls back to a plain mean. */
+export function creditWeighted(rows: Array<{ credits: number; value: number }>) {
+  if (!rows.length) return null;
+  const credits = rows.reduce((n, r) => n + Math.max(r.credits, 0), 0);
+  const v = credits ? rows.reduce((n, r) => n + r.value * Math.max(r.credits, 0), 0) / credits : rows.reduce((n, r) => n + r.value, 0) / rows.length;
+  return Number(v.toFixed(2));
+}
+
 export async function getCourseHistory(institutionId: string, studentId: string) {
   const enrolments = await prisma.enrolment.findMany({
     where: { institutionId, studentId },
@@ -201,10 +226,15 @@ export async function getCourseHistory(institutionId: string, studentId: string)
           classSessions: { orderBy: { startsAt: "asc" } },
         },
       },
-      gradeItems: { where: { status: "published" } },
+      gradeItems: { where: { status: "published" }, include: { assignment: { select: { weightPercent: true } } } },
     },
     orderBy: [{ attemptNumber: "asc" }, { createdAt: "desc" }],
   });
+  const [offerings, institution] = await Promise.all([
+    sectionOfferings(institutionId, [...new Set(enrolments.map((e) => e.sectionId))]),
+    prisma.institution.findFirst({ where: { id: institutionId }, select: { timezone: true } }),
+  ]);
+  const tz = institution?.timezone || DEFAULT_TZ;
 
   const instructorIds = [...new Set(enrolments.map((e) => e.section.instructorPersonId))];
   const instructors = await prisma.person.findMany({
@@ -227,23 +257,17 @@ export async function getCourseHistory(institutionId: string, studentId: string)
 
   const rows = enrolments.map((e) => {
     const published = e.gradeItems.filter((g) => g.score != null && g.maxScore > 0);
-    const avgPct =
-      published.length > 0
-        ? Number(
-            (
-              published.reduce((n, g) => n + ((g.score ?? 0) / g.maxScore) * 100, 0) / published.length
-            ).toFixed(1),
-          )
-        : null;
-    const letter =
-      published[0]?.letter || (avgPct != null ? letterFromPct(avgPct) : e.status === "withdrawn" ? "W" : "—");
+    const avgPct = weightedPercent(published.map((g) => ({ score: g.score, maxScore: g.maxScore, weightPercent: g.assignment.weightPercent })));
+    const explicit = published.length === 1 ? published[0]!.letter : null;
+    const letter = explicit || (avgPct != null ? letterFromPct(avgPct) : e.status === "withdrawn" ? "W" : "—");
     const sessions = e.section.classSessions;
-    const fromSessions = dateBoundsFromSessions(sessions);
+    const fromSessions = dateBoundsFromSessions(sessions, tz);
     const plan = planBySection.get(e.sectionId) ?? planByCode.get(e.section.course.code);
+    const offering = offerings.get(e.sectionId);
     const startsOn =
-      plan?.startsOn || e.section.academicBlock?.startsOn || fromSessions.startsOn || e.section.term.startsOn;
+      offering?.startsOn || plan?.startsOn || e.section.academicBlock?.startsOn || fromSessions.startsOn || e.section.term.startsOn;
     const endsOn =
-      plan?.endsOn || e.section.academicBlock?.endsOn || fromSessions.endsOn || e.section.term.endsOn;
+      offering?.endsOn || plan?.endsOn || e.section.academicBlock?.endsOn || fromSessions.endsOn || e.section.term.endsOn;
     return {
       enrolmentId: e.id,
       courseCode: e.section.course.code,
@@ -261,8 +285,9 @@ export async function getCourseHistory(institutionId: string, studentId: string)
       letter,
       sectionId: e.sectionId,
       instructorName: instructorDisplayName(instructorById.get(e.section.instructorPersonId)),
-      room: roomFromSessions(sessions),
-      scheduleText: scheduleTextFromSessions(sessions) || plan?.scheduleText || null,
+      room: offering?.location || roomFromSessions(sessions),
+      deliveryMethod: offering?.deliveryMethod ?? null,
+      scheduleText: offering?.scheduleText || scheduleTextFromSessions(sessions, tz) || plan?.scheduleText || null,
       startsOn,
       endsOn,
     };
@@ -274,7 +299,17 @@ export async function getCourseHistory(institutionId: string, studentId: string)
     withdrawn: rows.filter((r) => r.status === "withdrawn"),
     retakes: rows.filter((r) => r.isRetake),
     all: rows,
+    today: ymdIn(new Date(), tz),
   };
+}
+
+/**
+ * A course carries a final mark once it is completed, or once an enrolled course has ended with published marks.
+ * Until then it is "IP" (in progress) with its current percent, and stays out of credits earned and CGPA.
+ */
+export function hasFinalMark(row: { status: string; endsOn: string | null; averagePercent: number | null }, today: string) {
+  if (row.status === "completed") return true;
+  return row.status === "enrolled" && row.averagePercent != null && Boolean(row.endsOn) && row.endsOn!.slice(0, 10) < today;
 }
 
 export async function getTranscriptSummary(institutionId: string, studentId: string) {
@@ -285,11 +320,12 @@ export async function getTranscriptSummary(institutionId: string, studentId: str
   const history = await getCourseHistory(institutionId, studentId);
   const plan = await getProgramPlan(institutionId, studentId);
 
-  const programName =
-    student?.programName ?? student?.programVersion?.program.name ?? plan.cohort?.label ?? "Programme";
+  const assigned = student?.programName && student.programName !== "Not assigned" ? student.programName : null;
+  const programName = assigned ?? student?.programVersion?.program.name ?? plan.cohort?.label ?? student?.programName ?? "Programme";
 
-  const courses = history.all.map((r) => {
-    const letter = displayLetter(r);
+  const courses = history.all.filter((r) => r.status !== "waitlisted").map((r) => {
+    const final = hasFinalMark(r, history.today);
+    const letter = r.status === "enrolled" && !final ? "IP" : displayLetter({ ...r, status: final ? "completed" : r.status });
     return {
       enrolmentId: r.enrolmentId,
       sectionId: r.sectionId,
@@ -302,27 +338,17 @@ export async function getTranscriptSummary(institutionId: string, studentId: str
       startsOn: r.startsOn,
       endsOn: r.endsOn,
       status: r.status,
+      final,
       letter,
       averagePercent: r.averagePercent,
-      gradePoints: gradePointsOrNull(letter),
+      gradePoints: final ? gradePointsOrNull(letter) : null,
       attemptNumber: r.attemptNumber,
       isRetake: r.isRetake,
       countsTowardCgpa: r.countsTowardCgpa,
     };
   });
 
-  const completed = courses.filter((r) => r.status === "completed" && r.countsTowardCgpa);
-  const earnedCredits = completed.reduce((n, r) => n + r.credits, 0);
-  const withPct = completed.filter((r) => r.averagePercent != null);
-  const averagePercent =
-    withPct.length > 0
-      ? Number((withPct.reduce((n, r) => n + (r.averagePercent ?? 0), 0) / withPct.length).toFixed(2))
-      : plan.summary.averagePercent;
-  const withGp = completed.filter((r) => r.gradePoints != null);
-  const cgpa =
-    withGp.length > 0
-      ? Number((withGp.reduce((n, r) => n + (r.gradePoints ?? 0), 0) / withGp.length).toFixed(2))
-      : plan.summary.cgpa;
+  const totals = summarizeCourses(courses);
 
   const termMap = new Map<string, string>();
   for (const c of courses) {
@@ -348,9 +374,22 @@ export async function getTranscriptSummary(institutionId: string, studentId: str
       : plan.cohort
         ? { code: plan.cohort.code, label: plan.cohort.label }
         : null,
-    earnedCredits,
-    averagePercent,
-    cgpa,
+    ...totals,
     courses,
+  };
+}
+
+type SummaryRow = { status: string; final: boolean; credits: number; letter: string; averagePercent: number | null; gradePoints: number | null; countsTowardCgpa: boolean };
+
+/** Credits, average and CGPA from the same per-course rows the Final Marks tables show (any subset, e.g. one term). */
+export function summarizeCourses(rows: SummaryRow[]) {
+  const finals = rows.filter((r) => r.final && r.countsTowardCgpa);
+  const current = rows.filter((r) => r.status === "enrolled" && !r.final && r.averagePercent != null);
+  return {
+    earnedCredits: finals.filter((r) => r.letter !== "F" && r.gradePoints !== 0).reduce((n, r) => n + r.credits, 0),
+    attemptedCredits: rows.filter((r) => r.status !== "withdrawn" && r.status !== "waitlisted").reduce((n, r) => n + r.credits, 0),
+    averagePercent: creditWeighted(finals.filter((r) => r.averagePercent != null).map((r) => ({ credits: r.credits, value: r.averagePercent! }))),
+    cgpa: creditWeighted(finals.filter((r) => r.gradePoints != null).map((r) => ({ credits: r.credits, value: r.gradePoints! }))),
+    currentAverage: creditWeighted(current.map((r) => ({ credits: r.credits, value: r.averagePercent! }))),
   };
 }

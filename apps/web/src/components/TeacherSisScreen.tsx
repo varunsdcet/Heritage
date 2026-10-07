@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useRef, useState, Suspense, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { TeacherSisShell } from "@/components/TeacherSisShell";
 import { CourseLmsView } from "@/components/CourseLmsView";
@@ -732,7 +733,7 @@ function DashboardView({ config }: { config: TeacherScreenConfig }) {
                     key={row.time + row.code + row.room}
                     type="button"
                     className="mh-ct-dash__row"
-                    onClick={() => row.href && router.push(row.href)}
+                    onClick={() => router.push(row.href || "/instructor/sections")}
                   >
                     <span className="mh-ct-dash__row-time">{row.code}</span>
                     <span className="mh-ct-dash__row-body">
@@ -1835,7 +1836,7 @@ function TableBlock({ config }: { config: TeacherScreenConfig }) {
         {(config.rows || []).length === 0 ? (
           <div className="mh-teacher-table__row">
             <span className="mh-teacher-muted" style={{ gridColumn: `1 / span ${cols.length}` }}>
-              No assessments yet. Use Create Assessment to publish one.
+              {config.emptyMessage || "No records to show yet."}
             </span>
           </div>
         ) : (
@@ -2155,7 +2156,7 @@ function FormView({ config }: { config: TeacherScreenConfig }) {
                         : isCreateContentCourse
                           ? Boolean(contentCourse)
                           : isAddAvailability
-                            ? Boolean((values["Availability Name"] || "").trim() && (values.Date || "").trim())
+                            ? Boolean((values.Date || "").trim() && (values.Type || values["Availability Type"] || "").trim())
                     : Object.values(values).some((v) => v.trim());
 
   function addGradeEntry() {
@@ -3425,7 +3426,10 @@ function ModalView({ config }: { config: TeacherScreenConfig }) {
     setValues(init);
   }, [m]);
   if (!m) return null;
-  const canSubmit = Object.values(values).some((v) => v.trim().length > 0);
+  const requiredFields = m.fields.filter((f) => f.required);
+  const canSubmit = requiredFields.length
+    ? requiredFields.every((f) => (values[f.label] ?? "").trim().length > 0)
+    : Object.values(values).some((v) => v.trim().length > 0);
   return (
     <div
       className="mh-teacher-modal-backdrop"
@@ -3438,11 +3442,29 @@ function ModalView({ config }: { config: TeacherScreenConfig }) {
         <div className="mh-teacher-fields">
           {m.fields.map((f) => (
             <label key={f.label}>
-              <span>{f.label}</span>
-              {f.type === "textarea" ? (
+              <span>
+                {f.label}
+                {f.required ? " *" : ""}
+              </span>
+              {f.type === "select" && f.options ? (
+                <select
+                  className="mh-teacher-field"
+                  value={values[f.label] ?? ""}
+                  required={f.required}
+                  onChange={(e) => setValues((prev) => ({ ...prev, [f.label]: e.target.value }))}
+                >
+                  <option value="">Select…</option>
+                  {f.options.map((o) => (
+                    <option key={o} value={o}>
+                      {o}
+                    </option>
+                  ))}
+                </select>
+              ) : f.type === "textarea" ? (
                 <textarea
                   className="mh-teacher-field mh-teacher-field--tall"
                   value={values[f.label] ?? ""}
+                  required={f.required}
                   onChange={(e) => setValues((prev) => ({ ...prev, [f.label]: e.target.value }))}
                   rows={3}
                 />
@@ -3465,10 +3487,8 @@ function ModalView({ config }: { config: TeacherScreenConfig }) {
             disabled={live?.busy || !canSubmit}
             onClick={() => {
               void (async () => {
-                if (live?.runAction) {
-                  await live.runAction(m.confirmLabel, JSON.stringify(values));
-                }
-                if (m.backdropHref) router.push(m.backdropHref);
+                const ok = live?.runAction ? await live.runAction(m.confirmLabel, JSON.stringify(values)) : true;
+                if (ok && m.backdropHref) router.push(m.backdropHref);
               })();
             }}
           >
@@ -4096,20 +4116,22 @@ function NotificationsView({ config }: { config: TeacherScreenConfig }) {
   if (!data) return null;
 
   const rawItems = data.items ?? [];
+  const keyOf = (i: { id?: string; title: string }) => i.id || i.title;
   const items =
     filter === "All Alerts"
       ? rawItems
       : filter === "Unread"
-        ? rawItems.filter((i) => i.unread && !readIds.includes(i.title))
+        ? rawItems.filter((i) => i.unread && !readIds.includes(keyOf(i)))
         : rawItems.filter((i) => i.category === filter || i.category === filter.replace(/s$/, ""));
 
-  function markRead(title: string) {
-    setReadIds((prev) => (prev.includes(title) ? prev : [...prev, title]));
-    void live?.runAction?.("Mark notification read", title);
+  function markRead(item: { id?: string; title: string }) {
+    const key = keyOf(item);
+    setReadIds((prev) => (prev.includes(key) ? prev : [...prev, key]));
+    if (item.id) void live?.runAction?.("Mark notification read", item.id);
   }
 
   function markAllRead() {
-    setReadIds(rawItems.map((i) => i.title));
+    setReadIds(rawItems.map(keyOf));
     void live?.runAction?.("Mark All as Read");
   }
 
@@ -4117,14 +4139,13 @@ function NotificationsView({ config }: { config: TeacherScreenConfig }) {
     <div className="mh-teacher-notif" data-figma-id={config.figmaId}>
       <div className="mh-teacher-page-head">
         <div>
-          <div className="mh-teacher-page-head__eyebrow">SYS.NOTIFICATIONS // CRITICAL_DISPATCHER</div>
           <div className="mh-teacher-page-head__row">
-            <h2>Notifications Terminal</h2>
+            <h2>Notifications</h2>
           </div>
-          <p>{config.subtitle || "Manage critical system alerts and compliance dispatch logs."}</p>
+          <p>{config.subtitle || "Alerts and updates about your courses, students and account."}</p>
         </div>
         <div className="mh-teacher-actions mh-teacher-notif__actions">
-          <button type="button" className="mh-teacher-btn mh-teacher-btn--dark" onClick={markAllRead}>
+          <button type="button" className="mh-teacher-btn mh-teacher-btn--dark" onClick={markAllRead} disabled={live?.busy}>
             Mark All as Read
           </button>
           <button
@@ -4157,10 +4178,11 @@ function NotificationsView({ config }: { config: TeacherScreenConfig }) {
       </div>
 
       <div className="mh-teacher-notif__list">
-        {items.map((n) => {
-          const unread = Boolean(n.unread) && !readIds.includes(n.title);
+        {items.length === 0 ? <p className="mh-teacher-muted">No notifications in this view.</p> : null}
+        {items.map((n, idx) => {
+          const unread = Boolean(n.unread) && !readIds.includes(keyOf(n));
           return (
-            <article key={n.title} className={`mh-teacher-notif__card${unread ? " is-unread" : ""}`}>
+            <article key={n.id || `${n.title}-${idx}`} className={`mh-teacher-notif__card${unread ? " is-unread" : ""}`}>
               <div className="mh-teacher-notif__icon">
                 <img src={notifIcon(n.category, n.icon)} alt="" width={18} height={18} />
               </div>
@@ -4187,7 +4209,7 @@ function NotificationsView({ config }: { config: TeacherScreenConfig }) {
                   type="button"
                   className="mh-teacher-notif__check"
                   aria-label={unread ? "Mark as read" : "Read"}
-                  onClick={() => markRead(n.title)}
+                  onClick={() => markRead(n)}
                 >
                   <img src="/brand/icons/check-circle.svg" alt="" width={14} height={14} />
                 </button>
@@ -4199,14 +4221,6 @@ function NotificationsView({ config }: { config: TeacherScreenConfig }) {
 
       <div className="mh-teacher-notif__pager">
         <span>{data.pagination}</span>
-        <div className="mh-teacher-notif__pager-actions">
-          <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary" disabled>
-            Previous
-          </button>
-          <button type="button" className="mh-teacher-btn mh-teacher-btn--primary">
-            Next
-          </button>
-        </div>
       </div>
     </div>
   );
@@ -4265,11 +4279,11 @@ function TimetableView({ config }: { config: TeacherScreenConfig }) {
                 if (filter === "Show All") return true;
                 if (filter === "Classes") return e.tone === "blue" || e.tone === "purple";
                 if (filter === "Office Hours") return e.tone === "green";
-                if (filter === "Committees") return e.tone === "orange";
+                if (filter === "Committees" || filter === "Deadlines") return e.tone === "orange";
                 return true;
               })
-              .map((e) => (
-                <div key={e.title + e.time} className={`mh-teacher-cal__event is-${e.tone}`}>
+              .map((e, idx) => (
+                <div key={e.id || `${e.title}-${e.time}-${idx}`} className={`mh-teacher-cal__event is-${e.tone}`}>
                   <strong>{e.title}</strong>
                   <span>{e.time}</span>
                 </div>
@@ -4710,6 +4724,16 @@ function HelpSupportView({ config }: { config: TeacherScreenConfig }) {
 function SyllabusDiffView({ config }: { config: TeacherScreenConfig }) {
   const d = config.syllabusDiff;
   if (!d) return null;
+  if (!d.current.length && !d.proposed.length) {
+    return (
+      <div className="mh-teacher-stack mh-teacher-syllabus" data-figma-id={config.figmaId}>
+        <PageHead config={config} badge={d.badge} />
+        <section className="mh-teacher-card">
+          <p className="mh-teacher-muted">{d.emptyMessage || "There is nothing to review yet."}</p>
+        </section>
+      </div>
+    );
+  }
   return (
     <div className="mh-teacher-stack mh-teacher-syllabus" data-figma-id={config.figmaId}>
       <PageHead config={config} badge={d.badge} />
@@ -4718,8 +4742,8 @@ function SyllabusDiffView({ config }: { config: TeacherScreenConfig }) {
           <section className="mh-teacher-card">
             <h2>{d.currentTitle}</h2>
             <div className="mh-teacher-syllabus__fields">
-              {d.current.map((f) => (
-                <div key={f.label}>
+              {d.current.map((f, i) => (
+                <div key={`${f.label}-${i}`}>
                   <strong>{f.label}</strong>
                   <p>{f.value}</p>
                 </div>
@@ -4729,8 +4753,8 @@ function SyllabusDiffView({ config }: { config: TeacherScreenConfig }) {
           <section className="mh-teacher-card">
             <h2 className="mh-teacher-syllabus__proposed">{d.proposedTitle}</h2>
             <div className="mh-teacher-syllabus__fields">
-              {d.proposed.map((f) => (
-                <div key={f.label}>
+              {d.proposed.map((f, i) => (
+                <div key={`${f.label}-${i}`}>
                   <strong>{f.label}</strong>
                   {f.removed ? <p className="mh-teacher-diff-block is-removed">{f.removed}</p> : null}
                   {f.added ? <p className="mh-teacher-diff-block is-added">{f.added}</p> : null}
@@ -4742,8 +4766,9 @@ function SyllabusDiffView({ config }: { config: TeacherScreenConfig }) {
         </div>
         <aside className="mh-teacher-card mh-teacher-syllabus__comments">
           <h2>Review Comments ({d.comments.length})</h2>
-          {d.comments.map((c) => (
-            <article key={c.author + c.when} className="mh-teacher-comment">
+          {d.comments.length === 0 ? <p className="mh-teacher-muted">No reviewer comments yet.</p> : null}
+          {d.comments.map((c, i) => (
+            <article key={`${c.author}-${c.when}-${i}`} className="mh-teacher-comment">
               <div className="mh-teacher-comment__head">
                 <strong>{c.author}</strong>
                 <span>{c.when}</span>
@@ -4752,10 +4777,6 @@ function SyllabusDiffView({ config }: { config: TeacherScreenConfig }) {
               <p>{c.body}</p>
             </article>
           ))}
-          <label className="mh-teacher-comment__reply">
-            <span className="sr-only">Reply</span>
-            <input placeholder="Reply to thread..." aria-label="Reply to thread" />
-          </label>
         </aside>
       </div>
     </div>
@@ -4799,7 +4820,7 @@ function WorkshopsView({ config }: { config: TeacherScreenConfig }) {
           {!live?.loading && cards.length === 0 ? <p className="mh-teacher-muted">No workshops were found.</p> : null}
           {cards.map((card) => (
             <article
-              key={card.title}
+              key={card.href || card.title}
               className="mh-teacher-workshop-card is-clickable"
               role="link"
               tabIndex={0}
@@ -4831,16 +4852,14 @@ function WorkshopsView({ config }: { config: TeacherScreenConfig }) {
                 </span>
               </div>
               <div className="mh-teacher-workshop-card__foot">
-                <button
-                  type="button"
+                <Link
+                  href={card.href || "/instructor/f/t24-workshop-detail"}
                   className="mh-teacher-btn"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    router.push(card.href || "/instructor/f/t24-workshop-detail");
-                  }}
+                  role="button"
+                  onClick={(e) => e.stopPropagation()}
                 >
                   View Workshop
-                </button>
+                </Link>
               </div>
             </article>
           ))}
@@ -5249,10 +5268,13 @@ function WorkshopDetailView({ config }: { config: TeacherScreenConfig }) {
           <p className="mh-teacher-muted">{d.description}</p>
           <h3>Agenda</h3>
           <ol className="mh-teacher-agenda">
-            {d.agenda.map((item) => (
-              <li key={item}>{item}</li>
+            {d.agenda.map((item, i) => (
+              <li key={`${item}-${i}`}>{item}</li>
             ))}
           </ol>
+          <Link href="/instructor/f/t11-workshops" className="mh-teacher-btn">
+            ← All My Workshops
+          </Link>
         </section>
         <aside className="mh-teacher-card">
           <h2>Materials</h2>
@@ -5892,6 +5914,7 @@ function AssessmentBuilderView({ config }: { config: TeacherScreenConfig }) {
   const live = useOptionalTeacherLive();
   const router = useRouter();
   const data = config.assessmentBuilder;
+  const [sectionId, setSectionId] = useState(data?.sectionId ?? "");
   const [title, setTitle] = useState(data?.title ?? "");
   const [type, setType] = useState(data?.type ?? "Written Exam");
   const [weight, setWeight] = useState(data?.weight ?? "20%");
@@ -5903,6 +5926,7 @@ function AssessmentBuilderView({ config }: { config: TeacherScreenConfig }) {
 
   useEffect(() => {
     if (!data) return;
+    setSectionId(data.sectionId ?? "");
     setTitle(data.title);
     setType(data.type);
     setWeight(data.weight);
@@ -5922,7 +5946,10 @@ function AssessmentBuilderView({ config }: { config: TeacherScreenConfig }) {
   const types = data.types?.length ? data.types : ["Written Exam", "Quiz", "Project", "Lab Practical", "Oral Exam"];
   const weightLabel = weight.includes("%") ? weight : `${weight}%`;
   const previewTitle = title.trim() || data.preview.title;
-  const previewBadge = data.preview.badge.replace(/•.+$/, `• ${type.toUpperCase()}`);
+  const selectedSectionLabel = data.sections?.find((s) => s.id === sectionId)?.label.split(" — ")[0];
+  const previewBadge = selectedSectionLabel
+    ? `${selectedSectionLabel} • ${type.toUpperCase()}`
+    : data.preview.badge.replace(/•.+$/, `• ${type.toUpperCase()}`);
   const formatPreview = (iso: string, fallback: string) => {
     if (!iso) return fallback;
     const d = new Date(`${iso}T12:00:00`);
@@ -5930,6 +5957,7 @@ function AssessmentBuilderView({ config }: { config: TeacherScreenConfig }) {
     return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   };
   const payload = JSON.stringify({
+    ...(sectionId ? { sectionId } : {}),
     title: title.trim(),
     type,
     weight: weightLabel,
@@ -5960,6 +5988,18 @@ function AssessmentBuilderView({ config }: { config: TeacherScreenConfig }) {
 
         <section className="mh-teacher-card mh-teacher-assess__card">
           <h3>Basic Information</h3>
+          {data.sections?.length ? (
+            <label className="mh-teacher-assess__field">
+              <span>Course Section</span>
+              <select className="mh-teacher-field" value={sectionId} onChange={(e) => setSectionId(e.target.value)}>
+                {data.sections.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <label className="mh-teacher-assess__field">
             <span>Assessment Title</span>
             <input
@@ -7768,8 +7808,8 @@ function CalendarBoardView({ config }: { config: TeacherScreenConfig }) {
           <section key={month} className="mh-teacher-card">
             <h2>{month}</h2>
             <div className="mh-teacher-list">
-              {c.events.map((e) => (
-                <div key={e.date + e.label} className="mh-teacher-list__item">
+              {c.events.map((e, idx) => (
+                <div key={`${e.date}-${e.label}-${idx}`} className="mh-teacher-list__item">
                   <div>
                     <strong>{e.date}</strong>
                     <span>{e.label}</span>
@@ -7853,12 +7893,12 @@ function AttendanceSessionView({ config }: { config: TeacherScreenConfig }) {
   return (
     <div className="mh-teacher-attendance" data-figma-id={config.figmaId}>
       <div className="mh-teacher-attendance__alert" role="status">
-        <strong>System Deviation Alert:</strong> {data.alert.replace(/^System Deviation Alert:\s*/i, "")}
+        {data.alert.replace(/^System Deviation Alert:\s*/i, "")}
       </div>
 
       <section className="mh-teacher-card mh-teacher-attendance__meta">
         <div className="mh-teacher-attendance__meta-item">
-          <span className="mh-teacher-muted">CLASS_NODE</span>
+          <span className="mh-teacher-muted">CLASS</span>
           <strong>{data.classNode}</strong>
         </div>
         <div className="mh-teacher-attendance__meta-item">
@@ -7904,7 +7944,7 @@ function AttendanceSessionView({ config }: { config: TeacherScreenConfig }) {
                   <p className="mh-teacher-attendance__note">{s.note}</p>
                   <div className={`mh-teacher-attendance__pct${s.atRisk ? " is-risk" : ""}`}>
                     <strong>{s.pct}</strong>
-                    <span>LAST_FREQ</span>
+                    <span>Attendance</span>
                   </div>
                 </div>
               ))
@@ -8096,11 +8136,22 @@ function AuthGateView({ config }: { config: TeacherScreenConfig }) {
         ))}
         <label className="mh-teacher-auth__field">
           <span>{data.fieldLabel}</span>
-          <div className="mh-teacher-field">{data.fieldValue}</div>
+          <div className="mh-teacher-field">{data.fieldValue || "—"}</div>
         </label>
-        <button type="button" className="mh-teacher-btn mh-teacher-btn--primary mh-teacher-auth__cta">
-          {data.cta}
-        </button>
+        {data.ctaHref ? (
+          <Link href={data.ctaHref} className="mh-teacher-btn mh-teacher-btn--primary mh-teacher-auth__cta">
+            {data.cta}
+          </Link>
+        ) : (
+          <button type="button" className="mh-teacher-btn mh-teacher-btn--primary mh-teacher-auth__cta">
+            {data.cta}
+          </button>
+        )}
+        {data.secondaryCta && data.secondaryHref ? (
+          <Link href={data.secondaryHref} className="mh-teacher-btn mh-teacher-btn--secondary mh-teacher-auth__cta">
+            {data.secondaryCta}
+          </Link>
+        ) : null}
         <p className="mh-teacher-auth__help">{data.help}</p>
       </section>
     </div>

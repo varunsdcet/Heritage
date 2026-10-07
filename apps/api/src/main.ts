@@ -25,6 +25,7 @@ import { campusComplianceRouter } from "./modules/campusCompliance/campusComplia
 import { liveRouter } from "./modules/live/live.router.js";
 import { lmsFilesRouter } from "./modules/instructor/lmsFiles.router.js";
 import { publicRouter } from "./modules/public/public.router.js";
+import { selfpacedRouter } from "./modules/selfpaced/selfpaced.router.js";
 import { errorHandler } from "./middleware/error-handler.js";
 
 const app: Express = express();
@@ -107,6 +108,8 @@ app.get("/api/docs", (_req, res) => {
     <li>POST /instructor/sis/action</li>
     <li>GET /public/verify</li>
     <li>GET /public/certificates/:id</li>
+    <li>POST /public/apply</li>
+    <li>POST /selfpaced/certificates</li>
   </ul></body></html>`);
 });
 
@@ -133,6 +136,7 @@ app.use("/catalog", catalogRouter);
 app.use("/portal", portalRouter);
 app.use("/applicant", applicantRouter);
 app.use("/employer", employerRouter);
+app.use("/selfpaced", selfpacedRouter);
 app.use("/admin", adminRouter);
 
 app.use("/public", publicRouter);

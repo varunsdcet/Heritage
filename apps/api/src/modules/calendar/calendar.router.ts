@@ -3,6 +3,7 @@ import { prisma } from "@myheritage/db";
 import { requireAuth, type AuthedRequest } from "../../middleware/auth.js";
 import { sessionJoinUrl } from "../../lib/liveClass.js";
 import { currentStudentId } from "../me/studentAlignment.js";
+import { currentTerm } from "../../lib/currentTerm.js";
 
 export const calendarRouter: Router = Router();
 
@@ -38,10 +39,7 @@ calendarRouter.get("/me", requireAuth, async (req, res, next) => {
       sectionIds = sections.map((s) => s.id);
     }
 
-    const term = await prisma.term.findFirst({
-      where: { institutionId: user.institutionId },
-      orderBy: { code: "desc" },
-    });
+    const term = await currentTerm(user.institutionId);
 
     const assignments =
       sectionIds.length > 0

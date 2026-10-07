@@ -2,7 +2,8 @@
 
 import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
-import { getTranscriptSummary } from "../../academic/program-plan.service.js";
+import { getTranscriptSummary, summarizeCourses } from "../../academic/program-plan.service.js";
+import { ensureProgramVersion } from "../../academic/program-version.js";
 import { buildDocumentPdf, type DocLine } from "../../../lib/taxPdf.js";
 import {
   add,
@@ -23,8 +24,11 @@ import {
   stuAudit,
   type Data,
 } from "./students.core.js";
-import { assertRateCategory } from "./students.js";
-import { ENROLMENT_STATUSES, STU, TRANSCRIPT_OPTIONS } from "./students.spec.js";
+import { assertRateCategory, defaultRateCategory, setRateCategory } from "./students.js";
+import { enrolInSections, quoteSectionFee } from "./enrolment.js";
+import { linkScheduleSections } from "./programs.js";
+import { scheduleSectionIds } from "./programs.sections.js";
+import { ENROLMENT_STATUSES, RATE_CATEGORIES, STU, TRANSCRIPT_OPTIONS } from "./students.spec.js";
 
 /* ------------------------------------------------------------------ */
 /* Program enrolment                                                    */
@@ -50,6 +54,7 @@ async function feedInSessions(inst: string, scheduleIds: string[]) {
     startDate: s(x.data.startDate),
     endDate: s(x.data.endDate),
     campus: s(x.data.campus),
+    sectionId: x.data._status === "active" ? s(x.data._sectionId) : "",
   }));
 }
 
@@ -71,14 +76,24 @@ export async function programPlan(user: SessionClaims, id: string) {
     startDate: s(r.data.startDate),
     date: r.createdAt.toISOString(),
   }));
+  const feedIns = await Promise.all(
+    sessions
+      .filter((x) => x.feedIn)
+      .map(async (x) => {
+        const quote = x.sectionId ? await quoteSectionFee(inst, x.sectionId, id).catch(() => null) : null;
+        return { ...x, fee: quote ? { amount: quote.amount, included: quote.included, termName: quote.termName } : null, seats: quote?.seats ?? null };
+      }),
+  );
   return {
     enrolled: enrolments.length > 0,
     status: statusOf(meta, st._count.enrolments),
     enrolments,
     rateCategory: meta.rateCategory ?? "",
+    defaultRateCategory: defaultRateCategory(meta),
+    rateCategories: RATE_CATEGORIES,
     programs: pm.programs,
     schedules: pm.schedules.map((x) => ({ id: x.id, program: x.program, name: x.name, description: x.description })),
-    feedIns: sessions.filter((x) => x.feedIn),
+    feedIns,
     statuses: ENROLMENT_STATUSES,
   };
 }
@@ -96,15 +111,79 @@ export async function enrolProgram(user: SessionClaims, id: string, body: Data) 
   const session = sessions.find((x) => x.id === s(body.sessionId) && x.feedIn);
   if (!session) throw httpError(400, "Feed-in Course is required");
   const status = oneOf(body.status, ENROLMENT_STATUSES, "Student Status");
-  const meta = await metaOf(inst, id);
+  let meta = await metaOf(inst, id);
+  const rate = s(body.rateCategory).trim() || (s(meta.rateCategory).trim() ? "" : defaultRateCategory(meta));
+  if (rate && rate !== meta.rateCategory) {
+    await setRateCategory(user, id, { rateCategory: rate });
+    meta = await metaOf(inst, id);
+  }
   assertRateCategory(meta, status);
   const scheduleEnd = sessions.map((x) => x.endDate).filter(Boolean).sort().pop() ?? "";
-  const rec = await add(user, STU.ENROL, { programId: program.id, program: program.name, scheduleId: schedule.id, schedule: schedule.name, sessionId: session.id, feedIn: session.course, status, startDate: session.startDate }, id);
+  const courseEnrolments = await enrolScheduleSections(user, id, schedule.id, session, {
+    scope: body.courseScope === "feedIn" ? "feedIn" : "schedule",
+    postFee: bool(body.postFee),
+  });
+  const rec = await add(
+    user,
+    STU.ENROL,
+    {
+      programId: program.id,
+      program: program.name,
+      scheduleId: schedule.id,
+      schedule: schedule.name,
+      sessionId: session.id,
+      feedIn: session.course,
+      status,
+      startDate: session.startDate,
+      enrolmentIds: courseEnrolments.map((e) => e.enrolmentId),
+    },
+    id,
+  );
   await prisma.student.update({ where: { id }, data: { programName: program.name, rowVersion: { increment: 1 } } });
+  await ensureProgramVersion(inst, id, { relink: true });
   await patchMetaLoose(inst, id, { status, schedule: schedule.name, ...(session.campus && session.campus !== "Not Set" ? { campus: session.campus } : {}) });
   await saveProfile(user, id, { programId: program.id, scheduleStart: session.startDate, scheduleEnd, feedIn: session.course });
-  await stuAudit(user, "Program Plan", id, "Program enrolment saved", { program: program.name, schedule: schedule.name, feedIn: session.course, status, startDate: session.startDate }, rec.id);
-  return { id: rec.id };
+  await stuAudit(
+    user,
+    "Program Plan",
+    id,
+    "Program enrolment saved",
+    { program: program.name, schedule: schedule.name, feedIn: session.course, status, startDate: session.startDate, courses: courseEnrolments.map((e) => `${e.courseCode} ${e.sectionCode} (${e.status})`).join(", ") },
+    rec.id,
+  );
+  return {
+    id: rec.id,
+    rateCategory: meta.rateCategory ?? "",
+    courses: courseEnrolments.map((e) => ({ enrolmentId: e.enrolmentId, sectionId: e.sectionId, course: `${e.courseCode} ${e.sectionCode}`, status: e.status, fee: e.fee, feeNote: e.feeNote })),
+  };
+}
+
+/**
+ * Course enrolments that come with a program enrolment: the feed-in session's section and, for the whole schedule,
+ * the first session of every other course that starts on or after the feed-in date. Courses the student already holds
+ * (enrolled, waitlisted or completed) are left alone.
+ */
+async function enrolScheduleSections(user: SessionClaims, studentId: string, scheduleId: string, feedIn: { id: string; startDate: string }, opts: { scope: "feedIn" | "schedule"; postFee: boolean }) {
+  const inst = user.institutionId;
+  await linkScheduleSections(user, scheduleId);
+  const linked = await scheduleSectionIds(inst, scheduleId);
+  const feedInLink = linked.find((x) => x.sessionId === feedIn.id);
+  if (!feedInLink) throw httpError(409, "The feed-in session is not linked to a course section yet. Check its course and dates in Program Management, then try again.", "NOT_SCHEDULED");
+  const starts = new Map((await rows(inst, "PM:SESSION", [scheduleId])).map((x) => [x.id, s(x.data.startDate)]));
+  const picked = new Map<string, string>([[feedInLink.course, feedInLink.sectionId]]);
+  if (opts.scope === "schedule") {
+    const later = linked
+      .filter((x) => x.course !== feedInLink.course && (!feedIn.startDate || !starts.get(x.sessionId) || starts.get(x.sessionId)! >= feedIn.startDate))
+      .sort((a, b) => (starts.get(a.sessionId) ?? "").localeCompare(starts.get(b.sessionId) ?? ""));
+    for (const x of later) if (!picked.has(x.course)) picked.set(x.course, x.sectionId);
+  }
+  const held = await prisma.enrolment.findMany({
+    where: { institutionId: inst, studentId, status: { in: ["enrolled", "waitlisted", "completed"] }, section: { courseId: { in: [...picked.keys()] } } },
+    select: { sectionId: true, section: { select: { courseId: true } } },
+  });
+  const heldCourse = new Set(held.filter((e) => picked.get(e.section.courseId) !== e.sectionId).map((e) => e.section.courseId));
+  const sectionIds = [...picked.entries()].filter(([course]) => !heldCourse.has(course)).map(([, sectionId]) => sectionId);
+  return enrolInSections(user, studentId, sectionIds, { source: "admin.students.programPlan", postFee: opts.postFee, skipExisting: true });
 }
 
 /* ------------------------------------------------------------------ */
@@ -144,15 +223,35 @@ export async function addTest(user: SessionClaims, id: string, body: Data) {
 export async function finalMarks(user: SessionClaims, id: string, q: Data) {
   await canStudents(user, "view");
   const inst = user.institutionId;
-  const st = await requireStudentRow(inst, id);
+  await requireStudentRow(inst, id);
   const summary = await getTranscriptSummary(inst, id);
-  const program = s(q.program);
-  const items = summary.courses
-    .filter((c) => c.status === "completed" || c.status === "withdrawn")
-    .filter((c) => !program || program === "all" || c.programName === program)
-    .map((c) => ({ id: c.enrolmentId, course: `${c.courseCode} — ${c.title}`, term: c.termName, credits: c.credits, finalGrade: c.letter, gradePoint: c.gradePoints, completed: c.endsOn ?? "" }));
-  return { programs: [{ value: "all", label: "All Programs" }, { value: st.programName, label: st.programName }], items, cgpa: summary.cgpa };
+  const term = s(q.term);
+  const rows = summary.courses.filter((c) => !term || term === "all" || c.termCode === term);
+  const items = rows.map((c) => ({
+    id: c.enrolmentId,
+    course: `${c.courseCode} — ${c.title}`,
+    term: c.termName,
+    credits: c.credits,
+    percent: c.averagePercent,
+    finalGrade: c.letter,
+    gradePoint: c.gradePoints,
+    status: c.final ? "Final" : c.status === "withdrawn" ? "Withdrawn" : "In Progress",
+    completed: c.final ? (c.endsOn ?? "") : "",
+  }));
+  const totals = rows.length === summary.courses.length ? summary : { ...summary, ...summarizeCourses(rows) };
+  return {
+    programs: [{ value: "all", label: "All Programs" }, ...(summary.programName && summary.programName !== "all" ? [{ value: summary.programName, label: summary.programName }] : [])],
+    terms: summary.terms,
+    items,
+    cgpa: totals.cgpa,
+    earnedCredits: totals.earnedCredits,
+    attemptedCredits: totals.attemptedCredits,
+    averagePercent: totals.averagePercent,
+    currentAverage: totals.currentAverage,
+  };
 }
+
+const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 3)}...` : text);
 
 export async function transcriptPdf(user: SessionClaims, id: string, body: Data) {
   await canStudents(user, "view");
@@ -172,10 +271,10 @@ export async function transcriptPdf(user: SessionClaims, id: string, body: Data)
   const failing = (c: { gradePoints: number | null; letter: string }) => c.gradePoints === 0 || c.letter === "F";
   let courses = summary.courses.filter((c) => inRange(c.startsOn, c.endsOn));
   courses = courses.filter((c) => {
-    if (c.status === "enrolled") return opt.inProgress;
     if (c.status === "withdrawn") return opt.droppedPenalty;
-    if (c.status === "completed" && failing(c)) return opt.noCredit;
-    return c.status === "completed";
+    if (!c.final) return opt.inProgress;
+    if (failing(c)) return opt.noCredit;
+    return true;
   });
   if (!opt.overlapping) {
     const latest = new Map<string, number>();
@@ -187,19 +286,19 @@ export async function transcriptPdf(user: SessionClaims, id: string, body: Data)
     { kind: "title", text: "Academic Transcript" },
     { kind: "text", text: `${st.person.familyName}, ${st.person.givenName}`, bold: true },
     { kind: "text", text: `Student #: ${st.studentNumber}${profile.applicationNumber ? `   Application #: ${profile.applicationNumber}` : ""}` },
-    { kind: "text", text: `Program: ${st.programName}` },
+    { kind: "text", text: `Program: ${summary.programName}` },
     { kind: "text", text: `Start Date: ${start || profile.scheduleStart || "—"}   Completion Date: ${end || profile.scheduleEnd || "—"}` },
     { kind: "gap" },
-    { kind: "row", cells: [{ text: "Course", x: 0, bold: true }, { text: "Term", x: 270, bold: true }, { text: "Credits", x: 380, bold: true }, { text: "Grade", x: 440, bold: true }, { text: "GP", x: 500, bold: true }] },
+    { kind: "row", cells: [{ text: "Course", x: 0, bold: true }, { text: "Term", x: 220, bold: true }, { text: "Credits", x: 395, bold: true }, { text: "Grade", x: 445, bold: true }, { text: "GP", x: 500, bold: true }] },
     { kind: "rule" },
     ...courses.map(
       (c): DocLine => ({
         kind: "row",
         cells: [
-          { text: `${c.courseCode} ${c.title}`.slice(0, 48), x: 0 },
-          { text: (c.termName || c.termCode || "").slice(0, 18), x: 270 },
-          { text: String(c.credits), x: 380 },
-          { text: c.letter, x: 440 },
+          { text: clip(`${c.courseCode} ${c.title}`, 38), x: 0 },
+          { text: clip(c.termName || c.termCode || "", 30), x: 220 },
+          { text: String(c.credits), x: 395 },
+          { text: c.letter, x: 445 },
           { text: c.gradePoints == null ? "" : c.gradePoints.toFixed(2), x: 500 },
         ],
       }),

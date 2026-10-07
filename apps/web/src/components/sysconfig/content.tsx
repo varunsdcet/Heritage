@@ -7,7 +7,7 @@ import { SaModal, SuperFrame } from "@/components/superadmin/shared";
 import { sanitizeDashboardHtml } from "@/lib/dashboard";
 import { ConfirmDelete } from "../location/shared";
 import { Directory, EntityFormPage, SC, SettingsBody, type Ctx } from "./directory";
-import { SysIcon, SysSections, errMsg, fmtDate, invalidateMeta, str, sx, useFlash, type Listing, type Row, type SysForm } from "./kit";
+import { SysIcon, SysSections, errMsg, fmtDate, invalidateMeta, str, sx, useCanEdit, useFlash, type Listing, type Row, type SysForm } from "./kit";
 
 const DT = "/admin/sysconfig/document-templates";
 
@@ -174,13 +174,13 @@ export function DocumentTemplates() {
           { label: "Document Template Name", render: (r) => <strong>{str(r.name)}</strong> },
           { label: "Language", render: (r) => str(r.language) },
         ]}
-        rowActions={(r, ctx) => (
-          <>
+        rowActions={(r, ctx) =>
+          ctx.canEdit ? (
             <button type="button" className="mh-sa__btn mh-sa__btn--sm" onClick={() => void copy(r, ctx)}>
               Copy
             </button>
-          </>
-        )}
+          ) : null
+        }
         trailingActions={(r) =>
           Number(r._versions) > 1 ? (
             <Link className="mh-sa__btn mh-sa__btn--sm" href={`${DT}/audit?id=${r.id}`}>
@@ -281,6 +281,7 @@ export function TemplateAudit() {
   const [view, setView] = useState<{ mode: "review" | "history"; v: VersionDetail } | null>(null);
   const [current, setCurrent] = useState<Row | null>(null);
   const [restore, setRestore] = useState<Version | null>(null);
+  const writable = useCanEdit("documentTemplates");
   const load = useCallback(() => {
     if (!id) {
       void sx<Listing>("/e/documentTemplates").then((r) => setTemplates(r.items)).catch((e) => fail(errMsg(e, "Could not load templates")));
@@ -355,7 +356,7 @@ export function TemplateAudit() {
                         <button type="button" className="mh-sa__btn mh-sa__btn--sm" onClick={() => void open(v, "history")}>
                           History
                         </button>
-                        {!v.current ? (
+                        {!v.current && writable ? (
                           <button type="button" className="mh-sa__btn mh-sa__btn--sm mh-sa__btn--primary" onClick={() => setRestore(v)}>
                             Restore
                           </button>
@@ -482,6 +483,7 @@ export function Correspondence() {
   const [cats, setCats] = useState<Row[] | null>(null);
   const [types, setTypes] = useState<Row[]>([]);
   const [confirm, setConfirm] = useState<{ entity: "correspondenceCategories" | "correspondenceTypes"; row: Row } | null>(null);
+  const writable = useCanEdit("correspondenceTypes");
   const load = useCallback(() => {
     Promise.all([sx<Listing>("/e/correspondenceCategories"), sx<Listing>("/e/correspondenceTypes")])
       .then(([c, t]) => {
@@ -500,12 +502,16 @@ export function Correspondence() {
     <tr key={key}>
       <td>{str(t.name)}</td>
       <td className="lx-actions">
-        <button type="button" className="mh-sa__btn mh-sa__btn--sm" onClick={() => router.push(`${CORR}/types/edit?id=${t.id}`)}>
-          Edit
-        </button>
-        <button type="button" className="mh-sa__btn mh-sa__btn--sm mh-sa__btn--danger" onClick={() => setConfirm({ entity: "correspondenceTypes", row: t })}>
-          Delete
-        </button>
+        {writable ? (
+          <>
+            <button type="button" className="mh-sa__btn mh-sa__btn--sm" onClick={() => router.push(`${CORR}/types/edit?id=${t.id}`)}>
+              Edit
+            </button>
+            <button type="button" className="mh-sa__btn mh-sa__btn--sm mh-sa__btn--danger" onClick={() => setConfirm({ entity: "correspondenceTypes", row: t })}>
+              Delete
+            </button>
+          </>
+        ) : null}
       </td>
     </tr>
   );
@@ -515,14 +521,16 @@ export function Correspondence() {
       breadcrumbs={["Home", SC, "Correspondence Types"]}
       activeHref={CORR}
       actions={
-        <>
-          <Link className="mh-sa__btn" href={`${CORR}/categories/new`}>
-            Create Category
-          </Link>
-          <Link className="mh-sa__btn mh-sa__btn--primary" href={`${CORR}/types/new`}>
-            Create Correspondence Type
-          </Link>
-        </>
+        writable ? (
+          <>
+            <Link className="mh-sa__btn" href={`${CORR}/categories/new`}>
+              Create Category
+            </Link>
+            <Link className="mh-sa__btn mh-sa__btn--primary" href={`${CORR}/types/new`}>
+              Create Correspondence Type
+            </Link>
+          </>
+        ) : null
       }
     >
       <div className="lx sx">
@@ -540,7 +548,7 @@ export function Correspondence() {
                   {g.cat?.abbreviation ? <span className="mh-sa__muted"> ({str(g.cat.abbreviation)})</span> : null}
                   {g.cat?.status === "Inactive" ? <span className="sx-badge sx-badge--grey">Inactive</span> : null}
                 </h3>
-                {g.cat ? (
+                {g.cat && writable ? (
                   <span className="lx-actions">
                     <button type="button" className="mh-sa__btn mh-sa__btn--sm" onClick={() => router.push(`${CORR}/categories/edit?id=${g.cat!.id}`)}>
                       Edit

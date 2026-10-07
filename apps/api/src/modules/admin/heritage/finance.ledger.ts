@@ -17,6 +17,7 @@ import {
   dateAt,
   day,
   deallocate,
+  ensureFinancialTerm,
   finAudit,
   getSingle,
   httpError,
@@ -146,29 +147,85 @@ export async function applyAvailable(c: StudentCtx, chargeIds?: string[]) {
 
 export async function postFee(
   c: StudentCtx,
-  input: { type: Rec | undefined; label?: string; unit: number; quantity: number; termId: string | null; note: string; dueAt?: Date | null; extra?: Data },
+  input: { type: Rec | undefined; label?: string; unit: number; quantity: number; termId: string | null; note: string; dueAt?: Date | null; extra?: Data; courseId?: string | null; sectionId?: string | null },
 ) {
   const { subtotal, taxes, total } = feeTotals(c.cfg, input.type, input.unit, input.quantity);
   if (total < EPS) throw httpError(400, "Fee Amount must be greater than zero");
   const { entry, number } = await postEntry(
     c.user,
-    { studentId: c.st.id, kind: "charge", label: input.label ?? nameOf(input.type), amount: total, termId: input.termId, note: input.note, dueAt: input.dueAt ?? null },
+    { studentId: c.st.id, kind: "charge", label: input.label ?? nameOf(input.type), amount: total, termId: input.termId, note: input.note, dueAt: input.dueAt ?? null, courseId: input.courseId ?? null, sectionId: input.sectionId ?? null },
     { ledgerTypeId: input.type?.id ?? "", unitAmount: input.unit, quantity: input.quantity, subtotal, taxes, paymentStatus: "Not Paid", ...(input.extra ?? {}) },
   );
   await finAudit(c.user, c.st.id, "Receivable added", `Receivable #${number}`, { type: input.label ?? nameOf(input.type), amount: cad(total), quantity: input.quantity, taxes: taxes.map((t) => `${t.name} ${cad(t.amount)}`).join(", ") || "None", note: input.note }, entry.id);
   return { id: entry.id, number, total };
 }
 
+/** Resolves the optional course / section a fee is for; a section implies its course. */
+export async function feeCourseLink(inst: string, body: Data) {
+  const sectionId = s(body.sectionId).trim();
+  const courseId = s(body.courseId).trim();
+  if (sectionId) {
+    const x = await prisma.section.findFirst({ where: { id: sectionId, institutionId: inst }, include: { course: true, term: true } });
+    if (!x) throw httpError(400, "The selected course section was not found");
+    if (courseId && courseId !== x.courseId) throw httpError(400, "The selected section does not belong to the selected course");
+    return { courseId: x.courseId, sectionId: x.id, label: `${x.course.code} ${x.code}`, term: x.term };
+  }
+  if (courseId) {
+    const course = await prisma.course.findFirst({ where: { id: courseId, institutionId: inst } });
+    if (!course) throw httpError(400, "The selected course was not found");
+    return { courseId: course.id, sectionId: null, label: course.code, term: null };
+  }
+  return null;
+}
+
+/** Sections a fee can be linked to on Add Fee: the student's own course enrolments, newest term first. */
+export async function feeSectionOptions(user: SessionClaims, studentId: string) {
+  const c = await studentCtx(user, studentId, "view");
+  const rows = await prisma.enrolment.findMany({
+    where: { institutionId: c.inst, studentId },
+    include: { section: { include: { course: true, term: true } } },
+    orderBy: { createdAt: "desc" },
+  });
+  const seen = new Set<string>();
+  return {
+    items: rows
+      .filter((e) => !seen.has(e.sectionId) && seen.add(e.sectionId))
+      .sort((a, b) => b.section.term.startsOn.localeCompare(a.section.term.startsOn) || a.section.course.code.localeCompare(b.section.course.code))
+      .map((e) => ({
+        sectionId: e.sectionId,
+        courseId: e.section.courseId,
+        label: `${e.section.course.code} ${e.section.code} — ${e.section.course.title}`,
+        termName: e.section.term.name,
+        enrolmentStatus: e.status,
+      })),
+  };
+}
+
 export async function addFee(user: SessionClaims, studentId: string, body: Data) {
+  return withStudentMoneyLock(user.institutionId, studentId, () => addFeeLocked(user, studentId, body));
+}
+
+async function addFeeLocked(user: SessionClaims, studentId: string, body: Data) {
   const c = await studentCtx(user, studentId, "edit");
   const type = ledgerType(c.cfg, body.ledgerTypeId);
   const quantity = quantityOf(body.quantity);
   const unit = unitAmount(type, c.st, body.amount);
-  const term = await termId(c.inst, body.termId);
+  const link = await feeCourseLink(c.inst, body);
+  const term = s(body.termId).trim() || !link?.term ? await termId(c.inst, body.termId) : (await ensureFinancialTerm(c.inst, link.term)).id;
   const status = s(body.paymentStatus) || PAYMENT_STATUSES[0];
   if (!(PAYMENT_STATUSES as readonly string[]).includes(status)) throw httpError(400, `Payment Status "${status}" is not valid`);
   await assertPeriodOpen(user, c.cfg, c.st.campus, new Date(), "This fee");
-  const fee = await postFee(c, { type, unit, quantity, termId: term, note: text(body.note) });
+  const fee = await postFee(c, {
+    type,
+    label: link ? `${nameOf(type)} · ${link.label}` : undefined,
+    unit,
+    quantity,
+    termId: term,
+    note: text(body.note),
+    courseId: link?.courseId ?? null,
+    sectionId: link?.sectionId ?? null,
+    extra: link ? { courseId: link.courseId, sectionId: link.sectionId, courseLabel: link.label } : undefined,
+  });
   let applied = 0;
   if (status === "Paid from available credit") {
     c.book = await loadBook(c.inst, c.cfg, c.st.id);

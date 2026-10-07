@@ -1,7 +1,9 @@
 import { Router } from "express";
 import { prisma } from "@myheritage/db";
 import { requireAuth, type AuthedRequest } from "../../middleware/auth.js";
+import { sectionOfferings } from "./sectionOffering.js";
 import {
+  DEFAULT_TZ,
   dateBoundsFromSessions,
   deliveryFromSessions,
   instructorDisplayName,
@@ -85,7 +87,7 @@ coursesRouter.get("/me", requireAuth, async (req, res, next) => {
       where: {
         institutionId: user.institutionId,
         studentId: student.id,
-        status: { in: ["enrolled", "completed"] },
+        status: { in: ["enrolled", "completed", "waitlisted"] },
       },
       include: {
         section: {
@@ -122,6 +124,11 @@ coursesRouter.get("/me", requireAuth, async (req, res, next) => {
     });
     const planBySection = new Map(planItems.filter((i) => i.sectionId).map((i) => [i.sectionId!, i]));
     const planByCode = new Map(planItems.map((i) => [i.courseCode, i]));
+    const [offerings, institution] = await Promise.all([
+      sectionOfferings(user.institutionId, enrolments.map((e) => e.sectionId)),
+      prisma.institution.findFirst({ where: { id: user.institutionId }, select: { timezone: true } }),
+    ]);
+    const tz = institution?.timezone || DEFAULT_TZ;
 
     const courses = enrolments
       .map((e) => {
@@ -136,12 +143,13 @@ coursesRouter.get("/me", requireAuth, async (req, res, next) => {
               )
             : null;
         const sessions = e.section.classSessions;
-        const fromSessions = dateBoundsFromSessions(sessions);
+        const fromSessions = dateBoundsFromSessions(sessions, tz);
         const plan = planBySection.get(e.sectionId) ?? planByCode.get(e.section.course.code);
+        const offering = offerings.get(e.sectionId);
         const startsOn =
-          plan?.startsOn || e.section.academicBlock?.startsOn || fromSessions.startsOn || e.section.term.startsOn;
+          offering?.startsOn || plan?.startsOn || e.section.academicBlock?.startsOn || fromSessions.startsOn || e.section.term.startsOn;
         const endsOn =
-          plan?.endsOn || e.section.academicBlock?.endsOn || fromSessions.endsOn || e.section.term.endsOn;
+          offering?.endsOn || plan?.endsOn || e.section.academicBlock?.endsOn || fromSessions.endsOn || e.section.term.endsOn;
         return {
           sectionId: e.sectionId,
           courseCode: e.section.course.code,
@@ -150,11 +158,11 @@ coursesRouter.get("/me", requireAuth, async (req, res, next) => {
           termName: e.section.term.name,
           credits: e.section.course.credits,
           instructorName: instructorDisplayName(personById.get(e.section.instructorPersonId)) ?? "TBA",
-          enrolmentStatus: e.status as "enrolled" | "completed",
+          enrolmentStatus: e.status as "enrolled" | "completed" | "waitlisted",
           progressPercent,
-          deliveryMethod: deliveryFromSessions(sessions),
-          location: roomFromSessions(sessions) || "TBD",
-          scheduleText: scheduleTextFromSessions(sessions) || plan?.scheduleText || null,
+          deliveryMethod: offering?.deliveryMethod || deliveryFromSessions(sessions),
+          location: offering?.location || roomFromSessions(sessions) || "TBD",
+          scheduleText: offering?.scheduleText || scheduleTextFromSessions(sessions, tz) || plan?.scheduleText || null,
           startsOn,
           endsOn,
         };

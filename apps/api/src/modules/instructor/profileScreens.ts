@@ -208,6 +208,29 @@ export async function loadAvailabilitySlots(ctx: ProfileCtx): Promise<Availabili
   });
 }
 
+const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
+const HM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+export function validateAvailabilityWindow(input: { start: string; end: string; date: string; endDate: string }) {
+  const bad = (msg: string) => Object.assign(new Error(msg), { status: 400, code: "VALIDATION_ERROR" });
+  if (!YMD_RE.test(input.date) || Number.isNaN(Date.parse(`${input.date}T12:00:00Z`))) {
+    throw bad("Choose a valid date for this availability slot.");
+  }
+  if (!HM_RE.test(input.start) || !HM_RE.test(input.end)) throw bad("Choose a valid start and end time.");
+  if (input.end <= input.start) throw bad("End time must be after the start time.");
+  if (input.endDate) {
+    if (!YMD_RE.test(input.endDate)) throw bad("Choose a valid end date for the recurrence.");
+    if (input.endDate < input.date) throw bad("The recurrence end date cannot be before the start date.");
+  }
+}
+
+export function availabilityDefaultDates(now = new Date()) {
+  const ymd = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  const end = new Date(now);
+  end.setDate(end.getDate() + 7);
+  return { date: ymd(now), endDate: ymd(end) };
+}
+
 export async function persistAvailabilitySlot(ctx: ProfileCtx, fields: Record<string, string>) {
   const title = (fields["Title / Name (optional)"] || fields["Availability Name"] || fields.Name || "").trim();
   const mode = (fields.Type || fields["Availability Type"] || "Available to Teach").trim();
@@ -231,6 +254,7 @@ export async function persistAvailabilitySlot(ctx: ProfileCtx, fields: Record<st
     ? (fields["Days of the Week"] || fields["Repeat Weekly on"] || fields.Days || "").trim()
     : "";
   const note = (fields.Note || "").trim();
+  validateAvailabilityWindow({ start, end, date, endDate });
   const location = (fields.Location || title || mode).trim();
   const repeatLabel = repeats
     .split(/[·,]/)
@@ -617,7 +641,8 @@ function buildMonthCalendar(
   };
 }
 
-export function buildAddAvailabilityForm(nameDefault = "") {
+export function buildAddAvailabilityForm(nameDefault = "", now = new Date()) {
+  const defaults = availabilityDefaultDates(now);
   const hours = Array.from({ length: 24 }, (_, i) => ({
     label: pad2(i),
     value: pad2(i),
@@ -640,14 +665,14 @@ export function buildAddAvailabilityForm(nameDefault = "") {
           { label: "Start minute", value: "00", type: "select", options: minutes },
           { label: "End hour", value: "10", type: "select", options: hours },
           { label: "End minute", value: "00", type: "select", options: minutes },
-          { label: "Date", value: "2026-09-18", type: "date" },
+          { label: "Date", value: defaults.date, type: "date" },
           {
             label: "Set availability recurrence timeframe",
             value: "1",
             type: "checkbox",
             optional: true,
           },
-          { label: "End Date", value: "2026-09-25", type: "date", optional: true },
+          { label: "End Date", value: defaults.endDate, type: "date", optional: true },
           {
             label: "Days of the Week",
             value: "Mon,Tue,Wed,Thu,Fri",
@@ -658,6 +683,53 @@ export function buildAddAvailabilityForm(nameDefault = "") {
         ],
       },
     ],
+  };
+}
+
+export async function buildProfileCompletionPayload(ctx: ProfileCtx) {
+  const connect = await loadJsonRecord<ConnectPayload>(ctx, PROFILE_BIO_PATH, "connect", {
+    phone: "",
+    email: ctx.person.email,
+  });
+  const education = await loadJsonRecord<EducationPayload>(ctx, PROFILE_BIO_PATH, "education", {
+    background: "",
+    experience: "",
+    organizations: "",
+  });
+  const email = (connect.email || ctx.person.email || "").trim();
+  const phone = (connect.phone || "").trim();
+  const educationText = [education.background, education.experience, education.organizations]
+    .map((v) => (v || "").trim())
+    .filter(Boolean)
+    .join(" · ");
+  const checks = [Boolean(ctx.displayName.trim()), Boolean(email), Boolean(phone), Boolean(educationText)];
+  const done = checks.filter(Boolean).length;
+  const complete = done === checks.length;
+  return {
+    title: "Profile Completion",
+    subtitle: complete ? "Your faculty profile is complete" : `${done} of ${checks.length} profile details complete`,
+    breadcrumbs: ["Home", "My Profile", "Profile Completion"],
+    authGate: {
+      heading: complete ? "Your profile is complete" : "Complete your faculty profile",
+      description: complete
+        ? "Students and staff see these details on your faculty profile. You can update them at any time."
+        : "Add the missing details below so students and the registrar can reach you.",
+      extraFields: [
+        { label: "Full Name", value: ctx.displayName },
+        { label: "E-mail", value: email },
+        { label: "Phone", value: phone || "Not provided" },
+        { label: "Education / Accreditation", value: educationText || "Not provided" },
+      ],
+      fieldLabel: "Course sections assigned",
+      fieldValue: ctx.sections.length
+        ? ctx.sections.map((s) => `${s.courseCode} ${s.code}`).join(", ")
+        : "No course sections are assigned to you yet",
+      cta: complete ? "Review Profile" : "Complete Profile",
+      ctaHref: `${PROFILE_BIO_PATH}?edit=1`,
+      secondaryCta: "Change Password",
+      secondaryHref: "/instructor/f/t35-security-settings",
+      help: "Need help with your account? Contact the Registrar's Office",
+    },
   };
 }
 

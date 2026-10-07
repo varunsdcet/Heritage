@@ -84,7 +84,20 @@ export const LMS_ACTIVITY_FORMS: Record<string, { heading: string; error?: strin
       },
       {
         title: "Submission types",
-        fields: [chk("File submissions", "File submissions", true), chk("Online text", "Online text"), num("Maximum number of uploaded files", "Maximum number of uploaded files", "20"), sel("Maximum submission size", "Maximum submission size", ["Site upload limit (200 MB)", "50 MB", "20 MB", "10 MB", "5 MB", "1 MB"]), text("Accepted file types", "Accepted file types")],
+        fields: [
+          chk("File submissions", "File submissions", true),
+          chk("Online text", "Online text"),
+          num("Maximum number of uploaded files", "Maximum number of uploaded files", "20"),
+          sel("Maximum submission size", "Maximum submission size", ["Site upload limit (10 MB)", "5 MB", "2 MB", "1 MB"]),
+          {
+            ...text("Accepted file types", "Accepted file types"),
+            help: "Comma-separated, e.g. .pdf, .docx. Students can upload .pdf .doc .docx .xls .xlsx .csv .png .jpg .jpeg .zip. Leave blank to accept all of these.",
+          },
+        ],
+      },
+      {
+        title: "Grade",
+        fields: [num("Maximum grade", "Maximum grade", "100"), num("Course Mark Weight", "Course Mark Weight (%)", "0")],
       },
       {
         title: "Feedback types",

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { SaModal, SaNotice, SuperFrame } from "@/components/superadmin/shared";
 import { ConfirmDelete } from "../location/shared";
 import { Directory, ModalFields, SC, SettingsBody, Tabs, useTab, type Ctx } from "./directory";
-import { errMsg, invalidateMeta, str, sx, useFlash, useSysForm, type Listing, type Row } from "./kit";
+import { errMsg, invalidateMeta, str, sx, useCanEdit, useFlash, useSysForm, type Listing, type Row } from "./kit";
 
 const LOC = "/admin/sysconfig/localization";
 const TABS = [
@@ -60,6 +60,7 @@ function RegionsModal({ country, onClose }: { country: Row; onClose: () => void 
   const [rows, setRows] = useState<Row[] | null>(null);
   const [view, setView] = useState<{ id: string | null; name: string } | null>(null);
   const [confirm, setConfirm] = useState<Row | null>(null);
+  const writable = useCanEdit("countryRegions");
   const load = useCallback(() => {
     sx<Listing>(`/e/countryRegions?parentId=${country.id}`)
       .then((r) => setRows(r.items))
@@ -92,11 +93,13 @@ function RegionsModal({ country, onClose }: { country: Row; onClose: () => void 
       ) : (
         <div className="sx-modal">
           {flash.node}
-          <div className="sx-tabhead">
-            <button type="button" className="mh-sa__btn mh-sa__btn--primary" onClick={() => setView({ id: null, name: "" })}>
-              Add Region
-            </button>
-          </div>
+          {writable ? (
+            <div className="sx-tabhead">
+              <button type="button" className="mh-sa__btn mh-sa__btn--primary" onClick={() => setView({ id: null, name: "" })}>
+                Add Region
+              </button>
+            </div>
+          ) : null}
           {!rows ? (
             <p className="mh-sa__muted">Loading…</p>
           ) : (
@@ -114,12 +117,16 @@ function RegionsModal({ country, onClose }: { country: Row; onClose: () => void 
                     <td>{str(r.name)}</td>
                     <td>{str(r.code) || <span className="mh-sa__muted">—</span>}</td>
                     <td className="lx-actions">
-                      <button type="button" className="mh-sa__btn mh-sa__btn--sm" onClick={() => setView({ id: r.id, name: str(r.name) })}>
-                        Edit
-                      </button>
-                      <button type="button" className="mh-sa__btn mh-sa__btn--sm mh-sa__btn--danger" onClick={() => setConfirm(r)}>
-                        Delete
-                      </button>
+                      {writable ? (
+                        <>
+                          <button type="button" className="mh-sa__btn mh-sa__btn--sm" onClick={() => setView({ id: r.id, name: str(r.name) })}>
+                            Edit
+                          </button>
+                          <button type="button" className="mh-sa__btn mh-sa__btn--sm mh-sa__btn--danger" onClick={() => setConfirm(r)}>
+                            Delete
+                          </button>
+                        </>
+                      ) : null}
                     </td>
                   </tr>
                 ))}

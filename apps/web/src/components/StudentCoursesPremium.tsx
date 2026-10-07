@@ -5,12 +5,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { EmptyState } from "@myheritage/ui";
 import { ApiError, api, loadSession, type Session } from "@/lib/api";
 import { StudentFrame } from "@/components/StudentSisShell";
-import { formatHccDateRange, statusLabel, statusTone } from "@/lib/hccCourseFormat";
+import { formatHccDateRange, parseDate, statusLabel, statusTone } from "@/lib/hccCourseFormat";
 import { liveSectionId, openClassLink } from "@/lib/liveClass";
 import { LiveClassPanel } from "@/components/LiveClassPanel";
 import { AiDraftVideoPlayer } from "@/components/ai-draft/AiDraftVideoPlayer";
-import { LessonBody, LmsFileCard } from "@/components/lms/LmsScreens";
+import { LessonBody, LmsAssignmentSummary, LmsFileCard, LmsUrlCard } from "@/components/lms/LmsScreens";
 import type { AiDraftStoryboard } from "@/lib/aiDraftSamples";
+import type { LmsAssignmentSettings } from "@/lib/teacherCatalog";
 
 type LoadState = "loading" | "ready" | "offline" | "forbidden" | "error";
 
@@ -22,7 +23,7 @@ type Course = {
   termName: string;
   instructorName: string;
   credits: number;
-  enrolmentStatus: "enrolled" | "completed";
+  enrolmentStatus: "enrolled" | "completed" | "waitlisted";
   progressPercent: number | null;
   deliveryMethod?: string | null;
   location?: string | null;
@@ -55,6 +56,10 @@ type LmsActivity = {
   gradingMethod?: string;
   questions?: Array<{ id: string; text: string; answers: string[]; mark?: string }>;
   storyboard?: AiDraftStoryboard;
+  description?: string;
+  url?: string;
+  assignmentId?: string;
+  assignment?: LmsAssignmentSettings;
 };
 
 type CourseLms = {
@@ -93,6 +98,7 @@ type GradeRow = {
   score: number | null;
   maxScore: number;
   letter: string | null;
+  feedback?: string | null;
 };
 
 const EVAL_COLORS = ["#2f9e44", "#1971c2", "#e8590c", "#9c36b5", "#868e96"];
@@ -343,8 +349,9 @@ function useStudentResource<T>(path: string) {
 }
 
 function formatDate(value: string | null | undefined) {
-  if (!value) return "—";
-  return new Date(value).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+  const d = value ? parseDate(value) : null;
+  if (!d) return "—";
+  return d.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
 }
 
 function formatTime(value: string) {
@@ -400,7 +407,7 @@ export function StudentCoursesPremiumView() {
     const rows = courses.filter((c) => {
       if (term !== "All Terms" && c.termName !== term) return false;
       if (status === "Completed Courses") return c.enrolmentStatus === "completed";
-      if (status === "Active & Upcoming Courses") return c.enrolmentStatus === "enrolled";
+      if (status === "Active & Upcoming Courses") return c.enrolmentStatus === "enrolled" || c.enrolmentStatus === "waitlisted";
       return true;
     });
     return [...rows].sort((a, b) => {
@@ -486,7 +493,7 @@ export function StudentCoursesPremiumView() {
                       <td>{c.instructorName}</td>
                       <td>
                         <span className={`mh-hcc-status mh-hcc-status--${statusTone(c.enrolmentStatus)}`}>
-                          {statusLabel(c.enrolmentStatus)}
+                          {statusLabel(c.enrolmentStatus, c.startsOn)}
                         </span>
                       </td>
                       <td>{c.location || "TBD"}</td>
@@ -552,6 +559,8 @@ export function StudentCourseDetailPremiumView({ sectionId }: { sectionId: strin
 
   const allActivities = useMemo(() => topics.flatMap((t) => t.activities), [topics]);
   const viewed = allActivities.find((a) => a.id === activityId) || null;
+  const viewedIsEvaluation = viewed?.id === "act-evaluation-criteria" && !viewed.fileId;
+  const viewedIsSyllabus = viewed?.type === "FILE" && viewed.id === "act-course-syllabus" && !viewed.fileId;
 
   const gradesTable =
     gradeItems.length > 0
@@ -563,6 +572,7 @@ export function StudentCourseDetailPremiumView({ sectionId }: { sectionId: strin
           score: null as number | null,
           maxScore: 100,
           letter: null as string | null,
+          feedback: null as string | null,
         }));
 
   const weekDays = useMemo(() => {
@@ -668,8 +678,8 @@ export function StudentCourseDetailPremiumView({ sectionId }: { sectionId: strin
 
     const cells: Array<{ day: number | null; slots: string[]; inRange: boolean }> = [];
     for (let i = 0; i < firstDow; i++) cells.push({ day: null, slots: [], inRange: false });
-    const rangeStart = startDate ? new Date(startDate) : null;
-    const rangeEnd = endDate ? new Date(endDate) : null;
+    const rangeStart = startDate ? parseDate(startDate) : null;
+    const rangeEnd = endDate ? parseDate(endDate) : null;
     if (rangeStart) rangeStart.setHours(0, 0, 0, 0);
     if (rangeEnd) rangeEnd.setHours(23, 59, 59, 999);
     for (let day = 1; day <= daysInMonth; day++) {
@@ -761,7 +771,9 @@ export function StudentCourseDetailPremiumView({ sectionId }: { sectionId: strin
                             <strong>{g.title}</strong>
                             <div className="mh-teacher-muted">Weight: {Number(g.weightPercent).toFixed(2)}%</div>
                           </td>
-                          <td>{g.score != null ? "—" : "No grades have been posted."}</td>
+                          <td style={{ whiteSpace: "pre-wrap" }}>
+                            {g.score != null ? g.feedback || "—" : "No grades have been posted."}
+                          </td>
                           <td>{g.score != null ? `${g.score} / ${g.maxScore}` : "—"}</td>
                           <td>{g.letter || "—"}</td>
                         </tr>
@@ -836,10 +848,7 @@ export function StudentCourseDetailPremiumView({ sectionId }: { sectionId: strin
                 <button type="button" className="mh-hcc-btn ghost" onClick={clearActivity}>
                   Back
                 </button>
-                {viewed.id === "act-evaluation-criteria" ||
-                /evaluation/i.test(viewed.name) ||
-                (viewed.type === "FILE" &&
-                  (viewed.id === "act-course-syllabus" || /syllabus/i.test(viewed.name))) ? null : (
+                {viewedIsEvaluation || viewedIsSyllabus ? null : (
                   <div className="mh-student-activity-badge">
                     <span
                       className={`mh-student-activity-badge__icon is-${viewed.type.toLowerCase()}`}
@@ -882,7 +891,7 @@ export function StudentCourseDetailPremiumView({ sectionId }: { sectionId: strin
                     </button>
                     <p className="mh-teacher-muted">Grading method: Highest grade</p>
                   </div>
-                ) : viewed.id === "act-evaluation-criteria" || /evaluation/i.test(viewed.name) ? (
+                ) : viewedIsEvaluation ? (
                   /* Screen 8 — Evaluation criteria PAGE */
                   <EvaluationCriteriaCard
                     courseCode={course.courseCode}
@@ -890,15 +899,34 @@ export function StudentCourseDetailPremiumView({ sectionId }: { sectionId: strin
                     rows={evaluationRows}
                     modified={viewed.modified}
                   />
-                ) : viewed.type === "FILE" &&
-                  (viewed.id === "act-course-syllabus" || /syllabus/i.test(viewed.name)) ? (
+                ) : viewedIsSyllabus ? (
                   <SyllabusDocumentCard
                     sectionId={sectionId}
                     courseCode={course.courseCode}
                     courseTitle={course.courseTitle}
                   />
                 ) : viewed.type === "FILE" || viewed.type === "FOLDER" ? (
-                  <LmsFileCard activity={viewed} sectionId={sectionId} audience="student" />
+                  <>
+                    {viewed.description ? <p style={{ whiteSpace: "pre-wrap" }}>{viewed.description}</p> : null}
+                    <LmsFileCard activity={viewed} sectionId={sectionId} audience="student" />
+                  </>
+                ) : viewed.type === "URL" ? (
+                  <LmsUrlCard url={viewed.url} description={viewed.description} />
+                ) : viewed.type === "ASSIGNMENT" ? (
+                  <div data-screen="assignment">
+                    <LmsAssignmentSummary assignment={viewed.assignment} description={viewed.description} />
+                    {viewed.assignmentId ? (
+                      <button
+                        type="button"
+                        className="mh-hcc-btn"
+                        onClick={() => router.push(`/student/assignments/${viewed.assignmentId}`)}
+                      >
+                        Open assignment and submit
+                      </button>
+                    ) : (
+                      <p className="mh-teacher-muted">Online submission is not open for this item.</p>
+                    )}
+                  </div>
                 ) : (
                   /* Screen 5 — PAGE (Brief Course Description / Learning Objectives) */
                   <div className="mh-lms-pagebody mh-student-pagebody" data-screen="page">
@@ -1076,10 +1104,8 @@ export function StudentCourseDetailPremiumView({ sectionId }: { sectionId: strin
                           className={`mh-teacher-link${infoScheduleView === "calendar" ? " is-active" : ""}`}
                           onClick={() => {
                             setInfoScheduleView("calendar");
-                            if (startDate) {
-                              const d = new Date(startDate);
-                              setCalMonth(new Date(d.getFullYear(), d.getMonth(), 1));
-                            }
+                            const d = startDate ? parseDate(startDate) : null;
+                            if (d) setCalMonth(new Date(d.getFullYear(), d.getMonth(), 1));
                           }}
                         >
                           Calendar View

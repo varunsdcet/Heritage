@@ -1,5 +1,6 @@
 import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
+import { currentTerm } from "../../lib/currentTerm.js";
 import {
   toPortalRowsFromAssessments,
   toPortalRowsFromAttendance,
@@ -86,7 +87,7 @@ function titleFromPath(path: string): string {
 async function institutionMeta(institutionId: string) {
   const [institution, term] = await Promise.all([
     prisma.institution.findFirst({ where: { institutionId } }),
-    prisma.term.findFirst({ where: { institutionId }, orderBy: { code: "desc" } }),
+    currentTerm(institutionId),
   ]);
   return {
     institutionName: institution?.name ?? "Heritage College",
@@ -364,6 +365,12 @@ export async function buildPortalView(user: SessionClaims, path: string): Promis
   };
 
   const normalized = path.replace(/\/demo$/, "").replace(/\/$/, "") || path;
+
+  if (role === "student") {
+    const { buildMobileScreen } = await import("./mobileScreens.js");
+    const mobile = await buildMobileScreen(user, normalized, base);
+    if (mobile) return mobile;
+  }
 
   if (role === "student" && (normalized.endsWith("/continue") || normalized.endsWith("/modules"))) {
     const student = await studentFor(user);

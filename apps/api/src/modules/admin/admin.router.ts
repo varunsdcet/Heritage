@@ -8,6 +8,8 @@ import { getSisScreen, runSisAction, getCampusOverview } from "./sis.service.js"
 import { superAdminRouter } from "./superAdmin.router.js";
 import { assertPermission, type PermissionModuleKey } from "./superAdmin.service.js";
 import { heritageRouter } from "./heritage/heritage.router.js";
+import { enrolInSection, quoteSectionFee, seatRule } from "./heritage/enrolment.js";
+import { S as CM, settingsOf } from "./heritage/courses.js";
 import {
   UpsertCohortBody,
   GeneratePlanBody,
@@ -64,10 +66,14 @@ const CreateSection = z.object({
   termCode: z.string().default("2026F"),
 });
 
-const CreateEnrolment = z.object({
-  studentEmail: z.string().email(),
-  sectionId: z.string().uuid(),
-});
+const CreateEnrolment = z
+  .object({
+    studentEmail: z.string().email().optional(),
+    studentId: z.string().uuid().optional(),
+    sectionId: z.string().uuid(),
+    postFee: z.boolean().optional().default(false),
+  })
+  .refine((b) => b.studentEmail || b.studentId, { message: "studentEmail or studentId is required", path: ["studentEmail"] });
 
 const CreateAssignment = z.object({
   sectionId: z.string().uuid(),
@@ -344,25 +350,33 @@ adminRouter.get("/sections", async (req, res, next) => {
     const user = (req as AuthedRequest).user;
     const sections = await prisma.section.findMany({
       where: { institutionId: user.institutionId },
-      include: { course: true, term: true, _count: { select: { enrolments: true } } },
+      include: { course: true, term: true, enrolments: { where: { status: { in: ["enrolled", "waitlisted"] } }, select: { status: true } } },
       orderBy: { code: "asc" },
     });
     const instructors = await prisma.person.findMany({
       where: { id: { in: [...new Set(sections.map((s) => s.instructorPersonId))] } },
     });
     const names = new Map(instructors.map((p) => [p.id, `${p.givenName} ${p.familyName}`]));
+    const settings = await settingsOf(user.institutionId, CM.session, sections.map((s) => s.id));
     res.json({
-      items: sections.map((s) => ({
-        sectionId: s.id,
-        code: s.code,
-        courseCode: s.course.code,
-        courseTitle: s.course.title,
-        credits: s.course.credits,
-        termCode: s.term.code,
-        instructorName: names.get(s.instructorPersonId) ?? "TBA",
-        instructorPersonId: s.instructorPersonId,
-        enrolmentCount: s._count.enrolments,
-      })),
+      items: sections.map((s) => {
+        const rule = seatRule(settings.get(s.id)?.data);
+        return {
+          sectionId: s.id,
+          code: s.code,
+          courseCode: s.course.code,
+          courseTitle: s.course.title,
+          credits: s.course.credits,
+          termCode: s.term.code,
+          termName: s.term.name,
+          instructorName: names.get(s.instructorPersonId) ?? "TBA",
+          instructorPersonId: s.instructorPersonId,
+          enrolmentCount: s.enrolments.filter((e) => e.status === "enrolled").length,
+          waitlistCount: s.enrolments.filter((e) => e.status === "waitlisted").length,
+          capacity: rule.capacity,
+          waitlistEnabled: rule.waitlist,
+        };
+      }),
     });
   } catch (err) {
     next(err);
@@ -525,76 +539,57 @@ adminRouter.delete("/sections/:sectionId", async (req, res, next) => {
   }
 });
 
+async function enrolmentStudent(institutionId: string, by: { studentEmail?: string; studentId?: string }) {
+  if (by.studentId) {
+    const student = await prisma.student.findFirst({ where: { id: by.studentId, institutionId } });
+    if (!student) throw Object.assign(new Error("Student not found"), { status: 404, code: "NOT_FOUND" });
+    return student;
+  }
+  const email = (by.studentEmail ?? "").trim().toLowerCase();
+  const account = await prisma.account.findFirst({ where: { institutionId, email } });
+  const personId = account?.personId ?? (await prisma.person.findFirst({ where: { institutionId, email } }))?.id;
+  if (!personId) throw Object.assign(new Error("Student account not found"), { status: 404, code: "NOT_FOUND" });
+  const student = await prisma.student.findFirst({ where: { institutionId, personId } });
+  if (!student) throw Object.assign(new Error("Student profile missing for account"), { status: 404, code: "NOT_FOUND" });
+  return student;
+}
+
+adminRouter.get("/enrolments/quote", async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    const sectionId = String(req.query.sectionId ?? "");
+    if (!z.string().uuid().safeParse(sectionId).success) {
+      res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "sectionId is required" } });
+      return;
+    }
+    const studentEmail = String(req.query.studentEmail ?? "").trim();
+    const studentId = String(req.query.studentId ?? "").trim();
+    const student = studentEmail || studentId ? await enrolmentStudent(user.institutionId, { studentEmail, studentId }).catch(() => null) : null;
+    res.json(await quoteSectionFee(user.institutionId, sectionId, student?.id ?? null));
+  } catch (err) {
+    next(err);
+  }
+});
+
 adminRouter.post("/enrolments", async (req, res, next) => {
   try {
     const user = (req as AuthedRequest).user;
     const body = CreateEnrolment.parse(req.body);
-    const account = await prisma.account.findFirst({
-      where: { institutionId: user.institutionId, email: body.studentEmail.toLowerCase() },
-    });
-    if (!account) {
-      res.status(404).json({ error: { message: "Student account not found" } });
-      return;
-    }
-    const student = await prisma.student.findFirst({
-      where: { institutionId: user.institutionId, personId: account.personId },
-    });
-    if (!student) {
-      res.status(404).json({ error: { message: "Student profile missing for account" } });
-      return;
-    }
-    const section = await prisma.section.findFirst({
-      where: { id: body.sectionId, institutionId: user.institutionId },
-      include: { course: true },
-    });
-    if (!section) {
-      res.status(404).json({ error: { message: "Section not found" } });
-      return;
-    }
-    const existing = await prisma.enrolment.findFirst({
-      where: { sectionId: section.id, studentId: student.id },
-    });
-    if (existing) {
-      res.status(409).json({ error: { message: "Already enrolled" } });
-      return;
-    }
-    const enrolment = await prisma.$transaction(async (tx) => {
-      const created = await tx.enrolment.create({
-        data: {
-          institutionId: user.institutionId,
-          sectionId: section.id,
-          studentId: student.id,
-          status: "enrolled",
-        },
-      });
-      await tx.auditEvent.create({
-        data: {
-          institutionId: user.institutionId,
-          actorId: user.accountId,
-          eventName: "Enrolment.created",
-          purpose: "admin_mutation",
-          afterJson: JSON.stringify({ enrolmentId: created.id, sectionId: section.id, studentId: student.id }),
-          source: "admin.enrolments",
-          correlationId: randomUUID(),
-        },
-      });
-      return created;
-    });
-    await prisma.notification.create({
-      data: {
-        institutionId: user.institutionId,
-        recipientAccountId: account.id,
-        channel: "in_app",
-        title: `Enrolled · ${section.course.code}`,
-        body: `You are enrolled in ${section.code} ${section.course.title}.`,
-        templateKey: "enrolment.created",
-      },
+    const student = await enrolmentStudent(user.institutionId, body);
+    const result = await enrolInSection(user, {
+      studentId: student.id,
+      sectionId: body.sectionId,
+      postFee: body.postFee,
+      source: "admin.enrolments",
     });
     res.status(201).json({
-      enrolmentId: enrolment.id,
-      sectionId: section.id,
-      studentId: student.id,
-      courseCode: section.course.code,
+      enrolmentId: result.enrolmentId,
+      sectionId: result.sectionId,
+      studentId: result.studentId,
+      courseCode: result.courseCode,
+      status: result.status,
+      fee: result.fee,
+      feeNote: result.feeNote,
     });
   } catch (err) {
     next(err);

@@ -12,7 +12,36 @@ type ProfileMeta = {
   currentValues?: Record<string, string | null | undefined>;
   subjectLabel?: string | null;
   requestedByName?: string | null;
+  requestedByMe?: boolean;
+  decidedByMe?: boolean;
+  gradeRows?: Array<{
+    studentName: string;
+    studentNumber: string;
+    assignment: string;
+    score: number | null;
+    maxScore: number;
+    letter: string | null;
+    feedback: string | null;
+  }>;
 };
+
+const GRADE_ID_KEYS = new Set(["gradeItemIds", "studentIds"]);
+
+function labelOf(key: string) {
+  return key.replace(/([A-Z])/g, " $1").replace(/[_.]/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+}
+
+function valueText(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "—";
+  if (Array.isArray(value)) return value.length ? value.map(valueText).join(", ") : "None";
+  if (typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([k, v]) => `${labelOf(k)}: ${valueText(v)}`)
+      .join("; ");
+  }
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  return String(value);
+}
 
 type Filter = "all" | "pending" | "approved";
 
@@ -83,7 +112,17 @@ function RequestDetail({ item }: { item: ApprovalRequest }) {
   const meta = metaOf(item);
   const current = meta.currentValues ?? {};
   const profileRows = Object.keys(PROFILE_FIELDS).filter((key) => diff[key] !== undefined);
-  const other = Object.entries(diff).filter(([k, v]) => !k.startsWith("_") && !(k in PROFILE_FIELDS) && k !== "reason" && v !== null && v !== undefined && v !== "");
+  const gradeRows = meta.gradeRows ?? [];
+  const other = Object.entries(diff).filter(
+    ([k, v]) =>
+      !k.startsWith("_") &&
+      !(k in PROFILE_FIELDS) &&
+      k !== "reason" &&
+      !(gradeRows.length && GRADE_ID_KEYS.has(k)) &&
+      v !== null &&
+      v !== undefined &&
+      v !== "",
+  );
 
   return (
     <div className="mh-sa__stack">
@@ -137,15 +176,50 @@ function RequestDetail({ item }: { item: ApprovalRequest }) {
         </div>
       ) : null}
 
+      {gradeRows.length ? (
+        <div className="mh-sa__table-wrap">
+          <table className="mh-sa__table">
+            <thead>
+              <tr>
+                <th>Student</th>
+                <th>Assessment</th>
+                <th>Score</th>
+                <th>Letter</th>
+                <th>Feedback</th>
+              </tr>
+            </thead>
+            <tbody>
+              {gradeRows.map((g, i) => (
+                <tr key={`${g.studentNumber}-${g.assignment}-${i}`}>
+                  <td>
+                    {g.studentName}
+                    <div className="mh-sa__muted">{g.studentNumber}</div>
+                  </td>
+                  <td>{g.assignment}</td>
+                  <td>
+                    <strong>{g.score == null ? "—" : `${g.score} / ${g.maxScore}`}</strong>
+                  </td>
+                  <td>{g.letter || "—"}</td>
+                  <td className="mh-sa__muted">{g.feedback || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
       {other.length ? (
-        <dl className="mh-sa__dl">
-          {other.map(([k, v]) => (
-            <div key={k} className="hx-dl__row">
-              <dt>{k.replace(/([A-Z])/g, " $1").replace(/^\w/, (c) => c.toUpperCase())}</dt>
-              <dd>{Array.isArray(v) ? `${v.length} item${v.length === 1 ? "" : "s"}` : typeof v === "object" ? JSON.stringify(v) : String(v)}</dd>
-            </div>
-          ))}
-        </dl>
+        <>
+          <h3 className="hx-subhead">Proposed change</h3>
+          <dl className="mh-sa__dl">
+            {other.map(([k, v]) => (
+              <div key={k} className="hx-dl__row">
+                <dt>{labelOf(k)}</dt>
+                <dd>{valueText(v)}</dd>
+              </div>
+            ))}
+          </dl>
+        </>
       ) : null}
 
       <div>
@@ -372,7 +446,7 @@ export default function AdminApprovalsPage() {
               <button type="button" className="mh-sa__btn" onClick={() => setOpen(null)}>
                 Close
               </button>
-              {open.status === "pending" ? (
+              {open.status === "pending" && !metaOf(open).requestedByMe && !metaOf(open).decidedByMe ? (
                 <>
                   <button type="button" className="mh-sa__btn mh-sa__btn--danger" disabled={Boolean(busy)} onClick={() => void act(open, "reject")}>
                     {busy === "reject" ? "Rejecting…" : "Reject"}
@@ -396,7 +470,11 @@ export default function AdminApprovalsPage() {
             </SaNotice>
           ) : null}
           <RequestDetail item={open} />
-          {open.status === "pending" ? (
+          {open.status === "pending" && metaOf(open).requestedByMe ? (
+            <p className="mh-sa__muted">You submitted this request, so another approver must decide it.</p>
+          ) : open.status === "pending" && metaOf(open).decidedByMe ? (
+            <p className="mh-sa__muted">You have already recorded your decision. Waiting for the remaining approvers.</p>
+          ) : open.status === "pending" ? (
             <label className="mh-sa__field mh-sa__field--wide">
               <span className="mh-sa__label">Decision note (required to reject)</span>
               <textarea className="mh-sa__input" rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add a note for the requester…" />

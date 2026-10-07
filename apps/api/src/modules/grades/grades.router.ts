@@ -13,6 +13,7 @@ import { requireApproval } from "@myheritage/auth";
 import { writeAuditAndOutbox } from "@myheritage/events";
 import { requireAuth, requireRoles, type AuthedRequest } from "../../middleware/auth.js";
 import { gradeAwaitingApprovalError, gradeItemsInOpenApproval } from "../../lib/gradeApprovals.js";
+import { getTranscriptSummary } from "../academic/program-plan.service.js";
 import { currentStudentId } from "../me/studentAlignment.js";
 
 export const gradesRouter: Router = Router();
@@ -71,20 +72,23 @@ gradesRouter.get("/me", requireAuth, requireRoles("student"), async (req, res, n
       const publishedByAssignment = new Map(
         e.gradeItems.filter((g) => g.status === "published").map((g) => [g.assignmentId, g]),
       );
-      const items = e.section.assignments.map((a) => {
-        const g = publishedByAssignment.get(a.id);
-        return {
-          id: g?.id ?? a.id,
-          title: a.title,
-          weightPercent: a.weightPercent,
-          score: g && g.status === "published" ? g.score : null,
-          maxScore: g?.maxScore ?? a.maxScore,
-          letter: g && g.status === "published" ? g.letter : null,
-          status: (g?.status === "published" ? "published" : "draft") as "draft" | "published",
-          publishedAt: g?.status === "published" ? (g.publishedAt?.toISOString() ?? null) : null,
-          underReview: false,
-        };
-      });
+      const items = e.section.assignments
+        .filter((a) => !a.hidden || publishedByAssignment.has(a.id))
+        .map((a) => {
+          const g = publishedByAssignment.get(a.id);
+          return {
+            id: g?.id ?? a.id,
+            title: a.title,
+            weightPercent: a.weightPercent,
+            score: g && g.status === "published" ? g.score : null,
+            maxScore: g?.maxScore ?? a.maxScore,
+            letter: g && g.status === "published" ? g.letter : null,
+            status: (g?.status === "published" ? "published" : "draft") as "draft" | "published",
+            publishedAt: g?.status === "published" ? (g.publishedAt?.toISOString() ?? null) : null,
+            underReview: false,
+            feedback: g?.status === "published" ? (g.feedback ?? null) : null,
+          };
+        });
       const weighted = items.reduce(
         (acc, item) => {
           if (item.status !== "published" || item.score == null) return acc;
@@ -108,14 +112,7 @@ gradesRouter.get("/me", requireAuth, requireRoles("student"), async (req, res, n
       };
     });
 
-    const withScores = courses.filter((c) => c.currentPercent != null);
-    const cumulativeGpa =
-      withScores.length === 0
-        ? 0
-        : Math.round(
-            (withScores.reduce((sum, c) => sum + (c.currentPercent as number), 0) / withScores.length / 25) *
-              100,
-          ) / 100;
+    const cumulativeGpa = (await getTranscriptSummary(user.institutionId, student.id)).cgpa ?? 0;
 
     await prisma.auditEvent.create({
       data: {
@@ -213,9 +210,23 @@ gradesRouter.get(
         };
       }
 
+      const submissions = await prisma.submission.findMany({
+        where: { institutionId: user.institutionId, assignmentId: { in: assignments.map((a) => a.id) } },
+        select: {
+          id: true,
+          assignmentId: true,
+          studentId: true,
+          status: true,
+          submittedAt: true,
+          _count: { select: { files: { where: { archivedAt: null } } } },
+        },
+      });
+      const submissionFor = new Map(submissions.map((s) => [`${s.assignmentId}:${s.studentId}`, s]));
+
       const rows = section.enrolments.map((e) => {
         const cells = assignments.map((a) => {
           const cell = e.gradeItems.find((g) => g.assignmentId === a.id);
+          const sub = submissionFor.get(`${a.id}:${e.studentId}`);
           return {
             gradeItemId: cell?.id ?? "00000000-0000-4000-8000-000000000000",
             assignmentId: a.id,
@@ -223,6 +234,18 @@ gradesRouter.get(
             maxScore: Number(a.maxScore),
             status: normalizeGradeStatus(cell?.status),
             rowVersion: Number(cell?.rowVersion ?? 1) || 1,
+            feedback: cell?.feedback ?? null,
+            submission: sub
+              ? {
+                  id: sub.id,
+                  status: (["draft", "submitted", "returned"].includes(sub.status) ? sub.status : "draft") as
+                    | "draft"
+                    | "submitted"
+                    | "returned",
+                  submittedAt: sub.submittedAt?.toISOString() ?? null,
+                  fileCount: sub._count.files,
+                }
+              : null,
           };
         });
         const needsAttention = cells.some(
@@ -289,6 +312,7 @@ gradesRouter.post("/", requireAuth, requireRoles("instructor", "admin"), async (
       });
     }
     const letter = letterFor(body.score, assignment.maxScore);
+    const feedback = body.feedback === undefined ? undefined : body.feedback?.trim() || null;
     const existing = await prisma.gradeItem.findFirst({
       where: { assignmentId: assignment.id, studentId: body.studentId, institutionId: user.institutionId },
     });
@@ -300,7 +324,7 @@ gradesRouter.post("/", requireAuth, requireRoles("instructor", "admin"), async (
       const updated = await prisma.$transaction(async (tx) => {
         const row = await tx.gradeItem.update({
           where: { id: existing.id },
-          data: { score: body.score, letter, status: "draft", rowVersion: { increment: 1 } },
+          data: { score: body.score, letter, feedback, status: "draft", rowVersion: { increment: 1 } },
         });
         await writeAuditAndOutbox(tx, {
           institutionId: user.institutionId,
@@ -327,6 +351,7 @@ gradesRouter.post("/", requireAuth, requireRoles("instructor", "admin"), async (
           score: body.score,
           maxScore: assignment.maxScore,
           letter,
+          feedback: feedback ?? null,
           status: "draft",
         },
       });
@@ -382,10 +407,11 @@ gradesRouter.patch("/:id", requireAuth, requireRoles("instructor", "admin"), asy
       });
     }
     const letter = letterFor(body.score, existing.maxScore);
+    const feedback = body.feedback === undefined ? undefined : body.feedback?.trim() || null;
     const updated = await prisma.$transaction(async (tx) => {
       const row = await tx.gradeItem.update({
         where: { id },
-        data: { score: body.score, letter, status: "draft", rowVersion: { increment: 1 } },
+        data: { score: body.score, letter, feedback, status: "draft", rowVersion: { increment: 1 } },
       });
       await writeAuditAndOutbox(tx, {
         institutionId: user.institutionId,

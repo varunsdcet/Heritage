@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { SuperFrame } from "@/components/superadmin/shared";
 import { ConfirmDelete } from "../location/shared";
 import { SC } from "./directory";
-import { Swatch, errMsg, invalidateMeta, json, str, sx, useFlash, type Listing, type Row } from "./kit";
+import { Swatch, errMsg, invalidateMeta, json, str, sx, useCanEdit, useFlash, type Listing, type Row } from "./kit";
 
 const BASE = "/admin/sysconfig/student-statuses";
 
@@ -18,6 +18,7 @@ export function StudentStatuses() {
   const { ok, fail } = flash;
   const [rows, setRows] = useState<Row[] | null>(null);
   const [confirm, setConfirm] = useState<Row | null>(null);
+  const writable = useCanEdit("studentStatuses");
   const load = useCallback(() => {
     sx<Listing>("/e/studentStatuses")
       .then((r) => setRows(r.items))
@@ -50,12 +51,16 @@ export function StudentStatuses() {
   const line = (r: Row, siblings: Row[], i: number, child: boolean) => (
     <tr key={r.id} className={child ? "sx-tree__child" : "sx-tree__parent"}>
       <td className="sx-handle-col">
-        <button type="button" className="sx-move" aria-label={`Move ${str(r.name)} up`} disabled={i === 0} onClick={() => void move(siblings, r.id, -1)}>
-          ▲
-        </button>
-        <button type="button" className="sx-move" aria-label={`Move ${str(r.name)} down`} disabled={i === siblings.length - 1} onClick={() => void move(siblings, r.id, 1)}>
-          ▼
-        </button>
+        {writable ? (
+          <>
+            <button type="button" className="sx-move" aria-label={`Move ${str(r.name)} up`} disabled={i === 0} onClick={() => void move(siblings, r.id, -1)}>
+              ▲
+            </button>
+            <button type="button" className="sx-move" aria-label={`Move ${str(r.name)} down`} disabled={i === siblings.length - 1} onClick={() => void move(siblings, r.id, 1)}>
+              ▼
+            </button>
+          </>
+        ) : null}
       </td>
       <td>
         <span className={`sx-named${child ? " sx-tree__indent" : ""}`}>
@@ -67,17 +72,21 @@ export function StudentStatuses() {
       </td>
       <td>{str(r.description) || <span className="mh-sa__muted">—</span>}</td>
       <td className="lx-actions">
-        {!child ? (
-          <Link className="mh-sa__btn mh-sa__btn--sm" href={`${BASE}/new?d.parent=${r.id}`}>
-            Add Sub-Status
-          </Link>
+        {writable ? (
+          <>
+            {!child ? (
+              <Link className="mh-sa__btn mh-sa__btn--sm" href={`${BASE}/new?d.parent=${r.id}`}>
+                Add Sub-Status
+              </Link>
+            ) : null}
+            <button type="button" className="mh-sa__btn mh-sa__btn--sm" onClick={() => router.push(`${BASE}/edit?id=${r.id}`)}>
+              Edit
+            </button>
+            <button type="button" className="mh-sa__btn mh-sa__btn--sm mh-sa__btn--danger" onClick={() => setConfirm(r)}>
+              Delete
+            </button>
+          </>
         ) : null}
-        <button type="button" className="mh-sa__btn mh-sa__btn--sm" onClick={() => router.push(`${BASE}/edit?id=${r.id}`)}>
-          Edit
-        </button>
-        <button type="button" className="mh-sa__btn mh-sa__btn--sm mh-sa__btn--danger" onClick={() => setConfirm(r)}>
-          Delete
-        </button>
       </td>
     </tr>
   );
@@ -88,9 +97,11 @@ export function StudentStatuses() {
       breadcrumbs={["Home", SC, "Student Statuses"]}
       activeHref={BASE}
       actions={
-        <Link className="mh-sa__btn mh-sa__btn--primary" href={`${BASE}/new`}>
-          Add Student Status
-        </Link>
+        writable ? (
+          <Link className="mh-sa__btn mh-sa__btn--primary" href={`${BASE}/new`}>
+            Add Student Status
+          </Link>
+        ) : null
       }
     >
       <div className="lx sx">

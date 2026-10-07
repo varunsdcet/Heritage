@@ -1,7 +1,11 @@
 /* Student Management: directories, Create Student Profile, profile header / overview, status, program profiles, flags & holds, attendance, audit. */
 
+import { randomBytes } from "node:crypto";
 import { prisma } from "@myheritage/db";
+import { hashPassword } from "@myheritage/auth";
 import type { SessionClaims } from "@myheritage/contracts";
+import { ymdIn } from "../../../lib/workshopPolicy.js";
+import { DEFAULT_TZ } from "../../courses/sectionSchedule.js";
 import { getTranscriptSummary } from "../../academic/program-plan.service.js";
 import { ensureSeed, sanitizeHtml, entityRecords } from "./sysconfig.js";
 import { page } from "./finance.core.js";
@@ -359,6 +363,9 @@ function dob(body: Data) {
   return iso;
 }
 
+/** Shown once to the registrar; the student can replace it from Forgot Password or Change Password. */
+const temporaryPasswordFor = () => `Hc-${randomBytes(9).toString("base64url")}`;
+
 export async function createStudent(user: SessionClaims, body: Data) {
   await canStudents(user, "edit");
   const inst = user.institutionId;
@@ -406,6 +413,12 @@ export async function createStudent(user: SessionClaims, body: Data) {
 
   const dup = await prisma.person.findFirst({ where: { institutionId: inst, email } });
   if (dup) throw httpError(409, `A person with e-mail ${email} already exists. Open the existing profile and use New Program Profile instead.`, "CONFLICT");
+  const createLogin = body.createLogin !== false;
+  const chosenPassword = s(body.password);
+  if (createLogin && chosenPassword && (chosenPassword.length < 8 || chosenPassword.length > 200)) throw httpError(400, "Password must be 8 to 200 characters");
+  if (createLogin && (await prisma.account.findFirst({ where: { institutionId: inst, email } }))) throw httpError(409, `A user login with e-mail ${email} already exists`, "CONFLICT");
+  const temporaryPassword = createLogin && !chosenPassword ? temporaryPasswordFor() : "";
+  const passwordHash = createLogin ? await hashPassword(chosenPassword || temporaryPassword) : "";
 
   const studentNumber = await nextStudentNumber(inst);
   const applicationNumber = String(await seq(inst, "application"));
@@ -426,6 +439,7 @@ export async function createStudent(user: SessionClaims, body: Data) {
       },
     });
     const created = await tx.student.create({ data: { institutionId: inst, personId: person.id, studentNumber, programName: program.name } });
+    if (createLogin) await tx.account.create({ data: { institutionId: inst, personId: person.id, email, passwordHash, status: "active", rolesJson: JSON.stringify(["student"]) } });
     const transcripts = [];
     for (const file of files) transcripts.push(await storeValidFile(user, created.id, file, tx));
     await saveProfile(
@@ -468,12 +482,18 @@ export async function createStudent(user: SessionClaims, body: Data) {
     await prisma.$transaction([
       prisma.heritageRecord.deleteMany({ where: { institutionId: inst, contextKey: student.id, screenId: { in: [STU.FILE, STU.PROFILE, "FIN:STUDENT_AGENT"] } } }),
       prisma.student.delete({ where: { id: student.id } }),
+      prisma.account.deleteMany({ where: { institutionId: inst, personId: student.personId } }),
       prisma.person.delete({ where: { id: student.personId } }),
     ]);
     throw err;
   }
-  await stuAudit(user, "Profile Changes", student.id, "Student profile created", { name: `${last}, ${first}`, studentNumber: student.studentNumber, status, program: program.name, campus });
-  return { id: student.id, studentNumber: student.studentNumber, applicationNumber };
+  await stuAudit(user, "Profile Changes", student.id, "Student profile created", { name: `${last}, ${first}`, studentNumber: student.studentNumber, status, program: program.name, campus, login: createLogin ? email : "No login created" });
+  return {
+    id: student.id,
+    studentNumber: student.studentNumber,
+    applicationNumber,
+    login: createLogin ? { email, ...(temporaryPassword ? { temporaryPassword } : {}) } : null,
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -570,6 +590,28 @@ export async function downloadStudentFile(user: SessionClaims, id: string, fileI
 /** Registered / Active / Graduated cannot be reached while Rate Category / Fee Status is missing. */
 export function assertRateCategory(meta: Record<string, string | undefined>, status: string) {
   if (RATE_REQUIRED_STATUSES.has(status) && !s(meta.rateCategory).trim()) throw httpError(400, RATE_REQUIRED_MESSAGE, "RATE_CATEGORY_REQUIRED");
+}
+
+/** The fee status a student without one would be billed at: the recorded Domestic / International residency. */
+export function defaultRateCategory(meta: Record<string, string | undefined>) {
+  const residency = s(meta.residency).trim();
+  return (RATE_CATEGORIES as readonly string[]).find((r) => r.toLowerCase() === residency.toLowerCase()) ?? "";
+}
+
+/**
+ * Sets Rate Category / Fee Status on an existing student (onboarding and User Management never ask for it).
+ * Returns the stored value; an unchanged value is a no-op.
+ */
+export async function setRateCategory(user: SessionClaims, id: string, body: Data) {
+  await canStudents(user, "edit");
+  const inst = user.institutionId;
+  await requireStudentRow(inst, id);
+  const rateCategory = oneOf(body.rateCategory, RATE_CATEGORIES, "Rate Category / Fee Status");
+  const meta = await metaOf(inst, id);
+  if (meta.rateCategory === rateCategory) return { rateCategory };
+  await patchMetaLoose(inst, id, { rateCategory, ...(meta.residency ? {} : { residency: rateCategory }) });
+  await stuAudit(user, "Profile Changes", id, "Rate Category / Fee Status changed", { rateCategory }, null, { rateCategory: meta.rateCategory ?? "" });
+  return { rateCategory };
 }
 
 export async function changeStatus(user: SessionClaims, id: string, body: Data) {
@@ -719,21 +761,29 @@ export async function attendance(user: SessionClaims, id: string, q: Data) {
   const from = optDate(q.startDate, "Start Date");
   const to = optDate(q.endDate, "End Date");
   if (from && to && from > to) throw httpError(400, "Start Date must be on or before End Date");
-  const records = await prisma.attendanceRecord.findMany({
-    where: { institutionId: inst, studentId: id },
-    include: { section: { include: { course: true } } },
-    orderBy: { recordedAt: "desc" },
-    take: 2000,
-  });
+  const [records, institution] = await Promise.all([
+    prisma.attendanceRecord.findMany({
+      where: { institutionId: inst, studentId: id },
+      include: { section: { include: { course: true } }, classSession: { select: { startsAt: true } } },
+      orderBy: { recordedAt: "desc" },
+      take: 2000,
+    }),
+    prisma.institution.findFirst({ where: { id: inst }, select: { timezone: true } }),
+  ]);
+  const tz = institution?.timezone || DEFAULT_TZ;
+  const meetingDate = (r: (typeof records)[number]) =>
+    /^\d{4}-\d{2}-\d{2}$/.test(r.meetingLabel) ? r.meetingLabel : ymdIn(r.classSession?.startsAt ?? r.recordedAt, tz);
   const courses = [...new Map(records.map((r) => [r.sectionId, `${r.section.course.code} — ${r.section.course.title}`])).entries()].map(([value, label]) => ({ value, label }));
   const course = s(q.course);
   const items = records
-    .filter((r) => (!course || r.sectionId === course) && (!from || r.recordedAt.toISOString().slice(0, 10) >= from) && (!to || r.recordedAt.toISOString().slice(0, 10) <= to))
-    .map((r) => {
+    .map((r) => ({ r, date: meetingDate(r) }))
+    .filter(({ r, date }) => (!course || r.sectionId === course) && (!from || date >= from) && (!to || date <= to))
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .map(({ r, date }) => {
       const st = r.status.toLowerCase();
       return {
         id: r.id,
-        date: r.recordedAt.toISOString().slice(0, 10),
+        date,
         course: `${r.section.course.code} — ${r.section.course.title}`,
         meeting: r.meetingLabel,
         present: st === "present" || st === "late",

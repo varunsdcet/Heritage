@@ -5,6 +5,15 @@ import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
 import { writeAuditAndOutbox } from "@myheritage/events";
 import type { PortalRow, PortalView } from "../portal/portal.service.js";
+import {
+  APPLICATION_FIELDS,
+  applicationCompleteness,
+  cleanApplicationForm,
+  parseFormJson,
+  REQUIRED_APPLICANT_DOCUMENTS,
+  type FormOptions,
+  type FormValues,
+} from "./applicationForm.js";
 
 function requireApplicant(user: SessionClaims) {
   if (!user.roles.includes("applicant")) {
@@ -78,6 +87,107 @@ async function addTimeline(applicationId: string, institutionId: string, title: 
   await prisma.applicationTimelineEvent.create({
     data: { institutionId, applicationId, title, detail },
   });
+}
+
+type LoadedApplication = NonNullable<Awaited<ReturnType<typeof applicationFor>>>;
+
+/** Wizard answers, with the program/intake columns as the fallback for applications created by Admissions. */
+function formValuesOf(app: Pick<LoadedApplication, "formJson" | "programName" | "intakeTerm">): FormValues {
+  const values = parseFormJson(app.formJson);
+  if (!values.programName && app.programName) values.programName = app.programName;
+  if (!values.intakeTerm && app.intakeTerm) values.intakeTerm = app.intakeTerm;
+  return values;
+}
+
+function completenessOf(app: LoadedApplication) {
+  return applicationCompleteness(formValuesOf(app), app.documents);
+}
+
+async function formOptions(institutionId: string): Promise<FormOptions> {
+  const today = new Date().toISOString().slice(0, 10);
+  const [programs, terms] = await Promise.all([
+    prisma.program.findMany({ where: { institutionId }, select: { name: true }, orderBy: { name: "asc" } }),
+    prisma.term.findMany({ where: { institutionId, endsOn: { gte: today } }, select: { name: true }, orderBy: { startsOn: "asc" } }),
+  ]);
+  return { programs: [...new Set(programs.map((p) => p.name))], intakes: [...new Set(terms.map((t) => t.name))] };
+}
+
+async function formPayload(app: LoadedApplication, options: FormOptions) {
+  const completeness = completenessOf(app);
+  return {
+    applicationId: app.id,
+    status: app.status,
+    editable: app.status === "draft",
+    progressPct: completeness.pct,
+    values: formValuesOf(app),
+    fields: APPLICATION_FIELDS,
+    options,
+    completeness,
+    documents: app.documents.map((d) => ({ id: d.id, label: d.label, status: d.status, fileName: d.fileName })),
+  };
+}
+
+async function requireApplication(user: SessionClaims) {
+  requireApplicant(user);
+  const app = await applicationFor(user);
+  if (!app) throw httpError("Application not found", "NOT_FOUND", 404);
+  return app;
+}
+
+export async function getApplicationForm(user: SessionClaims) {
+  let app = await requireApplication(user);
+  if (app.status === "draft" && app.documents.length === 0) {
+    // Applications opened by Admissions may have no checklist yet; without rows there is nothing to upload against.
+    await prisma.applicationDocument.createMany({
+      data: REQUIRED_APPLICANT_DOCUMENTS.map((label) => ({ institutionId: user.institutionId, applicationId: app.id, label, status: "missing" })),
+    });
+    app = await requireApplication(user);
+  }
+  return formPayload(app, await formOptions(user.institutionId));
+}
+
+export async function saveApplicationForm(user: SessionClaims, input: unknown) {
+  const app = await requireApplication(user);
+  if (app.status !== "draft") throw httpError("This application has been submitted and can no longer be edited", "CONFLICT", 409);
+  const options = await formOptions(user.institutionId);
+  const before = formValuesOf(app);
+  const { values, errors } = cleanApplicationForm(input, options, before);
+  const problems = Object.values(errors);
+  if (problems.length) throw Object.assign(httpError(problems.join("; "), "VALIDATION_ERROR", 400), { fields: errors });
+  const merged = { ...before, ...values };
+  const progressPct = applicationCompleteness(merged, app.documents).pct;
+  await prisma.admissionsApplication.update({
+    where: { id: app.id },
+    data: {
+      formJson: JSON.stringify(merged),
+      progressPct,
+      programName: merged.programName ?? app.programName,
+      intakeTerm: merged.intakeTerm ?? app.intakeTerm,
+      rowVersion: { increment: 1 },
+    },
+  });
+  const person: Record<string, string | null> = {};
+  if (merged.givenName) person.givenName = merged.givenName;
+  if (merged.familyName) person.familyName = merged.familyName;
+  if ("preferredName" in values) person.preferredName = merged.preferredName || null;
+  if (merged.phone) person.phone = merged.phone;
+  if (merged.dateOfBirth) person.dateOfBirth = merged.dateOfBirth;
+  if (Object.keys(person).length) {
+    await prisma.person.update({ where: { id: app.personId }, data: { ...person, rowVersion: { increment: 1 } } });
+  }
+  await writeAuditAndOutbox(prisma, {
+    institutionId: user.institutionId,
+    actorId: user.accountId,
+    eventName: "ApplicantApplication.formSaved",
+    purpose: "applicant_mutation",
+    before: { applicationId: app.id, progressPct: app.progressPct },
+    after: { applicationId: app.id, progressPct, fields: Object.keys(values) },
+    source: "applicant.save_form",
+    correlationId: randomUUID(),
+    outboxPayload: { applicationId: app.id, progressPct },
+  });
+  const fresh = await applicationFor(user);
+  return { ...(await formPayload(fresh!, options)), savedAt: new Date().toISOString() };
 }
 
 export async function buildApplicantView(user: SessionClaims, path: string): Promise<PortalView> {
@@ -160,12 +270,20 @@ export async function buildApplicantView(user: SessionClaims, path: string): Pro
     base.title = "Application";
     base.active = "Application";
     base.breadcrumb = ["Applicant", "Application"];
+    const done = completenessOf(app);
+    const step = (s: keyof typeof done.sections) => (done.sections[s].done ? "Done" : `${done.sections[s].missing.length} to complete`);
     const reqRows: PortalRow[] = [
-      { primary: "Program", secondary: app.programName, meta: app.intakeTerm },
-      { primary: "Status", secondary: app.status.replace(/_/g, " "), meta: `${app.progressPct}% complete` },
-      { primary: "Personal details", secondary: "Profile captured", meta: "Done" },
-      { primary: "Academic history", secondary: "Transcript checklist", meta: app.progressPct >= 40 ? "Done" : "Todo" },
-      { primary: "Requirements", secondary: "Program prerequisites", meta: app.progressPct >= 60 ? "Done" : "In progress", href: "/applicant/f/ap-03-requirements" },
+      { primary: "Program", secondary: app.programName || "Not chosen yet", meta: app.intakeTerm || "—" },
+      { primary: "Status", secondary: app.status.replace(/_/g, " "), meta: `${done.pct}% complete` },
+      { primary: "Personal details", secondary: "Name, contact and residency", meta: step("personal") },
+      { primary: "Academic history", secondary: "Highest education completed", meta: step("academic") },
+      { primary: "Program choice", secondary: "Program, intake and study load", meta: step("program") },
+      {
+        primary: "Documents",
+        secondary: done.documentsMissing.length ? `Missing: ${done.documentsMissing.join(", ")}` : "All required documents uploaded",
+        meta: done.documentsMissing.length ? "Todo" : "Done",
+        href: "/applicant/documents",
+      },
     ];
     base.sections = [{ title: "Wizard steps", rows: reqRows }];
     base.actions = [
@@ -385,7 +503,7 @@ export async function runApplicantAction(
   if (!app) throw Object.assign(new Error("Application not found"), { status: 404, code: "NOT_FOUND" });
 
   if (action === "save_progress") {
-    const next = Math.min(90, app.progressPct + 15);
+    const next = completenessOf(app).pct;
     await prisma.admissionsApplication.update({
       where: { id: app.id },
       data: { progressPct: next },
@@ -406,10 +524,18 @@ export async function runApplicantAction(
   }
 
   if (action === "submit_application") {
-    await prisma.admissionsApplication.update({
-      where: { id: app.id },
-      data: { status: "submitted", progressPct: Math.max(app.progressPct, 80), submittedAt: new Date() },
+    if (app.status !== "draft") throw httpError("This application has already been submitted", "CONFLICT", 409);
+    const done = completenessOf(app);
+    if (done.missing.length) {
+      throw Object.assign(httpError(`Complete these before submitting: ${done.missing.join("; ")}`, "APPLICATION_INCOMPLETE", 400), {
+        missing: done.missing,
+      });
+    }
+    const claimed = await prisma.admissionsApplication.updateMany({
+      where: { id: app.id, status: "draft", rowVersion: app.rowVersion },
+      data: { status: "submitted", progressPct: 100, submittedAt: new Date(), rowVersion: { increment: 1 } },
     });
+    if (claimed.count !== 1) throw httpError("The application changed while submitting. Reload and try again.", "CONFLICT", 409);
     await addTimeline(app.id, user.institutionId, "Application submitted", "Packet sent to admissions review");
     await prisma.notification.create({
       data: {
@@ -427,7 +553,7 @@ export async function runApplicantAction(
       eventName: "ApplicantApplication.submitted",
       purpose: "applicant_mutation",
       before: { applicationId: app.id, status: app.status },
-      after: { applicationId: app.id, status: "submitted", progressPct: Math.max(app.progressPct, 80) },
+      after: { applicationId: app.id, status: "submitted", progressPct: 100 },
       source: "applicant.submit_application",
       correlationId: randomUUID(),
       outboxPayload: { applicationId: app.id, status: "submitted" },
@@ -490,13 +616,11 @@ export async function runApplicantAction(
       correlationId: randomUUID(),
       outboxPayload: { applicationId: app.id, documentId: doc.id },
     });
-    const remaining = await prisma.applicationDocument.count({
-      where: { applicationId: app.id, status: "missing" },
-    });
-    if (remaining === 0 && app.progressPct < 70) {
+    if (app.status === "draft") {
+      const docs = app.documents.map((d) => (d.id === doc.id ? { ...d, status: "uploaded" } : d));
       await prisma.admissionsApplication.update({
         where: { id: app.id },
-        data: { progressPct: 70, status: app.status === "draft" ? "draft" : app.status },
+        data: { progressPct: applicationCompleteness(formValuesOf(app), docs).pct },
       });
     }
     return { ok: true, documentId: doc.id, status: "uploaded", fileName: safeName };

@@ -44,6 +44,9 @@ import { getExecutiveMetrics } from "./metrics.service.js";
 import { askHeritageAi } from "../../lib/ask.js";
 import { adminCampusFacts, relevantFacts } from "./admin-facts.js";
 import { currentStudentId } from "../me/studentAlignment.js";
+import { ensureProgramVersion } from "../academic/program-version.js";
+
+const DEGREE_CAPABILITIES = new Set(["student_advisor", "degree_progress", "what_if_planner"]);
 
 export const aiRouter: Router = Router();
 
@@ -351,12 +354,16 @@ aiRouter.post("/ask", async (req, res, next) => {
 
     const startedAt = Date.now();
 
-    const student =
+    let student =
       role === "student"
         ? await prisma.student.findFirst({
             where: { id: await currentStudentId(user.institutionId, user.personId), institutionId: user.institutionId },
           })
         : null;
+    if (student && !student.programVersionId && DEGREE_CAPABILITIES.has(capability)) {
+      const versionId = await ensureProgramVersion(user.institutionId, student.id).catch(() => null);
+      if (versionId) student = { ...student, programVersionId: versionId };
+    }
 
     const ctx = buildAiRequestContext({
       user,

@@ -67,7 +67,12 @@ export default function CourseHistoryPage() {
 
   const rows = useMemo(() => {
     if (!data) return [];
-    return [...data.current, ...data.previous, ...data.withdrawn, ...data.retakes];
+    const seen = new Set<string>();
+    return [...data.current, ...data.previous, ...data.withdrawn, ...data.retakes].filter((row) => {
+      if (seen.has(row.enrolmentId)) return false;
+      seen.add(row.enrolmentId);
+      return true;
+    });
   }, [data]);
 
   return (

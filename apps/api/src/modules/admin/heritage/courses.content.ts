@@ -23,7 +23,7 @@ async function personName(user: SessionClaims) {
 /* Content repository                                                    */
 /* ------------------------------------------------------------------ */
 
-type Activity = { id: string; type: string; name: string; body?: string; url?: string; fileName?: string };
+type Activity = { id: string; type: string; name: string; body?: string; url?: string; description?: string; fileName?: string };
 type Topic = { id: string; title: string; summary: string; activities: Activity[] };
 
 const ACTIVITY_TYPES = ["PAGE", "FILE", "FOLDER", "URL", "ASSIGNMENT", "QUIZ", "FORUM", "BOOK", "BIGBLUEBUTTON", "CHAT", "CHECKLIST", "CHOICE", "DATABASE", "EXTERNAL TOOL", "FEEDBACK", "LABEL"];
@@ -43,7 +43,14 @@ function cleanTopics(raw: unknown): Topic[] {
       if (!name) throw httpError(400, `${title}: item ${j + 1} needs a name`);
       const url = s(x.url).slice(0, 1000);
       if (url && !/^https?:\/\//i.test(url)) throw httpError(400, `${title}: ${name} — the link must start with http:// or https://`);
-      activities.push({ id: s(x.id) || `ra-${Date.now().toString(36)}${i}${j}`, type, name, ...(s(x.body) ? { body: s(x.body).slice(0, 20_000) } : {}), ...(url ? { url } : {}) });
+      activities.push({
+        id: s(x.id) || `ra-${Date.now().toString(36)}${i}${j}`,
+        type,
+        name,
+        ...(s(x.body) ? { body: s(x.body).slice(0, 20_000) } : {}),
+        ...(url ? { url } : {}),
+        ...(s(x.description) ? { description: s(x.description).slice(0, 5000) } : {}),
+      });
     }
     out.push({ id: s(d.id) || `t-${Date.now().toString(36)}${i}`, title, summary: s(d.summary).slice(0, 4000), activities });
   }
@@ -196,7 +203,14 @@ export async function pullContent(user: SessionClaims, id: string, body: { secti
   if (!row) throw httpError(400, "Choose a session / offering of this course to pull from");
   const { extra, loose } = addedContent(await readOverlay(inst, row.id), repoTag(id));
   const stamp = Date.now().toString(36);
-  const clone = (a: Data, i: number): Activity => ({ id: `pa-${stamp}-${i}`, type: s(a.type).toUpperCase() || "PAGE", name: s(a.name) || "Untitled", ...(s(a.body) ? { body: s(a.body) } : {}) });
+  const clone = (a: Data, i: number): Activity => ({
+    id: `pa-${stamp}-${i}`,
+    type: s(a.type).toUpperCase() || "PAGE",
+    name: s(a.name) || "Untitled",
+    ...(s(a.body) ? { body: s(a.body) } : {}),
+    ...(s(a.url) ? { url: s(a.url) } : {}),
+    ...(s(a.description) ? { description: s(a.description) } : {}),
+  });
   const fresh: Topic[] = extra.map((t, i) => ({ id: `pt-${stamp}-${i}`, title: s(t.title) || `Section ${i + 1}`, summary: s(t.summary), activities: (arr(t.activities) as Data[]).map((a, j) => clone(a, i * 100 + j)) }));
   if (loose.length) fresh.push({ id: `pt-${stamp}-loose`, title: `Pulled from ${row.courseCode} ${row.code}`, summary: "", activities: loose.map((a, j) => clone(a, 9000 + j)) });
   if (!fresh.length) throw httpError(400, `${row.courseCode} ${row.code} has no instructor-added content to pull`);

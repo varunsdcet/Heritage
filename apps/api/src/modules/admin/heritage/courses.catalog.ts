@@ -3,6 +3,7 @@
 import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
 import { audit } from "./service.js";
+import { dropGeneratedClassSessions, syncSectionClassSessions } from "../../courses/sectionOffering.js";
 import { COURSE_FIELDS, COURSE_TEXTBOOK_FIELDS, ENTITIES, SESSION_FIELDS, WEEKDAYS, type Data, type Field } from "./courses.spec.js";
 import {
   S,
@@ -106,6 +107,7 @@ export async function getCourse(user: SessionClaims, id: string) {
     title: c.title,
     credits: c.credits,
     values: { ...defaults(COURSE_FIELDS), ...st, name: c.title, number: c.code, credits: c.credits },
+    sessionDefaults: { gradingScheme: await defaultGradingScheme(user.institutionId, id, await lookups(user)) },
   };
 }
 
@@ -295,7 +297,12 @@ export type LoadedSection = Awaited<ReturnType<typeof loadSections>>[number];
 export async function loadSections(inst: string, where: Record<string, unknown>) {
   return prisma.section.findMany({
     where: { institutionId: inst, ...where },
-    include: { course: true, term: true, enrolments: { where: { status: "enrolled" }, select: { id: true, student: { select: { studentNumber: true, person: { select: { familyName: true } } } } } } },
+    include: {
+      course: true,
+      term: true,
+      enrolments: { where: { status: "enrolled" }, select: { id: true, student: { select: { studentNumber: true, person: { select: { familyName: true } } } } } },
+      _count: { select: { enrolments: { where: { status: "waitlisted" } } } },
+    },
     orderBy: [{ createdAt: "desc" }],
   });
 }
@@ -327,7 +334,7 @@ export function sessionRow(x: LoadedSection, st: Data | undefined, lk: Lookups) 
     enrolled: x.enrolments.length,
     capacity,
     reserved: 0,
-    waitlist: 0,
+    waitlist: x._count.enrolments,
     sessionType: lk.label("courseTypes", st?.sessionType),
     enableLms: s(st?.enableLms) || "Disabled",
   };
@@ -354,19 +361,30 @@ export async function getSession(user: SessionClaims, id: string) {
   const lk = await lookups(user);
   const w = sessionWindow(x.term, st);
   const instructors = st ? arr(st.instructors) : [lk.accountOfPerson.get(x.instructorPersonId)].filter(Boolean);
+  const gradingScheme = s(st?.gradingScheme) || (await defaultGradingScheme(inst, x.courseId, lk));
   return {
     id: x.id,
     courseId: x.courseId,
     course: { id: x.course.id, code: x.course.code, title: x.course.title },
     code: x.code,
     term: x.term.name,
-    values: { ...defaults(SESSION_FIELDS), ...(st ?? {}), startDate: w.start, endDate: w.end, continuous: w.continuous, instructors, meetings: meetingsOf(st) },
+    termId: x.termId,
+    values: { ...defaults(SESSION_FIELDS), ...(st ?? {}), startDate: w.start, endDate: w.end, continuous: w.continuous, instructors, meetings: meetingsOf(st), gradingScheme, termId: x.termId },
   };
+}
+
+/** A new session's grading scheme: the course's scheme when it is still active, else the institution default scheme. */
+export async function defaultGradingScheme(inst: string, courseId: string, lk: Lookups) {
+  const active = new Set((lk.refs.gradingSchemes ?? []).map((o) => o.id));
+  const fromCourse = s((await settingsOf(inst, S.courseSettings, [courseId])).get(courseId)?.data.gradingScheme);
+  if (fromCourse && active.has(fromCourse)) return fromCourse;
+  const schemes = await list(inst, ENTITIES.gradingSchemes.screen);
+  return schemes.find((r) => r.data.isDefault === true && active.has(r.id))?.id ?? "";
 }
 
 const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 
-async function nextSectionCode(inst: string, courseId: string, courseCode: string, start: string) {
+export async function nextSectionCode(inst: string, courseId: string, courseCode: string, start: string) {
   const prefix = courseCode.replace(/[^A-Za-z]/g, "").toUpperCase() || "SEC";
   const base = `${prefix}${MONTHS[Number(start.slice(5, 7)) - 1] ?? ""}${start.slice(2, 4)}`;
   const taken = new Set((await prisma.section.findMany({ where: { institutionId: inst, courseId }, select: { code: true } })).map((x) => x.code));
@@ -377,7 +395,7 @@ async function nextSectionCode(inst: string, courseId: string, courseCode: strin
   return `${base}-${Date.now().toString(36)}`;
 }
 
-async function termFor(inst: string, start: string) {
+export async function termFor(inst: string, start: string) {
   const terms = await prisma.term.findMany({ where: { institutionId: inst }, orderBy: { startsOn: "asc" } });
   if (!terms.length) throw httpError(400, "Create a term first (Program Management → Manage Terms); every session / offering belongs to a term.");
   return terms.find((t) => t.startsOn <= start && t.endsOn >= start) ?? [...terms].reverse().find((t) => t.startsOn <= start) ?? terms[0];
@@ -406,8 +424,33 @@ function midpoint(a: string, b: string) {
   return new Date(t).toISOString().slice(0, 10);
 }
 
+export function sessionNameTaken(name: unknown, others: Iterable<{ data: Data }>) {
+  const want = s(name).trim().toLowerCase();
+  if (!want) return false;
+  for (const r of others) if (s(r.data.name).trim().toLowerCase() === want) return true;
+  return false;
+}
+
+const sessionSaves = new Map<string, Promise<unknown>>();
+
+/** Serialises session saves per course (single API process) so a double-submit cannot slip past the name check. */
+async function serialPerCourse<T>(key: string, run: () => Promise<T>): Promise<T> {
+  const next = (sessionSaves.get(key) ?? Promise.resolve()).catch(() => undefined).then(run);
+  const tail = next.catch(() => undefined);
+  sessionSaves.set(key, tail);
+  try {
+    return await next;
+  } finally {
+    if (sessionSaves.get(key) === tail) sessionSaves.delete(key);
+  }
+}
+
 export async function saveSession(user: SessionClaims, courseId: string, id: string | null, body: Data) {
   await edit(user);
+  return serialPerCourse(`${user.institutionId}:${courseId}`, () => saveSessionNow(user, courseId, id, body));
+}
+
+async function saveSessionNow(user: SessionClaims, courseId: string, id: string | null, body: Data) {
   const inst = user.institutionId;
   const course = await courseOr404(inst, courseId);
   const lk = await lookups(user);
@@ -427,8 +470,14 @@ export async function saveSession(user: SessionClaims, courseId: string, id: str
   if (!data.continuous && s(data.endDate) && s(data.endDate) < s(data.startDate)) errors.push("End Date must be on or after the Start Date");
   for (const ex of arr(data.exams) as Data[]) if (s(ex.start) && s(ex.end) && s(ex.end) <= s(ex.start)) errors.push(`Exam on ${s(ex.date)}: finish time must be after the start time`);
   if (errors.length) throw httpError(400, errors.join("; "));
+  if (s(data.name)) {
+    const siblings = await prisma.section.findMany({ where: { institutionId: inst, courseId, ...(id ? { id: { not: id } } : {}) }, select: { id: true } });
+    const settings = await settingsOf(inst, S.session, siblings.map((x) => x.id));
+    if (sessionNameTaken(data.name, settings.values())) throw httpError(409, `Session Name "${s(data.name)}" is already used by another session of ${course.code}`, "DUPLICATE");
+  }
   if (data.autoMedian) data.medianDate = !data.continuous && s(data.endDate) ? midpoint(s(data.startDate), s(data.endDate)) : "";
-  const term = await termFor(inst, s(data.startDate));
+  if (!s(data.gradingScheme)) data.gradingScheme = await defaultGradingScheme(inst, courseId, lk);
+  const term = s(body.termId) ? await chosenTerm(inst, s(body.termId), s(data.startDate), data.continuous ? "" : s(data.endDate)) : await termFor(inst, s(data.startDate));
   const instructors = arr(data.instructors).map(s);
   const instructorPersonId = (instructors[0] && lk.personOf.get(instructors[0])) || "";
   const section = existing
@@ -436,8 +485,23 @@ export async function saveSession(user: SessionClaims, courseId: string, id: str
     : await prisma.section.create({ data: { institutionId: inst, courseId, termId: term.id, code: await nextSectionCode(inst, courseId, course.code, s(data.startDate)), instructorPersonId } });
   const saved = { ...data, meetings };
   await saveSettings(user, S.session, section.id, saved);
-  await audit(user, "C04", courseId, id ? "Updated session / offering" : "Created session / offering", { recordId: section.id, before, after: saved });
-  return { id: section.id, message: `Session ${section.code} ${id ? "saved" : "created"}` };
+  const meetingsSync = await syncSectionClassSessions(inst, section.id);
+  await audit(user, "C04", courseId, id ? "Updated session / offering" : "Created session / offering", {
+    recordId: section.id,
+    before,
+    after: { ...saved, termId: term.id },
+    note: meetingsSync.created || meetingsSync.removed ? `${meetingsSync.created} class meeting(s) scheduled, ${meetingsSync.removed} removed` : undefined,
+  });
+  return { id: section.id, message: `Session ${section.code} ${id ? "saved" : "created"} in ${term.name}` };
+}
+
+/** The term picked on the session form; the session's dates must fall within it. */
+async function chosenTerm(inst: string, termId: string, start: string, end: string) {
+  const term = await prisma.term.findFirst({ where: { id: termId, institutionId: inst } });
+  if (!term) throw httpError(400, "Term: the selected term no longer exists");
+  if (start && (start < term.startsOn || start > term.endsOn)) throw httpError(400, `Start Date ${start} is outside ${term.name} (${term.startsOn} – ${term.endsOn})`);
+  if (end && end > term.endsOn) throw httpError(400, `End Date ${end} is after the end of ${term.name} (${term.endsOn})`);
+  return term;
 }
 
 export async function deleteSession(user: SessionClaims, id: string) {
@@ -449,6 +513,7 @@ export async function deleteSession(user: SessionClaims, id: string) {
   });
   if (!x) throw httpError(404, "Session / offering not found", "NOT_FOUND");
   if (x._count.enrolments) throw httpError(409, `${x.code} has ${x._count.enrolments} student enrolment(s). Withdraw or move the students first.`, "IN_USE");
+  x._count.classSessions -= await dropGeneratedClassSessions(inst, id, x.course.code, x.code);
   const { enrolments: _e, ...rest } = x._count;
   if (Object.values(rest).some((n) => n > 0)) throw httpError(409, `${x.code} already has course content, class sessions or attendance and cannot be deleted.`, "IN_USE");
   await prisma.section.delete({ where: { id } });
