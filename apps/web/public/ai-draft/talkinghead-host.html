@@ -103,6 +103,21 @@
       let bootId = 0;
       let ready = false;
 
+      // Called synchronously by the (same-origin) parent inside its Play click, so the browser counts it as a user gesture.
+      window.thUnlockAudio = () => {
+        const ctx = head?.audioCtx;
+        if (!ctx) return "none";
+        try {
+          if (ctx.state !== "running") void ctx.resume();
+          const silent = ctx.createBufferSource();
+          silent.buffer = ctx.createBuffer(1, 1, 22050);
+          silent.connect(ctx.destination);
+          silent.start(0);
+        } catch (_) {}
+        return ctx.state;
+      };
+      window.thAudioState = () => head?.audioCtx?.state || "none";
+
       async function ensureAudio() {
         if (!head?.audioCtx) return;
         if (head.audioCtx.state === "suspended") {
@@ -330,6 +345,7 @@
       });
 
       window.addEventListener("pointerdown", () => void ensureAudio(), { once: true });
+      window.addEventListener("pointerdown", () => window.thUnlockAudio());
       boot(gender);
     </script>
   </body>

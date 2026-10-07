@@ -10,6 +10,34 @@ const TITLE_KEY = "monica-lecture-title";
 const PREFETCH = 2;
 /** Roughly 150 spoken words a minute. */
 const CHARS_PER_SEC = 14;
+const AVATAR_TIMEOUT_MS = 25_000;
+
+type AvatarWindow = Window & { thUnlockAudio?: () => string; thAudioState?: () => string };
+
+let silentUrl = "";
+
+/** A tiny silent WAV, played inside the Play click so later voice clips may start without a fresh gesture. */
+function silentWavUrl() {
+  if (silentUrl) return silentUrl;
+  const samples = 800;
+  const view = new DataView(new ArrayBuffer(44 + samples));
+  const tag = (at: number, s: string) => [...s].forEach((c, i) => view.setUint8(at + i, c.charCodeAt(0)));
+  tag(0, "RIFF");
+  view.setUint32(4, 36 + samples, true);
+  tag(8, "WAVEfmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, 8000, true);
+  view.setUint32(28, 8000, true);
+  view.setUint16(32, 1, true);
+  view.setUint16(34, 8, true);
+  tag(36, "data");
+  view.setUint32(40, samples, true);
+  for (let i = 0; i < samples; i++) view.setUint8(44 + i, 128);
+  silentUrl = URL.createObjectURL(new Blob([view.buffer], { type: "audio/wav" }));
+  return silentUrl;
+}
 
 function clock(totalSec: number) {
   const s = Math.max(0, Math.round(totalSec));
@@ -28,6 +56,7 @@ export function MonicaLecture() {
   const [playing, setPlaying] = useState(false);
   const [finished, setFinished] = useState(false);
   const [avatarReady, setAvatarReady] = useState(false);
+  const [avatarFailed, setAvatarFailed] = useState(false);
   const [status, setStatus] = useState("Loading teacher…");
   const [error, setError] = useState("");
   const [fullscreen, setFullscreen] = useState(false);
@@ -41,6 +70,8 @@ export function MonicaLecture() {
   const runRef = useRef(0);
   const speakIdRef = useRef(0);
   const waitRef = useRef<{ id: number; resolve: () => void } | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioOnly = !avatarReady && avatarFailed;
 
   useEffect(() => {
     setScript(localStorage.getItem(STORAGE_KEY) || "");
@@ -70,9 +101,13 @@ export function MonicaLecture() {
     const onMsg = (ev: MessageEvent) => {
       if (ev.data?.type === "th-ready") {
         setAvatarReady(true);
-        setStatus("Ready — press Play");
+        setAvatarFailed(false);
+        setStatus((s) => (s.startsWith("Loading") || s.startsWith("Teacher could not") ? "Ready — press Play" : s));
       }
-      if (ev.data?.type === "th-error") setStatus(`Teacher failed to load: ${ev.data.message || "unknown error"}`);
+      if (ev.data?.type === "th-error") {
+        setAvatarFailed(true);
+        setStatus(`Teacher could not load (${ev.data.message || "unknown error"}) — Play reads the script with voice only`);
+      }
       const wait = waitRef.current;
       if (wait && ev.data?.type === "th-speak-done" && wait.id === ev.data.id) {
         waitRef.current = null;
@@ -92,8 +127,26 @@ export function MonicaLecture() {
     if (avatarReady) return;
     post({ type: "th-ping" });
     const timer = window.setInterval(() => post({ type: "th-ping" }), 1000);
-    return () => window.clearInterval(timer);
+    const giveUp = window.setTimeout(() => {
+      setAvatarFailed(true);
+      setStatus("Teacher could not load in this browser — Play reads the script with voice only");
+    }, AVATAR_TIMEOUT_MS);
+    return () => {
+      window.clearInterval(timer);
+      window.clearTimeout(giveUp);
+    };
   }, [avatarReady]);
+
+  /** Must run synchronously inside the click handler — browsers only allow sound to start from a user gesture. */
+  const unlockAudio = () => {
+    (iframeRef.current?.contentWindow as AvatarWindow | null)?.thUnlockAudio?.();
+    if (!audioRef.current) audioRef.current = new Audio();
+    const a = audioRef.current;
+    if (a.paused) {
+      a.src = silentWavUrl();
+      void a.play().catch(() => {});
+    }
+  };
 
   useEffect(() => {
     if (mode === "lecture") partRefs.current[index]?.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -128,6 +181,7 @@ export function MonicaLecture() {
     setPlaying(false);
     setStatus(label);
     post({ type: "th-stop" });
+    audioRef.current?.pause();
     const wait = waitRef.current;
     waitRef.current = null;
     wait?.resolve();
@@ -157,11 +211,35 @@ export function MonicaLecture() {
           return;
         }
         if (run !== runRef.current) return;
-        setStatus(`Reading part ${i + 1} of ${parts.length}`);
+        setStatus(`Reading part ${i + 1} of ${parts.length}${audioOnly ? " (voice only)" : ""}`);
         const id = ++speakIdRef.current;
         await new Promise<void>((resolve) => {
           waitRef.current = { id, resolve };
-          post({ type: "th-speak-audio", id, audio: n.audio, words: n.words, wtimes: n.wtimes, wdurations: n.wdurations });
+          const done = () => {
+            if (waitRef.current?.id === id) {
+              waitRef.current = null;
+              resolve();
+            }
+          };
+          if (audioOnly) {
+            const a = audioRef.current ?? (audioRef.current = new Audio());
+            a.onended = done;
+            a.onerror = done;
+            a.src = `data:audio/mpeg;base64,${n.audio}`;
+            a.play().catch((err) => {
+              if (run !== runRef.current) return;
+              setError(`The browser blocked the sound (${err instanceof Error ? err.message : "autoplay"}) — press Play again`);
+              stop("Stopped");
+            });
+          } else {
+            post({ type: "th-speak-audio", id, audio: n.audio, words: n.words, wtimes: n.wtimes, wdurations: n.wdurations });
+            window.setTimeout(() => {
+              const state = (iframeRef.current?.contentWindow as AvatarWindow | null)?.thAudioState?.();
+              if (state === "suspended" && waitRef.current?.id === id) {
+                setError("The browser is blocking the teacher's sound — click once on the teacher, then press Play");
+              }
+            }, 2000);
+          }
           window.setTimeout(() => {
             if (waitRef.current?.id === id) {
               waitRef.current = null;
@@ -181,7 +259,7 @@ export function MonicaLecture() {
       setStatus("Lecture finished");
       post({ type: "th-idle" });
     },
-    [durations, narration, parts, stop],
+    [audioOnly, durations, narration, parts, stop],
   );
 
   const jump = (i: number) => {
@@ -199,7 +277,9 @@ export function MonicaLecture() {
     setFinished(false);
     setIndex(0);
     setError("");
-    setStatus(avatarReady ? "Ready — press Play" : "Loading teacher…");
+    setStatus(
+      avatarReady ? "Ready — press Play" : avatarFailed ? "Teacher could not load — Play reads the script with voice only" : "Loading teacher…",
+    );
   };
 
   const toggleFullscreen = async () => {
@@ -276,8 +356,11 @@ export function MonicaLecture() {
                   <button
                     type="button"
                     className="mh-monica__btn mh-monica__btn--primary"
-                    disabled={!avatarReady || !parts.length}
-                    onClick={() => void playFrom(finished ? 0 : index)}
+                    disabled={(!avatarReady && !avatarFailed) || !parts.length}
+                    onClick={() => {
+                      unlockAudio();
+                      void playFrom(finished ? 0 : index);
+                    }}
                   >
                     {finished ? "Play again" : index > 0 ? "Resume" : "Play lecture"}
                   </button>

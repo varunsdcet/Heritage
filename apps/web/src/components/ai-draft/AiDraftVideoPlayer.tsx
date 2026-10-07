@@ -100,6 +100,7 @@ export function AiDraftVideoPlayer({ storyboard, onClose }: Props) {
 
   const playFrom = useCallback(
     async (startAt: number) => {
+      (iframeRef.current?.contentWindow as (Window & { thUnlockAudio?: () => string }) | null)?.thUnlockAudio?.();
       iframeRef.current?.contentWindow?.postMessage({ type: "th-resume" }, "*");
       playingRef.current = true;
       setPlaying(true);
