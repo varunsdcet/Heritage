@@ -319,10 +319,18 @@ searchRouter.get("/", requireAuth, async (req, res, next) => {
       const institution = await prisma.institution.findFirst({
         where: { institutionId: user.institutionId },
       });
-      // Same pool as Student List (t12): all institution students — not just section enrolments.
       const [directoryStudents, sections] = await Promise.all([
         prisma.student.findMany({
-          where: { institutionId: user.institutionId },
+          where: {
+            institutionId: user.institutionId,
+            enrolments: {
+              some: {
+                institutionId: user.institutionId,
+                status: { in: ["enrolled", "completed", "withdrawn"] },
+                section: { instructorPersonId: user.personId },
+              },
+            },
+          },
           include: { person: true },
           orderBy: [{ person: { familyName: "asc" } }, { person: { givenName: "asc" } }],
           take: 5000,

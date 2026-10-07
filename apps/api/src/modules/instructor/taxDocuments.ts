@@ -43,26 +43,23 @@ function mapRow(row: {
 }
 
 /**
- * Instructor tax slips (T4A / earnings).
+ * Instructor tax slips (T4A / earnings), issued to one account each — never shared or auto-generated.
  * Stored on PortalRecord until a dedicated instructor tax table exists.
- * Fields: primaryText=title, secondaryText=docType, metaText=`year|status|issuedAt`
+ * Fields: primaryText=title, secondaryText=docType, metaText=`year|status|issuedAt`, audienceAccountId=recipient
  */
 export async function listInstructorTaxDocuments(user: SessionClaims) {
-  await ensureInstructorTaxSlips(user);
-
   const rows = await prisma.portalRecord.findMany({
     where: {
       institutionId: user.institutionId,
       screenPath: TAX_PATH,
       role: "instructor",
-      OR: [{ audienceAccountId: user.accountId }, { audienceAccountId: null }],
+      audienceAccountId: user.accountId,
     },
     orderBy: { updatedAt: "desc" },
   });
 
   const documents: StoredTaxDoc[] = [];
   for (const row of rows) {
-    if (row.audienceAccountId && row.audienceAccountId !== user.accountId) continue;
     const mapped = mapRow(row);
     if (mapped) documents.push(mapped);
   }
@@ -79,32 +76,6 @@ export async function listInstructorTaxDocuments(user: SessionClaims) {
   };
 }
 
-async function ensureInstructorTaxSlips(user: SessionClaims) {
-  const existing = await prisma.portalRecord.count({
-    where: {
-      institutionId: user.institutionId,
-      screenPath: TAX_PATH,
-      role: "instructor",
-      OR: [{ audienceAccountId: user.accountId }, { audienceAccountId: null }],
-    },
-  });
-  if (existing > 0) return;
-  const year = new Date().getFullYear() - 1;
-  await prisma.portalRecord.create({
-    data: {
-      institutionId: user.institutionId,
-      screenPath: TAX_PATH,
-      role: "instructor",
-      audienceAccountId: user.accountId,
-      primaryText: `T4A Statement of Other Income — ${year}`,
-      secondaryText: "T4A",
-      metaText: `${year}|available|${new Date().toISOString()}`,
-      href: null,
-      sortOrder: 1,
-    },
-  });
-}
-
 export async function getInstructorTaxPdf(user: SessionClaims, documentId: string) {
   const row = await prisma.portalRecord.findFirst({
     where: {
@@ -112,12 +83,10 @@ export async function getInstructorTaxPdf(user: SessionClaims, documentId: strin
       institutionId: user.institutionId,
       screenPath: TAX_PATH,
       role: "instructor",
-      OR: [{ audienceAccountId: user.accountId }, { audienceAccountId: null }],
+      audienceAccountId: user.accountId,
     },
   });
-  if (!row || (row.audienceAccountId && row.audienceAccountId !== user.accountId)) {
-    throw httpError("Tax document not found", "NOT_FOUND", 404);
-  }
+  if (!row) throw httpError("Tax document not found", "NOT_FOUND", 404);
   const mapped = mapRow(row);
   if (!mapped) throw httpError("Tax document not found", "NOT_FOUND", 404);
 

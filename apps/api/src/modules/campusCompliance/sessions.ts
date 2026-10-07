@@ -120,11 +120,24 @@ export async function recordSessionJoin(input: {
   return { event, clientKind, joinUrl: sessionJoinUrl(session.sectionId, session.joinUrl) };
 }
 
-export async function mobileJoinReport(institutionId: string, days = 7) {
+/** `instructorPersonId` limits the report to class sessions of sections that person teaches. */
+export async function mobileJoinReport(institutionId: string, days = 7, instructorPersonId?: string) {
   const since = new Date();
   since.setDate(since.getDate() - days);
+  const ownSessionIds = instructorPersonId
+    ? (
+        await prisma.classSession.findMany({
+          where: { institutionId, section: { instructorPersonId } },
+          select: { id: true },
+        })
+      ).map((s) => s.id)
+    : null;
   const rows = await prisma.sessionJoinEvent.findMany({
-    where: { institutionId, joinedAt: { gte: since } },
+    where: {
+      institutionId,
+      joinedAt: { gte: since },
+      ...(ownSessionIds ? { classSessionId: { in: ownSessionIds } } : {}),
+    },
     orderBy: { joinedAt: "desc" },
     take: 500,
   });

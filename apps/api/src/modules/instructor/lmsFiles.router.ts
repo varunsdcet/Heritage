@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
 import { requireAuth, type AuthedRequest } from "../../middleware/auth.js";
+import { bytesMatchMime, decodeBase64 } from "../../lib/fileSniff.js";
 
 /** Files attached to course activities (FILE / FOLDER). Stored per section; readable by the section's teacher, admins and its students. */
 export const lmsFilesRouter: Router = Router();
@@ -59,6 +60,9 @@ lmsFilesRouter.post("/", requireAuth, async (req, res, next) => {
     const size = Math.floor((b64.length * 3) / 4) - (b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0);
     if (!size) throw httpError("The file is empty", "VALIDATION_ERROR", 400);
     if (size > FILE_MAX) throw httpError("Files must be 8 MB or smaller", "VALIDATION_ERROR", 400);
+    if (!bytesMatchMime(decodeBase64(b64), mime)) {
+      throw httpError("The file contents do not match its declared type", "VALIDATION_ERROR", 400);
+    }
     const name = body.name.replace(/[\\/]/g, "_");
     const rec = await prisma.heritageRecord.create({
       data: {

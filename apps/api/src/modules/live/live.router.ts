@@ -124,7 +124,7 @@ liveRouter.post("/sections/:sectionId/join", requireAuth, async (req, res, next)
         provider: "jitsi",
         role: room.role,
         meetingName: room.meetingName,
-        url: jitsiMeetUrl(room.section.course.code, room.section.code),
+        url: jitsiMeetUrl(room.section.course.code, room.section.code, room.section.id),
       });
       return;
     }

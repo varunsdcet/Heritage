@@ -1511,6 +1511,9 @@ function AnnouncementsView({ config }: { config: TeacherScreenConfig }) {
   const live = useOptionalTeacherLive();
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
+  const [sectionId, setSectionId] = useState("");
+  const sections = a?.sections ?? [];
+  const chosenSection = sections.find((s) => s.id === sectionId)?.id || a?.sectionId || sections[0]?.id || "";
   if (!a) {
     return (
       <div className="mh-teacher-stack" data-figma-id={config.figmaId}>
@@ -1546,20 +1549,37 @@ function AnnouncementsView({ config }: { config: TeacherScreenConfig }) {
             />
           </label>
           <label>
+            <span>Course section</span>
+            <select
+              className="mh-teacher-field"
+              value={chosenSection}
+              onChange={(e) => setSectionId(e.target.value)}
+              disabled={sections.length === 0}
+            >
+              {sections.length === 0 ? <option value="">No teaching sections</option> : null}
+              {sections.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.label}
+                  {typeof s.enrolled === "number" ? ` (${s.enrolled} enrolled)` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
             <span>Audience</span>
-            <div className="mh-teacher-field">All enrolled students</div>
+            <div className="mh-teacher-field">All enrolled students in this section</div>
           </label>
         </div>
         <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
           <button
             type="button"
             className="mh-teacher-btn mh-teacher-btn--primary"
-            disabled={live?.busy || !title.trim() || !body.trim()}
+            disabled={live?.busy || !title.trim() || !body.trim() || !chosenSection}
             onClick={() => {
               void (async () => {
                 await live?.runAction?.(
                   "Publish announcement",
-                  JSON.stringify({ title: title.trim(), body: body.trim() }),
+                  JSON.stringify({ title: title.trim(), body: body.trim(), sectionId: chosenSection }),
                 );
                 setTitle("");
                 setBody("");
@@ -3204,6 +3224,7 @@ function LecturesView({ config }: { config: TeacherScreenConfig }) {
 function lectureSharePayload(review: NonNullable<TeacherScreenConfig["lectureReview"]>) {
   const highlights = (review.highlights ?? []).map((h) => `• ${h}`).join("\n");
   return JSON.stringify({
+    sectionId: review.sectionId || undefined,
     title: `Lecture notes · ${review.title}`,
     body: [
       review.meta,

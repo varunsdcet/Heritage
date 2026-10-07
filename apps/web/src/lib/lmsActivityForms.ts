@@ -28,7 +28,7 @@ const chk = (name: string, label: string, checked = false): LmsFormField => ({
 const sel = (name: string, label: string, options: string[], def?: string): LmsFormField => ({
   name, label, type: "select", options, default: def || options[0],
 });
-const file = (name: string, label: string, help = "Maximum 200MB"): LmsFormField => ({
+const file = (name: string, label: string, help = "PDF, Office documents, text or images up to 8 MB."): LmsFormField => ({
   name, label, type: "file", help,
 });
 const dt = (name: string, label: string): LmsFormField => ({

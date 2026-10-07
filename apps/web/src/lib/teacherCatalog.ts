@@ -843,7 +843,9 @@ export type TeacherScreenConfig = {
   };
   announcements?: {
     course: string;
-    posts: Array<{ title: string; body: string; when: string; audience: string; pinned?: boolean }>;
+    sectionId?: string | null;
+    sections?: Array<{ id: string; label: string; enrolled?: number }>;
+    posts: Array<{ title: string; body: string; when: string; audience: string; sectionId?: string | null; pinned?: boolean }>;
   };
   versionEditor?: {
     course: string;
@@ -1031,6 +1033,7 @@ export type TeacherScreenConfig = {
   };
   lectureReview?: {
     title: string;
+    sectionId?: string | null;
     meta: string;
     transcript: string;
     highlights: string[];

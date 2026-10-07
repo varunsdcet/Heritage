@@ -190,11 +190,11 @@ const PORTAL: PortalSeed[] = [
   { screenPath: "/student/*", role: "student", primaryText: "Campus services", secondaryText: "Live portal record", metaText: "Open", href: "/student", sortOrder: 1 },
 
   // Instructor
-  { screenPath: "/instructor/tax-documents", role: "instructor", primaryText: "T4A Statement of Other Income — 2025", secondaryText: "T4A", metaText: "2025|available|2026-02-28T00:00:00.000Z", sortOrder: 1 },
-  { screenPath: "/instructor/tax-documents", role: "instructor", primaryText: "T4 Statement of Remuneration Paid — 2025", secondaryText: "T4", metaText: "2025|available|2026-02-28T00:00:00.000Z", sortOrder: 2 },
+  { screenPath: "/instructor/tax-documents", role: "instructor", primaryText: "T4A Statement of Other Income — 2025", secondaryText: "T4A", metaText: "2025|available|2026-02-28T00:00:00.000Z", sortOrder: 1, audienceAccountId: ids.vanceAccount },
+  { screenPath: "/instructor/tax-documents", role: "instructor", primaryText: "T4 Statement of Remuneration Paid — 2025", secondaryText: "T4", metaText: "2025|available|2026-02-28T00:00:00.000Z", sortOrder: 2, audienceAccountId: ids.vanceAccount },
   { screenPath: "/instructor/lectures", role: "instructor", primaryText: "CS301 Lecture 8", secondaryText: "Publish slides before 9am", metaText: "Today", href: "/instructor/lectures", sortOrder: 1 },
   { screenPath: "/instructor/labs", role: "instructor", primaryText: "Lab supervision CS301", secondaryText: "Science Hall 110", metaText: "Thu", href: "/instructor/labs", sortOrder: 1 },
-  { screenPath: "/instructor/announcements", role: "instructor", primaryText: "Midterm review session", secondaryText: "Posted to CS301-01", metaText: "Sent", href: "/instructor/announcements", sortOrder: 1 },
+  { screenPath: "/instructor/announcements", role: "instructor", primaryText: "Midterm review session", secondaryText: "Posted to CS301-01", metaText: "Sent", href: "/instructor/announcements", sortOrder: 1, audienceAccountId: ids.vanceAccount },
   { screenPath: "/instructor/studio", role: "instructor", primaryText: "AI course studio draft", secondaryText: "Outcome mapping ready", metaText: "Open", href: "/instructor/studio", sortOrder: 1 },
   { screenPath: "/instructor/modules", role: "instructor", primaryText: "Module 4 · Graphs", secondaryText: "CS301-01", metaText: "Published", href: "/instructor/modules", sortOrder: 1 },
   { screenPath: "/instructor/*", role: "instructor", primaryText: "Teaching workspace", secondaryText: "Live portal record", metaText: "Open", href: "/instructor", sortOrder: 1 },

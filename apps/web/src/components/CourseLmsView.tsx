@@ -427,7 +427,13 @@ export function CourseLmsView({ config }: Props) {
   if (!c) {
     return (
       <div className="mh-teacher-stack" data-figma-id={config.figmaId}>
-        <p className="mh-teacher-muted">No course workspace available yet.</p>
+        <p className="mh-teacher-muted">
+          {live?.loading
+            ? "Opening course…"
+            : live?.error
+              ? "This course section was not found, or you are not its instructor."
+              : "No course workspace available yet."}
+        </p>
       </div>
     );
   }

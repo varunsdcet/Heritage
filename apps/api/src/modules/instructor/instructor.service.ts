@@ -7,6 +7,7 @@ import {
   lifecycleFromStudent,
   LMS_ACTIVITY_TYPES,
 } from "../../lib/lifecycle-status.js";
+import { gradeItemsInOpenApproval } from "../../lib/gradeApprovals.js";
 import { buildAddProgramScreenForm } from "./addProgramForm.js";
 import { buildAddSessionScreenForm } from "./addSessionForm.js";
 import {
@@ -204,7 +205,7 @@ type InstructorCtx = {
     courseCode: string;
     weightPercent: number;
   }>;
-  announcementPosts: Array<{ id: string; title: string; body: string; when: string }>;
+  announcementPosts: Array<{ id: string; title: string; body: string; when: string; sectionId: string | null; audience: string }>;
   submissions: Array<{
     id: string;
     status: string;
@@ -251,6 +252,39 @@ function letterFromPct(p: number | null) {
 function adminSectionId(user: SessionClaims, path?: string) {
   if (!path || !(user.roles.includes("admin") || user.roles.includes("registrar"))) return null;
   return /^\/instructor\/sections\/([0-9a-z-]{36})(?:[/?]|$)/i.exec(path)?.[1] ?? null;
+}
+
+const SECTION_ID_RE = /^[0-9a-z-]{36}$/i;
+
+/** Sections named by a screen path (workspace URL, `view`, `sectionId`) or action payload must be taught by the caller; admins/registrars may open any section in their institution. */
+export async function assertInstructorSectionAccess(user: SessionClaims, path: string, rowKey?: string) {
+  const { pathname, query } = parseScreenQuery(path);
+  const workspaceId = /^\/instructor\/sections\/([^/]+)$/.exec(pathname.replace(/\/+$/, ""))?.[1] ?? "";
+  const ids = new Set<string>();
+  for (const raw of [workspaceId, query.get("view"), query.get("sectionId")]) {
+    const id = (raw || "").trim();
+    if (SECTION_ID_RE.test(id)) ids.add(id);
+  }
+  if (rowKey?.trim().startsWith("{")) {
+    try {
+      const parsed = JSON.parse(rowKey) as { sectionId?: unknown };
+      if (typeof parsed.sectionId === "string" && SECTION_ID_RE.test(parsed.sectionId.trim())) ids.add(parsed.sectionId.trim());
+    } catch {
+      /* not a JSON payload */
+    }
+  }
+  if (!ids.size) return;
+  const sections = await prisma.section.findMany({
+    where: { id: { in: [...ids] }, institutionId: user.institutionId },
+    select: { id: true, instructorPersonId: true },
+  });
+  if (SECTION_ID_RE.test(workspaceId) && !sections.some((s) => s.id === workspaceId)) {
+    throw Object.assign(new Error("Course section not found"), { status: 404, code: "NOT_FOUND" });
+  }
+  if (user.roles.includes("admin") || user.roles.includes("registrar")) return;
+  if (sections.some((s) => s.instructorPersonId !== user.personId)) {
+    throw Object.assign(new Error("You do not teach this course section"), { status: 403, code: "FORBIDDEN" });
+  }
 }
 
 async function loadCtx(user: SessionClaims, path?: string): Promise<InstructorCtx> {
@@ -405,22 +439,20 @@ async function loadCtx(user: SessionClaims, path?: string): Promise<InstructorCt
     where: {
       institutionId: user.institutionId,
       role: "instructor",
-      OR: [
-        { screenPath: { contains: "announcement" } },
-        { audienceAccountId: user.accountId, primaryText: { not: "" } },
-      ],
+      screenPath: { contains: "announcement" },
+      audienceAccountId: user.accountId,
     },
     orderBy: { createdAt: "desc" },
     take: 30,
   });
-  const announcementPosts = announcementRecords
-    .filter((r) => r.screenPath.includes("announcement"))
-    .map((r) => ({
-      id: r.id,
-      title: r.primaryText,
-      body: r.secondaryText ?? "",
-      when: r.createdAt.toLocaleString(),
-    }));
+  const announcementPosts = announcementRecords.map((r) => ({
+    id: r.id,
+    title: r.primaryText,
+    body: r.secondaryText ?? "",
+    when: r.createdAt.toLocaleString(),
+    sectionId: (r.href && parseScreenQuery(r.href).query.get("sectionId")) || null,
+    audience: r.metaText?.startsWith("Posted to ") ? r.metaText.slice("Posted to ".length) : "All enrolled",
+  }));
 
   const programRows = await prisma.program.findMany({
     where: { institutionId: user.institutionId },
@@ -1127,7 +1159,11 @@ async function buildCourseDetail(ctx: InstructorCtx, path: string): Promise<Inst
   const viewId = (query.get("view") || "").trim();
   const sectionId = viewId || pathname.split("/").pop() || "";
   const names = instructorNameParts(ctx.displayName);
-  const sec = ctx.sections.find((s) => s.id === sectionId) || ctx.sections[0];
+  const explicitId = /^\/instructor\/sections\/[^/]+$/.test(pathname) && sectionId !== "demo";
+  const sec = ctx.sections.find((s) => s.id === sectionId) || (explicitId ? undefined : ctx.sections[0]);
+  if (explicitId && !sec) {
+    throw Object.assign(new Error("Course section not found"), { status: 404, code: "NOT_FOUND" });
+  }
 
   if (!sec) {
     const code = "—";
@@ -1300,18 +1336,17 @@ async function buildCourseDetail(ctx: InstructorCtx, path: string): Promise<Inst
   return payload;
 }
 
-function buildAnnouncements(ctx: InstructorCtx): InstructorLivePayload {
-  const sec = primarySection(ctx);
-  const posts =
-    ctx.announcementPosts.length > 0
-      ? ctx.announcementPosts.map((p) => ({
-          title: p.title,
-          body: p.body,
-          when: p.when,
-          audience: "All enrolled",
-          pinned: false,
-        }))
-      : [];
+function buildAnnouncements(ctx: InstructorCtx, path = ""): InstructorLivePayload {
+  const requested = parseScreenQuery(path).query.get("sectionId")?.trim() || "";
+  const sec = ctx.sections.find((s) => s.id === requested) || primarySection(ctx);
+  const posts = ctx.announcementPosts.map((p) => ({
+    title: p.title,
+    body: p.body,
+    when: p.when,
+    audience: p.audience,
+    sectionId: p.sectionId,
+    pinned: false,
+  }));
   return {
     title: "Course Announcements",
     subtitle: sec
@@ -1320,6 +1355,12 @@ function buildAnnouncements(ctx: InstructorCtx): InstructorLivePayload {
     primaryAction: "New Announcement",
     announcements: {
       course: sec ? `${sec.courseCode} · ${sec.courseTitle}` : "All sections",
+      sectionId: sec?.id ?? null,
+      sections: ctx.sections.map((s) => ({
+        id: s.id,
+        label: `${s.courseCode} · ${s.code} — ${s.courseTitle}`,
+        enrolled: s.enrolments.filter((e) => e.status === "enrolled").length,
+      })),
       posts,
       compose: {
         titleLabel: "Announcement title",
@@ -3354,6 +3395,7 @@ async function buildLectureReview(ctx: InstructorCtx, path: string): Promise<Ins
     primaryAction: "Share with Class",
     lectureReview: {
       title,
+      sectionId: sec?.id ?? null,
       meta: `${sec ? `${sec.courseCode} · ${sec.code}` : "Course"} · ${when} · ${location} · ${attendanceLine}`,
       transcript: session
         ? "No recording or transcript is stored for this session yet."
@@ -3986,7 +4028,7 @@ async function routePayload(
     return buildGradebook(ctx);
   }
   if (p.includes("message") || p.includes("t16")) return buildMessages(ctx);
-  if (p.includes("announcement") || p.includes("t23")) return buildAnnouncements(ctx);
+  if (p.includes("announcement") || p.includes("t23")) return buildAnnouncements(ctx, path);
   if (p.includes("notification") || p.includes("t17")) return buildNotifications(ctx);
   if (
     p.includes("profile") ||
@@ -4074,6 +4116,7 @@ export async function buildInstructorScreen(
   user: SessionClaims,
   opts?: { studentId?: string | null },
 ) {
+  await assertInstructorSectionAccess(user, path);
   const ctx = await loadCtx(user, path);
   const overlay = await loadScreenOverlay(user.institutionId, path);
   const payload = mergeOverlayRows(await routePayload(path, ctx, overlay, opts?.studentId), overlay, path);
@@ -6586,8 +6629,14 @@ async function createOrSaveAssessment(
   };
 }
 
-async function postAnnouncement(ctx: InstructorCtx, title: string, body: string) {
-  const studentIds = [...new Set(ctx.sections.flatMap((s) => s.enrolments.map((e) => e.studentId)))];
+async function postAnnouncement(ctx: InstructorCtx, title: string, body: string, sectionId?: string | null) {
+  const sec = sectionId ? ctx.sections.find((s) => s.id === sectionId) : primarySection(ctx);
+  if (!sec) {
+    throw Object.assign(new Error(sectionId ? "You do not teach this course section" : "No teaching section to announce to"), {
+      status: sectionId ? 403 : 400,
+    });
+  }
+  const studentIds = [...new Set(sec.enrolments.filter((e) => e.status === "enrolled").map((e) => e.studentId))];
   const students = await prisma.student.findMany({
     where: { id: { in: studentIds }, institutionId: ctx.user.institutionId },
     select: { personId: true },
@@ -6617,17 +6666,19 @@ async function postAnnouncement(ctx: InstructorCtx, title: string, body: string)
       role: "instructor",
       primaryText: title,
       secondaryText: body.slice(0, 120),
-      metaText: "Posted",
-      href: "/instructor/announcements",
+      metaText: `Posted to ${sec.courseCode} · ${sec.code}`,
+      href: `/instructor/announcements?sectionId=${encodeURIComponent(sec.id)}`,
       sortOrder: 0,
       audienceAccountId: ctx.user.accountId,
     },
   });
-  return accounts.length;
+  return { recipients: accounts.length, section: sec };
 }
 
 async function publishDraftGrades(ctx: InstructorCtx) {
-  const drafts = ctx.grades.filter((g) => g.status === "draft");
+  const draftIds = ctx.grades.filter((g) => g.status === "draft").map((g) => g.id);
+  const alreadyPending = await gradeItemsInOpenApproval(ctx.user.institutionId, draftIds);
+  const drafts = ctx.grades.filter((g) => g.status === "draft" && !alreadyPending.has(g.id));
   if (!drafts.length) return { count: 0, approvals: 0 };
   const bySection = new Map<string, string[]>();
   for (const g of drafts) {
@@ -6640,7 +6691,7 @@ async function publishDraftGrades(ctx: InstructorCtx) {
   let approvals = 0;
   for (const [sectionId, gradeItemIds] of bySection) {
     await prisma.gradeItem.updateMany({
-      where: { id: { in: gradeItemIds } },
+      where: { id: { in: gradeItemIds }, institutionId: ctx.user.institutionId, status: "draft" },
       data: { status: "pending_publish" },
     });
     await prisma.approvalRequest.create({
@@ -7061,6 +7112,7 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
   const path = input.path;
   const action = input.action.trim();
   const lower = action.toLowerCase();
+  await assertInstructorSectionAccess(user, path, input.rowKey);
   const ctx = await loadCtx(user, path);
   let message = `Saved · ${action}`;
   let result: Record<string, unknown> = {};
@@ -7112,27 +7164,30 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
     } else if (lower.includes("announcement") || lower.includes("share with class") || lower.includes("publish announcement")) {
       let title = input.rowKey || `Class update · ${new Date().toLocaleDateString()}`;
       let body = `${ctx.displayName} posted: ${title}`;
+      let sectionId = parseScreenQuery(path).query.get("sectionId")?.trim() || null;
       if (input.rowKey?.startsWith("{")) {
         try {
-          const parsed = JSON.parse(input.rowKey) as { title?: string; body?: string };
+          const parsed = JSON.parse(input.rowKey) as { title?: string; body?: string; sectionId?: string };
           if (parsed.title) title = parsed.title;
           if (parsed.body) body = parsed.body;
+          if (parsed.sectionId?.trim()) sectionId = parsed.sectionId.trim();
         } catch {
           /* keep defaults */
         }
       } else if (path.includes("lecture-review") || path.includes("in-09")) {
         const review = (await buildLectureReview(ctx, path)).lectureReview as
-          | { title?: string; meta?: string; transcript?: string; highlights?: string[]; aiNotes?: string }
+          | { title?: string; sectionId?: string | null; meta?: string; transcript?: string; highlights?: string[]; aiNotes?: string }
           | undefined;
         if (review?.title) {
           title = `Lecture notes · ${review.title}`;
           const highlights = (review.highlights ?? []).map((h) => `• ${h}`).join("\n");
           body = [review.meta, review.transcript, highlights, review.aiNotes].filter(Boolean).join("\n\n");
         }
+        if (review?.sectionId) sectionId = review.sectionId;
       }
-      const n = await postAnnouncement(ctx, title, body);
-      message = `Announcement sent to ${n} student account(s)`;
-      result = { recipients: n, title };
+      const posted = await postAnnouncement(ctx, title, body, sectionId);
+      message = `Announcement sent to ${posted.recipients} student account(s) in ${posted.section.courseCode} · ${posted.section.code}`;
+      result = { recipients: posted.recipients, title, sectionId: posted.section.id };
     } else if (
       lower.includes("save availability") ||
       (lower.includes("availability") && lower.includes("save"))

@@ -163,7 +163,14 @@ campusComplianceRouter.get(
     try {
       const user = (req as AuthedRequest).user;
       const days = Number(req.query.days ?? 7);
-      res.json(await mobileJoinReport(user.institutionId, Number.isFinite(days) ? days : 7));
+      const institutionWide = user.roles.includes("admin") || user.roles.includes("registrar");
+      res.json(
+        await mobileJoinReport(
+          user.institutionId,
+          Number.isFinite(days) ? days : 7,
+          institutionWide ? undefined : user.personId,
+        ),
+      );
     } catch (err) {
       next(err);
     }

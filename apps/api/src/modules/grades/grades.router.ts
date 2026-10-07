@@ -12,6 +12,7 @@ import { prisma } from "@myheritage/db";
 import { requireApproval } from "@myheritage/auth";
 import { writeAuditAndOutbox } from "@myheritage/events";
 import { requireAuth, requireRoles, type AuthedRequest } from "../../middleware/auth.js";
+import { gradeAwaitingApprovalError, gradeItemsInOpenApproval } from "../../lib/gradeApprovals.js";
 import { currentStudentId } from "../me/studentAlignment.js";
 
 export const gradesRouter: Router = Router();
@@ -295,6 +296,7 @@ gradesRouter.post("/", requireAuth, requireRoles("instructor", "admin"), async (
       if (existing.status === "published") {
         throw Object.assign(new Error("Published grades are read-only"), { code: "CONFLICT", status: 409 });
       }
+      if ((await gradeItemsInOpenApproval(user.institutionId, [existing.id])).size) throw gradeAwaitingApprovalError();
       const updated = await prisma.$transaction(async (tx) => {
         const row = await tx.gradeItem.update({
           where: { id: existing.id },
@@ -369,7 +371,7 @@ gradesRouter.patch("/:id", requireAuth, requireRoles("instructor", "admin"), asy
     if (existing.status === "published") {
       throw Object.assign(new Error("Published grades are read-only"), { code: "CONFLICT", status: 409 });
     }
-    // pending_publish can be recalled to draft when instructor edits before approval is applied
+    if ((await gradeItemsInOpenApproval(user.institutionId, [existing.id])).size) throw gradeAwaitingApprovalError();
     if (existing.rowVersion !== body.rowVersion) {
       throw Object.assign(new Error("Stale row_version — refresh and try again"), { code: "CONFLICT", status: 409 });
     }
@@ -458,6 +460,15 @@ gradesRouter.post(
       });
       if (grades.length !== body.gradeItemIds.length) {
         throw Object.assign(new Error("One or more grade items not found"), { code: "NOT_FOUND", status: 404 });
+      }
+      if (grades.some((g) => g.status === "published")) {
+        throw Object.assign(new Error("Published grades are read-only"), { code: "CONFLICT", status: 409 });
+      }
+      if ((await gradeItemsInOpenApproval(user.institutionId, body.gradeItemIds)).size) {
+        throw Object.assign(new Error("One or more of these grades are already awaiting approval in another request"), {
+          code: "CONFLICT",
+          status: 409,
+        });
       }
       try {
         const response = await prisma.$transaction(async (tx) => {
