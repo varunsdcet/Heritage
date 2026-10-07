@@ -26,6 +26,7 @@ export function MonicaLecture() {
   const [speed, setSpeed] = useState(1);
   const [index, setIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [finished, setFinished] = useState(false);
   const [avatarReady, setAvatarReady] = useState(false);
   const [status, setStatus] = useState("Loading teacher…");
   const [error, setError] = useState("");
@@ -56,7 +57,7 @@ export function MonicaLecture() {
   const words = useMemo(() => (script.trim() ? script.trim().split(/\s+/).length : 0), [script]);
   const estimate = (i: number) => durations[i] ?? parts[i].text.length / CHARS_PER_SEC / speed;
   const totalSec = parts.reduce((sum, _p, i) => sum + estimate(i), 0);
-  const elapsedSec = parts.slice(0, index).reduce((sum, _p, i) => sum + estimate(i), 0);
+  const elapsedSec = finished ? totalSec : parts.slice(0, index).reduce((sum, _p, i) => sum + estimate(i), 0);
 
   const resetVoice = useCallback(() => {
     cacheRef.current.clear();
@@ -131,6 +132,7 @@ export function MonicaLecture() {
       const run = ++runRef.current;
       playingRef.current = true;
       setPlaying(true);
+      setFinished(false);
       setError("");
       post({ type: "th-resume" });
       for (let i = start; i < parts.length; i++) {
@@ -168,6 +170,7 @@ export function MonicaLecture() {
       playingRef.current = false;
       setPlaying(false);
       setIndex(parts.length - 1);
+      setFinished(true);
       setStatus("Lecture finished");
       post({ type: "th-idle" });
     },
@@ -178,6 +181,7 @@ export function MonicaLecture() {
     const next = Math.max(0, Math.min(parts.length - 1, i));
     const wasPlaying = playingRef.current;
     if (wasPlaying) stop();
+    setFinished(false);
     setIndex(next);
     if (wasPlaying) void playFrom(next);
   };
@@ -185,6 +189,7 @@ export function MonicaLecture() {
   const startLecture = () => {
     if (!parts.length) return;
     setMode("lecture");
+    setFinished(false);
     setIndex(0);
     setError("");
     setStatus(avatarReady ? "Ready — press Play" : "Loading teacher…");
@@ -265,9 +270,9 @@ export function MonicaLecture() {
                     type="button"
                     className="mh-monica__btn mh-monica__btn--primary"
                     disabled={!avatarReady || !parts.length}
-                    onClick={() => void playFrom(index)}
+                    onClick={() => void playFrom(finished ? 0 : index)}
                   >
-                    {index > 0 ? "Resume" : "Play lecture"}
+                    {finished ? "Play again" : index > 0 ? "Resume" : "Play lecture"}
                   </button>
                 )}
                 <button
