@@ -28,6 +28,86 @@ function extractMarks(ssml: string): { words: string[]; plain: string } {
   return { words, plain: words.join(" ").trim() };
 }
 
+type TtsResult = { audioContent: string; timepoints: { markName: string; timeSeconds: number }[] };
+
+/** Text between TalkingHead's `<mark name='i'/>` tags, indexed by mark number (empty entries kept so indices line up). */
+function markParts(ssml: string): string[] {
+  const body = ssml.replace(/<\/?speak>/gi, "").replace(/<break[^>]*\/>/gi, " ");
+  return body.split(/<mark\s+name=['"]?\d+['"]?\s*\/>/i).map((p) =>
+    p
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&amp;/g, "&")
+      .replace(/\s+/g, " ")
+      .trim(),
+  );
+}
+
+const HEYGEN_CACHE = new Map<string, TtsResult>();
+const HEYGEN_CACHE_MAX = 300;
+const RATE = new Map<string, { windowStart: number; count: number }>();
+
+/** The endpoint is reachable without a session (the avatar iframe calls it), so cap paid synthesis per client. */
+function rateLimited(req: NextRequest) {
+  const ip = (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() || req.headers.get("x-real-ip") || "local";
+  const now = Date.now();
+  const entry = RATE.get(ip);
+  if (!entry || now - entry.windowStart > 60_000) {
+    RATE.set(ip, { windowStart: now, count: 1 });
+    if (RATE.size > 5000) RATE.clear();
+    return false;
+  }
+  entry.count += 1;
+  return entry.count > 60;
+}
+
+async function heygenSynthesize(parts: string[], voiceId: string, apiKey: string, speed: number): Promise<TtsResult> {
+  const text = parts.filter(Boolean).join(" ");
+  const cacheKey = `${voiceId}|${speed}|${text}`;
+  const cached = HEYGEN_CACHE.get(cacheKey);
+  if (cached) return cached;
+
+  const res = await fetch("https://api.heygen.com/v3/voices/speech", {
+    method: "POST",
+    headers: { "x-api-key": apiKey, "content-type": "application/json" },
+    body: JSON.stringify({ text, voice_id: voiceId, speed, language: "en" }),
+    signal: AbortSignal.timeout(45_000),
+  });
+  const json = (await res.json().catch(() => ({}))) as {
+    data?: { audio_url?: string; duration?: number; word_timestamps?: { word: string; start: number; end: number }[] | null };
+    error?: { message?: string };
+  };
+  if (!res.ok || !json.data?.audio_url) throw new Error(json.error?.message || `HeyGen TTS HTTP ${res.status}`);
+
+  const audioRes = await fetch(json.data.audio_url, { signal: AbortSignal.timeout(45_000) });
+  if (!audioRes.ok) throw new Error(`HeyGen audio download HTTP ${audioRes.status}`);
+  const audio = Buffer.from(await audioRes.arrayBuffer());
+
+  const words = (json.data.word_timestamps || []).filter((w) => !/^<.*>$/.test(w.word));
+  const duration = json.data.duration || words.at(-1)?.end || Math.max(1.2, text.length * 0.055);
+  const starts: number[] = [];
+  let j = 0;
+  let last = 0;
+  for (const part of parts) {
+    const tokens = part ? part.split(" ").length : 0;
+    if (tokens && j < words.length) last = words[j].start;
+    starts.push(last);
+    j += tokens;
+  }
+  const aligned = words.length > 0 && Math.abs(j - words.length) <= Math.max(2, Math.round(words.length * 0.1));
+  const timepoints = aligned
+    ? starts.slice(1).map((t, i) => ({ markName: String(i + 1), timeSeconds: Number(t.toFixed(3)) }))
+    : fabricateTimepoints(parts.map((p) => p || " "), duration);
+
+  const result = { audioContent: audio.toString("base64"), timepoints };
+  if (HEYGEN_CACHE.size >= HEYGEN_CACHE_MAX) HEYGEN_CACHE.delete(HEYGEN_CACHE.keys().next().value as string);
+  HEYGEN_CACHE.set(cacheKey, result);
+  return result;
+}
+
 function isMaleVoice(name?: string, pitch?: number): boolean {
   if (pitch !== undefined && pitch < -0.5) return true;
   const n = (name || "").toLowerCase();
@@ -164,7 +244,28 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Empty TTS input" }, { status: 400 });
     }
 
+    if (plain.length > 5000) {
+      return NextResponse.json({ error: "TTS input too long" }, { status: 413 });
+    }
+
     const male = isMaleVoice(body.voice?.name, body.audioConfig?.pitch);
+
+    const heygenKey = (process.env.HEYGEN_API_KEY || "").trim();
+    const heygenVoice = (male ? process.env.HEYGEN_MALE_VOICE_ID : process.env.HEYGEN_VOICE_ID)?.trim();
+    if (heygenKey && heygenVoice) {
+      if (rateLimited(req)) {
+        return NextResponse.json({ error: "Too many narration requests. Try again in a minute." }, { status: 429 });
+      }
+      try {
+        const parts = ssml ? markParts(ssml) : [plain];
+        const speed = Math.min(2, Math.max(0.5, body.audioConfig?.speakingRate || 1));
+        const data = await heygenSynthesize(parts, heygenVoice, heygenKey, speed);
+        return NextResponse.json({ ...data, source: "heygen", gender: male ? "male" : "female" });
+      } catch (err) {
+        console.warn("HeyGen TTS failed, falling back to Google TTS:", err);
+      }
+    }
+
     const apiKey = (process.env.GOOGLE_TTS_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
 
     // Optional: real Google Cloud Neural2-D / Neural2-F when a key is present
