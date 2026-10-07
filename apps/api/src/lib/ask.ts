@@ -14,8 +14,40 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = ASK_
 export type AskResult = {
   answer: string;
   model: string;
-  source: "humanitix" | "openai" | "anthropic" | "fallback";
+  source: "deepseek" | "humanitix" | "openai" | "anthropic" | "fallback";
 };
+
+async function callDeepSeek(
+  systemPrompt: string,
+  question: string,
+  timeoutMs = ASK_TIMEOUT_MS,
+  maxTokens?: number,
+  json = false,
+): Promise<AskResult> {
+  const key = process.env.DEEPSEEK_API_KEY;
+  if (!key) throw new Error("DEEPSEEK_API_KEY missing");
+  const model = process.env.DEEPSEEK_MODEL || "deepseek-chat";
+  const base = (process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com").replace(/\/+$/, "");
+  const response = await fetchWithTimeout(`${base}/chat/completions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    body: JSON.stringify({
+      model,
+      temperature: 0.2,
+      ...(maxTokens ? { max_tokens: maxTokens } : {}),
+      ...(json ? { response_format: { type: "json_object" } } : {}),
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: question },
+      ],
+    }),
+  }, timeoutMs);
+  if (!response.ok) throw new Error(`DeepSeek failed: ${response.status}`);
+  const body = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  const answer = body.choices?.[0]?.message?.content?.trim();
+  if (!answer) throw new Error("DeepSeek empty answer");
+  return { answer, model: `deepseek:${model}`, source: "deepseek" };
+}
 
 function askConfigured() {
   const url = process.env.HUMANITIX_ASK_URL || DEFAULT_ASK_URL;
@@ -99,8 +131,14 @@ async function callAnthropic(systemPrompt: string, question: string, timeoutMs =
 }
 
 /** Long-form generation (lesson drafts etc.): same provider chain, longer timeout, throws when every provider fails. */
-export async function generateWithAi(systemPrompt: string, prompt: string, timeoutMs = 75_000): Promise<AskResult> {
+export async function generateWithAi(
+  systemPrompt: string,
+  prompt: string,
+  timeoutMs = 75_000,
+  options: { json?: boolean } = {},
+): Promise<AskResult> {
   const attempts: Array<[string, () => Promise<AskResult>]> = [];
+  if (process.env.DEEPSEEK_API_KEY) attempts.push(["deepseek", () => callDeepSeek(systemPrompt, prompt, timeoutMs, 8000, options.json)]);
   if (askConfigured()) attempts.push(["humanitix", () => callHumanitixAsk(systemPrompt, prompt, timeoutMs)]);
   if (process.env.ANTHROPIC_API_KEY) attempts.push(["anthropic", () => callAnthropic(systemPrompt, prompt, timeoutMs, 8000)]);
   if (process.env.OPENAI_API_KEY) attempts.push(["openai", () => callOpenAi(systemPrompt, prompt, timeoutMs, 8000)]);
@@ -132,12 +170,23 @@ export async function askHeritageAi(input: {
   }
   const systemPrompt =
     input.systemPrompt ||
-    `You are Ask Heritage, the campus AI assistant for MyHeritage AI Campus OS.
+    `You are Ask Heritage, the campus AI assistant for MyHeritage.
 Help ${input.role || "campus"} users with courses, grades, schedules, fees, attendance, and campus policies.
 Be concise, accurate, and cite which campus area the answer relates to.
 Never invent student grades or financial balances — tell the user to open the relevant portal screen.`;
 
   const errors: string[] = [];
+  if (process.env.DEEPSEEK_API_KEY) {
+    try {
+      const result = await callDeepSeek(systemPrompt, question, 20_000);
+      if (!result.answer || result.answer.trim().toLowerCase() === question.toLowerCase()) {
+        throw new Error("DeepSeek returned empty or echoed question");
+      }
+      return result;
+    } catch (err) {
+      errors.push(err instanceof Error ? err.message : "deepseek failed");
+    }
+  }
   if (askConfigured()) {
     try {
       const result = await callHumanitixAsk(systemPrompt, question);
@@ -172,14 +221,12 @@ Never invent student grades or financial balances — tell the user to open the 
     }
   }
 
+  if (errors.length) console.error("askHeritageAi providers failed", errors);
   return {
     answer: [
       "I couldn't reach the live AI provider just now.",
       "Try Global Search for people/courses, or open Grades, Fees, Attendance, and Schedule from your portal.",
-      errors.length ? `(debug: ${errors.join("; ")})` : "",
-    ]
-      .filter(Boolean)
-      .join("\n"),
+    ].join("\n"),
     model: "fallback",
     source: "fallback",
   };

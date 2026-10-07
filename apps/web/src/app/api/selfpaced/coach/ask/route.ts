@@ -38,6 +38,30 @@ async function callHumanitix(systemPrompt: string, question: string): Promise<As
   };
 }
 
+async function callDeepSeek(systemPrompt: string, question: string): Promise<AskResult> {
+  const key = process.env.DEEPSEEK_API_KEY;
+  if (!key) throw new Error("no deepseek");
+  const model = process.env.DEEPSEEK_MODEL || "deepseek-chat";
+  const base = (process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com").replace(/\/+$/, "");
+  const response = await fetchWithTimeout(`${base}/chat/completions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    body: JSON.stringify({
+      model,
+      temperature: 0.2,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: question },
+      ],
+    }),
+  }, 20_000);
+  if (!response.ok) throw new Error(`deepseek ${response.status}`);
+  const body = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  const answer = body.choices?.[0]?.message?.content?.trim();
+  if (!answer) throw new Error("empty deepseek");
+  return { answer, model: `deepseek:${model}`, source: "deepseek" };
+}
+
 async function callOpenAi(systemPrompt: string, question: string): Promise<AskResult> {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("no openai");
@@ -252,7 +276,7 @@ export async function POST(req: NextRequest) {
           : [],
     });
     const errors: string[] = [];
-    for (const fn of [callHumanitix, callAnthropic, callOpenAi]) {
+    for (const fn of [callDeepSeek, callHumanitix, callAnthropic, callOpenAi]) {
       try {
         const result = await fn(systemPrompt, question);
         if (result.answer && result.answer.toLowerCase() !== question.toLowerCase()) {

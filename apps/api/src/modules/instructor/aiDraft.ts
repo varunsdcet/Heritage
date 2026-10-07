@@ -91,7 +91,7 @@ Rules:
 
   let lastError = "";
   for (let attempt = 0; attempt < 2; attempt++) {
-    const ai = await generateWithAi(system, attempt ? `${prompt}\nReturn valid JSON only.` : prompt);
+    const ai = await generateWithAi(system, attempt ? `${prompt}\nReturn valid JSON only.` : prompt, 150_000, { json: true });
     try {
       const draft = Draft.parse(extractJson(ai.answer));
       const storyboard = normalizeStoryboard(draft.storyboard, input.lessonTitle, input.minutes);

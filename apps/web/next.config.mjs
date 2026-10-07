@@ -8,6 +8,8 @@ const nextConfig = {
     externalDir: true,
     // Requests proxied through /__api are buffered up to this size; base64 uploads of 10 MiB files need ~14 MB.
     middlewareClientMaxBodySize: "20mb",
+    // AI drafts (lesson + quiz + narrated slideshow) can take well over the 30 s default to generate.
+    proxyTimeout: 180_000,
   },
   images: {
     remotePatterns: [{ protocol: "https", hostname: "images.unsplash.com" }],
