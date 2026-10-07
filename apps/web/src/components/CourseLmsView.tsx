@@ -3,6 +3,7 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { AddActivityChooser } from "@/components/AddActivityChooser";
+import { CourseAiBuilderDialog } from "@/components/ai-draft/CourseAiBuilderDialog";
 import { CourseAiDraftDialog } from "@/components/ai-draft/CourseAiDraftDialog";
 import { LmsAddForm } from "@/components/lms/LmsAddForm";
 import {
@@ -932,6 +933,7 @@ function CourseContentPanel({
   const [chooserTopicId, setChooserTopicId] = useState<string | null>(null);
   const searchParams = useSearchParams();
   const [aiDraftTopicId, setAiDraftTopicId] = useState<string | null>(() => (searchParams.get("aiDraft") === "1" ? "" : null));
+  const [aiCourseOpen, setAiCourseOpen] = useState(() => searchParams.get("aiCourse") === "1");
 
   return (
     <section className="mh-lms-course">
@@ -957,6 +959,11 @@ function CourseContentPanel({
             onClick={() => setAiDraftTopicId("")}
           >
             ✦ AI draft
+          </button>
+        ) : null}
+        {editMode && live?.path ? (
+          <button type="button" className="mh-teacher-btn" disabled={live?.busy} onClick={() => setAiCourseOpen(true)}>
+            ✦ AI course builder
           </button>
         ) : null}
       </div>
@@ -1078,6 +1085,9 @@ function CourseContentPanel({
           runAction={live.runAction}
           onClose={() => setAiDraftTopicId(null)}
         />
+      ) : null}
+      {aiCourseOpen && live?.path ? (
+        <CourseAiBuilderDialog path={live.path} onClose={() => setAiCourseOpen(false)} onPublished={() => void live.refresh?.()} />
       ) : null}
       {chooserTopicId ? (
         <AddActivityChooser

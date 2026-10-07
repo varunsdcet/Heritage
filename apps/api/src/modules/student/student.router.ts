@@ -6,6 +6,7 @@ import {
   MAX_STUDENT_FILE_BYTES,
   StudentAssignmentSummary,
   StudentAssignmentsResponse,
+  StudentQuizAttemptResponse,
   SubmitStudentAssignmentResponse,
   UploadStudentSubmissionFileRequest,
   UploadStudentSubmissionFileResponse,
@@ -27,6 +28,7 @@ import {
   listStudentSessions,
   listStudentWorkshops,
   registerStudentWorkshop,
+  requireStudent,
   listLeaveOfAbsence,
   createLeaveOfAbsence,
   listRequiredTasks,
@@ -59,6 +61,7 @@ import { sessionJoinUrl } from "../../lib/liveClass.js";
 import { bytesMatchMime, decodeBase64 } from "../../lib/fileSniff.js";
 import { readSubmissionFile, submissionStorageRoot } from "../../lib/submissionFiles.js";
 import { currentStudentId } from "../me/studentAlignment.js";
+import { submitQuizAttempt } from "../instructor/lmsQuiz.js";
 
 export const studentRouter: Router = Router();
 
@@ -890,6 +893,17 @@ studentRouter.get("/calendars", requireAuth, requireRoles("student"), async (req
 studentRouter.get("/courses/:sectionId/lms", requireAuth, requireRoles("student"), async (req, res, next) => {
   try {
     res.json(await getStudentCourseLms((req as AuthedRequest).user, String(req.params.sectionId)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+studentRouter.post("/courses/:sectionId/quizzes/:activityId/attempts", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    const student = await requireStudent(user);
+    const result = await submitQuizAttempt(user, student, String(req.params.sectionId), String(req.params.activityId), req.body);
+    res.status(201).json(StudentQuizAttemptResponse.parse(result));
   } catch (error) {
     next(error);
   }

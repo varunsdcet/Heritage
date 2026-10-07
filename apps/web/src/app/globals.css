@@ -20844,6 +20844,170 @@ button.mh-sis-tax__download:disabled {
   padding: 12px 20px 18px;
   border-top: 1px solid #eeeae0;
 }
+.mh-ai-draft-modal.mh-ai-course {
+  width: min(1100px, 100%);
+}
+.mh-ai-course > .mh-ai-draft-modal__note,
+.mh-ai-course > .mh-ai-draft-modal__help {
+  padding: 0 20px;
+}
+.mh-ai-course__steps {
+  display: flex;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 12px 20px 0;
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+.mh-ai-course__steps li {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #f3f1ea;
+}
+.mh-ai-course__steps li.is-active {
+  background: #1f3a2c;
+  color: #fff;
+}
+.mh-ai-course__steps li.is-done {
+  color: #1f3a2c;
+}
+.mh-ai-course__ok {
+  margin: 10px 20px 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #ecfdf3;
+  color: #14532d;
+  font-size: 0.85rem;
+}
+.mh-ai-course__progress {
+  margin: 12px 20px 6px;
+  font-size: 0.88rem;
+  color: #1f3a2c;
+}
+.mh-ai-course__items progress {
+  display: block;
+  width: calc(100% - 40px);
+  margin: 0 20px 10px;
+}
+.mh-ai-course__blueprint {
+  padding: 12px 20px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.mh-ai-course__blueprint h3 {
+  margin: 10px 0 0;
+  font-size: 0.95rem;
+}
+.mh-ai-course__blueprint label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.mh-ai-course__blueprint input,
+.mh-ai-course__blueprint textarea,
+.mh-ai-course__blueprint select,
+.mh-ai-course__table input,
+.mh-ai-course__table select {
+  font: inherit;
+  font-weight: 400;
+  padding: 6px 8px;
+  border: 1px solid #d6d1c4;
+  border-radius: 6px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.mh-ai-course__blueprint .mh-ai-course__inline {
+  flex-direction: row;
+  align-items: center;
+}
+.mh-ai-course__inline > span {
+  flex: 0 0 140px;
+  color: #4b5563;
+}
+.mh-ai-course__module {
+  border: 1px solid #eeeae0;
+  border-radius: 8px;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mh-ai-course__module summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.mh-ai-course__module summary em {
+  font-weight: 400;
+  color: #6b7280;
+}
+.mh-ai-course__module[open] > label {
+  margin-top: 8px;
+}
+.mh-ai-course__table {
+  width: calc(100% - 40px);
+  margin: 0 20px 8px;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.mh-ai-course__blueprint .mh-ai-course__table {
+  width: 100%;
+  margin: 0;
+}
+.mh-ai-course__table th,
+.mh-ai-course__table td {
+  border-bottom: 1px solid #eeeae0;
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+.mh-ai-course__table td:last-child {
+  white-space: nowrap;
+}
+.mh-ai-course__table td button + button {
+  margin-left: 6px;
+}
+.mh-ai-course__bad {
+  color: #b91c1c;
+}
+.mh-ai-course__err {
+  font-size: 0.78rem;
+  color: #b91c1c;
+  white-space: normal;
+}
+.mh-ai-course__checks {
+  list-style: none;
+  margin: 12px 20px 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f8f7f2;
+  font-size: 0.84rem;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mh-ai-course__checks .is-ok {
+  color: #14532d;
+}
+.mh-ai-course__checks .is-bad {
+  color: #b91c1c;
+}
+.mh-ai-quiz-staff {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.mh-ai-quiz-staff ol {
+  padding-left: 20px;
+}
+.mh-ai-quiz-staff li .is-answer {
+  font-weight: 700;
+  color: #14532d;
+}
 .mh-ai-draft-story__meta {
   display: flex;
   flex-wrap: wrap;

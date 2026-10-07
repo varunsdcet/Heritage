@@ -722,6 +722,12 @@ export const StudentLmsActivityView = z.object({
     .optional(),
   gradingMethod: z.string().optional(),
   questions: z.array(StudentQuizQuestionView).optional(),
+  /** Set only on auto-graded quizzes; `quizAttempt` is the student's graded first attempt. */
+  quizMinutes: z.number().nullable().optional(),
+  quizAttempt: z
+    .object({ score: z.number(), maxScore: z.number(), submittedAt: z.string() })
+    .nullable()
+    .optional(),
   storyboard: z
     .object({
       title: z.string(),
@@ -731,6 +737,13 @@ export const StudentLmsActivityView = z.object({
       ),
     })
     .optional(),
+});
+
+export const StudentQuizAttemptResponse = z.object({
+  score: z.number(),
+  maxScore: z.number(),
+  submittedAt: z.string(),
+  results: z.array(z.object({ id: z.string(), correct: z.boolean() })),
 });
 
 export const StudentLmsTopicView = z.object({

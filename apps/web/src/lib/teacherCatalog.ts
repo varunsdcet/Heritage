@@ -138,6 +138,13 @@ export type CourseLmsGroup = {
   members: Array<{ id: string; name: string }>;
 };
 
+/** Auto-graded quiz with its answer key; only ever present in staff payloads. */
+export type LmsQuizData = {
+  code: string;
+  minutes: number;
+  questions: Array<{ id: string; text: string; options: string[]; answer: number; rationale?: string; lessonId?: string | null }>;
+};
+
 export type LmsAssignmentSettings = {
   instructions?: string;
   availableFrom?: string;
@@ -183,6 +190,7 @@ export type CourseLmsState = {
       settings?: Record<string, string>;
       assignmentId?: string;
       assignment?: LmsAssignmentSettings;
+      quiz?: LmsQuizData;
     }>;
   }>;
   activityTypes?: Array<{ code: string; label: string; kind: string }>;

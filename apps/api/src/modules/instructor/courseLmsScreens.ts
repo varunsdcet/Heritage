@@ -3,6 +3,7 @@
 import { LMS_ACTIVITY_TYPES } from "../../lib/lifecycle-status.js";
 import { externalJoinUrl } from "../../lib/liveClass.js";
 import type { AiDraftStoryboard } from "./aiDraftContent.js";
+import type { LmsQuizData } from "./lmsQuiz.js";
 
 export const COURSE_LMS_TABS = ["Course", "Class List", "Attendance", "Grades", "Badges", "More"] as const;
 
@@ -72,6 +73,8 @@ export type CourseLmsActivity = {
     maxFileBytes?: number;
     acceptedTypes?: string;
   };
+  /** Auto-graded quiz. Holds the answer key — never send this field to students. */
+  quiz?: LmsQuizData;
 };
 
 export type CourseLmsQuestion = {

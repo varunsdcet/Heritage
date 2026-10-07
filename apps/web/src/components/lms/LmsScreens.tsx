@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import type { CourseLmsState, LmsAssignmentSettings } from "@/lib/teacherCatalog";
+import type { CourseLmsState, LmsAssignmentSettings, LmsQuizData } from "@/lib/teacherCatalog";
+import { api, loadSession } from "@/lib/api";
 import { useOptionalTeacherLive } from "@/lib/useTeacherSisLive";
 import { liveSectionId, openClassLink } from "@/lib/liveClass";
 import { LiveClassPanel } from "@/components/LiveClassPanel";
@@ -801,6 +802,7 @@ type Activity = {
   settings?: Record<string, string>;
   assignmentId?: string;
   assignment?: LmsAssignmentSettings;
+  quiz?: LmsQuizData;
 };
 
 function formatWhen(iso?: string) {
@@ -936,6 +938,105 @@ export function LessonBody({ body, empty }: { body?: string; empty: string }) {
   if (!body?.trim()) return <p className="mh-teacher-muted">{empty}</p>;
   if (!/<[a-z][^>]*>/i.test(body)) return <p style={{ whiteSpace: "pre-wrap" }}>{body}</p>;
   return <div className="mh-lms-lesson-html" dangerouslySetInnerHTML={{ __html: body }} />;
+}
+
+type QuizResults = {
+  submitted: number;
+  enrolled: number;
+  students: Array<{ studentId: string; name: string; studentNumber: string; score: number | null; maxScore: number; submittedAt: string | null }>;
+  questions: Array<{ id: string; correctRate: number | null }>;
+};
+
+function StaffQuizPanel({ quiz, activityId, path }: { quiz: LmsQuizData; activityId: string; path: string }) {
+  const [results, setResults] = useState<QuizResults | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [showKey, setShowKey] = useState(false);
+
+  async function loadResults() {
+    const session = loadSession();
+    if (!session?.accessToken || !path || !activityId) return;
+    setLoading(true);
+    setError("");
+    try {
+      setResults(
+        await api<QuizResults>(
+          `/instructor/lms-quiz-results?path=${encodeURIComponent(path)}&activityId=${encodeURIComponent(activityId)}`,
+          undefined,
+          session.accessToken,
+        ),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load results");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const rate = (id: string) => results?.questions.find((q) => q.id === id)?.correctRate;
+  return (
+    <div className="mh-ai-quiz-staff">
+      <p className="mh-teacher-muted">
+        {quiz.code} · {quiz.questions.length} questions{quiz.minutes ? ` · ${quiz.minutes} minutes` : ""} · auto-graded, first attempt counts. Students
+        never receive the answer key.
+      </p>
+      <div className="mh-lms-toolbar">
+        <button type="button" className="mh-teacher-btn" onClick={() => setShowKey((v) => !v)}>
+          {showKey ? "Hide answer key" : "Show answer key"}
+        </button>
+        <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary" disabled={loading || !path} onClick={() => void loadResults()}>
+          {loading ? "Loading…" : results ? "Refresh results" : "View results"}
+        </button>
+      </div>
+      {error ? <p className="mh-teacher-muted">{error}</p> : null}
+      {showKey ? (
+        <ol>
+          {quiz.questions.map((q) => (
+            <li key={q.id}>
+              <p>
+                {q.text}
+                {rate(q.id) != null ? <span className="mh-teacher-muted"> · {rate(q.id)}% correct</span> : null}
+              </p>
+              <ol type="A">
+                {q.options.map((o, i) => (
+                  <li key={i} className={i === q.answer ? "is-answer" : ""}>
+                    {o}
+                    {i === q.answer ? " ✓" : ""}
+                  </li>
+                ))}
+              </ol>
+              {q.rationale ? <p className="mh-teacher-muted">Rationale: {q.rationale}</p> : null}
+            </li>
+          ))}
+        </ol>
+      ) : null}
+      {results ? (
+        <table className="mh-teacher-table">
+          <caption>
+            {results.submitted} of {results.enrolled} students submitted
+          </caption>
+          <thead>
+            <tr>
+              <th>Student</th>
+              <th>Number</th>
+              <th>Score</th>
+              <th>Submitted</th>
+            </tr>
+          </thead>
+          <tbody>
+            {results.students.map((s) => (
+              <tr key={s.studentId}>
+                <td>{s.name}</td>
+                <td>{s.studentNumber}</td>
+                <td>{s.score != null ? `${s.score} / ${s.maxScore}` : "—"}</td>
+                <td>{s.submittedAt ? formatWhen(s.submittedAt) : "Not attempted"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : null}
+    </div>
+  );
 }
 
 type RosterStudent = {
@@ -1150,6 +1251,11 @@ export function ResourceView({
         </>
       ) : (type === "FOLDER" || type === "FILE") && !activity.body ? (
         <LmsFileCard activity={activity} sectionId={sectionId} audience="staff" />
+      ) : type === "QUIZ" && activity.quiz?.questions?.length ? (
+        <div className="mh-lms-pagebody">
+          <LessonBody body={activity.body} empty="" />
+          <StaffQuizPanel quiz={activity.quiz} activityId={activity.id || ""} path={live?.path || ""} />
+        </div>
       ) : (
         <div className="mh-lms-pagebody">
           {activity.storyboard ? <AiDraftVideoPlayer key={activity.id} storyboard={activity.storyboard} /> : null}

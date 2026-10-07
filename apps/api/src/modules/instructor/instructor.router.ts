@@ -23,6 +23,102 @@ instructorRouter.post("/ai-draft", async (req, res, next) => {
   }
 });
 
+const queryPath = (req: { query: Record<string, unknown> }) => (typeof req.query.path === "string" ? req.query.path : "");
+const bodyPath = (req: { body?: unknown }) => {
+  const path = (req.body as { path?: unknown } | undefined)?.path;
+  return typeof path === "string" ? path : "";
+};
+
+instructorRouter.get("/ai-course", async (req, res, next) => {
+  try {
+    const { getAiCourse } = await import("./aiCourse.js");
+    res.json(await getAiCourse((req as AuthedRequest).user, queryPath(req)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+instructorRouter.get("/ai-course/item", async (req, res, next) => {
+  try {
+    const { previewAiCourseItem } = await import("./aiCourse.js");
+    res.json(await previewAiCourseItem((req as AuthedRequest).user, queryPath(req), String(req.query.key || "")));
+  } catch (err) {
+    next(err);
+  }
+});
+
+instructorRouter.post("/ai-course/blueprint", async (req, res, next) => {
+  try {
+    const { startAiCourseBlueprint } = await import("./aiCourse.js");
+    res.json(await startAiCourseBlueprint((req as AuthedRequest).user, bodyPath(req), req.body));
+  } catch (err) {
+    next(err);
+  }
+});
+
+instructorRouter.put("/ai-course/blueprint", async (req, res, next) => {
+  try {
+    const { saveAiCourseBlueprint } = await import("./aiCourse.js");
+    res.json(await saveAiCourseBlueprint((req as AuthedRequest).user, bodyPath(req), req.body));
+  } catch (err) {
+    next(err);
+  }
+});
+
+instructorRouter.post("/ai-course/approve", async (req, res, next) => {
+  try {
+    const { approveAiCourseBlueprint } = await import("./aiCourse.js");
+    res.json(await approveAiCourseBlueprint((req as AuthedRequest).user, bodyPath(req)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+instructorRouter.post("/ai-course/reopen", async (req, res, next) => {
+  try {
+    const { reopenAiCourseBlueprint } = await import("./aiCourse.js");
+    res.json(await reopenAiCourseBlueprint((req as AuthedRequest).user, bodyPath(req)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+instructorRouter.post("/ai-course/run", async (req, res, next) => {
+  try {
+    const { resumeAiCourse } = await import("./aiCourse.js");
+    res.json(await resumeAiCourse((req as AuthedRequest).user, bodyPath(req), { key: (req.body as { key?: unknown })?.key }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+instructorRouter.post("/ai-course/publish", async (req, res, next) => {
+  try {
+    const { publishAiCourse } = await import("./aiCourse.js");
+    res.json(await publishAiCourse((req as AuthedRequest).user, bodyPath(req)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+instructorRouter.delete("/ai-course", async (req, res, next) => {
+  try {
+    const { discardAiCourse } = await import("./aiCourse.js");
+    res.json(await discardAiCourse((req as AuthedRequest).user, queryPath(req)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+instructorRouter.get("/lms-quiz-results", async (req, res, next) => {
+  try {
+    const { aiQuizResults } = await import("./aiCourse.js");
+    res.json(await aiQuizResults((req as AuthedRequest).user, queryPath(req), String(req.query.activityId || "")));
+  } catch (err) {
+    next(err);
+  }
+});
+
 instructorRouter.get("/sis/bootstrap", async (req, res, next) => {
   try {
     const user = (req as AuthedRequest).user;

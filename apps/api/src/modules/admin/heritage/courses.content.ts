@@ -176,7 +176,11 @@ function addedContent(overlay: Data, tag: string) {
   const extra = (arr(overlay.extraTopics) as Data[]).filter((t) => !s(t.id).startsWith("repo-"));
   const perTopic = (overlay.topicActivities && typeof overlay.topicActivities === "object" ? overlay.topicActivities : {}) as Record<string, Data[]>;
   const deleted = new Set(arr(overlay.deletedActivityIds).map(s));
-  const loose = Object.entries(perTopic).flatMap(([topicId, acts]) => (topicId.startsWith(tag) ? [] : arr(acts) as Data[])).filter((a) => !deleted.has(s(a.id)));
+  // Hidden items include staff-only instructor guides with answer keys; they must not be copied to other sessions.
+  const hidden = new Set(arr(overlay.hiddenActivityIds).map(s));
+  const loose = Object.entries(perTopic)
+    .flatMap(([topicId, acts]) => (topicId.startsWith(tag) ? [] : (arr(acts) as Data[])))
+    .filter((a) => !deleted.has(s(a.id)) && !hidden.has(s(a.id)) && a.hidden !== true);
   return { extra, loose };
 }
 

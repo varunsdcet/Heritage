@@ -25,6 +25,7 @@ import {
   mergeCourseLmsOverlay,
   studentQuizQuestionsForActivity,
 } from "../instructor/courseLmsScreens.js";
+import { quizFromActivity, studentQuizAttempts, studentQuizQuestions } from "../instructor/lmsQuiz.js";
 import { sectionLmsMeta } from "../instructor/sectionLmsMeta.js";
 import { liveClassUrl } from "../../lib/liveClass.js";
 import { isSafeLink } from "../../lib/safeLink.js";
@@ -225,6 +226,7 @@ export async function getStudentCourseLms(user: SessionClaims, sectionId: string
     }),
     overlay,
   );
+  const quizAttempts = await studentQuizAttempts(user.institutionId, sectionId, student.id);
 
   const topics = lms.topics.map((topic) => ({
     id: topic.id,
@@ -267,6 +269,16 @@ export async function getStudentCourseLms(user: SessionClaims, sectionId: string
           gradingMethod: /final\s*exam/i.test(a.name) ? "Highest grade" : a.note?.includes("Grading method") ? a.note : undefined,
         };
         if (type === "QUIZ") {
+          const quiz = quizFromActivity(a);
+          if (quiz) {
+            const attempt = quizAttempts.get(a.id);
+            return {
+              ...base,
+              questions: studentQuizQuestions(quiz),
+              quizMinutes: quiz.minutes || null,
+              quizAttempt: attempt ? { score: attempt.score, maxScore: attempt.maxScore, submittedAt: attempt.submittedAt } : null,
+            };
+          }
           return {
             ...base,
             questions: studentQuizQuestionsForActivity(a.name, code),

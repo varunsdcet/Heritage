@@ -43,7 +43,8 @@ async function callDeepSeek(
     }),
   }, timeoutMs);
   if (!response.ok) throw new Error(`DeepSeek failed: ${response.status}`);
-  const body = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  const body = (await response.json()) as { choices?: Array<{ finish_reason?: string; message?: { content?: string } }> };
+  if (body.choices?.[0]?.finish_reason === "length") throw new Error("DeepSeek answer was cut off at the token limit");
   const answer = body.choices?.[0]?.message?.content?.trim();
   if (!answer) throw new Error("DeepSeek empty answer");
   return { answer, model: `deepseek:${model}`, source: "deepseek" };
@@ -135,13 +136,14 @@ export async function generateWithAi(
   systemPrompt: string,
   prompt: string,
   timeoutMs = 75_000,
-  options: { json?: boolean } = {},
+  options: { json?: boolean; maxTokens?: number } = {},
 ): Promise<AskResult> {
+  const maxTokens = options.maxTokens ?? 8000;
   const attempts: Array<[string, () => Promise<AskResult>]> = [];
-  if (process.env.DEEPSEEK_API_KEY) attempts.push(["deepseek", () => callDeepSeek(systemPrompt, prompt, timeoutMs, 8000, options.json)]);
+  if (process.env.DEEPSEEK_API_KEY) attempts.push(["deepseek", () => callDeepSeek(systemPrompt, prompt, timeoutMs, maxTokens, options.json)]);
   if (askConfigured()) attempts.push(["humanitix", () => callHumanitixAsk(systemPrompt, prompt, timeoutMs)]);
-  if (process.env.ANTHROPIC_API_KEY) attempts.push(["anthropic", () => callAnthropic(systemPrompt, prompt, timeoutMs, 8000)]);
-  if (process.env.OPENAI_API_KEY) attempts.push(["openai", () => callOpenAi(systemPrompt, prompt, timeoutMs, 8000)]);
+  if (process.env.ANTHROPIC_API_KEY) attempts.push(["anthropic", () => callAnthropic(systemPrompt, prompt, timeoutMs, maxTokens)]);
+  if (process.env.OPENAI_API_KEY) attempts.push(["openai", () => callOpenAi(systemPrompt, prompt, timeoutMs, maxTokens)]);
   const errors: string[] = [];
   for (const [name, run] of attempts) {
     try {

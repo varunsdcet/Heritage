@@ -28,7 +28,7 @@ const Draft = z.object({
   storyboard: z.object({ title: z.string().optional(), slides: z.array(StoryboardSlide).min(1).max(14) }),
 });
 
-function extractJson(answer: string) {
+export function extractJson(answer: string) {
   const unfenced = answer.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
   const start = unfenced.indexOf("{");
   const end = unfenced.lastIndexOf("}");
@@ -44,7 +44,7 @@ function sectionIdFromPath(path: string) {
   return pathname === "/instructor/f/t56-active-courses" && /^[0-9a-z-]{36}$/i.test(view) ? view : null;
 }
 
-async function loadSectionForDraft(user: SessionClaims, path: string) {
+export async function loadSectionForDraft(user: SessionClaims, path: string) {
   const sectionId = sectionIdFromPath(path);
   if (!sectionId) throw Object.assign(new Error("Open a course section first"), { status: 400, code: "VALIDATION_ERROR" });
   const section = await prisma.section.findFirst({

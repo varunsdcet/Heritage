@@ -56,6 +56,9 @@ type LmsActivity = {
   joinUrl?: string | null;
   gradingMethod?: string;
   questions?: Array<{ id: string; text: string; answers: string[]; mark?: string }>;
+  /** Present (null until submitted) only on auto-graded quizzes. */
+  quizAttempt?: { score: number; maxScore: number; submittedAt: string } | null;
+  quizMinutes?: number | null;
   storyboard?: AiDraftStoryboard;
   description?: string;
   url?: string;
@@ -546,6 +549,14 @@ export function StudentCourseDetailPremiumView({ sectionId }: { sectionId: strin
   });
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [answers, setAnswers] = useState<Record<string, number>>({});
+  const [quizSubmitting, setQuizSubmitting] = useState(false);
+  const [quizError, setQuizError] = useState("");
+  const [quizResult, setQuizResult] = useState<{
+    activityId: string;
+    score: number;
+    maxScore: number;
+    results: Array<{ id: string; correct: boolean }>;
+  } | null>(null);
 
   const course = courses.data?.courses.find((item) => item.sectionId === sectionId);
   const sessions = (calendar.data?.events ?? []).filter((e) => e.sectionId === sectionId && e.kind === "class");
@@ -711,6 +722,31 @@ export function StudentCourseDetailPremiumView({ sectionId }: { sectionId: strin
   const showingActivity = Boolean(viewed);
   const showingGrades = tab === "Grades" && !showingActivity;
 
+  async function submitQuiz(activity: LmsActivity) {
+    const questions = activity.questions || [];
+    const unanswered = questions.filter((q) => answers[q.id] == null).length;
+    const warning = unanswered ? `${unanswered} question(s) are not answered and will be marked wrong. ` : "";
+    if (!window.confirm(`${warning}Submit your answers? Only your first attempt is graded.`)) return;
+    const session = loadSession();
+    if (!session?.accessToken) return;
+    setQuizSubmitting(true);
+    setQuizError("");
+    try {
+      const res = await api<{ score: number; maxScore: number; results: Array<{ id: string; correct: boolean }> }>(
+        `/student/courses/${sectionId}/quizzes/${encodeURIComponent(activity.id)}/attempts`,
+        { method: "POST", body: JSON.stringify({ answers: Object.fromEntries(questions.map((q) => [q.id, answers[q.id] ?? -1])) }) },
+        session.accessToken,
+      );
+      setQuizResult({ activityId: activity.id, ...res });
+      lms.refresh();
+    } catch (err) {
+      setQuizError(err instanceof Error ? err.message : "Could not submit the quiz");
+      if (err instanceof ApiError && err.status === 409) lms.refresh();
+    } finally {
+      setQuizSubmitting(false);
+    }
+  }
+
   function joinSession(url: string | null | undefined) {
     if (!openClassLink(url)) {
       window.alert("This room is ready. Your instructor will share the live join link when class begins.");
@@ -850,11 +886,48 @@ export function StudentCourseDetailPremiumView({ sectionId }: { sectionId: strin
                 {(viewed.questions || []).length === 0 ? (
                   <p className="mh-teacher-muted">No questions published for this quiz yet.</p>
                 ) : null}
-                <div className="mh-student-quiz-footer">
-                  <button type="button" className="mh-hcc-btn">
-                    Next page
-                  </button>
-                </div>
+                {viewed.quizAttempt !== undefined ? (
+                  <div className="mh-student-quiz-footer">
+                    {quizError ? (
+                      <p className="mh-teacher-muted" role="alert">
+                        {quizError}
+                      </p>
+                    ) : null}
+                    {quizResult?.activityId === viewed.id ? (
+                      <p role="status">
+                        <strong>
+                          Score: {quizResult.score} / {quizResult.maxScore}
+                        </strong>{" "}
+                        — questions answered incorrectly:{" "}
+                        {quizResult.results
+                          .map((r, i) => (r.correct ? null : i + 1))
+                          .filter((n) => n !== null)
+                          .join(", ") || "none"}
+                        . Review the module lessons for any you missed.
+                      </p>
+                    ) : viewed.quizAttempt ? (
+                      <p role="status">
+                        Already submitted on {formatDate(viewed.quizAttempt.submittedAt)} — score {viewed.quizAttempt.score} /{" "}
+                        {viewed.quizAttempt.maxScore}.
+                      </p>
+                    ) : (
+                      <button
+                        type="button"
+                        className="mh-hcc-btn"
+                        disabled={quizSubmitting || !(viewed.questions || []).length}
+                        onClick={() => void submitQuiz(viewed)}
+                      >
+                        {quizSubmitting ? "Submitting…" : "Submit all and finish"}
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="mh-student-quiz-footer">
+                    <button type="button" className="mh-hcc-btn">
+                      Next page
+                    </button>
+                  </div>
+                )}
               </section>
             ) : viewed ? (
               /* Screens 1 gate / 4 BBB / 5 PAGE / 8 Evaluation */
@@ -896,6 +969,26 @@ export function StudentCourseDetailPremiumView({ sectionId }: { sectionId: strin
                     <button type="button" className="mh-hcc-btn" onClick={() => joinSession(viewed.joinUrl || joinUrl)}>
                       Join session
                     </button>
+                  </div>
+                ) : viewed.type === "QUIZ" && viewed.quizAttempt !== undefined ? (
+                  <div className="mh-student-quiz-gate" data-screen="quiz-gate">
+                    {viewed.body ? <LessonBody body={viewed.body} empty="" /> : null}
+                    {viewed.quizAttempt ? (
+                      <p>
+                        <strong>
+                          Your score: {viewed.quizAttempt.score} / {viewed.quizAttempt.maxScore}
+                        </strong>{" "}
+                        (submitted {formatDate(viewed.quizAttempt.submittedAt)})
+                      </p>
+                    ) : (
+                      <button type="button" className="mh-hcc-btn" onClick={() => openActivity(viewed.id, true)}>
+                        Attempt quiz
+                      </button>
+                    )}
+                    <p className="mh-teacher-muted">
+                      {(viewed.questions || []).length} questions
+                      {viewed.quizMinutes ? ` · ${viewed.quizMinutes} minutes` : ""} · one attempt, graded automatically
+                    </p>
                   </div>
                 ) : viewed.type === "QUIZ" ? (
                   /* Screen 1 — Attempt quiz gate (FINAL EXAM) */
