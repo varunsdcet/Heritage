@@ -275,6 +275,33 @@
           }
         }
 
+        if (data.type === "th-speak-audio") {
+          const id = data.id;
+          try {
+            await ensureAudio();
+            const bin = atob(String(data.audio || ""));
+            const bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            const audio = await head.audioCtx.decodeAudioData(bytes.buffer);
+            head.setMood(preset.avatarMood || "neutral");
+            if (preset.still) faceStraight();
+            else head.lookAtCamera(500);
+            head.speakAudio(
+              { audio, words: data.words || [], wtimes: data.wtimes || [], wdurations: data.wdurations || [] },
+              { lipsyncLang: "en" },
+            );
+            try {
+              head.speakWithHands?.(400, 0.6);
+            } catch (_) {}
+            head.speakMarker(() => {
+              parent.postMessage({ type: "th-speak-done", id }, "*");
+            });
+          } catch (err) {
+            console.error(err);
+            parent.postMessage({ type: "th-speak-done", id, error: String(err) }, "*");
+          }
+        }
+
         if (data.type === "th-stop") {
           try {
             head.stopSpeaking?.();

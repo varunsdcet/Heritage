@@ -3,6 +3,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { spawn } from "child_process";
 import { NextRequest, NextResponse } from "next/server";
+import { heygenConfig, heygenSpeech, rateLimited } from "@/lib/heygenSpeech";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -48,21 +49,6 @@ function markParts(ssml: string): string[] {
 
 const HEYGEN_CACHE = new Map<string, TtsResult>();
 const HEYGEN_CACHE_MAX = 300;
-const RATE = new Map<string, { windowStart: number; count: number }>();
-
-/** The endpoint is reachable without a session (the avatar iframe calls it), so cap paid synthesis per client. */
-function rateLimited(req: NextRequest) {
-  const ip = (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() || req.headers.get("x-real-ip") || "local";
-  const now = Date.now();
-  const entry = RATE.get(ip);
-  if (!entry || now - entry.windowStart > 60_000) {
-    RATE.set(ip, { windowStart: now, count: 1 });
-    if (RATE.size > 5000) RATE.clear();
-    return false;
-  }
-  entry.count += 1;
-  return entry.count > 60;
-}
 
 async function heygenSynthesize(parts: string[], voiceId: string, apiKey: string, speed: number): Promise<TtsResult> {
   const text = parts.filter(Boolean).join(" ");
@@ -70,24 +56,7 @@ async function heygenSynthesize(parts: string[], voiceId: string, apiKey: string
   const cached = HEYGEN_CACHE.get(cacheKey);
   if (cached) return cached;
 
-  const res = await fetch("https://api.heygen.com/v3/voices/speech", {
-    method: "POST",
-    headers: { "x-api-key": apiKey, "content-type": "application/json" },
-    body: JSON.stringify({ text, voice_id: voiceId, speed, language: "en" }),
-    signal: AbortSignal.timeout(45_000),
-  });
-  const json = (await res.json().catch(() => ({}))) as {
-    data?: { audio_url?: string; duration?: number; word_timestamps?: { word: string; start: number; end: number }[] | null };
-    error?: { message?: string };
-  };
-  if (!res.ok || !json.data?.audio_url) throw new Error(json.error?.message || `HeyGen TTS HTTP ${res.status}`);
-
-  const audioRes = await fetch(json.data.audio_url, { signal: AbortSignal.timeout(45_000) });
-  if (!audioRes.ok) throw new Error(`HeyGen audio download HTTP ${audioRes.status}`);
-  const audio = Buffer.from(await audioRes.arrayBuffer());
-
-  const words = (json.data.word_timestamps || []).filter((w) => !/^<.*>$/.test(w.word));
-  const duration = json.data.duration || words.at(-1)?.end || Math.max(1.2, text.length * 0.055);
+  const { audio, words, duration } = await heygenSpeech(text, voiceId, apiKey, speed);
   const starts: number[] = [];
   let j = 0;
   let last = 0;
@@ -250,16 +219,15 @@ export async function POST(req: NextRequest) {
 
     const male = isMaleVoice(body.voice?.name, body.audioConfig?.pitch);
 
-    const heygenKey = (process.env.HEYGEN_API_KEY || "").trim();
-    const heygenVoice = (male ? process.env.HEYGEN_MALE_VOICE_ID : process.env.HEYGEN_VOICE_ID)?.trim();
-    if (heygenKey && heygenVoice) {
-      if (rateLimited(req)) {
+    const heygen = heygenConfig(male);
+    if (heygen) {
+      if (rateLimited(req, "ai-draft", 60)) {
         return NextResponse.json({ error: "Too many narration requests. Try again in a minute." }, { status: 429 });
       }
       try {
         const parts = ssml ? markParts(ssml) : [plain];
         const speed = Math.min(2, Math.max(0.5, body.audioConfig?.speakingRate || 1));
-        const data = await heygenSynthesize(parts, heygenVoice, heygenKey, speed);
+        const data = await heygenSynthesize(parts, heygen.voiceId, heygen.apiKey, speed);
         return NextResponse.json({ ...data, source: "heygen", gender: male ? "male" : "female" });
       } catch (err) {
         console.warn("HeyGen TTS failed, falling back to Google TTS:", err);

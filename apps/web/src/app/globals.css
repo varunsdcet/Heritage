@@ -25120,3 +25120,259 @@ button.mh-sis-tax__download:disabled {
   margin: 0;
   color: #991b1b;
 }
+
+/* /monica — avatar teacher reads a pasted lecture script */
+.mh-monica {
+  min-height: 100vh;
+  padding: 28px clamp(16px, 4vw, 48px) 40px;
+  background: linear-gradient(180deg, #f7f4ec 0%, #efe9dc 100%);
+  color: #1f2a24;
+  font-family: var(--font-inter, Inter, system-ui, sans-serif);
+}
+.mh-monica__head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  max-width: 1280px;
+  margin: 0 auto 20px;
+}
+.mh-monica__kicker {
+  margin: 0 0 4px;
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #6b7a70;
+}
+.mh-monica__head h1 {
+  margin: 0;
+  font-size: clamp(1.6rem, 3vw, 2.2rem);
+  font-weight: 700;
+  color: #1f3a2c;
+}
+.mh-monica__layout {
+  display: grid;
+  grid-template-columns: minmax(300px, 440px) 1fr;
+  gap: 24px;
+  max-width: 1280px;
+  margin: 0 auto;
+  align-items: start;
+}
+.mh-monica__stage {
+  position: sticky;
+  top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 18px;
+  background: #fff;
+  border: 1px solid #e3ded2;
+  box-shadow: 0 12px 32px rgba(31, 58, 44, 0.08);
+}
+.mh-monica__avatar {
+  aspect-ratio: 4 / 5;
+  border-radius: 14px;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 30%, #2b4a3a 0%, #13241b 100%);
+}
+.mh-monica__avatar iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+.mh-monica__progress {
+  height: 6px;
+  border-radius: 999px;
+  background: #ece6d8;
+  overflow: hidden;
+}
+.mh-monica__progress span {
+  display: block;
+  height: 100%;
+  background: #1f3a2c;
+  transition: width 0.4s ease;
+}
+.mh-monica__status {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #4d5a52;
+}
+.mh-monica__error {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: #fff4f2;
+  border: 1px solid #f3c9c1;
+  color: #8a2a1b;
+  font-size: 0.85rem;
+}
+.mh-monica__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.mh-monica__btn {
+  appearance: none;
+  border: 1px solid #d0ccc2;
+  background: #fff;
+  color: #1f2a24;
+  border-radius: 10px;
+  padding: 9px 14px;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.mh-monica__btn:hover:not(:disabled) {
+  border-color: #1f3a2c;
+}
+.mh-monica__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.mh-monica__btn--primary {
+  background: #1f3a2c;
+  border-color: #1f3a2c;
+  color: #f7f4ec;
+}
+.mh-monica__speed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: #4d5a52;
+}
+.mh-monica__speed select,
+.mh-monica__field input,
+.mh-monica__field textarea {
+  font: inherit;
+  border: 1px solid #d0ccc2;
+  border-radius: 10px;
+  background: #fff;
+  color: #1f2a24;
+}
+.mh-monica__speed select {
+  padding: 7px 8px;
+}
+.mh-monica__editor,
+.mh-monica__script {
+  padding: 20px;
+  border-radius: 18px;
+  background: #fff;
+  border: 1px solid #e3ded2;
+}
+.mh-monica__editor {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.mh-monica__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #4d5a52;
+}
+.mh-monica__field input {
+  padding: 10px 12px;
+  font-size: 1rem;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+}
+.mh-monica__field textarea {
+  min-height: 52vh;
+  padding: 14px;
+  font-size: 0.98rem;
+  line-height: 1.6;
+  resize: vertical;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+}
+.mh-monica__editor-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+  color: #4d5a52;
+}
+.mh-monica__help {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #6b7a70;
+}
+.mh-monica__script {
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+}
+.mh-monica__part {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 1.05rem;
+  line-height: 1.7;
+  color: #3b463f;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+.mh-monica__part.is-paragraph {
+  margin-top: 14px;
+}
+.mh-monica__part.is-done {
+  color: #9aa49d;
+}
+.mh-monica__part.is-current {
+  background: #fdf5dc;
+  color: #1f2a24;
+  box-shadow: inset 3px 0 0 #c99a2e;
+}
+.mh-monica__part:hover:not(.is-current) {
+  background: #f7f4ec;
+}
+.mh-monica__stage.is-fullscreen,
+.mh-monica__stage:fullscreen {
+  position: static;
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+  background: #0f1c15;
+  border: 0;
+  padding: 24px;
+  justify-content: center;
+}
+.mh-monica__stage:fullscreen .mh-monica__avatar {
+  flex: 1;
+  aspect-ratio: auto;
+  max-height: calc(100vh - 260px);
+}
+.mh-monica__stage:fullscreen .mh-monica__status {
+  color: #c9d3cc;
+}
+.mh-monica__caption {
+  margin: 0 auto;
+  max-width: 900px;
+  font-size: 1.25rem;
+  line-height: 1.5;
+  text-align: center;
+  color: #f7f4ec;
+}
+@media (max-width: 860px) {
+  .mh-monica__layout {
+    grid-template-columns: 1fr;
+  }
+  .mh-monica__stage {
+    position: static;
+  }
+  .mh-monica__script {
+    max-height: none;
+  }
+}
