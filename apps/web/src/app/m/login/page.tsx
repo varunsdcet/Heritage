@@ -7,8 +7,8 @@ import { api, saveSession, type Session } from "@/lib/api";
 
 export default function MobileLoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("marcus.vance@heritage.edu");
-  const [password, setPassword] = useState("Heritage!2026");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -73,7 +73,7 @@ export default function MobileLoginPage() {
           <strong style={{ fontSize: 16 }}>Heritage</strong>
         </div>
         <h1 style={{ margin: "1.25rem 0 0.35rem", fontSize: 22, fontWeight: 700 }}>Sign in</h1>
-        <p style={{ margin: 0, opacity: 0.9, fontSize: 13 }}>MyHeritage Campus OS</p>
+        <p style={{ margin: 0, opacity: 0.9, fontSize: 13 }}>MyHeritage</p>
       </header>
 
       <form onSubmit={onSubmit} style={{ padding: "1.25rem 1.15rem 2rem", display: "grid", gap: 14 }}>
@@ -99,9 +99,6 @@ export default function MobileLoginPage() {
         <Button type="submit" disabled={loading} style={{ width: "100%", marginTop: 4 }}>
           {loading ? "Signing in…" : "Sign in"}
         </Button>
-        <p style={{ margin: 0, color: "var(--mh-text-subtle)", fontSize: 12, textAlign: "center" }}>
-          Demo password: Heritage!2026
-        </p>
         <div style={{ display: "flex", justifyContent: "center" }}>
           <BrandLockup compact />
         </div>

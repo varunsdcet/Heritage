@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Panel } from "@myheritage/ui";
 import { MobileChrome } from "@/components/ScreenScaffold";
-import { api, clearSession, loadSession } from "@/lib/api";
+import { api, loadSession, logout } from "@/lib/api";
 import { openClassLink } from "@/lib/liveClass";
 
 type HomePayload = {
@@ -193,8 +193,8 @@ export default function MobileStudentHomePage() {
         type="button"
         variant="secondary"
         style={{ width: "100%" }}
-        onClick={() => {
-          clearSession();
+        onClick={async () => {
+          await logout();
           router.push("/m/login");
         }}
       >

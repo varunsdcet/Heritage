@@ -2,7 +2,7 @@
 
 import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { api, clearSession, loadSession, saveSession, type Session } from "@/lib/api";
+import { api, clearSession, loadSession, logout, saveSession, type Session } from "@/lib/api";
 
 function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
@@ -28,8 +28,8 @@ function homeForRoles(roles: string[]) {
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [email, setEmail] = useState("admin@heritage.edu");
-  const [password, setPassword] = useState("Heritage!2026");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -254,8 +254,8 @@ function LoginForm() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    clearSession();
+                  onClick={async () => {
+                    await logout();
                     setExisting(null);
                   }}
                   style={{
@@ -429,12 +429,6 @@ function LoginForm() {
             >
               {loading ? "Signing in…" : "Sign in"}
             </button>
-            <p style={{ margin: 0, color: "#8D928A", fontSize: 12, lineHeight: 1.45 }}>
-              Demo: <code style={{ color: "#5C5F5A" }}>admin@heritage.edu</code> /{" "}
-              <code style={{ color: "#5C5F5A" }}>Heritage!2026</code>
-              {" · "}
-              student <code style={{ color: "#5C5F5A" }}>ST-2024-001</code>
-            </p>
           </div>
 
         </form>

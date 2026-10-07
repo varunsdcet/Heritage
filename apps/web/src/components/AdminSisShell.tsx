@@ -7,7 +7,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { ADMIN_SIDEBAR, adminChildActive, adminGroupActive, type AdminSidebarEntry } from "@/lib/adminNav";
 import { NoModuleAccess, allows, useMyAccess, type MyAccess } from "@/lib/access";
 import { AskHeritageFab } from "@/components/AskHeritageFab";
-import { clearSession } from "@/lib/api";
+import { logout } from "@/lib/api";
 import { useNavCounts } from "@/lib/navCounts";
 import { MY_COURSES_LABEL, useMyCoursesNav, withMyCourses } from "@/lib/myCoursesNav";
 import { version as APP_VERSION } from "../../package.json";
@@ -348,8 +348,8 @@ export function AdminSisShell({
 
   const showPalette = searchOpen && searchQ.trim().length >= 2;
 
-  function signOut() {
-    clearSession();
+  async function signOut() {
+    await logout();
     router.replace("/login");
   }
 

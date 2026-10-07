@@ -145,10 +145,15 @@ await run("AUTH-005", "Malformed login input returns validation error", async ()
   assert.ok([400, 422].includes(response.status), `malformed login returned HTTP ${response.status}`);
 });
 
-await run("PUB-001", "Public verification matches an exact student number", async () => {
-  const response = await request("/public/verify?studentNumber=ST-2024-001");
+await run("PUB-001", "Public verification matches an exact student number and family name", async () => {
+  const response = await request("/public/verify?studentNumber=ST-2024-001&familyName=Vance");
   expectStatus(response, 200);
   assert.equal(response.body?.match, true);
+});
+
+await run("PUB-001b", "Public verification does not confirm a student number on its own", async () => {
+  const response = await request("/public/verify?studentNumber=ST-2024-001");
+  assert.notEqual(response.body?.match, true, "student number alone disclosed that a student exists");
 });
 
 await run("PUB-002", "Public verification rejects blank input", async () => {

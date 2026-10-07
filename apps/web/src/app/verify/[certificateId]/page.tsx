@@ -1,69 +1,96 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useMemo } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useParams } from "next/navigation";
 import { SelfpacedShell } from "@/components/selfpaced/SelfpacedShell";
-import { getSelfpacedProgram } from "@/lib/selfpacedPrograms";
+import { api, ApiError } from "@/lib/api";
 
-/**
- * Public certificate verification. In the client prototype, verification uses
- * the query string issued on the certificate page; production will hit GET /verify/:id.
- */
-function VerifyInner() {
+type VerifiedCertificate = {
+  certificateId: string;
+  holderName: string;
+  title: string;
+  status: string;
+  issuedAt: string | null;
+};
+
+type VerifyState =
+  | { kind: "loading" }
+  | { kind: "found"; certificate: VerifiedCertificate }
+  | { kind: "missing" }
+  | { kind: "error" };
+
+export default function VerifyCertificatePage() {
   const params = useParams<{ certificateId: string }>();
-  const search = useSearchParams();
   const id = params.certificateId || "";
-  const slug = search.get("slug") || "";
-  const name = search.get("name") || "Learner";
-  const issued = search.get("issued") || "";
-  const program = useMemo(() => (slug ? getSelfpacedProgram(slug) : undefined), [slug]);
-  const valid = Boolean(id && slug && program);
+  const [state, setState] = useState<VerifyState>({ kind: "loading" });
+
+  useEffect(() => {
+    if (!id) {
+      setState({ kind: "missing" });
+      return;
+    }
+    let cancelled = false;
+    setState({ kind: "loading" });
+    api<VerifiedCertificate>(`/public/certificates/${encodeURIComponent(id)}`, {}, undefined, { skipAuthRedirect: true })
+      .then((certificate) => {
+        if (!cancelled) setState({ kind: "found", certificate });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setState(err instanceof ApiError && (err.status === 404 || err.status === 400) ? { kind: "missing" } : { kind: "error" });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  if (state.kind === "loading") {
+    return (
+      <SelfpacedShell>
+        <div className="sp-verify">
+          <p>Checking certificate…</p>
+        </div>
+      </SelfpacedShell>
+    );
+  }
+
+  if (state.kind === "found") {
+    const { certificate } = state;
+    const revoked = certificate.status === "revoked";
+    return (
+      <SelfpacedShell>
+        <div className="sp-verify">
+          <p className="sp-kicker">CERTIFICATE VERIFICATION</p>
+          <h1>{revoked ? "Certificate revoked" : "Certificate verified"}</h1>
+          <p className="sp-lede">
+            <strong>{certificate.certificateId}</strong> was issued to {certificate.holderName} · {certificate.title}
+            {certificate.issuedAt ? ` · ${new Date(certificate.issuedAt).toLocaleDateString("en-CA")}` : ""}
+          </p>
+          {revoked ? (
+            <p className="sp-tuition__note">Heritage has revoked this certificate. It is no longer valid.</p>
+          ) : (
+            <p className="sp-tuition__note">This record was confirmed against Heritage Community College records.</p>
+          )}
+        </div>
+      </SelfpacedShell>
+    );
+  }
 
   return (
     <SelfpacedShell>
       <div className="sp-verify">
         <p className="sp-kicker">CERTIFICATE VERIFICATION</p>
-        <h1>{valid ? "Certificate verified" : "Certificate not found"}</h1>
-        {valid ? (
-          <>
-            <p className="sp-lede">
-              <strong>{id}</strong> was issued for {name} · {program?.title}
-              {issued ? ` · ${new Date(issued).toLocaleDateString("en-CA")}` : ""}
-            </p>
-            <p className="sp-tuition__note">
-              This public page confirms the certificate ID format and programme binding. Heritage staff can audit the
-              full student record in Campus OS.
-            </p>
-            <Link href={`/selfpaced/programs/${slug}`} className="sp-btn sp-btn--primary">
-              View programme
-            </Link>
-          </>
-        ) : (
-          <>
-            <p className="sp-lede">We could not verify that certificate ID.</p>
-            <Link href="/selfpaced" className="sp-btn sp-btn--primary">
-              Heritage eLearning
-            </Link>
-          </>
-        )}
+        <h1>{state.kind === "missing" ? "No certificate found" : "Verification unavailable"}</h1>
+        <p className="sp-lede">
+          {state.kind === "missing"
+            ? "We could not find a certificate with that ID."
+            : "We could not reach Heritage records. Try again shortly."}
+        </p>
+        <Link href="/selfpaced" className="sp-btn sp-btn--primary">
+          Heritage eLearning
+        </Link>
       </div>
     </SelfpacedShell>
-  );
-}
-
-export default function VerifyCertificatePage() {
-  return (
-    <Suspense
-      fallback={
-        <SelfpacedShell>
-          <div className="sp-verify">
-            <p>Checking certificate…</p>
-          </div>
-        </SelfpacedShell>
-      }
-    >
-      <VerifyInner />
-    </Suspense>
   );
 }

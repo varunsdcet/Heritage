@@ -108,6 +108,36 @@ export function clearSession() {
   clearRoleCookie();
 }
 
+/** Revokes the server session (best-effort) before clearing local session state. */
+export async function logout(): Promise<void> {
+  if (typeof window === "undefined") return;
+  const raw = localStorage.getItem(KEY) ?? sessionStorage.getItem(KEY_SESSION);
+  let accessToken: string | undefined;
+  try {
+    accessToken = raw ? (JSON.parse(raw) as Session).accessToken : undefined;
+  } catch {
+    accessToken = undefined;
+  }
+  if (accessToken) {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 4000);
+    try {
+      await fetch(`${API_URL.replace(/\/$/, "")}/auth/logout`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+        body: "{}",
+        keepalive: true,
+        signal: controller.signal,
+      });
+    } catch {
+      /* best-effort: local session is cleared regardless */
+    } finally {
+      window.clearTimeout(timer);
+    }
+  }
+  clearSession();
+}
+
 export async function api<T>(
   path: string,
   init: RequestInit = {},

@@ -24,6 +24,7 @@ import { mailRouter } from "./modules/mail/mail.router.js";
 import { campusComplianceRouter } from "./modules/campusCompliance/campusCompliance.router.js";
 import { liveRouter } from "./modules/live/live.router.js";
 import { lmsFilesRouter } from "./modules/instructor/lmsFiles.router.js";
+import { publicRouter } from "./modules/public/public.router.js";
 import { errorHandler } from "./middleware/error-handler.js";
 
 const app: Express = express();
@@ -105,6 +106,7 @@ app.get("/api/docs", (_req, res) => {
     <li>GET /instructor/sis/screen?path=</li>
     <li>POST /instructor/sis/action</li>
     <li>GET /public/verify</li>
+    <li>GET /public/certificates/:id</li>
   </ul></body></html>`);
 });
 
@@ -133,25 +135,7 @@ app.use("/applicant", applicantRouter);
 app.use("/employer", employerRouter);
 app.use("/admin", adminRouter);
 
-app.get("/public/verify", async (req, res, next) => {
-  try {
-    const q = String(req.query.studentNumber ?? "")
-      .trim()
-      .toUpperCase();
-    if (!q) {
-      res.status(400).json({ match: false, error: { message: "studentNumber required" } });
-      return;
-    }
-    const { prisma } = await import("@myheritage/db");
-    const hit = await prisma.student.findFirst({
-      where: { studentNumber: { equals: q, mode: "insensitive" } },
-      select: { id: true },
-    });
-    res.json({ match: Boolean(hit) });
-  } catch (err) {
-    next(err);
-  }
-});
+app.use("/public", publicRouter);
 
 app.use(errorHandler);
 

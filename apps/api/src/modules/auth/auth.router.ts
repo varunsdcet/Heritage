@@ -91,7 +91,7 @@ authRouter.post("/forgot-password", async (req, res, next) => {
       "",
       "If you did not request this, you can ignore this email.",
       "",
-      "— MyHeritage AI Campus OS",
+      "— MyHeritage",
     ].join("\n");
 
     let mailed = false;

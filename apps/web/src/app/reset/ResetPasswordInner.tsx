@@ -4,14 +4,30 @@ import { FormEvent, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Banner, Button, Input } from "@myheritage/ui";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
+
+function friendlyError(err: unknown, fallback: string): string {
+  if (err instanceof ApiError) {
+    if (err.code === "VALIDATION_ERROR") {
+      if (/password/i.test(err.message)) return "Password must be at least 8 characters long.";
+      if (/token/i.test(err.message)) return "Reset link is invalid or expired. Request a new one.";
+      if (/email/i.test(err.message)) return "Enter the email address registered to your account.";
+      return fallback;
+    }
+    if (/invalid or expired/i.test(err.message)) return "Reset link is invalid or expired. Request a new one.";
+  }
+  if (err instanceof Error && /Failed to fetch|NetworkError|Load failed/i.test(err.message)) {
+    return "Cannot reach campus services. Check your connection and try again.";
+  }
+  return fallback;
+}
 
 export default function ResetPasswordInner() {
   const router = useRouter();
   const params = useSearchParams();
   const tokenFromUrl = params.get("token") || "";
-  const [email, setEmail] = useState("marcus.vance@heritage.edu");
-  const [studentNumber, setStudentNumber] = useState("ST-2024-001");
+  const [email, setEmail] = useState("");
+  const [studentNumber, setStudentNumber] = useState("");
   const [password, setPassword] = useState("");
   const [token, setToken] = useState(tokenFromUrl);
   const [sent, setSent] = useState(false);
@@ -24,6 +40,10 @@ export default function ResetPasswordInner() {
 
   async function onForgot(e: FormEvent) {
     e.preventDefault();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError("Enter the email address registered to your account.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -41,7 +61,7 @@ export default function ResetPasswordInner() {
       setMailed(Boolean(res.mailed));
       if (res.resetToken) setToken(res.resetToken);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not send reset email");
+      setError(friendlyError(err, "Could not send reset email. Check the details and try again."));
     } finally {
       setBusy(false);
     }
@@ -49,6 +69,10 @@ export default function ResetPasswordInner() {
 
   async function onReset(e: FormEvent) {
     e.preventDefault();
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters long.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -59,7 +83,7 @@ export default function ResetPasswordInner() {
       setDone(true);
       setTimeout(() => router.push("/login"), 1200);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Reset failed");
+      setError(friendlyError(err, "Could not update your password. Try again."));
     } finally {
       setBusy(false);
     }
@@ -95,12 +119,12 @@ export default function ResetPasswordInner() {
         {mode === "forgot" && !token ? (
           <>
             <label style={{ display: "grid", gap: "0.35rem", marginTop: "1rem" }}>
-              Student number
+              Student number (students only)
               <Input
                 value={studentNumber}
                 onChange={(e) => setStudentNumber(e.target.value)}
                 autoComplete="username"
-                placeholder="ST-2024-001"
+                placeholder="Leave blank if you are staff"
               />
             </label>
             <label style={{ display: "grid", gap: "0.35rem", marginTop: "1rem" }}>

@@ -12,6 +12,8 @@ const ROLE_HOME: Record<string, string> = {
 
 function portalForPath(pathname: string): string | null {
   if (pathname === "/admin" || pathname.startsWith("/admin/")) return "admin";
+  if (pathname === "/archive" || pathname.startsWith("/archive/")) return "admin";
+  if (pathname === "/design-system" || pathname.startsWith("/design-system/")) return "admin";
   if (pathname === "/instructor" || pathname.startsWith("/instructor/")) return "instructor";
   if (pathname === "/student" || pathname.startsWith("/student/")) return "student";
   if (pathname === "/applicant" || pathname.startsWith("/applicant/")) return "applicant";
@@ -74,6 +76,10 @@ export const config = {
   matcher: [
     "/admin",
     "/admin/:path*",
+    "/archive",
+    "/archive/:path*",
+    "/design-system",
+    "/design-system/:path*",
     "/instructor",
     "/instructor/:path*",
     "/student",

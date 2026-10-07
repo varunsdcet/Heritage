@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { AskHeritageFab } from "@/components/AskHeritageFab";
-import { api, loadSession } from "@/lib/api";
+import { api, loadSession, logout } from "@/lib/api";
 import { NoModuleAccess, allows, useMyAccess, type ModuleGate, type MyAccess } from "@/lib/access";
 
 type NavChild = { label: string; href: string; match?: string[]; section?: string; countKey?: string; gate?: ModuleGate };
@@ -365,7 +365,7 @@ function pageBlocked(pathname: string, search: URLSearchParams, access: MyAccess
 export function TeacherSisShell({
   children,
   activeHref = "/instructor",
-  title = "Campus OS",
+  title = "MyHeritage",
   subtitle,
   shell = "campus",
   studioActive,
@@ -411,6 +411,11 @@ export function TeacherSisShell({
   const [upcoming, setUpcoming] = useState<
     Array<{ id: string; courseCode: string; title: string; label: string; joinUrl?: string | null; minutesUntil: number }>
   >([]);
+
+  async function signOut() {
+    await logout();
+    router.push("/login");
+  }
 
   function submitHeaderSearch() {
     const q = searchQ.trim();
@@ -660,14 +665,7 @@ export function TeacherSisShell({
               <button
                 type="button"
                 aria-label="Sign out"
-                onClick={() => {
-                  try {
-                    localStorage.removeItem("mh.session");
-                  } catch {
-                    /* ignore */
-                  }
-                  router.push("/login");
-                }}
+                onClick={signOut}
               >
                 <img src="/brand/icons/chevron-right.svg" alt="" width={16} height={16} />
               </button>
@@ -734,14 +732,7 @@ export function TeacherSisShell({
                   <button
                     type="button"
                     className="mh-teacher__logout-link"
-                    onClick={() => {
-                      try {
-                        localStorage.removeItem("mh.session");
-                      } catch {
-                        /* ignore */
-                      }
-                      router.push("/login");
-                    }}
+                    onClick={signOut}
                   >
                     Log Out
                   </button>

@@ -101,7 +101,7 @@ export default function SelfpacedCertificatePage() {
               </p>
               <div className="sp-hero__cta">
                 <Link
-                  href={`/verify/${encodeURIComponent(enrollment!.certificateId!)}?slug=${encodeURIComponent(program.slug)}&name=${encodeURIComponent(name)}&issued=${encodeURIComponent(enrollment!.certificateIssuedAt || "")}`}
+                  href={`/verify/${encodeURIComponent(enrollment!.certificateId!)}`}
                   className="sp-btn sp-btn--ghost"
                 >
                   Public verify page

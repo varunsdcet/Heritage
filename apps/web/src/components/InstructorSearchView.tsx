@@ -568,7 +568,7 @@ export function InstructorSearchView() {
         {!busy && !hasCriteria ? (
           <div className="mh-teacher-card mh-teacher-search__empty">
             <img src="/brand/icons/search.svg" alt="" width={28} height={28} />
-            <h3>{advanced ? "Search Students" : "Search Campus OS"}</h3>
+            <h3>{advanced ? "Search Students" : "Search MyHeritage"}</h3>
             <p>
               {advanced
                 ? "Use any combination of status, name, campus, program, or contact fields. Results come from your live roster API."

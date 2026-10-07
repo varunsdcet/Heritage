@@ -3,7 +3,7 @@
 import type { FormEvent, ReactNode } from "react";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { api, clearSession, loadSession } from "@/lib/api";
+import { api, loadSession, logout } from "@/lib/api";
 import { AskHeritageFab } from "@/components/AskHeritageFab";
 import { NoModuleAccess, allows, useMyAccess, type ModuleGate, type MyAccess } from "@/lib/access";
 
@@ -365,8 +365,8 @@ function StudentSisShellInner({
     };
   }, []);
 
-  function signOut() {
-    clearSession();
+  async function signOut() {
+    await logout();
     router.replace("/login");
   }
 

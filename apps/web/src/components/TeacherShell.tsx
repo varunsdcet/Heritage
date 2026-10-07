@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AskHeritageFab } from "@/components/AskHeritageFab";
+import { logout } from "@/lib/api";
 
 type NavLeaf = {
   label: string;
@@ -442,7 +443,14 @@ export function TeacherShell({
             <button type="button" aria-label="Notifications" onClick={() => router.push("/instructor/notifications")}>
               <FooterIcon name="bell" />
             </button>
-            <button type="button" aria-label="Log out" onClick={() => router.push("/login")}>
+            <button
+              type="button"
+              aria-label="Log out"
+              onClick={async () => {
+                await logout();
+                router.push("/login");
+              }}
+            >
               <FooterIcon name="logout" />
             </button>
           </div>

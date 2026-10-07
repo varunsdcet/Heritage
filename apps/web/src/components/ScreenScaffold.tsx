@@ -13,7 +13,7 @@ import {
   StatusPill,
   LogoMark,
 } from "@myheritage/ui";
-import { clearSession, loadSession, type Session } from "@/lib/api";
+import { loadSession, logout, type Session } from "@/lib/api";
 import { resolveNav, type ShellRole } from "@/lib/nav";
 import { AskHeritageFab } from "@/components/AskHeritageFab";
 
@@ -190,8 +190,8 @@ export function ScreenScaffold({
                   <Button
                     variant="secondary"
                     type="button"
-                    onClick={() => {
-                      clearSession();
+                    onClick={async () => {
+                      await logout();
                       router.push("/login");
                     }}
                     style={{ padding: "0.4rem 0.75rem", fontSize: 13 }}
