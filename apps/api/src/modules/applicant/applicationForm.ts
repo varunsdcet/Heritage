@@ -32,7 +32,6 @@ export const APPLICATION_FIELDS: ApplicationField[] = [
   { key: "region", label: "Province / state", section: "personal", required: false, kind: "text", max: 80 },
   { key: "postalCode", label: "Postal code", section: "personal", required: false, kind: "text", max: 20 },
   { key: "country", label: "Country", section: "personal", required: true, kind: "text", max: 80 },
-  { key: "sin", label: "Social Insurance Number (optional)", section: "personal", required: false, kind: "text", max: 30 },
   {
     key: "residency",
     label: "Residency status",
@@ -79,9 +78,13 @@ export const REQUIRED_APPLICANT_DOCUMENTS = [
   "Grade 10 Certificate / Transcript",
   "Grade 12 Certificate / Transcript",
   "Post-Secondary Education Document",
-  "Passport",
   "Language Proficiency Test Report",
 ];
+
+/** Privacy rule: the college never asks for a passport, SIN or other government ID, even on checklists created before this rule. */
+export function isGovernmentIdDocument(label: string) {
+  return /passport|social insurance|\bsin\b|government id/i.test(label);
+}
 
 export type FormValues = Record<string, string>;
 export type FormOptions = { programs: string[]; intakes: string[] };
@@ -171,7 +174,9 @@ export function applicationCompleteness(values: FormValues, documents: Array<{ l
       sections[f.section].done = false;
     }
   }
-  const docs = documents.length ? documents : REQUIRED_APPLICANT_DOCUMENTS.map((label) => ({ label, status: "missing" }));
+  const docs = (documents.length ? documents : REQUIRED_APPLICANT_DOCUMENTS.map((label) => ({ label, status: "missing" }))).filter(
+    (d) => !isGovernmentIdDocument(d.label),
+  );
   const documentsMissing = docs.filter((d) => d.status === "missing" || d.status === "rejected").map((d) => d.label);
   const total = required.length + docs.length;
   const done = filled + docs.length - documentsMissing.length;

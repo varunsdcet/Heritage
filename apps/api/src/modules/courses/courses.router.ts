@@ -1,6 +1,9 @@
 import { Router } from "express";
 import { prisma } from "@myheritage/db";
 import { requireAuth, type AuthedRequest } from "../../middleware/auth.js";
+import { courseStatus } from "../../lib/courseStatus.js";
+import { institutionTerms, sectionTerm, termLabel, type TermRef } from "../../lib/sectionTerm.js";
+import { ymdIn } from "../../lib/workshopPolicy.js";
 import { sectionOfferings } from "./sectionOffering.js";
 import {
   DEFAULT_TZ,
@@ -13,6 +16,11 @@ import {
 import { currentStudentId } from "../me/studentAlignment.js";
 
 export const coursesRouter: Router = Router();
+
+async function offeredTerms(institutionId: string, sections: Array<{ id: string; term: TermRef }>) {
+  const [offerings, terms] = await Promise.all([sectionOfferings(institutionId, sections.map((s) => s.id)), institutionTerms(institutionId)]);
+  return (s: { id: string; term: TermRef }) => sectionTerm(s.term, { startsOn: offerings.get(s.id)?.startsOn, endsOn: offerings.get(s.id)?.endsOn }, terms);
+}
 
 coursesRouter.get("/me", requireAuth, async (req, res, next) => {
   try {
@@ -35,13 +43,14 @@ coursesRouter.get("/me", requireAuth, async (req, res, next) => {
         },
       });
       const nameById = new Map(instructors.map((p) => [p.id, `${p.givenName} ${p.familyName}`]));
+      const termOf = await offeredTerms(user.institutionId, sections);
       res.json({
         items: sections.map((s) => ({
           sectionId: s.id,
           code: s.course.code,
           title: s.course.title,
           credits: s.course.credits,
-          termCode: s.term.code,
+          termCode: termOf(s)?.code ?? "",
           instructorName: nameById.get(s.instructorPersonId) ?? "TBA",
           enrolmentCount: s._count.enrolments,
           status: "active",
@@ -61,13 +70,14 @@ coursesRouter.get("/me", requireAuth, async (req, res, next) => {
       });
       // Only sections with enrolled students (hide empty shells).
       const withStudents = sections.filter((s) => s._count.enrolments > 0);
+      const termOf = await offeredTerms(user.institutionId, withStudents);
       res.json({
         items: withStudents.map((s) => ({
           sectionId: s.id,
           code: s.course.code,
           title: s.course.title,
           credits: s.course.credits,
-          termCode: s.term.code,
+          termCode: termOf(s)?.code ?? "",
           enrolmentCount: s._count.enrolments,
           status: "teaching",
         })),
@@ -124,13 +134,15 @@ coursesRouter.get("/me", requireAuth, async (req, res, next) => {
     });
     const planBySection = new Map(planItems.filter((i) => i.sectionId).map((i) => [i.sectionId!, i]));
     const planByCode = new Map(planItems.map((i) => [i.courseCode, i]));
-    const [offerings, institution] = await Promise.all([
+    const [offerings, institution, terms] = await Promise.all([
       sectionOfferings(user.institutionId, enrolments.map((e) => e.sectionId)),
       prisma.institution.findFirst({ where: { id: user.institutionId }, select: { timezone: true } }),
+      institutionTerms(user.institutionId),
     ]);
     const tz = institution?.timezone || DEFAULT_TZ;
+    const today = ymdIn(new Date(), tz);
 
-    const courses = enrolments
+    const rows = enrolments
       .map((e) => {
         const scored = e.gradeItems.filter((grade) => grade.score != null && grade.maxScore > 0);
         const progressPercent =
@@ -150,40 +162,47 @@ coursesRouter.get("/me", requireAuth, async (req, res, next) => {
           offering?.startsOn || plan?.startsOn || e.section.academicBlock?.startsOn || fromSessions.startsOn || e.section.term.startsOn;
         const endsOn =
           offering?.endsOn || plan?.endsOn || e.section.academicBlock?.endsOn || fromSessions.endsOn || e.section.term.endsOn;
+        const term = sectionTerm(e.section.term, { startsOn, endsOn }, terms);
         return {
-          sectionId: e.sectionId,
-          courseCode: e.section.course.code,
-          courseTitle: e.section.course.title,
-          sectionCode: e.section.code,
-          termName: e.section.term.name,
-          credits: e.section.course.credits,
-          instructorName: instructorDisplayName(personById.get(e.section.instructorPersonId)) ?? "TBA",
-          enrolmentStatus: e.status as "enrolled" | "completed" | "waitlisted",
-          progressPercent,
-          deliveryMethod: offering?.deliveryMethod || deliveryFromSessions(sessions),
-          location: offering?.location || roomFromSessions(sessions) || "TBD",
-          scheduleText: offering?.scheduleText || scheduleTextFromSessions(sessions, tz) || plan?.scheduleText || null,
-          startsOn,
-          endsOn,
+          termCode: term?.code ?? "",
+          course: {
+            sectionId: e.sectionId,
+            courseCode: e.section.course.code,
+            courseTitle: e.section.course.title,
+            sectionCode: e.section.code,
+            termName: termLabel(term),
+            credits: e.section.course.credits,
+            instructorName: instructorDisplayName(personById.get(e.section.instructorPersonId)) ?? "TBA",
+            enrolmentStatus: e.status as "enrolled" | "completed" | "waitlisted",
+            courseStatus: courseStatus({ status: e.status, startsOn, endsOn, averagePercent: progressPercent }, today),
+            progressPercent,
+            deliveryMethod: offering?.deliveryMethod || deliveryFromSessions(sessions),
+            location: offering?.location || roomFromSessions(sessions) || "TBD",
+            scheduleText: offering?.scheduleText || scheduleTextFromSessions(sessions, tz) || plan?.scheduleText || null,
+            startsOn,
+            endsOn,
+          },
         };
       })
       .sort((a, b) => {
         const rank = (code: string) => (/^ACSW\s*500$/i.test(code) ? 0 : 1);
-        const diff = rank(a.courseCode) - rank(b.courseCode);
+        const diff = rank(a.course.courseCode) - rank(b.course.courseCode);
         if (diff !== 0) return diff;
-        return a.courseCode.localeCompare(b.courseCode);
+        return a.course.courseCode.localeCompare(b.course.courseCode);
       });
+    const courses = rows.map((r) => r.course);
 
     res.json({
       courses,
-      items: courses.map((course) => ({
+      items: rows.map(({ course, termCode }) => ({
         sectionId: course.sectionId,
         code: course.courseCode,
         title: course.courseTitle,
         credits: course.credits,
-        termCode: enrolments.find((entry) => entry.sectionId === course.sectionId)?.section.term.code,
+        termCode,
         instructorName: course.instructorName,
         status: course.enrolmentStatus,
+        courseStatus: course.courseStatus,
         progressPercent: course.progressPercent,
       })),
     });

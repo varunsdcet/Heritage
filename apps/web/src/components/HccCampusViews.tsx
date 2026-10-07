@@ -530,22 +530,15 @@ export function HccAttendanceView({ config }: { config: TeacherScreenConfig }) {
     const action = finalize
       ? d?.primaryAction || config.primaryAction || "Submit Attendance"
       : d?.secondaryAction || config.secondaryAction || "Save Draft";
-    await live?.runAction?.(action, rosterPayload());
-    if (finalize) {
-      setToast("Attendance submitted. Opening course attendance…");
-      await live?.refresh?.();
-      const firstSection = groups.find((g) => g.sectionId)?.sectionId;
-      window.setTimeout(() => {
-        if (firstSection) {
-          router.push(`/instructor/sections/${firstSection}?tab=Attendance`);
-        } else {
-          router.push("/instructor/sections");
-        }
-      }, 700);
-      return;
+    setToast(null);
+    const ok = await live?.runAction?.(action, rosterPayload());
+    if (!ok) return;
+    if (finalize) setToast("Attendance submitted.");
+    if (date !== d?.dateFilter) {
+      const qs = new URLSearchParams({ date });
+      if (d?.sectionId) qs.set("sectionId", d.sectionId);
+      router.replace(`/instructor/attendance?${qs.toString()}`);
     }
-    setToast("Draft saved.");
-    await live?.refresh?.();
   }
 
   const visible = groups

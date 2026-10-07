@@ -231,7 +231,22 @@ export function availabilityDefaultDates(now = new Date()) {
   return { date: ymd(now), endDate: ymd(end) };
 }
 
-export async function persistAvailabilitySlot(ctx: ProfileCtx, fields: Record<string, string>) {
+const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function normalizeRepeatDays(raw: string, date: string) {
+  const picked = new Set(
+    raw
+      .split(/[·,;|]/)
+      .map((d) => d.trim().slice(0, 3).toLowerCase())
+      .filter(Boolean),
+  );
+  const days = WEEKDAY_SHORT.filter((d) => picked.has(d.toLowerCase()));
+  if (days.length) return days.join(",");
+  return weekdayFromIso(date).slice(0, 3);
+}
+
+/** Recurrence is opt-in: a slot only repeats (and only checks its end date) when the recurrence box is ticked. */
+export function parseAvailabilityFields(fields: Record<string, string>) {
   const title = (fields["Title / Name (optional)"] || fields["Availability Name"] || fields.Name || "").trim();
   const mode = (fields.Type || fields["Availability Type"] || "Available to Teach").trim();
   const startHour = (fields["Start hour"] || "").trim();
@@ -245,23 +260,21 @@ export async function persistAvailabilitySlot(ctx: ProfileCtx, fields: Record<st
     (fields["End Time"] || fields.End || "").trim() ||
     (endHour ? `${pad2(Number(endHour))}:${pad2(Number(endMinute || 0))}` : "10:00");
   const date = (fields.Date || "").trim();
-  const recurOn = Boolean(
-    (fields["Set availability recurrence timeframe"] || "").trim() &&
-      (fields["Set availability recurrence timeframe"] || "").trim() !== "0",
-  );
+  const recurOn = /^(1|true|on|yes)$/i.test((fields["Set availability recurrence timeframe"] || "").trim());
   const endDate = recurOn ? (fields["End Date"] || "").trim() : "";
-  const repeats = recurOn
-    ? (fields["Days of the Week"] || fields["Repeat Weekly on"] || fields.Days || "").trim()
-    : "";
   const note = (fields.Note || "").trim();
   validateAvailabilityWindow({ start, end, date, endDate });
+  const repeats = recurOn
+    ? normalizeRepeatDays(fields["Days of the Week"] || fields["Repeat Weekly on"] || fields.Days || "", date)
+    : "";
   const location = (fields.Location || title || mode).trim();
-  const repeatLabel = repeats
-    .split(/[·,]/)
-    .map((d) => d.trim())
-    .filter(Boolean)
-    .join(" · ");
+  const repeatLabel = repeats.split(",").filter(Boolean).join(" · ");
   const day = repeatLabel || weekdayFromIso(date) || "Weekly";
+  return { title, mode, start, end, date, endDate, repeats, note, location, day };
+}
+
+export async function persistAvailabilitySlot(ctx: ProfileCtx, fields: Record<string, string>) {
+  const { title, mode, start, end, date, endDate, repeats, note, location, day } = parseAvailabilityFields(fields);
   const id = randomUUID();
   await prisma.portalRecord.create({
     data: {
@@ -278,8 +291,7 @@ export async function persistAvailabilitySlot(ctx: ProfileCtx, fields: Record<st
         mode,
         location,
         date,
-        endDate,
-        repeats,
+        ...(repeats ? { endDate, repeats } : {}),
         note,
         title,
       }),
@@ -668,16 +680,25 @@ export function buildAddAvailabilityForm(nameDefault = "", now = new Date()) {
           { label: "Date", value: defaults.date, type: "date" },
           {
             label: "Set availability recurrence timeframe",
-            value: "1",
+            value: "",
             type: "checkbox",
             optional: true,
           },
-          { label: "End Date", value: defaults.endDate, type: "date", optional: true },
+          {
+            label: "End Date",
+            value: "",
+            type: "date",
+            optional: true,
+            visibleWhen: "Set availability recurrence timeframe",
+            visibleValue: "true",
+          },
           {
             label: "Days of the Week",
-            value: "Mon,Tue,Wed,Thu,Fri",
+            value: weekdayFromIso(defaults.date),
             type: "weekdays",
             optional: true,
+            visibleWhen: "Set availability recurrence timeframe",
+            visibleValue: "true",
           },
           { label: "Note", value: "", type: "textarea", optional: true },
         ],

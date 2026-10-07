@@ -21,7 +21,6 @@ export const ApplyBody = z.object({
   city: z.string().trim().max(80).optional().default(""),
   region: z.string().trim().max(80).optional().default(""),
   postalCode: z.string().trim().max(20).optional().default(""),
-  sin: z.string().trim().max(30).optional().default(""),
   programCategory: z.string().trim().max(120).optional().default(""),
   programName: z.string().trim().max(180).optional().default(""),
   intakeTerm: z.string().trim().max(120).optional().default(""),

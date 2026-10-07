@@ -3,6 +3,7 @@
 import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
 import { audit } from "./service.js";
+import { sectionTerm, termLabel } from "../../../lib/sectionTerm.js";
 import { dropGeneratedClassSessions, syncSectionClassSessions } from "../../courses/sectionOffering.js";
 import { queueScheduleReview } from "../../instructor/myCourses.js";
 import { COURSE_FIELDS, COURSE_TEXTBOOK_FIELDS, ENTITIES, SESSION_FIELDS, WEEKDAYS, type Data, type Field } from "./courses.spec.js";
@@ -313,6 +314,8 @@ export function sessionRow(x: LoadedSection, st: Data | undefined, lk: Lookups) 
   const instructorIds = arr(st?.instructors).map(s);
   const names = instructorIds.length ? instructorIds.map((id) => lk.label("users", id)).filter(Boolean) : [lk.accountOfPerson.get(x.instructorPersonId)].filter(Boolean).map((id) => lk.label("users", id));
   const capacity = st && st.maxEnrolments !== null && st.maxEnrolments !== undefined ? num(st.maxEnrolments) : null;
+  const term = sectionTerm(x.term, { startsOn: w.start, endsOn: w.end }, lk.terms);
+  const campusId = lk.campusId(st?.campus);
   return {
     id: x.id,
     courseId: x.courseId,
@@ -320,10 +323,10 @@ export function sessionRow(x: LoadedSection, st: Data | undefined, lk: Lookups) 
     courseTitle: x.course.title,
     code: x.code,
     name: s(st?.name),
-    term: x.term.name,
-    termId: x.termId,
-    campusId: s(st?.campus),
-    campus: lk.label("campuses", st?.campus),
+    term: termLabel(term),
+    termId: term?.id ?? "",
+    campusId,
+    campus: lk.label("campuses", campusId),
     classroom: lk.label("classrooms", st?.classroom),
     instructors: names,
     instructorIds,
@@ -363,14 +366,27 @@ export async function getSession(user: SessionClaims, id: string) {
   const w = sessionWindow(x.term, st);
   const instructors = st ? arr(st.instructors) : [lk.accountOfPerson.get(x.instructorPersonId)].filter(Boolean);
   const gradingScheme = s(st?.gradingScheme) || (await defaultGradingScheme(inst, x.courseId, lk));
+  const term = sectionTerm(x.term, { startsOn: w.start, endsOn: w.end }, lk.terms);
+  const termId = term?.id ?? "";
   return {
     id: x.id,
     courseId: x.courseId,
     course: { id: x.course.id, code: x.course.code, title: x.course.title },
     code: x.code,
-    term: x.term.name,
-    termId: x.termId,
-    values: { ...defaults(SESSION_FIELDS), ...(st ?? {}), startDate: w.start, endDate: w.end, continuous: w.continuous, instructors, meetings: meetingsOf(st), gradingScheme, termId: x.termId },
+    term: termLabel(term),
+    termId,
+    values: {
+      ...defaults(SESSION_FIELDS),
+      ...(st ?? {}),
+      ...(st && s(st.campus) ? { campus: lk.campusId(st.campus) } : {}),
+      startDate: w.start,
+      endDate: w.end,
+      continuous: w.continuous,
+      instructors,
+      meetings: meetingsOf(st),
+      gradingScheme,
+      termId,
+    },
   };
 }
 
@@ -458,7 +474,7 @@ async function saveSessionNow(user: SessionClaims, courseId: string, id: string 
   const existing = id ? await prisma.section.findFirst({ where: { id, institutionId: inst, courseId } }) : null;
   if (id && !existing) throw httpError(404, "Session / offering not found", "NOT_FOUND");
   const before = id ? (await settingsOf(inst, S.session, [id])).get(id)?.data ?? null : null;
-  const data = await clean(user, SESSION_FIELDS, body, lk, before ?? {});
+  const data = await clean(user, SESSION_FIELDS, s(body.campus) ? { ...body, campus: lk.campusId(body.campus) } : body, lk, before && s(before.campus) ? { ...before, campus: lk.campusId(before.campus) } : before ?? {});
   const meetings = cleanMeetings(body.meetings);
   const errors: string[] = [];
   const classroomCampus = lk.refs.classrooms?.find((o) => o.id === data.classroom)?.tag;
@@ -479,6 +495,7 @@ async function saveSessionNow(user: SessionClaims, courseId: string, id: string 
   if (data.autoMedian) data.medianDate = !data.continuous && s(data.endDate) ? midpoint(s(data.startDate), s(data.endDate)) : "";
   if (!s(data.gradingScheme)) data.gradingScheme = await defaultGradingScheme(inst, courseId, lk);
   const term = s(body.termId) ? await chosenTerm(inst, s(body.termId), s(data.startDate), data.continuous ? "" : s(data.endDate)) : await termFor(inst, s(data.startDate));
+  const shownTerm = sectionTerm(term, { startsOn: s(data.startDate), endsOn: data.continuous ? "" : s(data.endDate) }, lk.terms);
   const instructors = arr(data.instructors).map(s);
   const instructorPersonId = (instructors[0] && lk.personOf.get(instructors[0])) || "";
   const section = existing
@@ -494,7 +511,7 @@ async function saveSessionNow(user: SessionClaims, courseId: string, id: string 
     instructorPersonId,
     previousInstructorPersonId: existing ? existing.instructorPersonId : null,
     scheduleChanged: !!existing && (existing.termId !== term.id || schedule(before) !== schedule({ ...data, meetings })),
-    diff: { course: course.code, title: course.title, offering: section.code, term: term.name, startDate: s(data.startDate), endDate: s(data.endDate), continuous: data.continuous === true, meetings },
+    diff: { course: course.code, title: course.title, offering: section.code, term: termLabel(shownTerm), startDate: s(data.startDate), endDate: s(data.endDate), continuous: data.continuous === true, meetings },
   });
   await audit(user, "C04", courseId, id ? "Updated session / offering" : "Created session / offering", {
     recordId: section.id,
@@ -502,7 +519,7 @@ async function saveSessionNow(user: SessionClaims, courseId: string, id: string 
     after: { ...saved, termId: term.id },
     note: meetingsSync.created || meetingsSync.removed ? `${meetingsSync.created} class meeting(s) scheduled, ${meetingsSync.removed} removed` : undefined,
   });
-  return { id: section.id, message: `Session ${section.code} ${id ? "saved" : "created"} in ${term.name}` };
+  return { id: section.id, message: `Session ${section.code} ${id ? "saved" : "created"}${shownTerm ? ` in ${shownTerm.name}` : " with no term assigned"}` };
 }
 
 /** The term picked on the session form; the session's dates must fall within it. */

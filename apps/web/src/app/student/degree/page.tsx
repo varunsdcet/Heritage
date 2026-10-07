@@ -12,7 +12,7 @@ function StudentDegreeBody() {
   const search = useSearchParams();
   const [progress, setProgress] = useState<DegreePlanAnalysis | null>(null);
   const [whatIf, setWhatIf] = useState<WhatIfScenarioResponse | null>(null);
-  const [dropCode, setDropCode] = useState("MATH210");
+  const [dropCode, setDropCode] = useState("");
   const [emptyMessage, setEmptyMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -38,10 +38,12 @@ function StudentDegreeBody() {
           return;
         }
         setProgress(data);
-        if (search.get("whatIf") === "1") {
+        const sample = data.remainingRequirements[0]?.code ?? data.satisfiedRequirements[0]?.code ?? "";
+        setDropCode(sample);
+        if (search.get("whatIf") === "1" && sample) {
           const scenario = await api<WhatIfScenarioResponse>(
             "/student/degree-scenarios",
-            { method: "POST", body: JSON.stringify({ dropCourseCodes: ["MATH210"], save: false }) },
+            { method: "POST", body: JSON.stringify({ dropCourseCodes: [sample], save: false }) },
             session.accessToken,
           );
           setWhatIf(scenario);
@@ -177,7 +179,7 @@ function StudentDegreeBody() {
               <form onSubmit={runWhatIf} style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "end" }}>
                 <label style={{ display: "grid", gap: 6 }}>
                   <span>Drop course code</span>
-                  <input value={dropCode} onChange={(e) => setDropCode(e.target.value)} placeholder="MATH210" />
+                  <input value={dropCode} onChange={(e) => setDropCode(e.target.value)} placeholder="Course code" />
                 </label>
                 <Button type="submit" disabled={saving}>
                   {saving ? "Running…" : "Run scenario"}
@@ -200,6 +202,7 @@ function StudentDegreeBody() {
               ) : null}
             </section>
 
+            {view.prerequisiteGraph.length ? (
             <section className="mh-sis-dash__card" style={{ marginTop: 20 }}>
               <h2>Prerequisite chain</h2>
               <pre
@@ -215,13 +218,12 @@ function StudentDegreeBody() {
                   borderRadius: 8,
                 }}
               >
-                {view.prerequisiteGraph.length
-                  ? view.prerequisiteGraph
-                      .map((edge) => `${edge.requiresCourseCode}\n  └─▶ ${edge.courseCode}`)
-                      .join("\n\n")
-                  : "No prerequisite edges published for this program catalog."}
+                {view.prerequisiteGraph
+                  .map((edge) => `${edge.requiresCourseCode}\n  └─▶ ${edge.courseCode}`)
+                  .join("\n\n")}
               </pre>
             </section>
+            ) : null}
 
             <section className="mh-sis-dash__card" style={{ marginTop: 20 }}>
               <h2>Open requirements</h2>
@@ -242,7 +244,7 @@ function StudentDegreeBody() {
                     <StatusPill
                       tone={req.status === "blocked" ? "danger" : req.status === "in_progress" ? "warning" : "neutral"}
                     >
-                      {req.status}
+                      {req.status.replace("_", " ")}
                     </StatusPill>
                   </div>
                 ))}

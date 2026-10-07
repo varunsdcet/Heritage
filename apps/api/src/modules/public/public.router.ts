@@ -12,7 +12,7 @@ const hits = new Map<string, { count: number; resetAt: number }>();
 
 function rateLimit(bucket: string, max = MAX_REQUESTS, message = "Too many verification attempts. Try again later.") {
   return (req: Request, res: Response, next: NextFunction) => {
-    const client = req.header("x-forwarded-for")?.split(",")[0]?.trim() || req.ip || "unknown";
+    const client = req.ip || req.socket.remoteAddress || "unknown";
     const key = `${bucket}|${client}`;
     const now = Date.now();
     const entry = hits.get(key);

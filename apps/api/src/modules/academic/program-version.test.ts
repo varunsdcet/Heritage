@@ -3,14 +3,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const db = vi.hoisted(() => ({
   student: { findFirst: vi.fn(), update: vi.fn() },
   heritageRecord: { findMany: vi.fn() },
-  program: { findFirst: vi.fn() },
+  program: { findFirst: vi.fn(), findMany: vi.fn() },
   programVersion: { findFirst: vi.fn(), create: vi.fn() },
   course: { findMany: vi.fn() },
 }));
 
 vi.mock("@myheritage/db", () => ({ prisma: db }));
 
-import { ensureProgramVersion } from "./program-version.js";
+import { ensureProgramVersion, knownProgramName } from "./program-version.js";
 
 const rec = (id: string, contextKey: string, data: Record<string, unknown>) => ({ id, contextKey, createdAt: new Date("2026-09-01T00:00:00Z"), dataJson: JSON.stringify(data) });
 
@@ -66,5 +66,27 @@ describe("ensureProgramVersion", () => {
     await expect(ensureProgramVersion("inst-1", "stu-1")).resolves.toBe("pv-old");
     expect(db.student.update).not.toHaveBeenCalled();
     await expect(ensureProgramVersion("inst-1", "stu-1", { relink: true })).resolves.toBe("pv-new");
+  });
+});
+
+describe("knownProgramName", () => {
+  beforeEach(() => {
+    db.program.findMany.mockResolvedValue([{ code: "HCA", name: "Health Care Assistant" }]);
+  });
+
+  it("returns the canonical name for a program name, code or Program Management abbreviation", async () => {
+    await expect(knownProgramName("inst-1", "  health care assistant ")).resolves.toBe("Health Care Assistant");
+    await expect(knownProgramName("inst-1", "hca")).resolves.toBe("Health Care Assistant");
+    await expect(knownProgramName("inst-1", "PN")).resolves.toBe("Practical Nursing");
+  });
+
+  it("rejects an unknown program with a 400", async () => {
+    await expect(knownProgramName("inst-1", "Helth Care Asistant")).rejects.toMatchObject({ status: 400, message: expect.stringContaining("Helth Care Asistant") });
+  });
+
+  it("accepts any name when the institution has no programs yet", async () => {
+    db.program.findMany.mockResolvedValue([]);
+    db.heritageRecord.findMany.mockResolvedValue([]);
+    await expect(knownProgramName("inst-1", "General Studies")).resolves.toBe("General Studies");
   });
 });

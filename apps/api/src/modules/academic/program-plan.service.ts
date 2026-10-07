@@ -1,4 +1,6 @@
 import { prisma } from "@myheritage/db";
+import { courseStatus, hasFinalMark, type CourseStatus } from "../../lib/courseStatus.js";
+import { institutionTerms, sectionTerm, termLabel } from "../../lib/sectionTerm.js";
 import { ymdIn } from "../../lib/workshopPolicy.js";
 import { sectionOfferings } from "../courses/sectionOffering.js";
 import {
@@ -59,7 +61,99 @@ function displayLetter(row: {
   return row.letter === "—" ? (row.averagePercent == null ? "I" : letterFromPct(row.averagePercent)) : row.letter;
 }
 
-export async function getProgramPlan(institutionId: string, studentId: string) {
+export { hasFinalMark };
+
+type CourseHistory = Awaited<ReturnType<typeof getCourseHistory>>;
+type HistoryRow = CourseHistory["all"][number];
+type FactsRow = Pick<HistoryRow, "courseId" | "courseCode" | "status" | "courseStatus" | "attemptNumber" | "startsOn" | "endsOn" | "scheduleText" | "sectionId" | "letter" | "averagePercent">;
+
+const STATUS_RANK: Record<CourseStatus, number> = { completed: 0, in_progress: 1, not_started: 2, dropped: 3 };
+
+/**
+ * What the student's enrolments say about one plan course: the latest non-dropped attempt (a dropped attempt only
+ * when nothing else exists) with its status, the section's dates / timetable, and the final grade once completed.
+ * Null when the student never enrolled in the course.
+ */
+export function planItemFacts(course: { courseId?: string | null; courseCode: string }, rows: FactsRow[]) {
+  const code = course.courseCode.trim().toUpperCase();
+  const mine = rows.filter((r) => r.status !== "waitlisted" && ((course.courseId && r.courseId === course.courseId) || r.courseCode.trim().toUpperCase() === code));
+  if (!mine.length) return null;
+  const best = [...mine].sort(
+    (a, b) => Number(a.courseStatus === "dropped") - Number(b.courseStatus === "dropped") || b.attemptNumber - a.attemptNumber || STATUS_RANK[a.courseStatus] - STATUS_RANK[b.courseStatus],
+  )[0]!;
+  return {
+    status: best.courseStatus,
+    startsOn: best.startsOn ?? null,
+    endsOn: best.endsOn ?? null,
+    scheduleText: best.scheduleText ?? null,
+    sectionId: best.sectionId,
+    grade: best.courseStatus === "completed" ? displayLetter({ ...best, status: "completed" }) : null,
+  };
+}
+
+export type PlanCourse = { courseId: string | null; courseCode: string; title: string; credits: number; sortOrder: number; category: string };
+
+/** Plan rows for a list of program courses, filled from real enrolments (Not Started with the fallback dates otherwise). */
+export function planItemRows<T extends PlanCourse>(courses: T[], rows: FactsRow[], fallback: { startsOn: string | null; endsOn: string | null }) {
+  return courses.map((c) => {
+    const f = planItemFacts(c, rows);
+    return {
+      ...c,
+      status: f?.status ?? ("not_started" as CourseStatus),
+      startsOn: f ? f.startsOn : fallback.startsOn,
+      endsOn: f ? f.endsOn : fallback.endsOn,
+      scheduleText: f?.scheduleText ?? null,
+      sectionId: f?.sectionId ?? null,
+    };
+  });
+}
+
+/**
+ * Creates the student's active program plan from their program version's requirements, or brings an existing plan's
+ * rows in line with their enrolments (adding missing program courses). Safe to call repeatedly; returns null when
+ * the student has no program version with requirements.
+ */
+export async function ensureStudentProgramPlan(institutionId: string, studentId: string) {
+  const student = await prisma.student.findFirst({
+    where: { id: studentId, institutionId },
+    select: {
+      cohortId: true,
+      cohort: { select: { startDate: true, endDate: true } },
+      programVersion: { select: { requirements: { orderBy: { sortOrder: "asc" } } } },
+    },
+  });
+  const requirements = student?.programVersion?.requirements ?? [];
+  if (!student || !requirements.length) return null;
+  const history = await getCourseHistory(institutionId, studentId);
+  const courses: PlanCourse[] = requirements.map((r, i) => ({ courseId: r.courseId, courseCode: r.courseCode, title: r.title, credits: r.credits, sortOrder: r.sortOrder ?? i, category: "main" }));
+  const rows = planItemRows(courses, history.all, { startsOn: student.cohort?.startDate ?? null, endsOn: student.cohort?.endDate ?? null });
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.programPlan.findFirst({ where: { institutionId, studentId, status: "active" }, include: { items: true } });
+    if (!existing) {
+      const created = await tx.programPlan.create({
+        data: { institutionId, studentId, cohortId: student.cohortId, status: "active", items: { create: rows.map((r) => ({ institutionId, ...r })) } },
+      });
+      return { planId: created.id, created: true };
+    }
+    for (const r of rows) {
+      const item = existing.items.find((i) => i.category === r.category && ((r.courseId && i.courseId === r.courseId) || i.courseCode === r.courseCode));
+      if (!item) {
+        await tx.programPlanItem.create({ data: { institutionId, planId: existing.id, ...r } });
+        continue;
+      }
+      const facts = { status: r.status, startsOn: r.startsOn, endsOn: r.endsOn, scheduleText: r.scheduleText, sectionId: r.sectionId };
+      const linked = Boolean(r.sectionId);
+      const changed = linked ? (Object.keys(facts) as Array<keyof typeof facts>).some((k) => item[k] !== facts[k]) : false;
+      if (changed) await tx.programPlanItem.update({ where: { id: item.id }, data: { ...facts, rowVersion: { increment: 1 } } });
+    }
+    const inProgram = (i: { courseId: string | null; courseCode: string }) => rows.some((r) => (r.courseId && i.courseId === r.courseId) || i.courseCode === r.courseCode);
+    const stale = existing.items.filter((i) => i.category === "main" && i.status === "not_started" && !inProgram(i) && !planItemFacts(i, history.all)).map((i) => i.id);
+    if (stale.length) await tx.programPlanItem.deleteMany({ where: { id: { in: stale }, planId: existing.id } });
+    return { planId: existing.id, created: false };
+  });
+}
+
+export async function getProgramPlan(institutionId: string, studentId: string, known?: CourseHistory) {
   const plan = await prisma.programPlan.findFirst({
     where: { institutionId, studentId, status: "active" },
     include: {
@@ -108,6 +202,7 @@ export async function getProgramPlan(institutionId: string, studentId: string) {
   });
   const courseById = new Map(courses.map((c) => [c.id, c]));
   const courseByCode = new Map(courses.map((c) => [c.code, c]));
+  const history = known ?? (await getCourseHistory(institutionId, studentId));
 
   const looksLikeId = (value: string) =>
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.trim()) ||
@@ -123,46 +218,32 @@ export async function getProgramPlan(institutionId: string, studentId: string) {
         ? fromCourse?.title || item.courseCode
         : rawTitle);
     const courseCode = fromCourse?.code || item.courseCode;
+    const live = planItemFacts({ courseId: item.courseId ?? fromCourse?.id, courseCode }, history.all);
     return {
       id: item.id,
       courseCode,
       title,
       credits: item.credits,
       category: item.category,
-      status: item.status,
-      startsOn: item.startsOn,
-      endsOn: item.endsOn,
-      scheduleText: item.scheduleText,
-      sectionId: item.sectionId,
+      status: live?.status ?? item.status,
+      grade: live?.grade ?? null,
+      startsOn: live ? live.startsOn : item.startsOn,
+      endsOn: live ? live.endsOn : item.endsOn,
+      scheduleText: live ? live.scheduleText : item.scheduleText,
+      sectionId: live?.sectionId ?? item.sectionId,
       sortOrder: item.sortOrder,
     };
   };
 
-  const main = plan.items.filter((i) => i.category === "main").map(mapItem);
-  const practicum = plan.items.filter((i) => i.category === "practicum").map(mapItem);
-  const makeup = plan.items.filter((i) => i.category === "makeup").map(mapItem);
+  const items = plan.items.map(mapItem);
+  const main = items.filter((i) => i.category === "main");
+  const practicum = items.filter((i) => i.category === "practicum");
+  const makeup = items.filter((i) => i.category === "makeup");
 
-  const completedItems = plan.items.filter((i) => i.status === "completed");
-  const earnedCredits = completedItems.reduce((n, i) => n + i.credits, 0);
-  const totalCredits = plan.items.reduce((n, i) => n + i.credits, 0);
-
-  const grades = await prisma.gradeItem.findMany({
-    where: {
-      institutionId,
-      studentId,
-      status: "published",
-      enrolment: { countsTowardCgpa: true },
-    },
-  });
-  const pcts = grades
-    .filter((g) => g.score != null && g.maxScore > 0)
-    .map((g) => ((g.score ?? 0) / g.maxScore) * 100);
-  const averagePercent =
-    pcts.length > 0 ? Number((pcts.reduce((a, b) => a + b, 0) / pcts.length).toFixed(1)) : null;
-  const points = grades
-    .filter((g) => g.score != null && g.maxScore > 0)
-    .map((g) => gradePoints(g.letter || letterFromPct(((g.score ?? 0) / g.maxScore) * 100)));
-  const cgpa = points.length ? Number((points.reduce((a, b) => a + b, 0) / points.length).toFixed(2)) : null;
+  const passed = (i: (typeof items)[number]) => i.status === "completed" && i.grade !== "F";
+  const earnedCredits = items.filter(passed).reduce((n, i) => n + i.credits, 0);
+  const totalCredits = items.reduce((n, i) => n + i.credits, 0);
+  const { averagePercent, cgpa } = summarizeCourses(transcriptCourses(history, ""));
 
   return {
     planId: plan.id,
@@ -181,10 +262,10 @@ export async function getProgramPlan(institutionId: string, studentId: string) {
       earnedCredits,
       averagePercent,
       cgpa,
-      completed: plan.items.filter((i) => i.status === "completed").length,
-      inProgress: plan.items.filter((i) => i.status === "in_progress").length,
-      notStarted: plan.items.filter((i) => i.status === "not_started").length,
-      dropped: plan.items.filter((i) => i.status === "dropped").length,
+      completed: items.filter((i) => i.status === "completed").length,
+      inProgress: items.filter((i) => i.status === "in_progress").length,
+      notStarted: items.filter((i) => i.status === "not_started").length,
+      dropped: items.filter((i) => i.status === "dropped").length,
     },
     main,
     practicum,
@@ -230,11 +311,13 @@ export async function getCourseHistory(institutionId: string, studentId: string)
     },
     orderBy: [{ attemptNumber: "asc" }, { createdAt: "desc" }],
   });
-  const [offerings, institution] = await Promise.all([
+  const [offerings, institution, terms] = await Promise.all([
     sectionOfferings(institutionId, [...new Set(enrolments.map((e) => e.sectionId))]),
     prisma.institution.findFirst({ where: { id: institutionId }, select: { timezone: true } }),
+    institutionTerms(institutionId),
   ]);
   const tz = institution?.timezone || DEFAULT_TZ;
+  const today = ymdIn(new Date(), tz);
 
   const instructorIds = [...new Set(enrolments.map((e) => e.section.instructorPersonId))];
   const instructors = await prisma.person.findMany({
@@ -268,13 +351,16 @@ export async function getCourseHistory(institutionId: string, studentId: string)
       offering?.startsOn || plan?.startsOn || e.section.academicBlock?.startsOn || fromSessions.startsOn || e.section.term.startsOn;
     const endsOn =
       offering?.endsOn || plan?.endsOn || e.section.academicBlock?.endsOn || fromSessions.endsOn || e.section.term.endsOn;
+    const term = sectionTerm(e.section.term, { startsOn, endsOn }, terms);
     return {
       enrolmentId: e.id,
+      courseId: e.section.courseId,
       courseCode: e.section.course.code,
       title: e.section.course.title,
       credits: e.section.course.credits,
-      termCode: e.section.term.code,
-      termName: e.section.term.name,
+      termCode: term?.code ?? "",
+      termName: termLabel(term),
+      courseStatus: courseStatus({ status: e.status, startsOn, endsOn, averagePercent: avgPct }, today),
       sectionCode: e.section.code,
       status: e.status,
       attemptNumber: e.attemptNumber,
@@ -299,31 +385,13 @@ export async function getCourseHistory(institutionId: string, studentId: string)
     withdrawn: rows.filter((r) => r.status === "withdrawn"),
     retakes: rows.filter((r) => r.isRetake),
     all: rows,
-    today: ymdIn(new Date(), tz),
+    today,
   };
 }
 
-/**
- * A course carries a final mark once it is completed, or once an enrolled course has ended with published marks.
- * Until then it is "IP" (in progress) with its current percent, and stays out of credits earned and CGPA.
- */
-export function hasFinalMark(row: { status: string; endsOn: string | null; averagePercent: number | null }, today: string) {
-  if (row.status === "completed") return true;
-  return row.status === "enrolled" && row.averagePercent != null && Boolean(row.endsOn) && row.endsOn!.slice(0, 10) < today;
-}
-
-export async function getTranscriptSummary(institutionId: string, studentId: string) {
-  const student = await prisma.student.findFirst({
-    where: { id: studentId, institutionId },
-    include: { cohort: true, programVersion: { include: { program: true } } },
-  });
-  const history = await getCourseHistory(institutionId, studentId);
-  const plan = await getProgramPlan(institutionId, studentId);
-
-  const assigned = student?.programName && student.programName !== "Not assigned" ? student.programName : null;
-  const programName = assigned ?? student?.programVersion?.program.name ?? plan.cohort?.label ?? student?.programName ?? "Programme";
-
-  const courses = history.all.filter((r) => r.status !== "waitlisted").map((r) => {
+/** Final Marks / transcript rows: IP until a final mark exists, then the letter and grade points. */
+export function transcriptCourses(history: Pick<CourseHistory, "all" | "today">, programName: string) {
+  return history.all.filter((r) => r.status !== "waitlisted").map((r) => {
     const final = hasFinalMark(r, history.today);
     const letter = r.status === "enrolled" && !final ? "IP" : displayLetter({ ...r, status: final ? "completed" : r.status });
     return {
@@ -338,6 +406,7 @@ export async function getTranscriptSummary(institutionId: string, studentId: str
       startsOn: r.startsOn,
       endsOn: r.endsOn,
       status: r.status,
+      courseStatus: r.courseStatus,
       final,
       letter,
       averagePercent: r.averagePercent,
@@ -347,7 +416,20 @@ export async function getTranscriptSummary(institutionId: string, studentId: str
       countsTowardCgpa: r.countsTowardCgpa,
     };
   });
+}
 
+export async function getTranscriptSummary(institutionId: string, studentId: string) {
+  const student = await prisma.student.findFirst({
+    where: { id: studentId, institutionId },
+    include: { cohort: true, programVersion: { include: { program: true } } },
+  });
+  const history = await getCourseHistory(institutionId, studentId);
+  const plan = await getProgramPlan(institutionId, studentId, history);
+
+  const assigned = student?.programName && student.programName !== "Not assigned" ? student.programName : null;
+  const programName = assigned ?? student?.programVersion?.program.name ?? plan.cohort?.label ?? student?.programName ?? "Programme";
+
+  const courses = transcriptCourses(history, programName);
   const totals = summarizeCourses(courses);
 
   const termMap = new Map<string, string>();

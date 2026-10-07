@@ -5,6 +5,9 @@ import { writeAuditAndOutbox, type Tx } from "@myheritage/events";
 import type { SessionClaims } from "@myheritage/contracts";
 import { SAFE_LINK_MESSAGE, isSafeLink } from "../../lib/safeLink.js";
 import { assertSeat } from "./heritage/enrolment.js";
+import { getCourseHistory, planItemRows } from "../academic/program-plan.service.js";
+import { S as FIN_SCREENS } from "./heritage/finance.core.js";
+import { createAdjustment } from "./heritage/finance.records.js";
 
 function httpError(message: string, code: string, status: number) {
   return Object.assign(new Error(message), { code, status });
@@ -236,6 +239,8 @@ export async function generateProgramPlan(user: SessionClaims, body: z.infer<typ
           sortOrder: i,
           category: "main" as const,
         }));
+  const history = await getCourseHistory(user.institutionId, student.id);
+  const items = planItemRows(courses, history.all, { startsOn: cohort.startDate, endsOn: cohort.endDate });
 
   const plan = await prisma.$transaction(async (tx) => {
     await tx.student.update({
@@ -252,19 +257,7 @@ export async function generateProgramPlan(user: SessionClaims, body: z.infer<typ
         data: { cohortId: cohort.id, rowVersion: { increment: 1 } },
       });
       await tx.programPlanItem.createMany({
-        data: courses.map((c) => ({
-          institutionId: user.institutionId,
-          planId: existing.id,
-          courseId: c.courseId,
-          courseCode: c.courseCode,
-          title: c.title,
-          credits: c.credits,
-          sortOrder: c.sortOrder,
-          category: c.category,
-          status: "not_started",
-          startsOn: cohort.startDate,
-          endsOn: cohort.endDate,
-        })),
+        data: items.map((c) => ({ institutionId: user.institutionId, planId: existing.id, ...c })),
       });
       return existing;
     }
@@ -275,18 +268,7 @@ export async function generateProgramPlan(user: SessionClaims, body: z.infer<typ
         cohortId: cohort.id,
         status: "active",
         items: {
-          create: courses.map((c) => ({
-            institutionId: user.institutionId,
-            courseId: c.courseId,
-            courseCode: c.courseCode,
-            title: c.title,
-            credits: c.credits,
-            sortOrder: c.sortOrder,
-            category: c.category,
-            status: "not_started",
-            startsOn: cohort.startDate,
-            endsOn: cohort.endDate,
-          })),
+          create: items.map((c) => ({ institutionId: user.institutionId, ...c })),
         },
       },
     });
@@ -386,17 +368,12 @@ export async function adjustLedgerEntry(user: SessionClaims, body: z.infer<typeo
   };
 
   if (body.action === "mark_paid") {
-    if (!unpaidCharge) throw httpError("Only an open charge can be marked paid", "CONFLICT", 409);
-    const updated = await claim(prisma, "paid", body.note ?? entry.note);
-    await audit(user, "FinanceLedger.paid", "finance_ar", entry, updated, "admin.finance.adjust");
-    return updated;
+    throw httpError("A charge is settled by posting the payment against it (Post ledger entry, kind Payment), not by marking it paid", "CONFLICT", 409);
   }
-  if (body.action === "waive") {
-    if (!unpaidCharge) throw httpError("Only an open charge can be waived; reverse payments and paid charges instead", "CONFLICT", 409);
-    const updated = await claim(prisma, "waived", body.note ?? entry.note);
-    await audit(user, "FinanceLedger.waived", "finance_ar", entry, updated, "admin.finance.adjust");
-    return updated;
+  if (body.action === "waive" && !unpaidCharge) {
+    throw httpError("Only an open charge can be waived; reverse payments and paid charges instead", "CONFLICT", 409);
   }
+  if (entry.kind === "charge") return requestChargeWriteOff(user, entry, body);
 
   // Waiving the original already removes its effect on the balance; the reversal row is a void memo for the audit trail.
   const reversal = await prisma.$transaction(async (tx) => {
@@ -419,6 +396,37 @@ export async function adjustLedgerEntry(user: SessionClaims, body: z.infer<typeo
   });
   await audit(user, "FinanceLedger.reversed", "finance_ar", entry, reversal, "admin.finance.adjust");
   return reversal;
+}
+
+/**
+ * Writing off a charge lowers what the student owes, so it goes through the same second-reviewer
+ * Financial Adjustment approval as Financial Management instead of changing the ledger directly.
+ */
+async function requestChargeWriteOff(
+  user: SessionClaims,
+  entry: { id: string; studentId: string; label: string; amountCad: number },
+  body: z.infer<typeof LedgerAdjustBody>,
+) {
+  const pending = await prisma.heritageRecord.findMany({
+    where: { institutionId: user.institutionId, screenId: FIN_SCREENS.ADJUSTMENT, contextKey: entry.studentId, deletedAt: null, dataJson: { contains: entry.id } },
+    select: { dataJson: true },
+  });
+  const open = pending.map((r) => JSON.parse(r.dataJson) as { status?: string; number?: number; ledgerEntryId?: string }).find((d) => d.ledgerEntryId === entry.id && d.status === "Pending");
+  if (open) throw httpError(`Adjustment #${open.number} for this charge is already waiting for approval`, "CONFLICT", 409);
+  const verb = body.action === "waive" ? "Waive" : "Reverse";
+  const created = await createAdjustment(user, {
+    studentId: entry.studentId,
+    direction: "Decrease balance (credit)",
+    amount: Math.abs(entry.amountCad),
+    reason: `${verb} ledger charge "${entry.label}"${body.note ? `: ${body.note}` : ""}`,
+    ledgerEntryId: entry.id,
+  });
+  await audit(user, "FinanceLedger.writeOffRequested", "finance_ar", entry, { adjustmentId: created.id, action: body.action }, "admin.finance.adjust");
+  return {
+    pendingApproval: true,
+    adjustmentId: created.id,
+    message: `${verb} request submitted as Financial Adjustment #${created.number}. Another user must approve it in Financial Management before the balance changes.`,
+  };
 }
 
 export async function listTaxDocumentsAdmin(institutionId: string) {

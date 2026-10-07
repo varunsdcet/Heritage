@@ -47,3 +47,19 @@ export function statusTone(enrolmentStatus: string) {
   if (enrolmentStatus === "withdrawn") return "muted";
   return "muted";
 }
+
+type CourseRowStatus = { enrolmentStatus: string; courseStatus?: string | null; startsOn?: string | null };
+
+const COURSE_STATUS_LABEL: Record<string, string> = { completed: "Completed", in_progress: "In Progress", not_started: "Not Started", dropped: "Withdrawn" };
+const COURSE_STATUS_TONE: Record<string, string> = { completed: "done", in_progress: "progress", not_started: "muted", dropped: "muted" };
+
+/** The API's shared course status (Completed once a final mark exists), falling back to the enrolment status. */
+export function courseStatusLabel(c: CourseRowStatus) {
+  if (c.enrolmentStatus === "waitlisted" || !c.courseStatus) return statusLabel(c.enrolmentStatus, c.startsOn);
+  return COURSE_STATUS_LABEL[c.courseStatus] ?? statusLabel(c.enrolmentStatus, c.startsOn);
+}
+
+export function courseStatusTone(c: CourseRowStatus) {
+  if (c.enrolmentStatus === "waitlisted" || !c.courseStatus) return statusTone(c.enrolmentStatus);
+  return COURSE_STATUS_TONE[c.courseStatus] ?? statusTone(c.enrolmentStatus);
+}

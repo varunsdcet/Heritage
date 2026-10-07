@@ -13,6 +13,7 @@ type PlanItem = {
   credits: number;
   category: string;
   status: string;
+  grade?: string | null;
   startsOn?: string | null;
   endsOn?: string | null;
   scheduleText?: string | null;
@@ -211,7 +212,10 @@ export default function ProgramPlanPage() {
                             ))}
                           </td>
                           <td>
-                            <span className={statusClass(item.status)}>{statusLabel(item.status)}</span>
+                            <span className={statusClass(item.status)}>
+                              {statusLabel(item.status)}
+                              {item.status === "completed" && item.grade ? ` (${item.grade})` : ""}
+                            </span>
                           </td>
                         </tr>
                       );

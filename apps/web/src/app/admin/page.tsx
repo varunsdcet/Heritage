@@ -92,17 +92,19 @@ function AdminHomeBody({
   const canSeeFinance = allows(access, { modules: ["financialManagement"] });
   const canPostFinance = allows(access, { modules: ["financialManagement"], edit: true });
   const canSeeStudents = allows(access, { modules: ["studentRecords"] });
+  const canSeeApprovals = allows(access, { modules: ["userRequests"] });
+  const canSeeCourses = allows(access, { modules: ["courseManagement"] });
   const loading = stats === null;
   const blank = failed ? "—" : "…";
   const todos: AdminTodo[] | null = stats
     ? [
-        { count: stats.pendingApprovals, one: "pending approval", many: "pending approvals", href: "/admin/approvals" },
-        { count: stats.pendingGrades, one: "grade awaiting publish", many: "grades awaiting publish", href: "/admin/student-management/grades" },
-        { count: stats.pendingLoa, one: "leave of absence request", many: "leave of absence requests", href: "/admin/student-management/leave" },
-        { count: stats.atRisk, one: "at-risk student", many: "at-risk students", href: "/admin/ops/success/cases" },
-        { count: stats.pendingEvaluations, one: "pending evaluation", many: "pending evaluations", href: "/admin/course-management/evaluations" },
+        { count: stats.pendingApprovals, one: "pending approval", many: "pending approvals", href: "/admin/approvals", show: canSeeApprovals },
+        { count: stats.pendingGrades, one: "grade awaiting publish", many: "grades awaiting publish", href: "/admin/student-management/grades", show: canSeeApprovals },
+        { count: stats.pendingLoa, one: "leave of absence request", many: "leave of absence requests", href: "/admin/student-management/leave", show: canSeeStudents },
+        { count: stats.atRisk, one: "at-risk student", many: "at-risk students", href: "/admin/ops/success/cases", show: canSeeStudents },
+        { count: stats.pendingEvaluations, one: "pending evaluation", many: "pending evaluations", href: "/admin/course-management/evaluations", show: canSeeCourses },
       ]
-        .filter((t) => t.count > 0)
+        .filter((t) => t.show && t.count > 0)
         .map((t) => ({ label: `${t.count} ${t.count === 1 ? t.one : t.many}`, href: t.href }))
     : null;
 
@@ -119,7 +121,12 @@ function AdminHomeBody({
           <h1>Welcome back{firstName ? `, ${firstName}` : ""}</h1>
           <p>
             {stats
-              ? `${stats.institutionName} · ${stats.termName} · ${stats.pendingApprovals} pending approvals · ${stats.enrolments} enrolments`
+              ? [
+                  stats.institutionName,
+                  stats.termName,
+                  canSeeApprovals ? `${stats.pendingApprovals} pending approvals` : null,
+                  `${stats.enrolments} enrolments`,
+                ].filter(Boolean).join(" · ")
               : failed
                 ? "Live campus data is unavailable."
                 : "Loading live campus data…"}
@@ -206,20 +213,24 @@ function AdminHomeBody({
             danger={!loading && stats.feesPastDueCad > 0}
           />
         ) : null}
-        <KpiButton
-          label="Pending approvals"
-          value={loading ? blank : stats.pendingApprovals}
-          hint="Action required"
-          href="/admin/approvals"
-          danger
-        />
-        <KpiButton
-          label="Pending grades"
-          value={loading ? blank : stats.pendingGrades}
-          hint={loading ? "Draft / publish" : `${stats.publishedGrades} published`}
-          href="/admin/student-management/grades"
-          danger={!loading && stats.pendingGrades > 0}
-        />
+        {canSeeApprovals ? (
+          <>
+            <KpiButton
+              label="Pending approvals"
+              value={loading ? blank : stats.pendingApprovals}
+              hint="Action required"
+              href="/admin/approvals"
+              danger
+            />
+            <KpiButton
+              label="Pending grades"
+              value={loading ? blank : stats.pendingGrades}
+              hint={loading ? "Draft / publish" : `${stats.publishedGrades} published`}
+              href="/admin/student-management/grades"
+              danger={!loading && stats.pendingGrades > 0}
+            />
+          </>
+        ) : null}
         <KpiButton
           label="At-risk students"
           value={loading ? blank : stats.atRisk}

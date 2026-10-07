@@ -5,6 +5,7 @@ import type { SessionClaims } from "@myheritage/contracts";
 import { CAMPUSES, assertPermission } from "../superAdmin.service.js";
 import { audit, refs } from "./service.js";
 import { bytesMatchMime, decodeBase64 } from "../../../lib/fileSniff.js";
+import type { TermRef } from "../../../lib/sectionTerm.js";
 import {
   ANSWER_FIELDS,
   COURSE_FIELDS,
@@ -148,7 +149,10 @@ export type Lookups = {
   personOf: Map<string, string>;
   accountOfPerson: Map<string, string>;
   classroomSize: Map<string, number>;
+  terms: TermRef[];
   label: (ref: string, id: unknown) => string;
+  /** A stored campus id, or the id of the campus a legacy row stored by name. */
+  campusId: (v: unknown) => string;
 };
 
 export async function staffAccounts(inst: string) {
@@ -182,6 +186,13 @@ export async function locationLookups(inst: string) {
 
 const byLabel = (a: Opt, b: Opt) => a.label.localeCompare(b.label);
 
+export function resolveCampusId(campuses: Opt[], v: unknown) {
+  const raw = s(v).trim();
+  if (!raw || campuses.some((c) => c.id === raw)) return raw;
+  const norm = (x: string) => x.toLowerCase().replace(/[\u2013\u2014]/g, "-").replace(/\s+/g, " ").trim();
+  return campuses.find((c) => norm(c.label) === norm(raw))?.id ?? raw;
+}
+
 export async function lookups(user: SessionClaims): Promise<Lookups> {
   const inst = user.institutionId;
   await ensureSeed(user);
@@ -193,7 +204,7 @@ export async function lookups(user: SessionClaims): Promise<Lookups> {
       orderBy: { createdAt: "asc" },
     }),
     prisma.course.findMany({ where: { institutionId: inst }, orderBy: { code: "asc" }, select: { id: true, code: true, title: true } }),
-    prisma.term.findMany({ where: { institutionId: inst }, orderBy: { startsOn: "desc" }, select: { id: true, name: true } }),
+    prisma.term.findMany({ where: { institutionId: inst }, orderBy: { startsOn: "desc" }, select: { id: true, code: true, name: true, startsOn: true, endsOn: true } }),
     prisma.section.findMany({ where: { institutionId: inst }, include: { course: { select: { code: true } }, term: { select: { name: true } } }, orderBy: [{ createdAt: "desc" }], take: 2000 }),
     prisma.courseResourceCategory.findMany({ where: { institutionId: inst }, orderBy: { name: "asc" } }),
     refs(user),
@@ -232,7 +243,9 @@ export async function lookups(user: SessionClaims): Promise<Lookups> {
     personOf: new Map(staff.map((a) => [a.id, a.personId])),
     accountOfPerson: new Map(staff.map((a) => [a.personId, a.id])),
     classroomSize: loc.classroomSize,
+    terms,
     label: (ref, id) => (ref === "users" ? (users.find((u) => u.id === id)?.label ?? "") : (maps.get(ref)?.get(s(id)) ?? "")),
+    campusId: (v) => resolveCampusId(loc.campuses, v),
   };
 }
 

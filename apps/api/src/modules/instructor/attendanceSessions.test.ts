@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@myheritage/db", () => ({ prisma: {} }));
 
-import { ensureAttendanceClassSession, writeAttendanceRecords } from "./attendanceSessions.js";
+import { applyDraftToSubmittedAttendance, ensureAttendanceClassSession, writeAttendanceRecords } from "./attendanceSessions.js";
 
 const institutionId = "00000000-0000-4000-8000-000000000004";
 const tz = "America/Vancouver";
@@ -11,7 +11,7 @@ const sectionB = { id: "1caa169d-d2e4-4f91-8a1f-eb1d1689eeff", code: "QAI1010B-0
 
 const tx = {
   classSession: { findMany: vi.fn(), findFirst: vi.fn(), create: vi.fn() },
-  attendanceRecord: { deleteMany: vi.fn(), create: vi.fn() },
+  attendanceRecord: { deleteMany: vi.fn(), create: vi.fn(), findMany: vi.fn() },
 };
 
 beforeEach(() => {
@@ -21,6 +21,7 @@ beforeEach(() => {
   tx.classSession.create.mockImplementation(async ({ data }: { data: { sectionId: string } }) => ({ id: `session-${data.sectionId}` }));
   tx.attendanceRecord.deleteMany.mockResolvedValue({ count: 0 });
   tx.attendanceRecord.create.mockResolvedValue({});
+  tx.attendanceRecord.findMany.mockResolvedValue([]);
 });
 
 describe("ensureAttendanceClassSession", () => {
@@ -101,5 +102,39 @@ describe("writeAttendanceRecords", () => {
       }),
     ).rejects.toMatchObject({ status: 403, code: "FORBIDDEN" });
     expect(tx.attendanceRecord.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("applyDraftToSubmittedAttendance", () => {
+  const input = { institutionId, meetingLabel: "2026-10-06", tz, sections: [sectionA, sectionB] };
+
+  it("leaves a day with no submitted records to the draft", async () => {
+    const result = await applyDraftToSubmittedAttendance(tx as never, {
+      ...input,
+      marks: [{ studentId: "student-1", sectionId: sectionA.id, status: "Present", note: "draft" }],
+    });
+    expect(result).toEqual({ submittedCount: 0, updated: 0 });
+    expect(tx.attendanceRecord.create).not.toHaveBeenCalled();
+  });
+
+  it("writes edits for already-submitted students to their records and skips the rest", async () => {
+    tx.attendanceRecord.findMany.mockResolvedValue([{ studentId: "student-1", sectionId: sectionA.id }]);
+    const result = await applyDraftToSubmittedAttendance(tx as never, {
+      ...input,
+      marks: [
+        { studentId: "student-1", sectionId: sectionA.id, status: "Present", note: "Arrived with doctor's note" },
+        { studentId: "student-2", sectionId: sectionA.id, status: "Absent" },
+        { studentId: "student-1", sectionId: sectionB.id, status: "Late" },
+      ],
+    });
+    expect(result).toEqual({ submittedCount: 1, updated: 1 });
+    expect(tx.attendanceRecord.findMany).toHaveBeenCalledWith({
+      where: { institutionId, sectionId: { in: [sectionA.id, sectionB.id] }, meetingLabel: "2026-10-06" },
+      select: { studentId: true, sectionId: true },
+    });
+    const rows = tx.attendanceRecord.create.mock.calls.map((c) => c[0].data);
+    expect(rows).toEqual([
+      expect.objectContaining({ studentId: "student-1", sectionId: sectionA.id, status: "present", note: "Arrived with doctor's note" }),
+    ]);
   });
 });

@@ -331,7 +331,7 @@ export function FlagsHolds() {
 /* Attendance Records                                                   */
 /* ------------------------------------------------------------------ */
 
-type Attendance = { courses: Array<{ value: string; label: string }>; items: Array<{ id: string; date: string; course: string; present: boolean; absent: boolean; excused: boolean; note: string }> };
+type Attendance = { courses: Array<{ value: string; label: string }>; items: Array<{ id: string; date: string; course: string; present: boolean; late?: boolean; absent: boolean; excused: boolean; note: string }> };
 
 export function AttendanceRecords() {
   const { id } = useProfile();
@@ -360,12 +360,13 @@ export function AttendanceRecords() {
       </Card>
       <Card>
         <ErrorLine>{error}</ErrorLine>
-        <Table head={["Date", "Course", "Present", "Absent", "Excused", "Note"]} empty={data ? "No attendance records were found." : false}>
+        <Table head={["Date", "Course", "Present", "Late", "Absent", "Excused", "Note"]} empty={data ? "No attendance records were found." : false}>
           {(data?.items ?? []).map((a) => (
             <tr key={a.id}>
               <td>{fmtDate(a.date)}</td>
               <td>{a.course}</td>
               <td>{mark(a.present)}</td>
+              <td>{mark(a.late === true)}</td>
               <td>{mark(a.absent)}</td>
               <td>{mark(a.excused)}</td>
               <td>{a.note || "—"}</td>

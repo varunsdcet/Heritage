@@ -27,8 +27,10 @@ import { lmsFilesRouter } from "./modules/instructor/lmsFiles.router.js";
 import { publicRouter } from "./modules/public/public.router.js";
 import { selfpacedRouter } from "./modules/selfpaced/selfpaced.router.js";
 import { errorHandler } from "./middleware/error-handler.js";
+import { trustProxySetting } from "./lib/clientIp.js";
 
 const app: Express = express();
+app.set("trust proxy", trustProxySetting(process.env.TRUST_PROXY));
 const allowedOrigins = (process.env.WEB_ORIGIN ??
   "http://localhost:3000,http://46.202.163.202:3000,http://46.202.163.202,http://46.202.163.202:80")
   .split(",")

@@ -10,6 +10,7 @@ import { assertPermission, type PermissionModuleKey } from "./superAdmin.service
 import { heritageRouter } from "./heritage/heritage.router.js";
 import { enrolInSection, quoteSectionFee, seatRule } from "./heritage/enrolment.js";
 import { S as CM, settingsOf } from "./heritage/courses.js";
+import { knownProgramName } from "../academic/program-version.js";
 import {
   UpsertCohortBody,
   GeneratePlanBody,
@@ -161,6 +162,10 @@ adminRouter.post("/users", async (req, res, next) => {
     if (existing) {
       res.status(409).json({ error: { message: "Account already exists" } });
       return;
+    }
+
+    if (body.role === "student" && body.programName?.trim()) {
+      body.programName = await knownProgramName(user.institutionId, body.programName);
     }
 
     const personId = randomUUID();

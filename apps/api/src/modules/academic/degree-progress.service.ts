@@ -1,6 +1,7 @@
 import type { DegreePlanAnalysis, AiClaim } from "@myheritage/contracts";
 import { prisma } from "@myheritage/db";
 import { ensureProgramVersion } from "./program-version.js";
+import { getCourseHistory, transcriptCourses } from "./program-plan.service.js";
 
 type ProgressOptions = {
   institutionId: string;
@@ -12,6 +13,27 @@ type ProgressOptions = {
 
 function unique(codes: string[]) {
   return [...new Set(codes.map((c) => c.toUpperCase()))];
+}
+
+type Standing = { credits: number; status: "satisfied" | "in_progress" };
+
+/**
+ * Per course code: satisfied only by a final, passing mark that earns credit (the Final Marks / transcript rule);
+ * in progress while an enrolment has no final mark yet. Failed and withdrawn attempts count for nothing.
+ */
+export function courseStanding(
+  rows: Array<{ courseCode: string; credits: number; status: string; final: boolean; letter: string; gradePoints: number | null; countsTowardCgpa: boolean }>,
+  drop: Set<string> = new Set(),
+  fail: Set<string> = new Set(),
+) {
+  const out = new Map<string, Standing>();
+  for (const r of rows) {
+    const code = r.courseCode.toUpperCase();
+    if (drop.has(code) || fail.has(code)) continue;
+    if (r.final && r.countsTowardCgpa && r.letter !== "F" && r.gradePoints !== 0) out.set(code, { credits: r.credits, status: "satisfied" });
+    else if (!r.final && r.status === "enrolled" && out.get(code)?.status !== "satisfied") out.set(code, { credits: r.credits, status: "in_progress" });
+  }
+  return out;
 }
 
 export async function computeDegreeProgress(input: ProgressOptions): Promise<DegreePlanAnalysis> {
@@ -42,36 +64,9 @@ export async function computeDegreeProgress(input: ProgressOptions): Promise<Deg
   const fail = new Set(unique(input.failCourseCodes ?? []));
   const add = unique(input.addCourseCodes ?? []);
 
-  const enrolments = await prisma.enrolment.findMany({
-    where: {
-      institutionId: input.institutionId,
-      studentId: student.id,
-      status: { in: ["enrolled", "completed"] },
-    },
-    include: { section: { include: { course: true } } },
-  });
-
-  const publishedGrades = await prisma.gradeItem.findMany({
-    where: {
-      institutionId: input.institutionId,
-      studentId: student.id,
-      status: "published",
-    },
-    include: { assignment: { include: { section: { include: { course: true } } } } },
-  });
-
-  const completedByCourse = new Map<string, { credits: number; status: "satisfied" | "in_progress" }>();
-  for (const enrolment of enrolments) {
-    const code = enrolment.section.course.code.toUpperCase();
-    if (drop.has(code) || fail.has(code)) continue;
-    const hasPublished = publishedGrades.some(
-      (g) => g.assignment.section.course.code.toUpperCase() === code,
-    );
-    completedByCourse.set(code, {
-      credits: enrolment.section.course.credits,
-      status: enrolment.status === "completed" || hasPublished ? "satisfied" : "in_progress",
-    });
-  }
+  const history = await getCourseHistory(input.institutionId, student.id);
+  const enrolments = history.all.filter((r) => r.status === "enrolled" || r.status === "completed");
+  const completedByCourse = courseStanding(transcriptCourses(history, version.program.name), drop, fail);
   const transfers = await prisma.transferCredit.findMany({
     where: { institutionId: input.institutionId, studentId: student.id, status: "accepted" },
     include: { course: true },
@@ -96,10 +91,13 @@ export async function computeDegreeProgress(input: ProgressOptions): Promise<Deg
     }
   }
 
-  const prereqRows = await prisma.coursePrerequisite.findMany({
-    where: { institutionId: input.institutionId },
-    include: { course: true, prerequisiteCourse: true },
-  });
+  const programCodes = version.requirements.map((r) => r.courseCode);
+  const prereqRows = programCodes.length
+    ? await prisma.coursePrerequisite.findMany({
+        where: { institutionId: input.institutionId, course: { code: { in: programCodes } } },
+        include: { course: true, prerequisiteCourse: true },
+      })
+    : [];
   const prerequisiteGraph = prereqRows.map((row) => ({
     courseCode: row.course.code,
     requiresCourseCode: row.prerequisiteCourse.code,
@@ -206,8 +204,8 @@ export async function computeDegreeProgress(input: ProgressOptions): Promise<Deg
       uri: "/student/profile",
     },
     ...enrolments.slice(0, 6).map((e) => ({
-      id: `enrolment:${e.id}`,
-      title: `${e.section.course.code} enrolment`,
+      id: `enrolment:${e.enrolmentId}`,
+      title: `${e.courseCode} enrolment`,
       uri: `/student/courses/${e.sectionId}`,
     })),
   ];
@@ -215,7 +213,7 @@ export async function computeDegreeProgress(input: ProgressOptions): Promise<Deg
   const claims: AiClaim[] = [
     {
       kind: "fact",
-      text: `${completedCredits} of ${version.totalCredits} required credits are satisfied from published/completed records.`,
+      text: `${completedCredits} of ${version.totalCredits} required credits are satisfied by final, passing marks.`,
       evidenceIds: evidence.map((e) => e.id),
     },
     {

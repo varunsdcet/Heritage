@@ -14,6 +14,8 @@ export default function MobileLoginPage() {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    if (!email.trim()) return setError("Enter your campus email.");
+    if (!password) return setError("Enter your password.");
     setLoading(true);
     setError(null);
     try {
@@ -30,7 +32,18 @@ export default function MobileLoginPage() {
       else if (session.roles.includes("admin") || session.roles.includes("registrar")) router.push("/admin");
       else router.push("/m/student");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Sign-in failed");
+      const raw = err instanceof Error ? err.message : "";
+      setError(
+        /Failed to fetch|NetworkError|Load failed|TypeError/i.test(raw)
+          ? "Cannot reach campus services. Check your connection and try again."
+          : /Invalid credentials|unauthorized|401/i.test(raw)
+            ? "Email or password is incorrect."
+            : /VALIDATION_ERROR|Invalid request/i.test(raw)
+              ? "Check your email and password and try again."
+              : raw && raw.length <= 180
+                ? raw
+                : "Sign-in failed. Please try again.",
+      );
     } finally {
       setLoading(false);
     }
@@ -96,7 +109,7 @@ export default function MobileLoginPage() {
             autoComplete="current-password"
           />
         </label>
-        <Button type="submit" disabled={loading} style={{ width: "100%", marginTop: 4 }}>
+        <Button type="submit" disabled={loading || !email.trim() || !password} style={{ width: "100%", marginTop: 4 }}>
           {loading ? "Signing in…" : "Sign in"}
         </Button>
         <div style={{ display: "flex", justifyContent: "center" }}>

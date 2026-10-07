@@ -77,6 +77,25 @@ async function versionFromOutline(institutionId: string, programId: string, outl
 }
 
 /**
+ * The canonical name of a real program (SIS program name / code, or a Program Management program name /
+ * abbreviation). Degree progress resolves a student's program from this name, so unknown names are rejected.
+ */
+export async function knownProgramName(institutionId: string, raw: string) {
+  const want = raw.trim().toLowerCase();
+  const [programs, pm] = await Promise.all([
+    prisma.program.findMany({ where: { institutionId }, select: { code: true, name: true } }),
+    records(institutionId, "PM:PROGRAM"),
+  ]);
+  const local = pm.map((p) => ({ name: s(p.data.name).trim(), abbreviation: s(p.data.abbreviation).trim() })).filter((p) => p.name);
+  if (!programs.length && !local.length) return raw.trim();
+  const sis = programs.find((p) => p.name.trim().toLowerCase() === want || p.code.trim().toLowerCase() === want);
+  if (sis) return sis.name;
+  const match = local.find((p) => p.name.toLowerCase() === want || (p.abbreviation && p.abbreviation.toLowerCase() === want));
+  if (match) return match.name;
+  throw Object.assign(new Error(`Program "${raw.trim()}" was not found. Choose one of the institution's programs.`), { status: 400, code: "VALIDATION_ERROR" });
+}
+
+/**
  * Students created or enrolled through Student Management carry a program name and Program Management enrolment, but
  * no ProgramVersion. Resolve one from the synced SIS Program (its latest active version, else one built from the
  * program outline) and link it, so degree progress and what-if planning work for them too.

@@ -10,15 +10,22 @@ import { writeAuditAndOutbox } from "@myheritage/events";
 import { requireAuth, requireRoles, type AuthedRequest } from "../../middleware/auth.js";
 import { computeDegreeProgress, impactIfDropCourse } from "./degree-progress.service.js";
 import {
+  ensureStudentProgramPlan,
   getCourseHistory,
   getProgramPlan,
   getTranscriptSummary,
 } from "./program-plan.service.js";
+import { ensureProgramVersion } from "./program-version.js";
 import { currentStudentId } from "../me/studentAlignment.js";
 
 export const academicRouter: Router = Router();
 
 academicRouter.use(requireAuth, requireRoles("student"));
+
+/** A program enrolment implies a program plan; a missing one is created when the student views it. */
+async function hasProgramEnrolment(institutionId: string, studentId: string) {
+  return (await prisma.heritageRecord.count({ where: { institutionId, screenId: "STU:ENROL", contextKey: studentId, deletedAt: null } })) > 0;
+}
 
 async function ownStudent(user: AuthedRequest["user"]) {
   const student = await prisma.student.findFirst({
@@ -53,7 +60,11 @@ academicRouter.get("/program-plan", async (req, res, next) => {
   try {
     const user = (req as AuthedRequest).user;
     const student = await ownStudent(user);
-    const plan = await getProgramPlan(user.institutionId, student.id);
+    let plan = await getProgramPlan(user.institutionId, student.id);
+    if (!plan.planId && (await hasProgramEnrolment(user.institutionId, student.id))) {
+      await ensureProgramVersion(user.institutionId, student.id);
+      if (await ensureStudentProgramPlan(user.institutionId, student.id)) plan = await getProgramPlan(user.institutionId, student.id);
+    }
     res.json(plan);
   } catch (error) {
     next(error);

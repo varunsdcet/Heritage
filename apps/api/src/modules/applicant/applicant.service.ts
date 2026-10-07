@@ -9,6 +9,7 @@ import {
   APPLICATION_FIELDS,
   applicationCompleteness,
   cleanApplicationForm,
+  isGovernmentIdDocument,
   parseFormJson,
   REQUIRED_APPLICANT_DOCUMENTS,
   type FormOptions,
@@ -137,7 +138,9 @@ async function formPayload(app: LoadedApplication, options: FormOptions) {
     fields: APPLICATION_FIELDS,
     options,
     completeness,
-    documents: app.documents.map((d) => ({ id: d.id, label: d.label, status: d.status, fileName: d.fileName })),
+    documents: app.documents
+      .filter((d) => !isGovernmentIdDocument(d.label))
+      .map((d) => ({ id: d.id, label: d.label, status: d.status, fileName: d.fileName })),
   };
 }
 

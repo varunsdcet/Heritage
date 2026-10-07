@@ -92,3 +92,25 @@ export async function writeAttendanceRecords(
   }
   return { written, classSessionIds: Object.fromEntries(sessionBySection) };
 }
+
+/**
+ * The attendance page shows a student's submitted record over any draft, so a draft edit to an
+ * already-submitted student is written to that record; only students without a record stay in the draft.
+ */
+export async function applyDraftToSubmittedAttendance(
+  tx: Tx,
+  input: { institutionId: string; meetingLabel: string; tz: string; sections: AttendanceSectionRef[]; marks: AttendanceMark[] },
+) {
+  const { institutionId, meetingLabel } = input;
+  const sectionIds = input.sections.map((s) => s.id);
+  const existing = sectionIds.length
+    ? await tx.attendanceRecord.findMany({
+        where: { institutionId, sectionId: { in: sectionIds }, meetingLabel },
+        select: { studentId: true, sectionId: true },
+      })
+    : [];
+  const submitted = new Set(existing.map((r) => `${r.sectionId}:${r.studentId}`));
+  const edits = input.marks.filter((m) => m.status.trim() && submitted.has(`${m.sectionId}:${m.studentId}`));
+  const { written } = edits.length ? await writeAttendanceRecords(tx, { ...input, marks: edits }) : { written: 0 };
+  return { submittedCount: submitted.size, updated: written };
+}

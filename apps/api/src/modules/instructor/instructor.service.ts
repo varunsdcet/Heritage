@@ -10,6 +10,8 @@ import {
 import { gradeItemsInOpenApproval } from "../../lib/gradeApprovals.js";
 import { assertSeat } from "../admin/heritage/enrolment.js";
 import { DEFAULT_TZ } from "../courses/sectionSchedule.js";
+import { sectionOfferings, type Offering } from "../courses/sectionOffering.js";
+import { sectionTerm, UNASSIGNED_TERM } from "../../lib/sectionTerm.js";
 import { buildAddProgramScreenForm } from "./addProgramForm.js";
 import { buildAddSessionScreenForm } from "./addSessionForm.js";
 import {
@@ -161,7 +163,7 @@ import {
 import { classJoinUrl, liveClassUrl, sessionJoinUrl } from "../../lib/liveClass.js";
 import { addDays, hmIn, institutionTimezone, ymdIn, zonedToUtc } from "../../lib/workshopPolicy.js";
 import { createClassSessionWithNotifications } from "../campusCompliance/sessions.js";
-import { writeAttendanceRecords } from "./attendanceSessions.js";
+import { applyDraftToSubmittedAttendance, writeAttendanceRecords } from "./attendanceSessions.js";
 import { buildCourseApprovalReview, buildGradeCorrectionReview } from "./approvalReviewScreens.js";
 import { buildCourseBackups, buildCourseGroupsList, saveCourseGroup } from "./courseCatalogScreens.js";
 import { FLAG_PRIORITIES, FLAG_TYPES, updateInstructorFlag, validateFlagFields } from "./instructorFlags.js";
@@ -336,6 +338,8 @@ async function loadCtx(user: SessionClaims, path?: string): Promise<InstructorCt
     },
     orderBy: { code: "asc" },
   });
+  // Only labels depend on the offering dates, so a lookup failure falls back to the stored term instead of failing the screen.
+  const offerings = await sectionOfferings(user.institutionId, sectionsRaw.map((s) => s.id)).catch(() => new Map<string, Offering>());
 
   const sections = sectionsRaw.map((s) => ({
     id: s.id,
@@ -344,7 +348,7 @@ async function loadCtx(user: SessionClaims, path?: string): Promise<InstructorCt
     courseCode: s.course.code,
     courseTitle: s.course.title,
     credits: s.course.credits,
-    termCode: s.term.code,
+    termCode: sectionTerm(s.term, { startsOn: offerings.get(s.id)?.startsOn, endsOn: offerings.get(s.id)?.endsOn }, termsRaw)?.code ?? "",
     enrolmentCount: s.enrolments.filter((e) => e.status === "enrolled").length,
     enrolments: s.enrolments.map((e) => ({
       id: e.id,
@@ -739,7 +743,7 @@ function buildDashboard(ctx: InstructorCtx): InstructorLivePayload {
       timetable: ctx.sections.slice(0, 6).map((s) => {
         const board = sectionGradeBoard(ctx, s.code);
         return {
-          time: s.termCode || "",
+          time: s.termCode || UNASSIGNED_TERM,
           code: s.courseCode,
           title: s.courseTitle,
           room: s.code,
@@ -4082,6 +4086,9 @@ async function routePayload(
   ) {
     return buildAssessmentList(ctx);
   }
+  if (p.includes("t20") || p.includes("grade-correction")) {
+    return buildGradeCorrectionReview(ctx);
+  }
   if (p.includes("t62") || p.includes("pending-grade") || p.includes("grades-submission")) {
     if (path.includes("mode=submission") || p.includes("grades-submission")) {
       return buildHccGradesSubmission(ctx, path);
@@ -4193,25 +4200,36 @@ async function routePayload(
     return buildCourseBackups(ctx.sections.length);
   }
   if (parseScreenQuery(path).pathname.replace(/\/+$/, "") === "/instructor/studio") {
-    const picked = (parseScreenQuery(path).query.get("sectionId") || "").trim();
-    return buildCourseDetail(ctx, picked ? `/instructor/studio?view=${encodeURIComponent(picked)}` : path);
+    return buildCourseDetail(ctx, studioWorkspacePath(path, ctx));
   }
   if (p.includes("in-17") || p.includes("course-approval")) {
     return buildCourseApprovalReview(ctx);
   }
-  if (p.includes("t20") || p.includes("grade-correction")) {
-    return buildGradeCorrectionReview(ctx);
-  }
   return buildEmptyDomain("Instructor", `${ctx.displayName} · live`);
 }
 
+/** `/instructor/studio` shows a section's course workspace, so it must use that workspace's path (and LMS overlay). */
+function studioWorkspacePath(path: string, ctx: InstructorCtx) {
+  const { pathname, query } = parseScreenQuery(path);
+  if (pathname.replace(/\/+$/, "") !== "/instructor/studio") return path;
+  const picked = [query.get("sectionId"), query.get("view")].map((v) => (v || "").trim()).find((id) => ctx.sections.some((s) => s.id === id));
+  const sectionId = picked || ctx.sections[0]?.id;
+  if (!sectionId) return path;
+  query.delete("sectionId");
+  query.delete("view");
+  const qs = query.toString();
+  return `/instructor/sections/${sectionId}${qs ? `?${qs}` : ""}`;
+}
+
 export async function buildInstructorScreen(
-  path: string,
+  requestedPath: string,
   user: SessionClaims,
   opts?: { studentId?: string | null },
 ) {
-  await assertInstructorSectionAccess(user, path);
-  const ctx = await loadCtx(user, path);
+  await assertInstructorSectionAccess(user, requestedPath);
+  const ctx = await loadCtx(user, requestedPath);
+  const path = studioWorkspacePath(requestedPath, ctx);
+  if (path !== requestedPath) await assertInstructorSectionAccess(user, path);
   const overlay = await loadScreenOverlay(user.institutionId, path);
   const payload = mergeOverlayRows(await routePayload(path, ctx, overlay, opts?.studentId), overlay, path);
   if (overlay?._lastAction) {
@@ -4220,7 +4238,7 @@ export async function buildInstructorScreen(
   const workshopCounts = await workshopNavCounts(user);
   const statusCounts = await loadStudentStatusCounts(user);
   return {
-    path,
+    path: requestedPath,
     live: true as const,
     source: "domain" as const,
     bootstrap: {
@@ -6824,15 +6842,9 @@ async function publishDraftGrades(ctx: InstructorCtx) {
   return { count: drafts.length, approvals };
 }
 
-async function saveAttendanceSession(ctx: InstructorCtx, path: string, finalize: boolean, rowKey?: string) {
+async function saveAttendanceSession(ctx: InstructorCtx, screenPath: string, finalize: boolean, rowKey?: string) {
   const sec = attendanceSection(ctx) || primarySection(ctx);
   if (!sec) throw Object.assign(new Error("No teaching section for attendance"), { status: 400 });
-  const existing = await prisma.sisScreenState.findUnique({
-    where: { institutionId_path: { institutionId: ctx.user.institutionId, path } },
-  });
-  const prev = existing ? (JSON.parse(existing.payloadJson) as Record<string, unknown>) : {};
-  type Row = { studentId: string; studentNumber: string; name: string; status: string; note?: string; sectionId: string };
-  const existingAttendance = prev.attendance as { roster?: Array<Partial<Row>> } | undefined;
 
   type ClientRow = { studentId?: string; id?: string; studentNumber?: string; name?: string; status?: string; note?: string; sectionId?: string };
   let rosterFromClient: ClientRow[] | null = null;
@@ -6846,36 +6858,53 @@ async function saveAttendanceSession(ctx: InstructorCtx, path: string, finalize:
       rosterFromClient = null;
     }
   }
+  const pathDate = parseScreenQuery(screenPath).query.get("date")?.trim() || "";
+  const tz = await institutionTimezone(ctx.user.institutionId);
+  const meetingLabel =
+    (/^\d{4}-\d{2}-\d{2}$/.test(dateFromClient) && dateFromClient) ||
+    (/^\d{4}-\d{2}-\d{2}$/.test(pathDate) && pathDate) ||
+    ymdIn(new Date(), tz);
+  // The attendance page reads drafts back from the per-date key, whatever filters the URL carried.
+  const path =
+    parseScreenQuery(screenPath).pathname.replace(/\/+$/, "") === "/instructor/attendance"
+      ? `/instructor/attendance?date=${meetingLabel}`
+      : screenPath;
+
+  const existing = await prisma.sisScreenState.findUnique({
+    where: { institutionId_path: { institutionId: ctx.user.institutionId, path } },
+  });
+  const prev = existing ? (JSON.parse(existing.payloadJson) as Record<string, unknown>) : {};
+  type Row = { studentId: string; studentNumber: string; name: string; status: string; note?: string; sectionId: string };
+  const existingAttendance = prev.attendance as { roster?: Array<Partial<Row>> } | undefined;
 
   const sameStudent = (r: ClientRow | Partial<Row>, e: { studentId: string; studentNumber: string }) =>
     r.studentId === e.studentId || r.studentNumber === e.studentNumber || (r as ClientRow).id === e.studentNumber;
   const roster: Row[] = [];
+  const editedRows: Row[] = [];
   for (const s of ctx.sections) {
     for (const e of s.enrolments.filter((x) => x.status === "enrolled")) {
       const fromClient = rosterFromClient?.find((r) => sameStudent(r, e) && (!r.sectionId || r.sectionId === s.id));
       const prior = existingAttendance?.roster?.find((r) => sameStudent(r, e) && (!r.sectionId || r.sectionId === s.id));
-      roster.push({
+      const row = {
         studentId: e.studentId,
         studentNumber: e.studentNumber,
         name: e.studentName,
         status: (fromClient?.status ?? prior?.status ?? "").trim(),
         note: (fromClient?.note ?? prior?.note ?? "").trim(),
         sectionId: s.id,
-      });
+      };
+      roster.push(row);
+      if (fromClient) editedRows.push(row);
     }
   }
 
+  let submittedUpdated = 0;
+  let pendingDraft = roster.filter((r) => r.status).length;
   if (finalize) {
     const marked = roster.filter((r) => r.status);
     if (!marked.length) {
       throw Object.assign(new Error("Mark Present, Absent, Late or Excused for at least one student before submitting."), { status: 400 });
     }
-    const pathDate = parseScreenQuery(path).query.get("date")?.trim() || "";
-    const tz = await institutionTimezone(ctx.user.institutionId);
-    const meetingLabel =
-      (/^\d{4}-\d{2}-\d{2}$/.test(dateFromClient) && dateFromClient) ||
-      (/^\d{4}-\d{2}-\d{2}$/.test(pathDate) && pathDate) ||
-      ymdIn(new Date(), tz);
     await prisma.$transaction((tx) =>
       writeAttendanceRecords(tx, {
         institutionId: ctx.user.institutionId,
@@ -6888,6 +6917,18 @@ async function saveAttendanceSession(ctx: InstructorCtx, path: string, finalize:
     void import("../campusCompliance/sweep.js")
       .then(({ escalateStudentMisses }) => escalateStudentMisses(ctx.user.institutionId))
       .catch(() => undefined);
+  } else {
+    const applied = await prisma.$transaction((tx) =>
+      applyDraftToSubmittedAttendance(tx, {
+        institutionId: ctx.user.institutionId,
+        meetingLabel,
+        tz,
+        sections: ctx.sections,
+        marks: editedRows,
+      }),
+    );
+    submittedUpdated = applied.updated;
+    pendingDraft = Math.max(0, pendingDraft - applied.updated);
   }
 
   const attendance = {
@@ -6896,6 +6937,9 @@ async function saveAttendanceSession(ctx: InstructorCtx, path: string, finalize:
     courseCode: sec.courseCode,
     finalized: finalize,
     savedAt: new Date().toISOString(),
+    meetingLabel,
+    submittedUpdated,
+    pendingDraft,
     roster,
   };
   // Screen state is keyed per institution path, so another instructor's unsubmitted rows must survive this save.
@@ -7229,11 +7273,12 @@ async function createStudentProfile(ctx: InstructorCtx, fields: Record<string, s
 
 /** Domain-backed CTA handler — every teacher button that is not a nav href hits this. */
 export async function runInstructorAction(user: SessionClaims, input: ActionInput) {
-  const path = input.path;
   const action = input.action.trim();
   const lower = action.toLowerCase();
-  await assertInstructorSectionAccess(user, path, input.rowKey);
-  const ctx = await loadCtx(user, path);
+  await assertInstructorSectionAccess(user, input.path, input.rowKey);
+  const ctx = await loadCtx(user, input.path);
+  const path = studioWorkspacePath(input.path, ctx);
+  if (path !== input.path) await assertInstructorSectionAccess(user, path, input.rowKey);
   let message = `Saved · ${action}`;
   let result: Record<string, unknown> = {};
 
@@ -7504,7 +7549,9 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
       !isAssessmentBuilderPath
     ) {
       const att = await saveAttendanceSession(ctx, path, false, input.rowKey);
-      message = `Attendance draft saved · ${att.roster.length} student(s)`;
+      message = att.submittedUpdated
+        ? `Attendance for ${att.meetingLabel} was already submitted · updated ${att.submittedUpdated} submitted record(s)${att.pendingDraft ? ` · draft saved for ${att.pendingDraft} unsubmitted student(s)` : ""}`
+        : `Attendance draft saved · ${att.pendingDraft} student(s) marked`;
       result = att;
     } else if (lower.includes("save session") || lower.includes("create session") || lower.includes("add session")) {
       const fields = parseActionFields(input.rowKey) || {};
@@ -9210,12 +9257,12 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
     },
   });
 
-  const screen = await buildInstructorScreen(path, user);
+  const screen = await buildInstructorScreen(input.path, user);
   return {
     ...screen,
     ok: !(result as { error?: boolean }).error,
     action,
-    path,
+    path: input.path,
     rowKey: input.rowKey ?? null,
     message,
     result,

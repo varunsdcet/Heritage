@@ -24,7 +24,7 @@ const QUICK_ACCESS: QuickItem[] = [
   { label: "Enrol student", href: "/admin/enrolments", tone: "green", icon: "check", gate: { modules: ["studentRecords"], edit: true } },
   { label: "Search Students", href: "/admin/student-search", tone: "cyan", icon: "search", gate: { modules: ["studentRecords"] } },
   { label: "Messages", href: "/admin/messages", tone: "red", icon: "mail", gate: { modules: ["emailMessaging"] } },
-  { label: "Approvals", href: "/admin/approvals", tone: "amber", icon: "clipboard" },
+  { label: "Approvals", href: "/admin/approvals", tone: "amber", icon: "clipboard", gate: { modules: ["userRequests"] } },
   { label: "AR posting", href: "/admin/finance/posting", tone: "navy", icon: "dollar", gate: { modules: ["financialManagement"], edit: true } },
   { label: "Documents", href: "/admin/student-documents", tone: "sky", icon: "file", gate: { modules: ["studentRecords"] } },
   { label: "Tax docs", href: "/admin/tax-documents", tone: "indigo", icon: "receipt", gate: { modules: ["financialManagement"] } },

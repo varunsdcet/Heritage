@@ -41,8 +41,9 @@ function CreateUserInner() {
     role: initialRole,
     password: "",
     studentNumber: "",
-    programName: "Computer Science",
+    programName: "",
   });
+  const [programs, setPrograms] = useState<Array<{ id: string; code: string; name: string }> | null>(null);
 
   const [lastLogin, setLastLogin] = useState<{
     email: string;
@@ -97,6 +98,9 @@ function CreateUserInner() {
       return;
     }
     refresh(s.accessToken).catch((err) => setError(err instanceof Error ? err.message : "Failed"));
+    api<{ items: Array<{ id: string; code: string; name: string }> }>("/admin/programs-lite", {}, s.accessToken)
+      .then((res) => setPrograms(res.items))
+      .catch(() => setPrograms([]));
   }, [router]);
 
   async function onSubmit(e: FormEvent) {
@@ -274,7 +278,28 @@ function CreateUserInner() {
               </label>
               <label style={{ display: "grid", gap: 6 }}>
                 <span style={{ fontWeight: 600, fontSize: 14 }}>Program</span>
-                <Input value={form.programName} onChange={(e) => setForm({ ...form, programName: e.target.value })} />
+                {programs && programs.length ? (
+                  <select
+                    value={form.programName}
+                    onChange={(e) => setForm({ ...form, programName: e.target.value })}
+                    required
+                    style={{
+                      padding: "10px 12px",
+                      borderRadius: 6,
+                      border: "1px solid var(--mh-border)",
+                      background: "var(--mh-surface-muted)",
+                    }}
+                  >
+                    <option value="">Select a program</option>
+                    {programs.map((p) => (
+                      <option key={p.id} value={p.name}>
+                        {p.name} ({p.code})
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <Input value={form.programName} onChange={(e) => setForm({ ...form, programName: e.target.value })} />
+                )}
               </label>
             </>
           ) : null}

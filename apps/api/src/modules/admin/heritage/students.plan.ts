@@ -2,8 +2,9 @@
 
 import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
-import { getTranscriptSummary, summarizeCourses } from "../../academic/program-plan.service.js";
+import { ensureStudentProgramPlan, getTranscriptSummary, summarizeCourses } from "../../academic/program-plan.service.js";
 import { ensureProgramVersion } from "../../academic/program-version.js";
+import { COURSE_STATUS_LABEL } from "../../../lib/courseStatus.js";
 import { buildDocumentPdf, type DocLine } from "../../../lib/taxPdf.js";
 import {
   add,
@@ -141,6 +142,7 @@ export async function enrolProgram(user: SessionClaims, id: string, body: Data) 
   );
   await prisma.student.update({ where: { id }, data: { programName: program.name, rowVersion: { increment: 1 } } });
   await ensureProgramVersion(inst, id, { relink: true });
+  await ensureStudentProgramPlan(inst, id);
   await patchMetaLoose(inst, id, { status, schedule: schedule.name, ...(session.campus && session.campus !== "Not Set" ? { campus: session.campus } : {}) });
   await saveProfile(user, id, { programId: program.id, scheduleStart: session.startDate, scheduleEnd, feedIn: session.course });
   await stuAudit(
@@ -235,7 +237,7 @@ export async function finalMarks(user: SessionClaims, id: string, q: Data) {
     percent: c.averagePercent,
     finalGrade: c.letter,
     gradePoint: c.gradePoints,
-    status: c.final ? "Final" : c.status === "withdrawn" ? "Withdrawn" : "In Progress",
+    status: c.status === "withdrawn" && !c.final ? "Withdrawn" : COURSE_STATUS_LABEL[c.courseStatus],
     completed: c.final ? (c.endsOn ?? "") : "",
   }));
   const totals = rows.length === summary.courses.length ? summary : { ...summary, ...summarizeCourses(rows) };

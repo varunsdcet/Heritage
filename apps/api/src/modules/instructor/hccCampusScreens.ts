@@ -5,7 +5,9 @@ import { agentCatalogue, fullName, profilesFor, s as str, staffAccounts, statusO
 import { entityRecords } from "../admin/heritage/sysconfig.js";
 import { STATUS_TREE } from "../admin/heritage/students.spec.js";
 import { dateBoundsFromSessions, instructorDisplayName, scheduleTextFromSessions } from "../courses/sectionSchedule.js";
+import { COURSE_STATUS_LABEL } from "../../lib/courseStatus.js";
 import { FLAG_TYPES, listInstructorFlags } from "./instructorFlags.js";
+import { loadSectionRunFacts, type SectionRunFacts } from "./myCoursesFacts.js";
 import {
   FILTER_ALL_LABELS,
   NO_VALUE,
@@ -125,9 +127,19 @@ function formatClock(d: Date) {
   return d.toLocaleTimeString("en-US", { timeZone: DISPLAY_TZ, hour: "numeric", minute: "2-digit" }).toLowerCase().replace(" ", "");
 }
 
-function scheduleLabel(sessions: SessionRow[], sectionCode: string) {
+function formatYmd(iso: string) {
+  return new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" });
+}
+
+function scheduleLabel(sessions: SessionRow[], sectionCode: string, run?: { startsOn: string | null; endsOn: string | null }) {
   const mine = sessions.filter((s) => s.sectionCode === sectionCode);
-  if (!mine.length) return "TBA";
+  const runRange =
+    run?.startsOn && run.endsOn
+      ? `${formatYmd(run.startsOn)} - ${formatYmd(run.endsOn)}`
+      : run?.startsOn
+        ? `From ${formatYmd(run.startsOn)}`
+        : "";
+  if (!mine.length) return runRange ? `${runRange}\nTBA` : "TBA";
   const days = [...new Set(mine.map((s) => campusWeekday(s.startsAt)))].sort();
   const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const dayLabel =
@@ -140,7 +152,7 @@ function scheduleLabel(sessions: SessionRow[], sectionCode: string) {
   const end = first.endsAt ?? new Date(first.startsAt.getTime() + 90 * 60 * 1000);
   const startIso = first.startsAt.toLocaleDateString("en-US", { timeZone: DISPLAY_TZ, month: "short", day: "numeric", year: "numeric" });
   const endIso = end.toLocaleDateString("en-US", { timeZone: DISPLAY_TZ, month: "short", day: "numeric", year: "numeric" });
-  return `${startIso} - ${endIso}\n${dayLabel}, ${formatClock(first.startsAt)} - ${formatClock(end)}`;
+  return `${runRange || `${startIso} - ${endIso}`}\n${dayLabel}, ${formatClock(first.startsAt)} - ${formatClock(end)}`;
 }
 
 export async function buildHccMyCourses(
@@ -192,6 +204,11 @@ export async function buildHccMyCourses(
     return "unknown";
   }
 
+  const runFacts = ctx.user?.institutionId
+    ? await loadSectionRunFacts(ctx.user.institutionId, ctx.sections.map((s) => s.id))
+    : new Map<string, SectionRunFacts>();
+  const sectionTiming = (s: SectionRow) => runFacts.get(s.id)?.timing ?? termTiming(s.termCode);
+
   // Include sections with no enrolments so a newly created course can be opened and activities added.
   let filtered = ctx.sections;
 
@@ -204,15 +221,12 @@ export async function buildHccMyCourses(
   }
 
   if (/ended/i.test(statusFilter)) {
-    filtered = filtered.filter((s) => termTiming(s.termCode) === "ended");
+    filtered = filtered.filter((s) => sectionTiming(s) === "ended");
   } else if (/all courses/i.test(statusFilter)) {
     // no status narrowing
   } else {
     // Active & Upcoming (default)
-    filtered = filtered.filter((s) => {
-      const timing = termTiming(s.termCode);
-      return timing === "current" || timing === "upcoming" || timing === "unknown";
-    });
+    filtered = filtered.filter((s) => sectionTiming(s) !== "ended");
   }
 
   const sectionIds = filtered.map((s) => s.id);
@@ -257,9 +271,10 @@ export async function buildHccMyCourses(
   }
 
   const courses = filtered.map((s) => {
-    const timing = termTiming(s.termCode);
+    const run = runFacts.get(s.id);
+    const timing = sectionTiming(s);
     const status =
-      timing === "ended" ? "Ended" : timing === "upcoming" ? "Upcoming" : "In Progress";
+      timing === "ended" ? "Ended" : timing === "upcoming" ? COURSE_STATUS_LABEL.not_started : COURSE_STATUS_LABEL.in_progress;
     const att = attendanceBySection.get(s.id);
     const attendanceLabel = att
       ? `Taken ${att.meetingLabel} · ${att.present}/${att.total} present`
@@ -271,12 +286,12 @@ export async function buildHccMyCourses(
       section: s.code,
       title: s.courseTitle,
       role: "Instructor",
-      delivery: deliveryLabel(ctx.classSessions, s.code),
+      delivery: run?.delivery || deliveryLabel(ctx.classSessions, s.code),
       students: `Enrolled: ${s.enrolmentCount}`,
       status,
       statusTone: (timing === "ended" ? "muted" : "active") as "muted" | "active",
       location: locationLabel(ctx.classSessions, s.code),
-      schedule: scheduleLabel(ctx.classSessions, s.code),
+      schedule: scheduleLabel(ctx.classSessions, s.code, run),
       href: `/instructor/sections/${s.id}`,
       term: termMeta.get(s.termCode)?.name || s.termCode,
       attendanceLabel,

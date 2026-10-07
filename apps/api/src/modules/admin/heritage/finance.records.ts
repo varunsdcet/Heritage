@@ -351,9 +351,15 @@ export async function createAdjustment(user: SessionClaims, body: Data) {
   const reason = text(body.reason);
   if (!reason) throw httpError(400, "Reason is required");
   const number = await nextNumber(c.inst, "adjustment");
-  const r = await add(user, S.ADJUSTMENT, { number, direction, amount, reason, status: "Pending", requestedBy: user.accountId, requestedAt: new Date().toISOString() }, c.st.id);
+  const ledgerEntryId = s(body.ledgerEntryId);
+  const r = await add(
+    user,
+    S.ADJUSTMENT,
+    { number, direction, amount, reason, status: "Pending", requestedBy: user.accountId, requestedAt: new Date().toISOString(), ...(ledgerEntryId ? { ledgerEntryId } : {}) },
+    c.st.id,
+  );
   await finAudit(user, c.st.id, "Adjustment requested", `Adjustment #${number}`, { direction, amount: cad(amount), reason }, r.id);
-  return { id: r.id, message: "Financial adjustment submitted for approval" };
+  return { id: r.id, number, message: "Financial adjustment submitted for approval" };
 }
 
 export async function reviewAdjustment(user: SessionClaims, id: string, body: Data) {

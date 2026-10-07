@@ -854,13 +854,6 @@ function isoDay(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function addDays(iso: string, n: number) {
-  const d = new Date(`${iso}T12:00:00`);
-  if (Number.isNaN(d.getTime())) return new Date();
-  d.setDate(d.getDate() + n);
-  return d;
-}
-
 function AvailabilityModal({
   open,
   onClose,
@@ -882,8 +875,8 @@ function AvailabilityModal({
   const [endH, setEndH] = useState("10");
   const [endM, setEndM] = useState("00");
   const [date, setDate] = useState(() => defaultDate || isoDay(new Date()));
-  const [recur, setRecur] = useState(true);
-  const [endDate, setEndDate] = useState(() => isoDay(addDays(defaultDate || isoDay(new Date()), 7)));
+  const [recur, setRecur] = useState(false);
+  const [endDate, setEndDate] = useState("");
   const [error, setError] = useState("");
   const [days, setDays] = useState<string[]>(["Mon", "Tue", "Wed", "Thu", "Fri"]);
   const [note, setNote] = useState("");
@@ -893,9 +886,9 @@ function AvailabilityModal({
     if (!open) return;
     setType(defaultType);
     setError("");
-    const start = defaultDate || isoDay(new Date());
-    setDate(start);
-    setEndDate(isoDay(addDays(start, 7)));
+    setDate(defaultDate || isoDay(new Date()));
+    setRecur(false);
+    setEndDate("");
   }, [open, defaultType, defaultDate]);
 
   if (!open) return null;
@@ -1018,7 +1011,7 @@ function AvailabilityModal({
         {recur ? (
           <label>
             <span>End Date</span>
-            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+            <input type="date" value={endDate} min={date} onChange={(e) => setEndDate(e.target.value)} />
           </label>
         ) : null}
         {recur ? (

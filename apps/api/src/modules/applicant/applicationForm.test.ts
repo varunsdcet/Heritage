@@ -10,7 +10,14 @@ vi.mock("@myheritage/db", () => ({ prisma: db }));
 vi.mock("@myheritage/events", () => ({ writeAuditAndOutbox: vi.fn() }));
 
 import type { SessionClaims } from "@myheritage/contracts";
-import { applicationCompleteness, cleanApplicationForm } from "./applicationForm.js";
+import {
+  APPLICATION_FIELDS,
+  applicationCompleteness,
+  cleanApplicationForm,
+  isGovernmentIdDocument,
+  parseFormJson,
+  REQUIRED_APPLICANT_DOCUMENTS,
+} from "./applicationForm.js";
 import { runApplicantAction } from "./applicant.service.js";
 
 const now = new Date("2026-10-07T12:00:00Z");
@@ -37,7 +44,7 @@ const complete = {
   campus: "Surrey",
   applicationAcknowledgement: "Confirmed",
 };
-const uploaded = ["Grade 10 Certificate / Transcript", "Grade 12 Certificate / Transcript", "Post-Secondary Education Document", "Passport", "Language Proficiency Test Report"].map((label, index) => ({ label, status: index % 2 ? "accepted" : "uploaded" }));
+const uploaded = ["Grade 10 Certificate / Transcript", "Grade 12 Certificate / Transcript", "Post-Secondary Education Document", "Language Proficiency Test Report"].map((label, index) => ({ label, status: index % 2 ? "accepted" : "uploaded" }));
 
 describe("cleanApplicationForm", () => {
   it("accepts a partial save with blanks", () => {
@@ -69,14 +76,28 @@ describe("applicationCompleteness", () => {
 
   it("lists missing fields by section and missing or rejected documents", () => {
     const { givenName: _g, graduationYear: _y, ...partial } = complete;
-    const out = applicationCompleteness(partial, uploaded.map((doc) => doc.label === "Passport" ? { ...doc, status: "rejected" } : doc));
-    expect(out.missing).toEqual(["Personal details: First name", "Academic history: Year completed", "Document: Passport"]);
+    const out = applicationCompleteness(partial, uploaded.map((doc) => doc.label === "Language Proficiency Test Report" ? { ...doc, status: "rejected" } : doc));
+    expect(out.missing).toEqual(["Personal details: First name", "Academic history: Year completed", "Document: Language Proficiency Test Report"]);
     expect(out.sections.program.done).toBe(true);
     expect(out.pct).toBeLessThan(100);
   });
 
   it("treats an application with no document checklist as missing the required documents", () => {
     expect(applicationCompleteness(complete, []).documentsMissing).toEqual(uploaded.map((doc) => doc.label));
+  });
+
+  it("never requires a passport or other government ID, even on an older checklist", () => {
+    const older = [...uploaded, { label: "Passport", status: "missing" }];
+    expect(applicationCompleteness(complete, older)).toMatchObject({ pct: 100, missing: [] });
+    expect(REQUIRED_APPLICANT_DOCUMENTS.some(isGovernmentIdDocument)).toBe(false);
+  });
+});
+
+describe("government ID fields", () => {
+  it("does not offer or read back a SIN", () => {
+    expect(APPLICATION_FIELDS.map((f) => f.key)).not.toContain("sin");
+    expect(parseFormJson(JSON.stringify({ givenName: "Ada", sin: "000 000 000" }))).toEqual({ givenName: "Ada" });
+    expect(cleanApplicationForm({ sin: "000 000 000" }, opts, {}, now).values).toEqual({});
   });
 });
 
@@ -103,11 +124,11 @@ describe("submit_application", () => {
 
   it("returns 400 APPLICATION_INCOMPLETE listing what is missing", async () => {
     db.admissionsApplication.findFirst.mockResolvedValue(
-      app({ formJson: JSON.stringify({ givenName: "Ada" }), documents: [{ id: "d-0", label: "Passport", status: "missing", fileName: null }] }),
+      app({ formJson: JSON.stringify({ givenName: "Ada" }), documents: [{ id: "d-0", label: "Grade 12 Certificate / Transcript", status: "missing", fileName: null }] }),
     );
     const err = await runApplicantAction(user, "submit_application").catch((e: unknown) => e);
     expect(err).toMatchObject({ status: 400, code: "APPLICATION_INCOMPLETE" });
-    expect((err as { missing: string[] }).missing).toContain("Document: Passport");
+    expect((err as { missing: string[] }).missing).toContain("Document: Grade 12 Certificate / Transcript");
     expect((err as Error).message).toMatch(/^Complete these before submitting: Personal details: Last name/);
     expect(db.admissionsApplication.updateMany).not.toHaveBeenCalled();
   });

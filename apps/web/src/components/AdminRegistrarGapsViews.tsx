@@ -299,15 +299,22 @@ export function AdminFinancePostingView() {
     }
   }
 
-  async function adjust(entryId: string, action: "reverse" | "waive" | "mark_paid") {
+  async function adjust(row: Record<string, unknown>, action: "reverse" | "waive") {
     if (!session) return;
+    const isCharge = row.kind === "charge";
+    const amount = `CAD ${String(row.amountCad)}`;
+    const question = isCharge
+      ? `${action === "waive" ? "Waive" : "Reverse"} the ${amount} charge "${String(row.label)}" for ${String(row.studentName)}?\n\nThis creates a Financial Adjustment that another user must approve before the balance changes.`
+      : `Reverse the ${amount} ${String(row.kind)} "${String(row.label)}" for ${String(row.studentName)}? The student's balance goes up by this amount.`;
+    if (!window.confirm(question)) return;
     setError(null);
+    setNotice(null);
     try {
-      await api("/admin/finance/ledger/adjust", {
+      const res = await api<{ message?: string }>("/admin/finance/ledger/adjust", {
         method: "POST",
-        body: JSON.stringify({ entryId, action }),
+        body: JSON.stringify({ entryId: String(row.id), action }),
       }, session.accessToken);
-      setNotice(`Entry ${action.replace("_", " ")}.`);
+      setNotice(res?.message ?? "Entry reversed.");
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Adjust failed");
@@ -361,9 +368,12 @@ export function AdminFinancePostingView() {
               </div>
             </div>
             <div className="mh-finance-posting__actions">
-              <Button type="button" variant="secondary" onClick={() => void adjust(String(row.id), "mark_paid")}>Paid</Button>
-              <Button type="button" variant="secondary" onClick={() => void adjust(String(row.id), "waive")}>Waive</Button>
-              <Button type="button" variant="secondary" onClick={() => void adjust(String(row.id), "reverse")}>Reverse</Button>
+              {row.kind === "charge" && row.status === "open" ? (
+                <Button type="button" variant="secondary" onClick={() => void adjust(row, "waive")}>Waive</Button>
+              ) : null}
+              {row.status !== "waived" && row.status !== "void" && row.source !== "reversal" && !row.reversedFromId ? (
+                <Button type="button" variant="secondary" onClick={() => void adjust(row, "reverse")}>Reverse</Button>
+              ) : null}
             </div>
           </div>
         ))}
