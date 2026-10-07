@@ -31,10 +31,10 @@ export const RESIDENCY_OPTIONS: Option[] = [
   { label: "International", value: "International" },
 ];
 
-/** "Bleded" is the source spelling; it still matches records stored as Blended / Hybrid. */
+/** "Blended" also matches records stored as Bleded (the original UI spelling) or Hybrid. */
 export const DELIVERY_OPTIONS: Option[] = [
   { label: "In-person", value: "In-person" },
-  { label: "Bleded", value: "Bleded" },
+  { label: "Blended", value: "Blended" },
   { label: "Online", value: "Online" },
 ];
 

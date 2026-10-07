@@ -629,7 +629,7 @@ export function TeacherSisShell({
                         const prev = item.children![index - 1];
                         const showSection = Boolean(child.section && child.section !== prev?.section);
                         return (
-                          <div key={child.href}>
+                          <div key={`${child.label}-${child.href}`}>
                             {showSection ? <p className="mh-teacher__nav-section">{child.section}</p> : null}
                             <button
                               type="button"

@@ -99,6 +99,7 @@ import {
   VISA_STATUSES,
   WITHDRAW_STATUSES,
   auditScreen,
+  normalizeDelivery,
   type AuditSection,
 } from "./students.spec.js";
 
@@ -283,7 +284,7 @@ export async function directory(user: SessionClaims, q: DirectoryQuery) {
       (!adv.phone || (p.phone ?? "").replace(/\D/g, "").includes(adv.phone)) &&
       has(p.personalEmail ?? p.email, adv.email) &&
       has(m.discountCode, adv.discountCode) &&
-      (!adv.delivery || m.delivery === adv.delivery)
+      (!adv.delivery || normalizeDelivery(m.delivery) === normalizeDelivery(adv.delivery))
     );
   };
   const all = students.filter((st) => advancedMatch(st, (metaMap[st.id] ?? {}) as Record<string, string | undefined>)).map((st) => {
@@ -393,7 +394,7 @@ export async function createStudent(user: SessionClaims, body: Data) {
   const visaExpiry = optDate(body.visaExpiry, "Visa Expiry Date");
   const campus = required(body.campus, "Campus", 120);
   if (!campuses.includes(campus)) throw httpError(400, "Campus is not a configured campus");
-  const delivery = oneOf(body.delivery, DELIVERY_METHODS, "Delivery Method");
+  const delivery = oneOf(normalizeDelivery(body.delivery), DELIVERY_METHODS, "Delivery Method");
   const programName = required(body.program, "Program of Study", 200);
   const program = pm.programs.find((p) => p.name === programName || p.id === programName);
   if (!program) throw httpError(400, "Program of Study is not a configured program");

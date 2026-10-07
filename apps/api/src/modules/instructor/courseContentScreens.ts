@@ -305,7 +305,10 @@ export function buildRepositoryCatalog(): RepositoryCourseRecord[] {
     const num = 100 + (i % 80);
     const number = `${prefix} ${num}`;
     const name = `${prefix} Content Module ${num}`;
-    rows.push(toRepoCourse(number, name, i));
+    const course = toRepoCourse(number, name, i);
+    // Keep the first occurrence's id unchanged: stored overlays reference repository ids.
+    if (rows.some((r) => r.id === course.id)) course.id = `${course.id}-${i}`;
+    rows.push(course);
     i += 1;
   }
   return rows;

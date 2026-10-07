@@ -407,7 +407,13 @@ export const WhatIfScenarioResponse = z.object({
   claims: z.array(AiClaim),
 });
 
-export const DegreeProgressResponse = DegreePlanAnalysis;
+export const DegreeProgressUnassigned = z.object({
+  studentId: Uuid,
+  programAssigned: z.literal(false),
+  message: z.string().min(1),
+});
+
+export const DegreeProgressResponse = z.union([DegreePlanAnalysis, DegreeProgressUnassigned]);
 
 export const KnowledgeHit = z.object({
   id: Uuid,
@@ -633,6 +639,7 @@ export type DegreeRequirementItem = z.infer<typeof DegreeRequirementItem>;
 export type DegreePlanAnalysis = z.infer<typeof DegreePlanAnalysis>;
 export type WhatIfScenarioRequest = z.infer<typeof WhatIfScenarioRequest>;
 export type WhatIfScenarioResponse = z.infer<typeof WhatIfScenarioResponse>;
+export type DegreeProgressUnassigned = z.infer<typeof DegreeProgressUnassigned>;
 export type DegreeProgressResponse = z.infer<typeof DegreeProgressResponse>;
 export type KnowledgeHit = z.infer<typeof KnowledgeHit>;
 export type StudentRiskAnalysis = z.infer<typeof StudentRiskAnalysis>;

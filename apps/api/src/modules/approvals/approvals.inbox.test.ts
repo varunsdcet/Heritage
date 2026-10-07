@@ -16,6 +16,10 @@ const claims = vi.hoisted(
     }) satisfies SessionClaims,
 );
 
+const access = vi.hoisted(() => ({ assertPermission: vi.fn() }));
+
+const decide = vi.hoisted(() => vi.fn());
+
 const db = vi.hoisted(() => ({
   approvalRequest: { findMany: vi.fn() },
   student: { findMany: vi.fn() },
@@ -26,6 +30,8 @@ const db = vi.hoisted(() => ({
 
 vi.mock("@myheritage/db", () => ({ prisma: db }));
 vi.mock("./approvals.service.js", () => ({ applyApprovedRequest: vi.fn(), settleRejectedApproval: vi.fn() }));
+vi.mock("../admin/superAdmin.service.js", () => ({ assertPermission: access.assertPermission }));
+vi.mock("@myheritage/auth", async (importOriginal) => ({ ...(await importOriginal<typeof import("@myheritage/auth")>()), decideApproval: decide }));
 vi.mock("../../middleware/auth.js", () => ({
   requireAuth(req: Request, _res: Response, next: NextFunction) {
     Object.assign(req, { user: claims, correlationId: "approvals-inbox" });
@@ -84,6 +90,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  access.assertPermission.mockResolvedValue({});
   db.approvalRequest.findMany.mockResolvedValue([approvalRow()]);
   db.student.findMany.mockResolvedValue([]);
   db.section.findMany.mockResolvedValue([]);
@@ -158,5 +165,30 @@ describe("approval inbox detail", () => {
     const [item] = await inbox();
     expect(db.gradeItem.findMany).not.toHaveBeenCalled();
     expect(item!.proposedDiff).toMatchObject({ from: "2026-11-01", to: "2026-12-01" });
+  });
+});
+
+describe("approval access level", () => {
+  const denied = () =>
+    access.assertPermission.mockRejectedValue(Object.assign(new Error("Your access level does not allow changing User Requests."), { status: 403, code: "FORBIDDEN" }));
+
+  it("requires User Requests view to open the inbox", async () => {
+    denied();
+    const response = await fetch(`${baseUrl}/approvals`);
+    expect(response.status).toBe(403);
+    expect(access.assertPermission).toHaveBeenCalledWith(claims, "userRequests", "view");
+    expect(db.approvalRequest.findMany).not.toHaveBeenCalled();
+  });
+
+  it("stops a Staff level without User Requests edit from deciding", async () => {
+    denied();
+    const response = await fetch(`${baseUrl}/approvals/${approvalRow().id}/decide`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decision: "approve" }),
+    });
+    expect(response.status).toBe(403);
+    expect(access.assertPermission).toHaveBeenCalledWith(claims, "userRequests", "edit");
+    expect(decide).not.toHaveBeenCalled();
   });
 });

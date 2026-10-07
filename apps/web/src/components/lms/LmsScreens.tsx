@@ -612,7 +612,7 @@ export function SettingsPanel({ courseCode, title }: { courseCode: string; title
             <span>Course image</span>
             <div className="mh-teacher-dropzone">
               <input type="file" accept="image/*" />
-              <p className="mh-teacher-muted">Maximum 200MB · Maximum 1 file · Accepted image formats</p>
+              <p className="mh-teacher-muted">Maximum 8MB · Maximum 1 file · Accepted image formats</p>
             </div>
           </label>
         </div>
@@ -1381,7 +1381,7 @@ export function CreateGroupForm({ onCancel }: { onCancel: () => void }) {
           <span>New picture</span>
           <div className="mh-teacher-dropzone">
             <input type="file" accept="image/*" />
-            <p className="mh-teacher-muted">Choose a file · Maximum 200MB</p>
+            <p className="mh-teacher-muted">Choose a file · Maximum 8MB</p>
           </div>
         </label>
       </div>

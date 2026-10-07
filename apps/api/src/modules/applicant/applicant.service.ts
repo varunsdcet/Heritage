@@ -48,7 +48,11 @@ function decodeAndValidateApplicantFile(input: {
   const allowedExtensions = extensionByMime[input.mimeType] ?? [];
   const extension = path.extname(input.filename).toLowerCase();
   if (!allowedExtensions.includes(extension)) {
-    throw httpError("Filename extension does not match the file type", "VALIDATION_ERROR", 400);
+    throw httpError(
+      `File type not allowed. Allowed file types: ${Object.values(extensionByMime).flat().join(", ")}`,
+      "VALIDATION_ERROR",
+      400,
+    );
   }
 
   const content = Buffer.from(input.contentBase64, "base64");
@@ -567,6 +571,9 @@ export async function runApplicantAction(
     const mimeType = typeof payload?.mimeType === "string" ? payload.mimeType : "";
     const sizeBytes = typeof payload?.sizeBytes === "number" ? payload.sizeBytes : Number(payload?.sizeBytes);
     const contentBase64 = typeof payload?.contentBase64 === "string" ? payload.contentBase64 : "";
+    if (filename && (sizeBytes === 0 || (Number.isFinite(sizeBytes) && !contentBase64))) {
+      throw httpError("The selected file is empty (0 bytes). Choose a file that has content.", "VALIDATION_ERROR", 400);
+    }
     if (!documentId || !filename || !mimeType || !Number.isFinite(sizeBytes) || !contentBase64) {
       throw httpError(
         "Upload requires documentId, filename, mimeType, sizeBytes, and contentBase64",

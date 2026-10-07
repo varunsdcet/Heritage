@@ -52,8 +52,9 @@ export const STATUS_TREE: Array<{ name: string; children?: string[] }> = [
 export const GENDERS = ["Male", "Female", "Other"] as const;
 export const RESIDENCY = ["Domestic", "International"] as const;
 export const VISA_STATUSES = ["Permanent Resident", "Student VISA", "Visitor", "Work Permit", "Distance", "Citizen"] as const;
-/** "Bleded" is the original UI spelling. */
-export const DELIVERY_METHODS = ["In-person", "Bleded", "Online"] as const;
+export const DELIVERY_METHODS = ["In-person", "Blended", "Online"] as const;
+/** Older student records store the original UI misspelling "Bleded". */
+export const normalizeDelivery = (v: unknown) => (v === "Bleded" ? "Blended" : v);
 export const DECLARATION_BY = ["Applicant", "Agent or Representative", "Student"] as const;
 export const DECLARATION_ACKS = [
   "I certify that the information provided is accurate and complete.",

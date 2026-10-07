@@ -1,16 +1,22 @@
-import { Router } from "express";
+import { Router, type NextFunction, type Request, type Response } from "express";
 import { z } from "zod";
 import { ApprovalInboxResponse, DecideApprovalRequest } from "@myheritage/contracts";
 import { canDecideApproval, decideApproval, parseApproverRoles } from "@myheritage/auth";
 import { prisma } from "@myheritage/db";
 import { requireAuth, requireRoles, type AuthedRequest } from "../../middleware/auth.js";
+import { assertPermission } from "../admin/superAdmin.service.js";
 import { applyApprovedRequest, settleRejectedApproval } from "./approvals.service.js";
 
 export const approvalsRouter: Router = Router();
 
 const GRADE_PUBLISH_TYPES = new Set(["grade.publish", "grade_publish"]);
 
-approvalsRouter.get("/", requireAuth, requireRoles("admin", "registrar"), async (req, res, next) => {
+/** Every Staff access level carries the `registrar` role, so the role alone does not prove the level may act on requests. */
+const requireUserRequests = (mode: "view" | "edit") => (req: Request, _res: Response, next: NextFunction) => {
+  assertPermission((req as AuthedRequest).user, "userRequests", mode).then(() => next(), next);
+};
+
+approvalsRouter.get("/", requireAuth, requireRoles("admin", "registrar"), requireUserRequests("view"), async (req, res, next) => {
   try {
     const user = (req as AuthedRequest).user;
     const rows = (
@@ -169,6 +175,7 @@ approvalsRouter.post(
   "/:id/decide",
   requireAuth,
   requireRoles("admin", "registrar"),
+  requireUserRequests("edit"),
   async (req, res, next) => {
     try {
       const user = (req as AuthedRequest).user;
@@ -194,6 +201,7 @@ approvalsRouter.post(
   "/:id/apply",
   requireAuth,
   requireRoles("admin", "registrar"),
+  requireUserRequests("edit"),
   async (req, res, next) => {
     try {
       const user = (req as AuthedRequest).user;

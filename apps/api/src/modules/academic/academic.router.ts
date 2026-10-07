@@ -37,6 +37,11 @@ academicRouter.get("/degree-progress", async (req, res, next) => {
     const progress = await computeDegreeProgress({
       institutionId: user.institutionId,
       studentId: student.id,
+    }).catch((error: unknown) => {
+      if ((error as { code?: string })?.code === "NO_PROGRAM") {
+        return { studentId: student.id, programAssigned: false as const, message: "No program assigned yet" };
+      }
+      throw error;
     });
     res.json(DegreeProgressResponse.parse(progress));
   } catch (error) {

@@ -6640,6 +6640,17 @@ async function createOrSaveAssessment(
     return { draft: true as const, title, sectionId: sec.id, sectionCode: sec.code };
   }
 
+  const clash = await prisma.assignment.findFirst({
+    where: { institutionId: ctx.user.institutionId, sectionId: sec.id, title: { equals: title, mode: "insensitive" } },
+    select: { id: true },
+  });
+  if (clash) {
+    throw Object.assign(new Error(`${sec.code} already has an assessment named "${title}". Use a different title so grades stay distinguishable.`), {
+      status: 409,
+      code: "DUPLICATE",
+    });
+  }
+
   const rubric = await prisma.rubric.create({
     data: {
       id: randomUUID(),
@@ -8409,7 +8420,12 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
         message = "Term deleted";
         result = { id: termId };
       }
-    } else if (lower.includes("category")) {
+    } else if (
+      (path.includes("t58") || path.includes("course-categor")) &&
+      lower.includes("category") &&
+      /^(?:quick-)?(?:create|save|add)\b/.test(lower) &&
+      !/delete|remove|edit/.test(lower)
+    ) {
       const fields = parseActionFields(input.rowKey) || {};
       const name = (fields["Category Name"] || fields.Name || "New Category").trim();
       const code = (fields.Code || name.slice(0, 4).toUpperCase()).trim();

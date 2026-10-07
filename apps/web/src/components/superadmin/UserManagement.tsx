@@ -34,6 +34,8 @@ function useMetaAndLevels() {
 
 const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
+const suggestLogin = (givenName: string, familyName: string) => `${givenName}.${familyName}`.replace(/[^A-Za-z0-9._-]/g, "").toLowerCase();
+
 /* ------------------------------ Directory ------------------------------ */
 
 export function SuperUserDirectory() {
@@ -229,6 +231,7 @@ export function SuperUserForm() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [loginEdited, setLoginEdited] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -254,7 +257,7 @@ export function SuperUserForm() {
 
   const loginSuggestion = useMemo(() => {
     if (!form || form.login || !form.givenName || !form.familyName) return "";
-    return `${form.givenName}.${form.familyName}`.replace(/[^A-Za-z0-9._-]/g, "").toLowerCase();
+    return suggestLogin(form.givenName, form.familyName);
   }, [form]);
 
   if (!form) {
@@ -266,6 +269,15 @@ export function SuperUserForm() {
   }
 
   const set = <K extends keyof UserForm>(k: K, v: UserForm[K]) => setForm((f) => (f ? { ...f, [k]: v } : f));
+
+  /** On Add User the required login follows the name until the admin types their own, so the first Save is not blocked by an empty login. */
+  const setName = (k: "givenName" | "familyName", v: string) =>
+    setForm((f) => {
+      if (!f) return f;
+      const next = { ...f, [k]: v };
+      if (!id && !loginEdited && next.givenName && next.familyName) next.login = suggestLogin(next.givenName, next.familyName);
+      return next;
+    });
 
   function changeLevel(accessLevelId: string) {
     const next = levels.find((l) => l.id === accessLevelId);
@@ -340,10 +352,10 @@ export function SuperUserForm() {
         <SaCard title="USER DETAILS">
           <div className="mh-sa__grid">
             <SaField label="First Name">
-              <input className="mh-sa__input" value={form.givenName} onChange={(e) => set("givenName", e.target.value)} required maxLength={80} />
+              <input className="mh-sa__input" value={form.givenName} onChange={(e) => setName("givenName", e.target.value)} required maxLength={80} />
             </SaField>
             <SaField label="Last Name">
-              <input className="mh-sa__input" value={form.familyName} onChange={(e) => set("familyName", e.target.value)} required maxLength={80} />
+              <input className="mh-sa__input" value={form.familyName} onChange={(e) => setName("familyName", e.target.value)} required maxLength={80} />
             </SaField>
             <SaField label="Preferred Name">
               <input className="mh-sa__input" value={form.preferredName} onChange={(e) => set("preferredName", e.target.value)} maxLength={80} />
@@ -380,7 +392,10 @@ export function SuperUserForm() {
               <input
                 className="mh-sa__input"
                 value={form.login}
-                onChange={(e) => set("login", e.target.value)}
+                onChange={(e) => {
+                  setLoginEdited(true);
+                  set("login", e.target.value);
+                }}
                 onFocus={() => loginSuggestion && set("login", loginSuggestion)}
                 required
                 minLength={3}

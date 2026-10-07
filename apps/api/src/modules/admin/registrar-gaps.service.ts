@@ -710,7 +710,7 @@ export async function listStudentDocumentsForStudent(institutionId: string, stud
       recordName: r.recordName,
       recordDate: r.recordDate,
       docLabel: r.docLabel,
-      downloadUrl: r.downloadUrl,
+      downloadUrl: r.downloadUrl && isSafeLink(r.downloadUrl) ? r.downloadUrl : null,
       status: r.status,
     })),
   };

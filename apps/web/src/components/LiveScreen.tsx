@@ -189,8 +189,18 @@ function GenericLiveScreen({
     event.target.value = "";
     pendingUploadRef.current = null;
     if (!file || !pending?.action) return;
+    if (file.size === 0) {
+      setError("The selected file is empty (0 bytes). Choose a file that has content.");
+      return;
+    }
     const mimeType = mimeForFile(file);
-    const contentBase64 = toBase64(new Uint8Array(await file.arrayBuffer()));
+    let contentBase64: string;
+    try {
+      contentBase64 = toBase64(new Uint8Array(await file.arrayBuffer()));
+    } catch {
+      setError("The selected file could not be read. Choose another file.");
+      return;
+    }
     await postAction(pending, {
       ...(pending.payload ?? {}),
       filename: file.name,

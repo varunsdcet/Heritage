@@ -361,7 +361,7 @@ export function ProgramPage({ mode }: { mode: "create" | "edit" }) {
   return (
     <SuperFrame title={title} breadcrumbs={[...CRUMB, "Faculties & Programs", mode === "create" ? "Add Program" : name || "Program"]} breadcrumbHrefs={[null, null, FAC]} activeHref={FAC}>
       <div className="lx">
-        <Tabs tabs={PROGRAM_TABS} active={tab} hrefOf={(k) => `${FAC}/program?id=${id}&tab=${k}`} disabled={!id} />
+        <Tabs tabs={PROGRAM_TABS} active={tab} hrefOf={(k) => (id ? `${FAC}/program?id=${id}&tab=${k}` : `${FAC}/program-new`)} disabled={!id} />
         {tab === "settings" ? <ProgramSettings id={id} onName={setName} /> : null}
         {id && tab === "pathway" ? <PathwayTab programId={id} /> : null}
         {id && tab === "fees" ? <FeesPanel parentId={id} termEntity="feeTerms" feeEntity="fees" amountLabel="Default Fees" empty="No ledger or tuition types currently exist for this program." /> : null}

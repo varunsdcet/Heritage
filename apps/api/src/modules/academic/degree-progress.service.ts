@@ -32,7 +32,7 @@ export async function computeDegreeProgress(input: ProgressOptions): Promise<Deg
   }
   if (!student.programVersion) {
     throw Object.assign(new Error("No program with a course outline is assigned for this student. Enrol the student in a program whose pathway lists its courses."), {
-      code: "NOT_FOUND",
+      code: "NO_PROGRAM",
       status: 404,
     });
   }

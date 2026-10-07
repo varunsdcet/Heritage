@@ -840,7 +840,7 @@ async function assertUnique(inst: string, def: EntityDef, data: Data, parentKey:
   }
 }
 
-const titleOf = (d: Data) => s(d.name || d.question || d.email || d.label) || "record";
+const titleOf = (d: Data, fallback: string) => s(d.name || d.question || d.email || d.label) || (s(d.startDate) && s(d.endDate) ? `${s(d.startDate)} – ${s(d.endDate)}` : "") || fallback;
 
 async function afterSave(user: SessionClaims, entity: EntityKey, id: string, before: Data | null, after: Data) {
   const inst = user.institutionId;
@@ -903,7 +903,7 @@ export async function createEntity(user: SessionClaims, entity: EntityKey, body:
   await afterSave(user, entity, rec.id, null, data);
   if (entity === "documentTemplates") await addVersion(user, rec.id, data, ["Template created"]);
   await audit(user, def.audit, ctx, `create ${def.label.toLowerCase()}`, { recordId: rec.id, after: publicData(def, data) });
-  return { ok: true, id: rec.id, message: `${capital(def.label)} "${titleOf(data)}" saved` };
+  return { ok: true, id: rec.id, message: `${capital(def.label)} "${titleOf(data, def.label)}" saved` };
 }
 
 const capital = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
@@ -941,7 +941,7 @@ export async function updateEntity(user: SessionClaims, entity: EntityKey, id: s
     if (changes.length) await addVersion(user, id, data, [`Updated ${changes.slice(0, 6).join(", ")}${changes.length > 6 ? ` and ${changes.length - 6} more` : ""}`]);
   }
   await audit(user, def.audit, rec.contextKey, `update ${def.label.toLowerCase()}`, { recordId: id, before: publicData(def, rec.data), after: publicData(def, data) });
-  return { ok: true, id, message: `${capital(def.label)} "${titleOf(data)}" saved` };
+  return { ok: true, id, message: `${capital(def.label)} "${titleOf(data, def.label)}" saved` };
 }
 
 async function usedBy(inst: string, entity: EntityKey, test: (d: Data) => boolean) {
@@ -953,10 +953,10 @@ export async function deleteEntity(user: SessionClaims, entity: EntityKey, id: s
   const def = ENTITIES[entity];
   const inst = user.institutionId;
   const rec = await find(inst, def.screen, id, def.label);
-  const name = titleOf(rec.data);
+  const name = titleOf(rec.data, def.label);
   const block = (used: Rec[], what: string) => {
     if (used.length)
-      throw httpError(409, `"${name}" is still used by ${used.length} ${what}${used.length === 1 ? "" : "s"} (${used.slice(0, 3).map((u) => titleOf(u.data)).join(", ")}${used.length > 3 ? ", …" : ""}). Update ${used.length === 1 ? "it" : "them"} first.`, "CONFLICT");
+      throw httpError(409, `"${name}" is still used by ${used.length} ${what}${used.length === 1 ? "" : "s"} (${used.slice(0, 3).map((u) => titleOf(u.data, what)).join(", ")}${used.length > 3 ? ", …" : ""}). Update ${used.length === 1 ? "it" : "them"} first.`, "CONFLICT");
   };
   const [extra] = await decorate(user, entity, [rec]);
   if (extra?._protected) throw httpError(409, s(extra._protected), "CONFLICT");
@@ -1011,7 +1011,7 @@ export async function reorderEntity(user: SessionClaims, entity: EntityKey, ids:
   if (recs.some((r) => !r) || new Set(ids).size !== ids.length) throw httpError(400, "The list changed — reload and try again");
   if (entity === "studentStatuses" && new Set(recs.map((r) => s(r!.data.parent))).size > 1) throw httpError(400, "Statuses can only be reordered within the same parent");
   for (const [i, r] of recs.entries()) if (r!.data._order !== i) await write(user.accountId, r!.id, { ...r!.data, _order: i });
-  await audit(user, def.audit, "", `reorder ${def.label.toLowerCase()}s`, { after: recs.map((r) => titleOf(r!.data)) });
+  await audit(user, def.audit, "", `reorder ${def.label.toLowerCase()}s`, { after: recs.map((r) => titleOf(r!.data, def.label)) });
   return { ok: true, message: "Order saved" };
 }
 

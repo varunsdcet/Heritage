@@ -806,9 +806,9 @@ function DashboardView({ config }: { config: TeacherScreenConfig }) {
               {alerts.length === 0 ? (
                 <p className="mh-teacher-muted">No alerts.</p>
               ) : (
-                alerts.map((a) => (
+                alerts.map((a, i) => (
                   <button
-                    key={a.title}
+                    key={`${a.title}-${i}`}
                     type="button"
                     className={`mh-ct-dash__row mh-ct-dash__row--stack mh-ct-dash__alert--${a.tone}`}
                     onClick={() =>
@@ -910,8 +910,8 @@ function DashboardView({ config }: { config: TeacherScreenConfig }) {
                   </button>
                 </li>
               ))}
-              {alerts.slice(0, 3).map((a) => (
-                <li key={a.title}>{a.title}</li>
+              {alerts.slice(0, 3).map((a, i) => (
+                <li key={`${a.title}-${i}`}>{a.title}</li>
               ))}
             </ul>
           ) : (
@@ -1481,9 +1481,9 @@ function ModulesBoardView({ config }: { config: TeacherScreenConfig }) {
         </section>
       ) : (
         <div className="mh-teacher-list">
-          {items.map((m) => (
+          {items.map((m, i) => (
             <button
-              key={`${m.course}-${m.title}`}
+              key={`${m.course}-${m.title}-${i}`}
               type="button"
               className="mh-teacher-list__item mh-teacher-list__item--button"
               onClick={() => {
@@ -4306,11 +4306,14 @@ function fileKindLabel(name: string, mimeOrType?: string) {
   return mimeOrType && mimeOrType.length < 12 ? mimeOrType : "File";
 }
 
+/** Shared fallback so missing files/tree keep a stable identity for the sync effect below. */
+const NO_ITEMS: never[] = [];
+
 function FileManagerView({ config }: { config: TeacherScreenConfig }) {
   const live = useOptionalTeacherLive();
   const data = config.fileManager;
-  const files = data?.files ?? [];
-  const tree = data?.tree ?? [];
+  const files = data?.files ?? NO_ITEMS;
+  const tree = data?.tree ?? NO_ITEMS;
   const breadcrumbs = data?.breadcrumbs ?? ["Files"];
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [activeFolder, setActiveFolder] = useState(() => tree.find((n) => n.active)?.name || tree[0]?.name || "All files");
@@ -5506,8 +5509,8 @@ function StudentDetailView({ config }: { config: TeacherScreenConfig }) {
               {assessments.length === 0 ? (
                 <p className="mh-teacher-muted">No assessment records for this student in your sections.</p>
               ) : (
-                assessments.map((a) => (
-                  <div key={`${a.course}-${a.title}`} className="mh-teacher-list__item">
+                assessments.map((a, i) => (
+                  <div key={`${a.course}-${a.title}-${i}`} className="mh-teacher-list__item">
                     <div>
                       <strong>{a.title}</strong>
                       <span>
@@ -5605,8 +5608,8 @@ function StudentDetailView({ config }: { config: TeacherScreenConfig }) {
         <div className="mh-teacher-stack">
           {tab === "Overview" ? (
             <>
-              {d.alerts.map((a) => (
-                <section key={a.title} className="mh-teacher-card">
+              {d.alerts.map((a, i) => (
+                <section key={`${a.title}-${i}`} className="mh-teacher-card">
                   <h2>{a.title}</h2>
                   <p>{a.body}</p>
                   <span className={badgeClass(a.tone)}>{a.tone}</span>

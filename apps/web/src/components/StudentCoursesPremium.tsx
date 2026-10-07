@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { EmptyState } from "@myheritage/ui";
 import { ApiError, api, loadSession, type Session } from "@/lib/api";
@@ -13,7 +14,7 @@ import { LessonBody, LmsAssignmentSummary, LmsFileCard, LmsUrlCard } from "@/com
 import type { AiDraftStoryboard } from "@/lib/aiDraftSamples";
 import type { LmsAssignmentSettings } from "@/lib/teacherCatalog";
 
-type LoadState = "loading" | "ready" | "offline" | "forbidden" | "error";
+type LoadState = "loading" | "ready" | "offline" | "forbidden" | "notFound" | "error";
 
 type Course = {
   sectionId: string;
@@ -320,6 +321,10 @@ function useStudentResource<T>(path: string) {
           setState("forbidden");
           return;
         }
+        if (caught instanceof ApiError && caught.status === 404) {
+          setState("notFound");
+          return;
+        }
         if ((typeof navigator !== "undefined" && !navigator.onLine) || caught instanceof TypeError) {
           setState("offline");
           return;
@@ -374,6 +379,7 @@ function Boundary({
     loading: ["Loading", "Fetching your courses…"],
     offline: ["You're offline", "Reconnect and try again."],
     forbidden: ["Permission denied", "This page is available only to the signed-in student."],
+    notFound: ["You're not enrolled in this course", "This course was not found or is not part of your enrolment."],
     error: ["Something went wrong", error ?? "The page could not be loaded."],
   }[state];
   return (
@@ -383,6 +389,11 @@ function Boundary({
         <button type="button" className="mh-hcc-btn" onClick={onRetry}>
           Try again
         </button>
+      ) : null}
+      {state === "notFound" ? (
+        <Link href="/student/courses" className="mh-hcc-btn">
+          Back to My Courses
+        </Link>
       ) : null}
     </div>
   );
@@ -587,16 +598,19 @@ export function StudentCourseDetailPremiumView({ sectionId }: { sectionId: strin
     return labels.map((label) => ({ label, entries: buckets[label] || [] }));
   }, [sessions]);
 
-  const states = [courses.state, calendar.state, lms.state, grades.state];
+  const lmsState: LoadState = lms.state === "forbidden" && courses.state === "ready" ? "notFound" : lms.state;
+  const states = [courses.state, calendar.state, lmsState, grades.state];
   const combinedState: LoadState = states.includes("forbidden")
     ? "forbidden"
-    : states.includes("error")
-      ? "error"
-      : states.includes("offline")
-        ? "offline"
-        : states.every((s) => s === "ready")
-          ? "ready"
-          : "loading";
+    : states.includes("notFound")
+      ? "notFound"
+      : states.includes("error")
+        ? "error"
+        : states.includes("offline")
+          ? "offline"
+          : states.every((s) => s === "ready")
+            ? "ready"
+            : "loading";
 
   function setTab(next: "Course" | "Grades") {
     const params = new URLSearchParams(search.toString());

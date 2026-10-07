@@ -3,6 +3,7 @@ import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
 import { CAMPUSES, STUDENT_STATUSES, assertPermission, patchStudentMeta, studentMetaMap, type PermissionModuleKey } from "../superAdmin.service.js";
 import { withStudentMoneyLock } from "./studentLock.js";
+import { normalizeDelivery } from "./students.spec.js";
 
 export type DomainRow = {
   id: string;
@@ -67,7 +68,7 @@ async function students(ctx: DomainCtx): Promise<DomainResult> {
         nationality: m.residency ?? "",
         e_mail_address: s.person.email,
         phone_number: s.person.phone ?? "",
-        delivery_method: m.delivery ?? "",
+        delivery_method: normalizeDelivery(m.delivery) ?? "",
       },
     };
   });

@@ -23,8 +23,10 @@ export function AskHeritageFab({
     pathname === href ||
     pathname.startsWith(`${href}/`) ||
     /\/ask(\/|$)/.test(pathname);
+  // The composer's Send button sits bottom-right, exactly where the launcher floats.
+  const onMessages = /^\/[^/]+\/messages(\/|$)/.test(pathname);
 
-  if (onAskPage) return null;
+  if (onAskPage || onMessages) return null;
 
   return (
     <Link

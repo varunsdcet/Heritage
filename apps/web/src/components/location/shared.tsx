@@ -113,7 +113,7 @@ export function ConfirmDelete({ title, body, onCancel, onOk, okLabel = "Delete" 
         </>
       }
     >
-      <p>{body}</p>
+      {typeof body === "string" ? <p>{body}</p> : <div>{body}</div>}
     </SaModal>
   );
 }

@@ -366,6 +366,7 @@ function refineSetting(f: FieldDef): FieldDef {
 const FIELD_OVERRIDES: Record<string, Partial<FieldDef>> = {
   "P12-FLD01": { kind: "display" },
   "P12-FLD02": { kind: "ref", ref: "timezones", required: true },
+  "S02-FLD22": { kind: "select", options: ["In-person", "Blended", "Online"] },
   "SC25-FLD11": { kind: "checkbox" },
   "SC25-FLD12": { kind: "checkbox" },
   "SC25-FLD13": { kind: "checkbox" },

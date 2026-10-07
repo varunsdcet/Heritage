@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { allows, useMyAccess, type ModuleKey } from "@/lib/access";
 import { api, loadSession } from "@/lib/api";
 
 const REFRESH_EVENT = "mh:nav-counts";
@@ -11,19 +12,23 @@ type WorkshopCounts = { pending: number; approved: number; declined: number; ava
 /** Live sidebar badge values keyed by `AdminNavChild.count` / `AdminNavItem.count`. */
 export function useNavCounts(enabled: boolean, pathname: string) {
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const access = useMyAccess();
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || access === undefined) return;
     let cancelled = false;
     const load = () => {
       const token = loadSession()?.accessToken;
       if (!token) return;
       const quiet = { skipAuthRedirect: true };
+      /* Each endpoint asserts view access on its module; skip the ones that would 403. */
+      const get = <T,>(path: string, module: ModuleKey) =>
+        allows(access, { modules: [module] }) ? api<T>(path, {}, token, quiet) : Promise.reject(new Error(`No ${module} access`));
       void Promise.allSettled([
-        api<RequestCounts>("/admin/heritage/requests/counts", {}, token, quiet),
-        api<WorkshopCounts>("/admin/heritage/workshops/counts", {}, token, quiet),
-        api<{ gradesSubmission: number }>("/admin/heritage/my-courses/counts", {}, token, quiet),
-        api<{ pending: number; backups: number }>("/admin/heritage/courses/counts", {}, token, quiet),
-        api<Record<string, number>>("/admin/heritage/students/counts", {}, token, quiet),
+        get<RequestCounts>("/admin/heritage/requests/counts", "userRequests"),
+        get<WorkshopCounts>("/admin/heritage/workshops/counts", "courseManagement"),
+        get<{ gradesSubmission: number }>("/admin/heritage/my-courses/counts", "courseManagement"),
+        get<{ pending: number; backups: number }>("/admin/heritage/courses/counts", "courseManagement"),
+        get<Record<string, number>>("/admin/heritage/students/counts", "studentRecords"),
       ]).then(([requests, workshops, myCourses, courses, students]) => {
         if (cancelled) return;
         const next: Record<string, number> = {};
@@ -49,7 +54,7 @@ export function useNavCounts(enabled: boolean, pathname: string) {
       cancelled = true;
       window.removeEventListener(REFRESH_EVENT, load);
     };
-  }, [enabled, pathname]);
+  }, [enabled, pathname, access]);
   return counts;
 }
 

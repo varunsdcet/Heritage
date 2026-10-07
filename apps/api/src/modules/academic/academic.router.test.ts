@@ -138,11 +138,25 @@ describe("student degree APIs", () => {
     const response = await fetch(`${apiBaseUrl}/student/degree-progress`);
     expect(response.status).toBe(200);
     const payload = DegreeProgressResponse.parse(await response.json());
-    expect(payload.programCode).toBe("CS-DIP");
-    expect(payload.remainingCredits).toBe(12);
+    expect(payload).toMatchObject({ programCode: "CS-DIP", remainingCredits: 12 });
     expect(progress.computeDegreeProgress).toHaveBeenCalledWith({
       institutionId: claims.institutionId,
       studentId: "student-1",
+    });
+  });
+
+  it("returns an empty state when the student has no program assigned", async () => {
+    db.student.findFirst.mockResolvedValue({ id: progressFixture.studentId, programVersionId: null });
+    progress.computeDegreeProgress.mockRejectedValue(
+      Object.assign(new Error("No program"), { code: "NO_PROGRAM", status: 404 }),
+    );
+    const response = await fetch(`${apiBaseUrl}/student/degree-progress`);
+    expect(response.status).toBe(200);
+    const payload = DegreeProgressResponse.parse(await response.json());
+    expect(payload).toEqual({
+      studentId: progressFixture.studentId,
+      programAssigned: false,
+      message: "No program assigned yet",
     });
   });
 

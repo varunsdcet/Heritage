@@ -285,7 +285,7 @@ function DeleteCategory({ cat, onClose, onDone }: { cat: Row; onClose: () => voi
       footer={
         <>
           <button type="button" className="mh-sa__btn" onClick={onClose}>
-            MYC_STUDENTS_TUITION_CANCEL_BUTTON
+            Cancel
           </button>
           <button
             type="button"
@@ -314,6 +314,7 @@ function DeleteCategory({ cat, onClose, onDone }: { cat: Row; onClose: () => voi
 
 function LedgerTypes() {
   const flash = useFlash();
+  const { fail } = flash;
   const [cats, setCats] = useState<Row[]>([]);
   const [rev, setRev] = useState(0);
   const [catModal, setCatModal] = useState<{ id: string | null } | null>(null);
@@ -321,8 +322,8 @@ function LedgerTypes() {
   const loadCats = useCallback(() => {
     sx<Listing>("/e/ledgerCategories")
       .then((r) => setCats(r.items))
-      .catch((e) => flash.fail(errMsg(e, "Could not load categories")));
-  }, [flash]);
+      .catch((e) => fail(errMsg(e, "Could not load categories")));
+  }, [fail]);
   useEffect(loadCats, [loadCats]);
   const refresh = (m: string) => {
     flash.ok(m);

@@ -2,7 +2,7 @@
 
 import { FormEvent, Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import type { DegreePlanAnalysis, WhatIfScenarioResponse } from "@myheritage/contracts";
+import type { DegreePlanAnalysis, DegreeProgressResponse, WhatIfScenarioResponse } from "@myheritage/contracts";
 import { Banner, Button, StatusPill } from "@myheritage/ui";
 import { api, loadSession } from "@/lib/api";
 import { StudentSisShell } from "@/components/StudentSisShell";
@@ -13,6 +13,7 @@ function StudentDegreeBody() {
   const [progress, setProgress] = useState<DegreePlanAnalysis | null>(null);
   const [whatIf, setWhatIf] = useState<WhatIfScenarioResponse | null>(null);
   const [dropCode, setDropCode] = useState("MATH210");
+  const [emptyMessage, setEmptyMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -29,10 +30,14 @@ function StudentDegreeBody() {
       return;
     }
     setUserName(`${session.givenName} ${session.familyName}`.trim() || "Student");
-    api<DegreePlanAnalysis>("/student/degree-progress", {}, session.accessToken)
+    api<DegreeProgressResponse>("/student/degree-progress", {}, session.accessToken)
       .then(async (data) => {
-        setProgress(data);
         setLoading(false);
+        if ("programAssigned" in data) {
+          setEmptyMessage(data.message);
+          return;
+        }
+        setProgress(data);
         if (search.get("whatIf") === "1") {
           const scenario = await api<WhatIfScenarioResponse>(
             "/student/degree-scenarios",
@@ -110,8 +115,20 @@ function StudentDegreeBody() {
     >
       <div className="mh-student-stack">
         {error ? <Banner tone="danger">{error}</Banner> : null}
-        {loading || !view ? (
+        {loading ? (
           <p>Loading live degree progress…</p>
+        ) : !view ? (
+          error ? null : (
+            <section className="mh-sis-dash__card">
+              <h2>{emptyMessage ?? "No degree progress available"}</h2>
+              <p style={{ color: "var(--mh-text-muted)", marginTop: 0 }}>
+                Your degree requirements will appear here once you are enrolled in a program.
+              </p>
+              <Button variant="secondary" onClick={() => router.push("/student/advising")}>
+                Book advisor
+              </Button>
+            </section>
+          )
         ) : (
           <>
             <section className="mh-sis-dash__welcome">

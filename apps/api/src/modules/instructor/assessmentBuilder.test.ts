@@ -116,6 +116,17 @@ describe("assessment builder", () => {
     expect(out.result).not.toHaveProperty("assessmentId");
   });
 
+  it("refuses a second assessment with the same title in the same section", async () => {
+    fn("assignment", "findFirst").mockResolvedValue({ id: "existing" });
+    const out = (await publish({ sectionId: sectionB, title: "Midterm" })) as { message?: string };
+    expect(fn("assignment", "findFirst")).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ sectionId: sectionB, title: { equals: "Midterm", mode: "insensitive" } }) }),
+    );
+    expect(fn("assignment", "create")).not.toHaveBeenCalled();
+    expect(fn("rubric", "create")).not.toHaveBeenCalled();
+    expect(out.message ?? "").toMatch(/already has an assessment named "Midterm"/);
+  });
+
   it("refuses a section the instructor does not teach", async () => {
     const out = (await publish({ sectionId: "70000000-0000-4000-8000-0000000000ff", title: "X" })) as {
       message?: string;

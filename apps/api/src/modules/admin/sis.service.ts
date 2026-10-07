@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { applyApproval, decideApproval } from "@myheritage/auth";
 import { settleRejectedApproval } from "../approvals/approvals.service.js";
+import { assertPermission } from "./superAdmin.service.js";
 import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
 import {
@@ -1908,6 +1909,7 @@ export async function runSisAction(
     input.rowKey &&
     (lower.includes("approve") || lower.includes("reject") || lower.includes("deny") || lower.includes("apply"))
   ) {
+    await assertPermission(user, "userRequests", "edit");
     const approvalId = input.rowKey;
     if (lower.includes("apply")) {
       await applyApproval({
