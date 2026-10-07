@@ -683,8 +683,12 @@ export function StudentAssignmentDetailView({ assignmentId }: { assignmentId: st
 
   async function upload(file: File | undefined) {
     if (!file || !resource.session) return;
-    setBusy(true);
     setNotice(null);
+    if (file.size > 10 * 1024 * 1024) {
+      setActionError("Files must be 10 MB or smaller");
+      return;
+    }
+    setBusy(true);
     setActionError(null);
     try {
       const mimeType = mimeForFile(file);

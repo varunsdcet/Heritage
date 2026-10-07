@@ -3,7 +3,8 @@ import { decideApproval, hashPassword } from "@myheritage/auth";
 import type { RoleName } from "@myheritage/contracts";
 import { prisma } from "@myheritage/db";
 import { forgetSessionRevocation } from "../../../middleware/auth.js";
-import { applyApprovedRequest, settleRejectedApproval } from "../../approvals/approvals.service.js";
+import { SAFE_LINK_MESSAGE, isSafeLink } from "../../../lib/safeLink.js";
+import { OPEN_SERVICE_REQUEST_STATUSES, applyApprovedRequest, settleRejectedApproval } from "../../approvals/approvals.service.js";
 import type { Data, EntityKey, ModuleKey, OpsRef } from "./ops.spec.js";
 import { APP_ADMITTED, APP_EARLY, MORE_ENTITIES } from "./ops.spec.more.js";
 import { addDays, age, bump, httpError, n, parse, pct, personName, records, s, stampOf, take, today, type Adapter, type Change, type Ctx, type Opt, type Row } from "./ops.util.js";
@@ -24,6 +25,11 @@ const rolesOf = (json: string) => {
 };
 const changed = (c: Change, key: string) => s(c.data[key]) !== s(c.before?.[key]);
 const lines = (xs: string[]) => xs.filter(Boolean).join("\n");
+const downloadLink = (d: Data) => {
+  const url = s(d.downloadUrl).trim();
+  if (url && !isSafeLink(url)) throw httpError(400, SAFE_LINK_MESSAGE, "VALIDATION_ERROR");
+  return url || null;
+};
 
 /* ------------------------------------------------------------------ */
 /* Shared helpers                                                       */
@@ -352,10 +358,10 @@ export const EXT_TABLES: Partial<Record<EntityKey, Adapter>> = {
       return rows.map((r) => ({ id: r.id, studentId: r.studentId, recordName: r.recordName, docLabel: r.docLabel ?? "", recordDate: r.recordDate ?? "", downloadUrl: r.downloadUrl ?? "", status: r.status, note: r.note ?? "", updatedAt: r.updatedAt.toISOString() }));
     },
     async create(inst, d) {
-      return (await prisma.studentDocument.create({ data: { institutionId: inst, studentId: s(d.studentId), recordName: s(d.recordName), docLabel: s(d.docLabel) || null, recordDate: s(d.recordDate) || null, downloadUrl: s(d.downloadUrl) || null, status: s(d.status), note: s(d.note) || null } })).id;
+      return (await prisma.studentDocument.create({ data: { institutionId: inst, studentId: s(d.studentId), recordName: s(d.recordName), docLabel: s(d.docLabel) || null, recordDate: s(d.recordDate) || null, downloadUrl: downloadLink(d), status: s(d.status), note: s(d.note) || null } })).id;
     },
     async update(_inst, id, d) {
-      await prisma.studentDocument.update({ where: { id }, data: { studentId: s(d.studentId), recordName: s(d.recordName), docLabel: s(d.docLabel) || null, recordDate: s(d.recordDate) || null, downloadUrl: s(d.downloadUrl) || null, status: s(d.status), note: s(d.note) || null, ...bump } });
+      await prisma.studentDocument.update({ where: { id }, data: { studentId: s(d.studentId), recordName: s(d.recordName), docLabel: s(d.docLabel) || null, recordDate: s(d.recordDate) || null, downloadUrl: downloadLink(d), status: s(d.status), note: s(d.note) || null, ...bump } });
     },
     async remove(_inst, id) {
       await prisma.studentDocument.delete({ where: { id } });
@@ -1041,7 +1047,7 @@ export const DASH: Partial<Record<ModuleKey, (ctx: Ctx) => Promise<{ kpis: Kpi[]
       prisma.enrolment.count({ where: { institutionId: ctx.inst, status: "enrolled" } }),
       ctx.rows("transferCredits"),
       prisma.leaveOfAbsenceRequest.findMany({ where: { institutionId: ctx.inst, status: "pending" }, include: { student: { include: { person: true } } }, orderBy: { createdAt: "asc" } }),
-      prisma.serviceRequest.count({ where: { institutionId: ctx.inst, status: { in: ["open", "pending", "submitted", "in_review"] } } }),
+      prisma.serviceRequest.count({ where: { institutionId: ctx.inst, status: { in: OPEN_SERVICE_REQUEST_STATUSES } } }),
     ]);
     const st = await ctx.labels("students");
     const pendingCredits = credits.filter((c) => c.status === "pending");

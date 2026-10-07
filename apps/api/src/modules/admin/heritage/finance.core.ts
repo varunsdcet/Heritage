@@ -106,8 +106,10 @@ export async function row(inst: string, screen: string, id: string, label: strin
   return toRow(r);
 }
 
-export async function add(user: SessionClaims, screen: string, data: Data, contextKey = "", singletonKey: string | null = null) {
-  const r = await prisma.heritageRecord.create({
+export type Db = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
+
+export async function add(user: SessionClaims, screen: string, data: Data, contextKey = "", singletonKey: string | null = null, db: Db = prisma) {
+  const r = await db.heritageRecord.create({
     data: { institutionId: user.institutionId, screenId: screen, contextKey, singletonKey, dataJson: JSON.stringify(data), createdById: user.accountId, updatedById: user.accountId },
   });
   return toRow(r);
@@ -122,9 +124,9 @@ export async function drop(user: SessionClaims, ids: string[]) {
   await prisma.heritageRecord.updateMany({ where: { id: { in: ids } }, data: { deletedAt: new Date(), updatedById: user.accountId, status: "deleted" } });
 }
 
-export async function putSingle(user: SessionClaims, screen: string, contextKey: string, key: string, data: Data) {
+export async function putSingle(user: SessionClaims, screen: string, contextKey: string, key: string, data: Data, db: Db = prisma) {
   const where = { institutionId_screenId_contextKey_singletonKey: { institutionId: user.institutionId, screenId: screen, contextKey, singletonKey: key } };
-  await prisma.heritageRecord.upsert({
+  await db.heritageRecord.upsert({
     where,
     create: { institutionId: user.institutionId, screenId: screen, contextKey, singletonKey: key, dataJson: JSON.stringify(data), createdById: user.accountId, updatedById: user.accountId },
     update: { dataJson: JSON.stringify(data), updatedById: user.accountId, deletedAt: null, status: "active", rowVersion: { increment: 1 } },

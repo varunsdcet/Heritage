@@ -40,8 +40,10 @@ import {
   statusOf,
   statusTree,
   storeFile,
+  storeValidFile,
   stuAudit,
   text,
+  validateFile,
   type Data,
 } from "./students.core.js";
 import { studentMetaMap } from "../superAdmin.service.js";
@@ -399,56 +401,77 @@ export async function createStudent(user: SessionClaims, body: Data) {
   const agentId = bool(body.assignAgent) ? s(body.agentId) : "";
   if (agentId && !agents.some((a) => a.id === agentId)) throw httpError(400, "Unknown agent selected");
 
+  const gender = body.gender ? oneOf(body.gender, GENDERS, "Gender") : "";
+  const files = arr<Data>(body.transcripts).slice(0, 10).map(validateFile);
+
   const dup = await prisma.person.findFirst({ where: { institutionId: inst, email } });
   if (dup) throw httpError(409, `A person with e-mail ${email} already exists. Open the existing profile and use New Program Profile instead.`, "CONFLICT");
 
-  const person = await prisma.person.create({
-    data: {
-      institutionId: inst,
-      givenName: first,
-      familyName: last,
-      middleName: text(body.middleName, 100) || null,
-      preferredName: text(body.preferredName, 100) || null,
-      email,
-      personalEmail: email,
-      phone,
-      emergencyContactName: emergencyName,
-      emergencyContactPhone: emergencyPhone,
-      dateOfBirth: birth,
-    },
-  });
-  const student = await prisma.student.create({ data: { institutionId: inst, personId: person.id, studentNumber: await nextStudentNumber(inst), programName: program.name } });
-  await patchMetaLoose(inst, student.id, {
-    status,
-    residency,
-    street,
-    city,
-    postal,
-    discountCode: text(body.discountCode, 60),
-    campus,
-    delivery,
-    admissionTerm,
-    country,
-    rateCategory,
-  });
-  const transcripts = [];
-  for (const file of arr<Data>(body.transcripts).slice(0, 10)) transcripts.push(await storeFile(user, student.id, file));
+  const studentNumber = await nextStudentNumber(inst);
   const applicationNumber = String(await seq(inst, "application"));
-  await saveProfile(user, student.id, {
-    gender: body.gender ? oneOf(body.gender, GENDERS, "Gender") : "",
-    province,
-    visaStatus,
-    visaExpiry,
-    academicHistory: text(body.academicHistory, 4000),
-    transcripts: transcripts.map((t) => ({ id: t.id, name: t.name, size: t.size })),
-    declarationBy,
-    acknowledgements: acks,
-    advisors: advisorIds,
-    agentId,
-    applicationNumber,
-    programId: program.id,
+  const student = await prisma.$transaction(async (tx) => {
+    const person = await tx.person.create({
+      data: {
+        institutionId: inst,
+        givenName: first,
+        familyName: last,
+        middleName: text(body.middleName, 100) || null,
+        preferredName: text(body.preferredName, 100) || null,
+        email,
+        personalEmail: email,
+        phone,
+        emergencyContactName: emergencyName,
+        emergencyContactPhone: emergencyPhone,
+        dateOfBirth: birth,
+      },
+    });
+    const created = await tx.student.create({ data: { institutionId: inst, personId: person.id, studentNumber, programName: program.name } });
+    const transcripts = [];
+    for (const file of files) transcripts.push(await storeValidFile(user, created.id, file, tx));
+    await saveProfile(
+      user,
+      created.id,
+      {
+        gender,
+        province,
+        visaStatus,
+        visaExpiry,
+        academicHistory: text(body.academicHistory, 4000),
+        transcripts: transcripts.map((t) => ({ id: t.id, name: t.name, size: t.size })),
+        declarationBy,
+        acknowledgements: acks,
+        advisors: advisorIds,
+        agentId,
+        applicationNumber,
+        programId: program.id,
+      },
+      tx,
+    );
+    if (agentId) await putSingle(user, "FIN:STUDENT_AGENT", created.id, "agent", { agentId }, tx);
+    return created;
   });
-  if (agentId) await putSingle(user, "FIN:STUDENT_AGENT", student.id, "agent", { agentId });
+  try {
+    await patchMetaLoose(inst, student.id, {
+      status,
+      residency,
+      street,
+      city,
+      postal,
+      discountCode: text(body.discountCode, 60),
+      campus,
+      delivery,
+      admissionTerm,
+      country,
+      rateCategory,
+    });
+  } catch (err) {
+    await prisma.$transaction([
+      prisma.heritageRecord.deleteMany({ where: { institutionId: inst, contextKey: student.id, screenId: { in: [STU.FILE, STU.PROFILE, "FIN:STUDENT_AGENT"] } } }),
+      prisma.student.delete({ where: { id: student.id } }),
+      prisma.person.delete({ where: { id: student.personId } }),
+    ]);
+    throw err;
+  }
   await stuAudit(user, "Profile Changes", student.id, "Student profile created", { name: `${last}, ${first}`, studentNumber: student.studentNumber, status, program: program.name, campus });
   return { id: student.id, studentNumber: student.studentNumber, applicationNumber };
 }
@@ -785,7 +808,7 @@ export async function counts(user: SessionClaims) {
     rows(inst, STU.FLAG),
     rows(inst, STU.REQ),
     prisma.leaveOfAbsenceRequest.count({ where: { institutionId: inst, status: "pending" } }),
-    prisma.serviceRequest.count({ where: { institutionId: inst, type: { contains: "withdraw", mode: "insensitive" }, status: { in: ["open", "pending", "submitted"] } } }),
+    prisma.serviceRequest.count({ where: { institutionId: inst, type: { contains: "withdraw", mode: "insensitive" }, status: { in: ["open", "pending", "pending_approval", "submitted"] } } }),
     prisma.approvalRequest.count({ where: { institutionId: inst, type: { in: ["grade.publish", "grade_publish"] }, status: "pending" } }),
     rows(inst, STU.ALERT),
     rows(inst, STU.ASSESS),

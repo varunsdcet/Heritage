@@ -1283,7 +1283,7 @@ export function InvoiceEditor({ meta, onClose, onDone, invoiceId, studentId, stu
     setStage("items");
   };
   const sendOptions = (meta.constants.sendOptions ?? []).filter((o) => (type === "Student" ? !/funding/.test(o) : type === "Agent" ? o === "Do not send" || o === "Send to agent" : o === "Do not send" || /funding/.test(o)));
-  const heading = invoiceId ? `Edit Invoice #${loaded?.number ?? ""}` : "MYC_INVOICE_ADDEDIT_HEADER";
+  const heading = invoiceId ? `Edit Invoice #${loaded?.number ?? ""}` : "Create Invoice";
   return (
     <>
       <ActionModal

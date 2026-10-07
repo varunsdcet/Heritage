@@ -200,7 +200,7 @@ export function feeActions(r: FeeRow, h: Pick<H, "open" | "close" | "done" | "me
       ) : r.canRefund ? (
         <>
           <span className="fn-sep">|</span>
-          <LinkBtn onClick={() => h.open(<RefundModal meta={h.meta} target={{ kind: "fee", id: r.id, number: r.number, max: r.amount, label: r.type }} onClose={h.close} onDone={h.done} />)}>REFUND</LinkBtn>
+          <LinkBtn onClick={() => h.open(<RefundModal meta={h.meta} target={{ kind: "fee", id: r.id, number: r.number, max: r.paid, label: r.type }} onClose={h.close} onDone={h.done} />)}>REFUND</LinkBtn>
         </>
       ) : null}
     </>

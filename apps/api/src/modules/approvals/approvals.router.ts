@@ -18,18 +18,19 @@ approvalsRouter.get("/", requireAuth, requireRoles("admin", "registrar"), async 
       })
     ).filter((r) => (JSON.parse(r.requiredApproverRolesJson) as RoleName[]).some((role) => user.roles.includes(role)));
 
-    const profileIds = rows
-      .filter((r) => r.type === "student_profile_change")
-      .map((r) => r.subjectRef);
-    const students = profileIds.length
+    const studentIdOf = (subjectRef: string) => subjectRef.replace(/^student:/, "");
+    const studentIds = [...new Set(rows.map((r) => studentIdOf(r.subjectRef)))];
+    const students = studentIds.length
       ? await prisma.student.findMany({
-          where: { institutionId: user.institutionId, id: { in: profileIds } },
+          where: { institutionId: user.institutionId, id: { in: studentIds } },
           include: { person: true },
         })
       : [];
     const byId = new Map(students.map((s) => [s.id, s]));
 
-    const otherIds = [...new Set(rows.filter((r) => r.type !== "student_profile_change").map((r) => r.subjectRef))];
+    const otherIds = [
+      ...new Set(rows.filter((r) => !byId.has(studentIdOf(r.subjectRef))).map((r) => r.subjectRef.replace(/^section:/, ""))),
+    ];
     const requesterIds = [...new Set(rows.map((r) => r.requestedBy))];
     const [sections, requesters] = await Promise.all([
       otherIds.length
@@ -56,21 +57,22 @@ approvalsRouter.get("/", requireAuth, requireRoles("admin", "registrar"), async 
       ApprovalInboxResponse.parse({
         items: rows.map((r) => {
           const proposedDiff = JSON.parse(r.proposedDiffJson) as Record<string, unknown>;
-          const student = byId.get(r.subjectRef);
-          const currentValues = student
-            ? {
-                givenName: student.person.givenName,
-                familyName: student.person.familyName,
-                middleName: student.person.middleName,
-                preferredName: student.person.preferredName,
-                primaryEmail: student.person.email,
-                personalEmail: student.person.personalEmail,
-                phone: student.person.phone,
-                dateOfBirth: student.person.dateOfBirth,
-                emergencyContactName: student.person.emergencyContactName,
-                emergencyContactPhone: student.person.emergencyContactPhone,
-              }
-            : null;
+          const student = byId.get(studentIdOf(r.subjectRef));
+          const currentValues =
+            student && r.type === "student_profile_change"
+              ? {
+                  givenName: student.person.givenName,
+                  familyName: student.person.familyName,
+                  middleName: student.person.middleName,
+                  preferredName: student.person.preferredName,
+                  primaryEmail: student.person.email,
+                  personalEmail: student.person.personalEmail,
+                  phone: student.person.phone,
+                  dateOfBirth: student.person.dateOfBirth,
+                  emergencyContactName: student.person.emergencyContactName,
+                  emergencyContactPhone: student.person.emergencyContactPhone,
+                }
+              : null;
           return {
             id: r.id,
             institutionId: r.institutionId,
@@ -89,7 +91,7 @@ approvalsRouter.get("/", requireAuth, requireRoles("admin", "registrar"), async 
                       currentValues,
                     }
                   : {}),
-                subjectLabel: sectionById.get(r.subjectRef) ?? null,
+                subjectLabel: sectionById.get(r.subjectRef.replace(/^section:/, "")) ?? null,
                 requestedByName: requesterById.get(r.requestedBy) ?? null,
               },
             },

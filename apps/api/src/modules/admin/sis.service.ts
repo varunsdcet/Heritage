@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { applyApproval, decideApproval } from "@myheritage/auth";
+import { settleRejectedApproval } from "../approvals/approvals.service.js";
 import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
 import {
@@ -1952,7 +1953,7 @@ export async function runSisAction(
         },
       });
     } else {
-      await decideApproval({
+      const decided = await decideApproval({
         approvalId,
         institutionId: user.institutionId,
         actorId: user.accountId,
@@ -1960,6 +1961,7 @@ export async function runSisAction(
         decision: lower.includes("approve") ? "approve" : "reject",
         comment: input.note,
       });
+      if (decided.status === "rejected") await settleRejectedApproval(user.institutionId, approvalId, input.note);
     }
   }
 

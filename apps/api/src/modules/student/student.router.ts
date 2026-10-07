@@ -3,6 +3,7 @@ import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Router } from "express";
 import {
+  MAX_STUDENT_FILE_BYTES,
   StudentAssignmentsResponse,
   SubmitStudentAssignmentResponse,
   UploadStudentSubmissionFileRequest,
@@ -72,6 +73,14 @@ const extensionByMime: Record<string, string[]> = {
 
 function httpError(message: string, code: string, status: number) {
   return Object.assign(new Error(message), { code, status });
+}
+
+function assertUploadSize(body: unknown) {
+  const { sizeBytes, contentBase64 } = (body ?? {}) as { sizeBytes?: unknown; contentBase64?: unknown };
+  const tooLarge =
+    (typeof sizeBytes === "number" && sizeBytes > MAX_STUDENT_FILE_BYTES) ||
+    (typeof contentBase64 === "string" && contentBase64.length > Math.ceil(MAX_STUDENT_FILE_BYTES / 3) * 4);
+  if (tooLarge) throw httpError("Files must be 10 MB or smaller", "FILE_TOO_LARGE", 413);
 }
 
 function parseUploadBody(body: unknown) {
@@ -233,6 +242,7 @@ studentRouter.post("/assignments/:assignmentId/files", async (req, res, next) =>
   try {
     const user = (req as unknown as AuthedRequest).user;
     const student = await getStudent(user);
+    assertUploadSize(req.body);
     const input = parseUploadBody(req.body);
     const content = decodeAndValidateFile(input);
     const [assignment] = await getAssignments(user.institutionId, student.id, req.params.assignmentId);
@@ -249,29 +259,14 @@ studentRouter.post("/assignments/:assignmentId/files", async (req, res, next) =>
     }
 
     const fileId = randomUUID();
-    const submissionId = existing?.id ?? randomUUID();
-    const latestFile = existing
-      ? await prisma.fileObject.findFirst({
-          where: { institutionId: user.institutionId, submissionId: existing.id },
-          orderBy: { version: "desc" },
-          select: { version: true },
-        })
-      : null;
-    const version = (latestFile?.version ?? 0) + 1;
-    const relativePath = path.join(user.institutionId, student.id, assignment.id, submissionId, `${fileId}-${version}`);
     const storageRoot = path.resolve(process.env.FILE_STORAGE_ROOT ?? path.join(process.cwd(), "var", "uploads"));
-    storedPath = path.resolve(storageRoot, relativePath);
-    if (!storedPath.startsWith(`${storageRoot}${path.sep}`)) {
-      throw httpError("Invalid storage path", "VALIDATION_ERROR", 400);
-    }
-    await mkdir(path.dirname(storedPath), { recursive: true });
-    await writeFile(storedPath, content, { flag: "wx" });
 
     const submission = await prisma.$transaction(async (tx) => {
+      // The upsert locks the submission row, so concurrent uploads number their versions one after another.
       const row = await tx.submission.upsert({
         where: { assignmentId_studentId: { assignmentId: assignment.id, studentId: student.id } },
         create: {
-          id: submissionId,
+          id: existing?.id ?? randomUUID(),
           institutionId: user.institutionId,
           assignmentId: assignment.id,
           studentId: student.id,
@@ -279,6 +274,19 @@ studentRouter.post("/assignments/:assignmentId/files", async (req, res, next) =>
         },
         update: { rowVersion: { increment: 1 } },
       });
+      const latestFile = await tx.fileObject.findFirst({
+        where: { institutionId: user.institutionId, submissionId: row.id },
+        orderBy: { version: "desc" },
+        select: { version: true },
+      });
+      const version = (latestFile?.version ?? 0) + 1;
+      const relativePath = path.join(user.institutionId, student.id, assignment.id, row.id, `${fileId}-${version}`);
+      storedPath = path.resolve(storageRoot, relativePath);
+      if (!storedPath.startsWith(`${storageRoot}${path.sep}`)) {
+        throw httpError("Invalid storage path", "VALIDATION_ERROR", 400);
+      }
+      await mkdir(path.dirname(storedPath), { recursive: true });
+      await writeFile(storedPath, content, { flag: "wx" });
       await tx.fileObject.create({
         data: {
           id: fileId,
@@ -312,7 +320,11 @@ studentRouter.post("/assignments/:assignmentId/files", async (req, res, next) =>
     );
   } catch (error) {
     if (storedPath) await unlink(storedPath).catch(() => undefined);
-    next(error);
+    next(
+      (error as { code?: unknown }).code === "P2002"
+        ? httpError("This file is already being uploaded, refresh and try again", "CONFLICT", 409)
+        : error,
+    );
   }
 });
 

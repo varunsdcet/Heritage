@@ -558,43 +558,32 @@ export async function listStudentFinance(user: SessionClaims, financialTermId?: 
     where: { institutionId: user.institutionId },
     orderBy: { startsOn: "desc" },
   });
-  const selectedId =
-    financialTermId && terms.some((t) => t.id === financialTermId)
-      ? financialTermId
-      : terms[0]?.id ?? null;
-  const entries = await prisma.financeLedgerEntry.findMany({
-    where: {
-      institutionId: user.institutionId,
-      studentId: student.id,
-      ...(selectedId ? { financialTermId: selectedId } : {}),
-    },
-    include: { financialTerm: true },
-    orderBy: { postedAt: "desc" },
-  });
+  // Without an explicit term the statement covers the whole account, so entries posted without a
+  // financial term are included and the balance matches the admin ledger.
+  const selectedId = financialTermId && terms.some((t) => t.id === financialTermId) ? financialTermId : null;
   const allEntries = await prisma.financeLedgerEntry.findMany({
     where: { institutionId: user.institutionId, studentId: student.id },
     include: { financialTerm: true },
     orderBy: { postedAt: "desc" },
   });
-  const counted = entries.filter((e) => e.status !== "waived" && e.status !== "void");
-  const balance = counted.reduce((sum, e) => {
-    if (e.kind === "charge" || e.kind === "refund") return sum + e.amountCad;
-    return sum - e.amountCad;
-  }, 0);
-  const pastDue = entries
-    .filter((e) => e.kind === "charge" && e.status === "open" && e.dueAt && e.dueAt < new Date())
-    .reduce((sum, e) => sum + e.amountCad, 0);
-  const nextDue = entries
-    .filter((e) => e.kind === "charge" && e.status === "open" && e.dueAt)
+  const entries = selectedId ? allEntries.filter((e) => e.financialTermId === selectedId) : allEntries;
+  const isCounted = (e: (typeof allEntries)[number]) => e.status !== "waived" && e.status !== "void";
+  const raisesBalance = (e: (typeof allEntries)[number]) => e.kind === "charge" || e.kind === "refund";
+  const lowersBalance = (e: (typeof allEntries)[number]) => e.kind === "payment" || e.kind === "credit";
+  const signed = (e: (typeof allEntries)[number]) => (raisesBalance(e) ? e.amountCad : lowersBalance(e) ? -e.amountCad : 0);
+  const accountBalanceCad = Math.round(allEntries.filter(isCounted).reduce((sum, e) => sum + signed(e), 0) * 100) / 100;
+  const openCharges = allEntries.filter((e) => e.kind === "charge" && e.status === "open");
+  const pastDue = openCharges.filter((e) => e.dueAt && e.dueAt < new Date()).reduce((sum, e) => sum + e.amountCad, 0);
+  const nextDue = openCharges
+    .filter((e) => e.dueAt)
     .map((e) => e.dueAt!)
     .sort((a, b) => a.getTime() - b.getTime())[0];
 
+  const counted = entries.filter(isCounted);
   const selectedTerm = terms.find((t) => t.id === selectedId) ?? null;
-  const charges = counted.filter((e) => e.kind === "charge" || e.kind === "refund");
+  const charges = counted.filter(raisesBalance);
   const totalChargesCad = charges.reduce((sum, e) => sum + e.amountCad, 0);
-  const totalPaymentsCad = counted
-    .filter((e) => e.kind === "payment" || e.kind === "credit")
-    .reduce((sum, e) => sum + e.amountCad, 0);
+  const totalPaymentsCad = counted.filter(lowersBalance).reduce((sum, e) => sum + e.amountCad, 0);
   const gstRatePercent = 0;
   const pstRatePercent = 0;
   const gstCad = Math.round(totalChargesCad * (gstRatePercent / 100) * 100) / 100;
@@ -620,7 +609,7 @@ export async function listStudentFinance(user: SessionClaims, financialTermId?: 
 
   return StudentFinanceResponse.parse({
     summary: {
-      balance: { amountCents: Math.round(balanceCad * 100), currency: "CAD" },
+      balance: { amountCents: Math.round(accountBalanceCad * 100), currency: "CAD" },
       pastDue: { amountCents: Math.round(pastDue * 100), currency: "CAD" },
       nextDueAt: nextDue?.toISOString() ?? null,
       paymentExecutionEnabled: false,
@@ -634,20 +623,18 @@ export async function listStudentFinance(user: SessionClaims, financialTermId?: 
       endsOn: t.endsOn,
     })),
     selectedFinancialTermId: selectedId,
-    statement: selectedTerm
-      ? {
-          termCode: selectedTerm.code,
-          termName: selectedTerm.name,
-          charges: charges.map((c) => ({ id: c.id, label: c.label, amountCad: c.amountCad })),
-          totalChargesCad,
-          gstRatePercent,
-          gstCad,
-          pstRatePercent,
-          pstCad,
-          totalPaymentsCad,
-          balanceCad,
-        }
-      : null,
+    statement: {
+      termCode: selectedTerm?.code ?? "All terms",
+      termName: selectedTerm?.name ?? "All terms",
+      charges: charges.map((c) => ({ id: c.id, label: c.kind === "refund" ? `Refund: ${c.label}` : c.label, amountCad: c.amountCad })),
+      totalChargesCad,
+      gstRatePercent,
+      gstCad,
+      pstRatePercent,
+      pstCad,
+      totalPaymentsCad,
+      balanceCad,
+    },
     history,
   });
 }

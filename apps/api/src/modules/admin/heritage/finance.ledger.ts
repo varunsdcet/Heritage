@@ -286,10 +286,11 @@ async function refundFeeLocked(user: SessionClaims, entryId: string, body: Data)
   const ch = findCharge(c, entryId);
   if (ch.hidden || ch.statusLabel === "Refunded") throw httpError(400, "This fee has already been removed or refunded");
   if (ch.paid < EPS) throw httpError(400, "Nothing has been paid on this fee. Remove it instead.");
-  const r = refundInput(c.cfg, body, ch.total, "fee");
+  if (amountOf(body.amount, "Refund Amount") > ch.paid + EPS) throw httpError(400, `Refund Amount cannot exceed ${cad(ch.paid)} paid on this fee`);
+  const r = refundInput(c.cfg, body, ch.paid, "fee");
   await assertPeriodOpen(user, c.cfg, c.st.campus, r.date, "This refund");
   const retained = r2(ch.total - r.amount);
-  const release = r2(Math.max(0, ch.paid - retained));
+  const release = r.amount;
   const allocated = r2(c.book.allocs.filter((a) => a.chargeId === ch.id).reduce((t, a) => t + a.amount, 0));
   const released = await deallocate(user, c.book, { chargeId: ch.id }, Math.min(release, allocated));
   const legacy = r2(release - [...released.values()].reduce((t, v) => t + v, 0));

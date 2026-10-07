@@ -95,6 +95,13 @@ export default function CreateSectionPage() {
   async function onDelete(section: SectionRow) {
     const s = loadSession();
     if (!s) return;
+    if (
+      !window.confirm(
+        `Delete section ${section.code}? This permanently removes the section with its assignments, grade items, submissions, files and class sessions. This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
     setError(null);
     setNote(null);
     setBusyId(section.sectionId);

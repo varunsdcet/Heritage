@@ -22,7 +22,7 @@ const claims = vi.hoisted(
 
 const tx = vi.hoisted(() => ({
   submission: { upsert: vi.fn(), findUniqueOrThrow: vi.fn(), updateMany: vi.fn() },
-  fileObject: { create: vi.fn(), update: vi.fn() },
+  fileObject: { create: vi.fn(), update: vi.fn(), findFirst: vi.fn() },
   auditEvent: { create: vi.fn() },
   eventOutbox: { create: vi.fn() },
 }));
@@ -117,6 +117,7 @@ beforeEach(() => {
   db.$transaction.mockImplementation(async (work: (client: typeof tx) => Promise<unknown>) => work(tx));
   tx.submission.upsert.mockResolvedValue(assignment.submissions[0]);
   tx.fileObject.create.mockResolvedValue({});
+  tx.fileObject.findFirst.mockResolvedValue(null);
   tx.auditEvent.create.mockResolvedValue({});
   tx.eventOutbox.create.mockResolvedValue({});
 });
@@ -195,6 +196,43 @@ describe("student assignment journey", () => {
 
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({ error: { code: "VALIDATION_ERROR" } });
+    expect(db.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("turns a concurrent-upload version clash into a clean 409", async () => {
+    tx.fileObject.create.mockRejectedValue(
+      Object.assign(new Error("Invalid `tx.fileObject.create()` invocation in /srv/app/student.router.ts"), { code: "P2002" }),
+    );
+    const content = Buffer.from("%PDF-1.4\n");
+    const response = await fetch(`${apiBaseUrl}/student/assignments/${assignmentId}/files`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        filename: "project.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: content.byteLength,
+        contentBase64: content.toString("base64"),
+      }),
+    });
+    expect(response.status).toBe(409);
+    const payload = (await response.json()) as { error: { message: string } };
+    expect(payload.error.message).toBe("This file is already being uploaded, refresh and try again");
+    expect(JSON.stringify(payload)).not.toContain("/srv/");
+  });
+
+  it("refuses files over 10 MiB with 413 before touching the database", async () => {
+    const response = await fetch(`${apiBaseUrl}/student/assignments/${assignmentId}/files`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        filename: "big.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 11 * 1024 * 1024,
+        contentBase64: "JVBERi0=",
+      }),
+    });
+    expect(response.status).toBe(413);
+    expect(await response.json()).toMatchObject({ error: { message: "Files must be 10 MB or smaller" } });
     expect(db.$transaction).not.toHaveBeenCalled();
   });
 

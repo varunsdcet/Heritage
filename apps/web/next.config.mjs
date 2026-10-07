@@ -6,6 +6,8 @@ const nextConfig = {
   transpilePackages: ["@myheritage/ui", "@myheritage/tokens", "@myheritage/contracts"],
   experimental: {
     externalDir: true,
+    // Requests proxied through /__api are buffered up to this size; base64 uploads of 10 MiB files need ~14 MB.
+    middlewareClientMaxBodySize: "20mb",
   },
   images: {
     remotePatterns: [{ protocol: "https", hostname: "images.unsplash.com" }],

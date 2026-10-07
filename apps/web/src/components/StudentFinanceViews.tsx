@@ -121,7 +121,7 @@ export function StudentFeesView() {
   const [notice, setNotice] = useState<string | null>(null);
 
   const terms = resource.data?.financialTerms ?? [];
-  const selected = termId ?? resource.data?.selectedFinancialTermId ?? terms[0]?.id ?? null;
+  const selected = termId || resource.data?.selectedFinancialTermId || null;
   const statement = resource.data?.statement;
 
   useEffect(() => {
@@ -158,8 +158,8 @@ export function StudentFeesView() {
   }
 
   function onTermChange(next: string) {
-    setTermId(next);
-    router.replace(`/student/fees?term=${encodeURIComponent(next)}`);
+    setTermId(next || null);
+    router.replace(next ? `/student/fees?term=${encodeURIComponent(next)}` : "/student/fees");
   }
 
   return (
@@ -188,6 +188,7 @@ export function StudentFeesView() {
               <label>
                 <span>TERM:</span>
                 <select value={selected ?? ""} onChange={(e) => onTermChange(e.target.value)}>
+                  <option value="">All terms</option>
                   {terms.map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.name}
@@ -213,7 +214,7 @@ export function StudentFeesView() {
             </div>
             {notice ? <p className="mh-teacher-muted">{notice}</p> : null}
 
-            {!statement || statement.charges.length === 0 ? (
+            {!statement || (statement.charges.length === 0 && statement.totalPaymentsCad === 0) ? (
               <EmptyState title="No fees posted" body="New fees & charges will appear when finance posts your term statement." />
             ) : (
               <>

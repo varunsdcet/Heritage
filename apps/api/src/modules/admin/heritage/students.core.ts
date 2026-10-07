@@ -5,11 +5,11 @@ import type { SessionClaims } from "@myheritage/contracts";
 import { CAMPUSES, STUDENT_PROGRAMS, assertPermission, patchStudentMeta, studentMetaMap } from "../superAdmin.service.js";
 import { audit } from "./service.js";
 import { ensureSeed, entityRecords, type Rec } from "./sysconfig.js";
-import { add, arr, getSingle, httpError, nextNumber, putSingle, rows, s, type Data, type Row } from "./finance.core.js";
+import { add, arr, getSingle, httpError, nextNumber, putSingle, rows, s, type Data, type Db, type Row } from "./finance.core.js";
 import { STATUS_TREE, STU, auditScreen, type AuditSection } from "./students.spec.js";
 import { bytesMatchMime, decodeBase64 } from "../../../lib/fileSniff.js";
 
-export { add, arr, drop, getSingle, httpError, putSingle, row, rows, s, save, day, today, DATE_RE, type Data, type Row } from "./finance.core.js";
+export { add, arr, drop, getSingle, httpError, putSingle, row, rows, s, save, day, today, DATE_RE, type Data, type Db, type Row } from "./finance.core.js";
 
 export async function canStudents(user: SessionClaims, level: "view" | "edit") {
   await assertPermission(user, "studentRecords", level);
@@ -173,10 +173,10 @@ export async function profilesFor(inst: string, ids: string[]) {
   return new Map(list.map((r) => [r.contextKey, { ...EMPTY_PROFILE, ...(r.data as Partial<Profile>) }]));
 }
 
-export async function saveProfile(user: SessionClaims, studentId: string, patch: Partial<Profile>) {
+export async function saveProfile(user: SessionClaims, studentId: string, patch: Partial<Profile>, db: Db = prisma) {
   const current = await loadProfile(user.institutionId, studentId);
   const next = { ...current, ...patch };
-  await putSingle(user, STU.PROFILE, studentId, "profile", next as unknown as Data);
+  await putSingle(user, STU.PROFILE, studentId, "profile", next as unknown as Data, db);
   return next;
 }
 
@@ -221,7 +221,10 @@ const FILE_TYPES =
 
 export type FileRef = { id: string; name: string; size: number; mime: string };
 
-export async function storeFile(user: SessionClaims, studentId: string, body: { name?: unknown; mime?: unknown; base64?: unknown }): Promise<FileRef> {
+type FileBody = { name?: unknown; mime?: unknown; base64?: unknown };
+export type ValidFile = { name: string; mime: string; size: number; base64: string };
+
+export function validateFile(body: FileBody): ValidFile {
   const name = s(body.name).replace(/[\\/]/g, "_").trim().slice(0, 200);
   const mime = s(body.mime).toLowerCase();
   if (!name) throw httpError(400, "File name is required");
@@ -231,8 +234,16 @@ export async function storeFile(user: SessionClaims, studentId: string, body: { 
   if (!size) throw httpError(400, "The file is empty");
   if (size > FILE_MAX) throw httpError(400, "Files must be 8 MB or smaller");
   if (!bytesMatchMime(decodeBase64(b64), mime)) throw httpError(400, "The file's contents do not match its type. Upload a genuine PDF, image, Word, Excel or text file.");
-  const rec = await add(user, STU.FILE, { name, mime, size, base64: b64 }, studentId);
-  return { id: rec.id, name, size, mime };
+  return { name, mime, size, base64: b64 };
+}
+
+export async function storeValidFile(user: SessionClaims, studentId: string, file: ValidFile, db: Db = prisma): Promise<FileRef> {
+  const rec = await add(user, STU.FILE, file, studentId, null, db);
+  return { id: rec.id, name: file.name, size: file.size, mime: file.mime };
+}
+
+export async function storeFile(user: SessionClaims, studentId: string, body: FileBody): Promise<FileRef> {
+  return storeValidFile(user, studentId, validateFile(body));
 }
 
 /** Validates file references posted with a record against files uploaded for the same student. */

@@ -57,7 +57,11 @@ function metaOf(item: ApprovalRequest): ProfileMeta {
 
 function subjectOf(item: ApprovalRequest) {
   const meta = metaOf(item);
-  if (meta.studentName) return `${meta.studentName}${meta.studentNumber ? ` · ${meta.studentNumber}` : ""}`;
+  const topic = diffOf(item).subject;
+  if (meta.studentName) {
+    const who = `${meta.studentName}${meta.studentNumber ? ` · ${meta.studentNumber}` : ""}`;
+    return typeof topic === "string" && topic ? `${who} — ${topic}` : who;
+  }
   const gradeItems = diffOf(item).gradeItemIds;
   const count = Array.isArray(gradeItems) ? `${gradeItems.length} grade item${gradeItems.length === 1 ? "" : "s"}` : "";
   if (meta.subjectLabel) return count ? `${meta.subjectLabel} · ${count}` : meta.subjectLabel;

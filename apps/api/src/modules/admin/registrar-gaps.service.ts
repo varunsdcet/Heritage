@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@myheritage/db";
 import { writeAuditAndOutbox, type Tx } from "@myheritage/events";
 import type { SessionClaims } from "@myheritage/contracts";
+import { SAFE_LINK_MESSAGE, isSafeLink } from "../../lib/safeLink.js";
 
 function httpError(message: string, code: string, status: number) {
   return Object.assign(new Error(message), { code, status });
@@ -63,13 +64,15 @@ export const ExtracurricularBody = z.object({
   status: z.string().trim().min(1).max(40).default("recorded"),
 });
 
+const SafeLinkUrl = z.string().trim().max(2000).refine(isSafeLink, SAFE_LINK_MESSAGE);
+
 export const StudentDocumentBody = z.object({
   id: z.string().uuid().optional(),
   studentId: z.string().uuid(),
   recordName: z.string().trim().min(1).max(200),
   recordDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   docLabel: z.string().trim().max(200).optional().nullable(),
-  downloadUrl: z.string().url().optional().nullable(),
+  downloadUrl: SafeLinkUrl.optional().nullable(),
   status: z.string().trim().min(1).max(40).default("available"),
   note: z.string().trim().max(1000).optional().nullable(),
 });
