@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export type RawDataPoint = { id: string; type: string; label: string; status: string; evidence: string };
 export type RawScreen = {
@@ -108,9 +108,11 @@ export type ScreenSchema = {
   dataPointCount: number;
 };
 
+const REGISTRY_FILE = fileURLToPath(new URL("../heritage-master.json", import.meta.url));
+
 let cached: RawRegistry | null = null;
 export function rawRegistry(): RawRegistry {
-  if (!cached) cached = JSON.parse(readFileSync(join(__dirname, "..", "heritage-master.json"), "utf8")) as RawRegistry;
+  if (!cached) cached = JSON.parse(readFileSync(REGISTRY_FILE, "utf8")) as RawRegistry;
   return cached;
 }
 
@@ -491,8 +493,9 @@ export function buildSchema(screen: RawScreen): ScreenSchema {
 let schemas: Map<string, ScreenSchema> | null = null;
 export function screenSchemas(): Map<string, ScreenSchema> {
   if (!schemas) {
-    schemas = new Map();
-    for (const s of rawRegistry().screens) schemas.set(s.id.toUpperCase(), buildSchema(s));
+    const built = new Map<string, ScreenSchema>();
+    for (const s of rawRegistry().screens) built.set(s.id.toUpperCase(), buildSchema(s));
+    schemas = built;
   }
   return schemas;
 }
