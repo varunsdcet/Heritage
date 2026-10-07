@@ -1,38 +1,54 @@
 export type ScriptPart = { text: string; paragraph: number };
 
 export const MAX_PART_CHARS = 600;
+/** Smaller first part so the teacher starts speaking quickly. */
+export const FIRST_PART_CHARS = 250;
 
-/** Splits a lecture script into sentence-aligned parts of at most MAX_PART_CHARS, remembering each part's paragraph. */
+const ENDS_WITH_PAUSE = /[.!?,;:…"'”’)\]]$/;
+/** A line ending in a connective ("… and") flows straight into the next line. */
+const ENDS_WITH_CONNECTIVE = /\b(and|or|but|nor|of|to|the|a|an|with|for)$/i;
+
+/**
+ * Splits a lecture script into sentence-aligned parts of at most MAX_PART_CHARS. Short lines (list items, headings)
+ * are merged with their neighbours so each part is a natural stretch of speech; `paragraph` is the index of the
+ * line a part starts on.
+ */
 export function splitScript(script: string): ScriptPart[] {
-  const paragraphs = script
-    .split(/\n\s*\n/)
+  const lines = script
+    .split(/\n\s*\n|\n(?=\s*\S)/)
     .map((p) => p.replace(/\s+/g, " ").trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .map((line) => (ENDS_WITH_PAUSE.test(line) || ENDS_WITH_CONNECTIVE.test(line) ? line : `${line}.`));
   const parts: ScriptPart[] = [];
-  paragraphs.forEach((para, paragraph) => {
-    const sentences = para.match(/[^.!?]+(?:[.!?]+["')\]]*|$)/g)?.map((s) => s.trim()).filter(Boolean) ?? [para];
-    let buf = "";
-    const flush = () => {
-      if (buf) parts.push({ text: buf, paragraph });
-      buf = "";
-    };
+  let buf = "";
+  let start = 0;
+  const limit = () => (parts.length ? MAX_PART_CHARS : FIRST_PART_CHARS);
+  const flush = () => {
+    if (buf) parts.push({ text: buf, paragraph: start });
+    buf = "";
+  };
+  lines.forEach((line, index) => {
+    const sentences = line.match(/[^.!?]+(?:[.!?]+["'”’)\]]*|$)/g)?.map((s) => s.trim()).filter(Boolean) ?? [line];
     for (const sentence of sentences) {
-      if (sentence.length > MAX_PART_CHARS) {
+      if (sentence.length > limit()) {
         flush();
         let rest = sentence;
-        while (rest.length > MAX_PART_CHARS) {
-          let cut = rest.lastIndexOf(" ", MAX_PART_CHARS);
-          if (cut < MAX_PART_CHARS / 2) cut = MAX_PART_CHARS;
-          parts.push({ text: rest.slice(0, cut).trim(), paragraph });
+        while (rest.length > limit()) {
+          const max = limit();
+          let cut = rest.lastIndexOf(" ", max);
+          if (cut < max / 2) cut = max;
+          parts.push({ text: rest.slice(0, cut).trim(), paragraph: index });
           rest = rest.slice(cut).trim();
         }
         buf = rest;
+        start = index;
         continue;
       }
-      if (buf && buf.length + sentence.length + 1 > MAX_PART_CHARS) flush();
+      if (buf && buf.length + sentence.length + 1 > limit()) flush();
+      if (!buf) start = index;
       buf = buf ? `${buf} ${sentence}` : sentence;
     }
-    flush();
   });
+  flush();
   return parts;
 }
