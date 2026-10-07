@@ -11,12 +11,15 @@ import {
   loadProgress,
   loadSelfpacedUser,
   saveProgress,
+  syncSelfpacedEnrollments,
 } from "@/lib/selfpacedAuth";
 import { flattenActivities, getCurriculum } from "@/lib/selfpacedCurriculum";
 import { getSelfpacedProgram } from "@/lib/selfpacedPrograms";
 import { openChapterCount, todaysPlan, type StudyPlan } from "@/lib/selfpacedEngine";
+import { useSelfpacedCatalogue } from "@/lib/useSelfpacedCatalogue";
 
 export default function SelfpacedDashboardPage() {
+  const { programs: publishedPrograms, loading: catalogueLoading } = useSelfpacedCatalogue();
   const [enrollments, setEnrollments] = useState<string[]>([]);
   const [tick, setTick] = useState(0);
   const [name, setName] = useState("Learner");
@@ -28,11 +31,13 @@ export default function SelfpacedDashboardPage() {
   useEffect(() => {
     setEnrollments(loadEnrollments());
     setName(loadSelfpacedUser()?.name || "Learner");
+    void syncSelfpacedEnrollments().then((records) => setEnrollments(records.map((item) => item.slug))).catch(() => undefined);
   }, [tick]);
 
   const progressMap = useMemo(() => loadAllProgress(), [tick]);
 
-  const enrolledPrograms = enrollments
+  const publishedSlugs = useMemo(() => new Set(publishedPrograms.map((program) => program.slug)), [publishedPrograms]);
+  const enrolledPrograms = (catalogueLoading ? [] : enrollments.filter((slug) => publishedSlugs.has(slug)))
     .map((slug) => getSelfpacedProgram(slug))
     .filter(Boolean) as NonNullable<ReturnType<typeof getSelfpacedProgram>>[];
 

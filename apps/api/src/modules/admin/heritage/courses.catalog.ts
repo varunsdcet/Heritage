@@ -4,6 +4,7 @@ import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
 import { audit } from "./service.js";
 import { dropGeneratedClassSessions, syncSectionClassSessions } from "../../courses/sectionOffering.js";
+import { queueScheduleReview } from "../../instructor/myCourses.js";
 import { COURSE_FIELDS, COURSE_TEXTBOOK_FIELDS, ENTITIES, SESSION_FIELDS, WEEKDAYS, type Data, type Field } from "./courses.spec.js";
 import {
   S,
@@ -486,6 +487,15 @@ async function saveSessionNow(user: SessionClaims, courseId: string, id: string 
   const saved = { ...data, meetings };
   await saveSettings(user, S.session, section.id, saved);
   const meetingsSync = await syncSectionClassSessions(inst, section.id);
+  const schedule = (d: Data | null) => JSON.stringify([s(d?.startDate), s(d?.endDate), d?.continuous === true, meetingsOf(d ?? undefined)]);
+  await queueScheduleReview(user, {
+    sectionId: section.id,
+    label: `${course.code} (${section.code}) — ${course.title}`,
+    instructorPersonId,
+    previousInstructorPersonId: existing ? existing.instructorPersonId : null,
+    scheduleChanged: !!existing && (existing.termId !== term.id || schedule(before) !== schedule({ ...data, meetings })),
+    diff: { course: course.code, title: course.title, offering: section.code, term: term.name, startDate: s(data.startDate), endDate: s(data.endDate), continuous: data.continuous === true, meetings },
+  });
   await audit(user, "C04", courseId, id ? "Updated session / offering" : "Created session / offering", {
     recordId: section.id,
     before,

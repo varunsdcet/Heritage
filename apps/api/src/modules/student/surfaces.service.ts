@@ -1176,7 +1176,7 @@ export async function listExtracurricular(user: SessionClaims) {
 export async function listStudentBadges(user: SessionClaims) {
   const student = await requireStudent(user);
   const rows = await prisma.studentBadge.findMany({
-    where: { institutionId: user.institutionId, studentId: student.id },
+    where: { institutionId: user.institutionId, studentId: student.id, status: { in: ["available", "earned", "revoked"] } },
     orderBy: { createdAt: "desc" },
   });
   return StudentBadgesResponse.parse({

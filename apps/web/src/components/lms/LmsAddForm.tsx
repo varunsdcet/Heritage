@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { formForActivity, type LmsFormField } from "@/lib/lmsActivityForms";
 import { formatFileSize, uploadLmsFile } from "@/lib/lmsFiles";
+import { LMS_ACCESS_RESTRICTIONS_KEY, LmsAccessRestrictionsEditor } from "./LmsAccessRestrictions";
 
 type RosterStudent = {
   studentId?: string;
@@ -16,6 +17,7 @@ type Props = {
   label: string;
   busy?: boolean;
   roster?: RosterStudent[];
+  groups?: Array<{ id: string; name: string; members: Array<{ id: string; name: string }> }>;
   sectionId?: string;
   /** Saved form values when editing an existing activity. */
   initial?: Record<string, string>;
@@ -37,7 +39,7 @@ function toIso(value: string) {
   return !value || Number.isNaN(d.getTime()) ? value : d.toISOString();
 }
 
-export function LmsAddForm({ code, label, busy, roster = [], sectionId, initial, heading, onSave, onCancel }: Props) {
+export function LmsAddForm({ code, label, busy, roster = [], groups = [], sectionId, initial, heading, onSave, onCancel }: Props) {
   const spec = useMemo(() => formForActivity(code), [code]);
   const isOnlineClass = /bigbluebutton/i.test(code);
   const editing = Boolean(initial);
@@ -146,6 +148,14 @@ export function LmsAddForm({ code, label, busy, roster = [], sectionId, initial,
         >
           <summary>{section.title}</summary>
           <div className="mh-lms-addform__fields">
+            {section.title === "Restrict access" ? (
+              <LmsAccessRestrictionsEditor
+                value={values[LMS_ACCESS_RESTRICTIONS_KEY] || ""}
+                roster={roster}
+                groups={groups}
+                onChange={(value) => set(LMS_ACCESS_RESTRICTIONS_KEY, value)}
+              />
+            ) : null}
             {section.fields.map((field) => (
               <Field
                 key={field.name}

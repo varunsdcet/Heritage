@@ -2,6 +2,7 @@
  * My Courses — the teaching workspace of the signed-in person (instructor portal and Super Admin).
  * Every query is scoped to sections where the caller is the assigned instructor.
  */
+import { requireApproval } from "@myheritage/auth";
 import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
 import { addDays, hmIn, institutionTimezone, ymdIn } from "../../lib/workshopPolicy.js";
@@ -151,10 +152,11 @@ const byCourse = (a: Offering, b: Offering) => a.code.localeCompare(b.code) || a
 
 async function myOfferings(user: SessionClaims, sectionIds?: string[]) {
   const { tz, today } = await clock(user.institutionId);
+  const canManageAll = user.roles.includes("admin") || user.roles.includes("registrar");
   const rows = await prisma.section.findMany({
     where: {
       institutionId: user.institutionId,
-      instructorPersonId: user.personId,
+      ...(canManageAll ? {} : { instructorPersonId: user.personId }),
       ...(sectionIds ? { id: { in: sectionIds } } : {}),
     },
     include: {
@@ -389,6 +391,27 @@ export async function saveCourseAttendance(
 /* Course Repository (personal)                                         */
 /* ------------------------------------------------------------------ */
 
+/** Course Management → Repository content courses (heritageRecord "CM:REPOSITORY") for the given courses. */
+async function managedRepositories(institutionId: string, courses: Map<string, { code: string; title: string }>) {
+  if (!courses.size) return [];
+  const recs = await prisma.heritageRecord.findMany({
+    where: { institutionId, screenId: "CM:REPOSITORY", deletedAt: null, singletonKey: null },
+    select: { id: true, dataJson: true },
+    orderBy: { createdAt: "asc" },
+  });
+  return recs.flatMap((r) => {
+    let d: Record<string, unknown> = {};
+    try {
+      d = JSON.parse(r.dataJson) as Record<string, unknown>;
+    } catch {
+      return [];
+    }
+    const course = courses.get(s(d.course));
+    if (!course) return [];
+    return [{ id: r.id, number: course.code, name: s(d.name) || course.title, lms: `Moodle · ${s(d.format) || "Topics"} format` }];
+  });
+}
+
 export async function myRepository(user: SessionClaims, q: { course?: string }) {
   const [{ offerings }, state] = await Promise.all([
     myOfferings(user),
@@ -401,12 +424,14 @@ export async function myRepository(user: SessionClaims, q: { course?: string }) 
     overlay = null;
   }
   const mine = new Set(offerings.map((o) => lower(o.code)));
+  const myCourses = new Map(offerings.map((o) => [o.courseId, { code: o.code, title: o.title }]));
   const needle = lower(s(q.course));
-  const rows = mergeRepositoryList(buildRepositoryCatalog(), overlay)
+  const catalog = mergeRepositoryList(buildRepositoryCatalog(), overlay)
     .filter((c) => mine.has(lower(c.number)))
-    .filter((c) => !needle || lower(c.number).includes(needle) || lower(c.name).includes(needle) || lower(`${c.number} ${c.name}`).includes(needle))
-    .sort((a, b) => a.number.localeCompare(b.number) || a.name.localeCompare(b.name))
     .map((c) => ({ id: c.id, number: c.number, name: c.name, lms: c.lms }));
+  const rows = [...(await managedRepositories(user.institutionId, myCourses)), ...catalog]
+    .filter((c) => !needle || lower(c.number).includes(needle) || lower(c.name).includes(needle) || lower(`${c.number} ${c.name}`).includes(needle))
+    .sort((a, b) => a.number.localeCompare(b.number) || a.name.localeCompare(b.name));
   return { course: s(q.course), rows };
 }
 
@@ -444,6 +469,103 @@ export async function pendingSchedules(user: SessionClaims, q: { type?: string }
     };
   });
   return { type, typeOptions: [...SCHEDULE_CHANGE_TYPES], rows };
+}
+
+const SCHEDULE_TYPES: string[] = Object.values(SCHEDULE_APPROVAL_TYPES);
+
+async function accountOfPerson(institutionId: string, personId: string) {
+  if (!personId) return null;
+  return prisma.account.findFirst({ where: { institutionId, personId }, select: { id: true } });
+}
+
+/**
+ * Called after Course Management saves a session / offering: asks the assigned instructor to review a new
+ * assignment (course_session_new) or a schedule change (course_session_change) under Pending Course Schedules.
+ * Reassigning the offering withdraws the previous instructor's open requests.
+ */
+export async function queueScheduleReview(
+  user: SessionClaims,
+  input: {
+    sectionId: string;
+    label: string;
+    instructorPersonId: string;
+    previousInstructorPersonId: string | null;
+    scheduleChanged: boolean;
+    diff: Record<string, unknown>;
+  },
+) {
+  const inst = user.institutionId;
+  const reassigned = input.previousInstructorPersonId === null || input.previousInstructorPersonId !== input.instructorPersonId;
+  const open = await prisma.approvalRequest.findMany({
+    where: { institutionId: inst, status: "pending", type: { in: SCHEDULE_TYPES }, subjectRef: input.sectionId },
+    select: { id: true },
+  });
+  if (reassigned && open.length) {
+    await prisma.approvalRequest.updateMany({ where: { id: { in: open.map((r) => r.id) } }, data: { status: "cancelled", rowVersion: { increment: 1 } } });
+  }
+  if (!input.instructorPersonId || input.instructorPersonId === user.personId) return null;
+  if (!reassigned && (!input.scheduleChanged || open.length)) return null;
+  const type = reassigned ? SCHEDULE_APPROVAL_TYPES.newSession : SCHEDULE_APPROVAL_TYPES.change;
+  const row = await requireApproval({
+    institutionId: inst,
+    type,
+    subjectRef: input.sectionId,
+    proposedDiff: input.diff,
+    requestedBy: user.accountId,
+    requiredApproverRoles: ["instructor"],
+    source: "courses.session",
+  });
+  const recipient = await accountOfPerson(inst, input.instructorPersonId);
+  if (recipient) {
+    await prisma.notification.create({
+      data: {
+        institutionId: inst,
+        recipientAccountId: recipient.id,
+        channel: "in_app",
+        title: reassigned ? "New course session assigned" : "Course schedule changed",
+        body: `${input.label}: please review it under My Courses → Pending Course Schedules.`.slice(0, 4000),
+      },
+    });
+  }
+  return row;
+}
+
+/** The assigned instructor accepts or declines a pending schedule item on their own offering. */
+export async function decideSchedule(user: SessionClaims, id: string, body: { decision?: string; comment?: string }) {
+  const decision = s(body.decision);
+  if (decision !== "accept" && decision !== "decline") throw httpError(400, "Choose Accept or Decline");
+  const comment = s(body.comment).slice(0, 1000);
+  const req = await prisma.approvalRequest.findFirst({ where: { id, institutionId: user.institutionId, type: { in: SCHEDULE_TYPES } } });
+  if (!req) throw httpError(404, "Pending course schedule not found", "NOT_FOUND");
+  const [o] = (await myOfferings(user, [req.subjectRef])).offerings;
+  if (!o) throw httpError(403, "This course offering is not assigned to you", "FORBIDDEN");
+  if (req.status !== "pending") throw httpError(409, "This schedule has already been reviewed", "CONFLICT");
+  let decisions: unknown[] = [];
+  try {
+    decisions = JSON.parse(req.decisionsJson) as unknown[];
+  } catch {
+    decisions = [];
+  }
+  decisions.push({ actorId: user.accountId, decision: decision === "accept" ? "approve" : "reject", comment: comment || undefined, decidedAt: new Date().toISOString() });
+  const status = decision === "accept" ? "approved" : "rejected";
+  const claimed = await prisma.approvalRequest.updateMany({
+    where: { id: req.id, rowVersion: req.rowVersion, status: "pending" },
+    data: { status, decisionsJson: JSON.stringify(decisions), rowVersion: { increment: 1 } },
+  });
+  if (claimed.count !== 1) throw httpError(409, "This schedule was reviewed by someone else. Reload and try again.", "CONFLICT");
+  const what = req.type === SCHEDULE_APPROVAL_TYPES.newSession ? "new session" : "schedule change";
+  if (req.requestedBy !== user.accountId) {
+    await prisma.notification.create({
+      data: {
+        institutionId: user.institutionId,
+        recipientAccountId: req.requestedBy,
+        channel: "in_app",
+        title: decision === "accept" ? "Course schedule accepted" : "Course schedule declined",
+        body: `${offeringLabel(o)}: the instructor ${decision === "accept" ? "accepted" : "declined"} the ${what}.${comment ? ` Note: ${comment}` : ""}`.slice(0, 4000),
+      },
+    });
+  }
+  return { id: req.id, sectionId: o.id, status, message: `${o.code} (${o.offering}) ${what} ${decision === "accept" ? "accepted" : "declined"}` };
 }
 
 /* ------------------------------------------------------------------ */

@@ -198,12 +198,9 @@ export function loadEnrollmentRecords(): EnrollmentRecord[] {
   const email = normalizeEmail(user.email);
   const bag = readEnrollmentBag();
   const list = normalizeEnrollments(bag.byEmail[email] || []);
-  // Drop unknown / removed catalog slugs so dashboard only shows real purchases.
-  const cleaned = list.filter((r) => knownSlug(r.slug));
-  if (cleaned.length !== list.length) {
-    bag.byEmail[email] = cleaned;
-    writeEnrollmentBag(bag);
-  }
+  // Dynamic/admin-created programmes may not be installed until the catalogue request completes.
+  // Keep structurally valid slugs here; the dashboard only renders slugs present in the live catalogue.
+  const cleaned = list.filter((r) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(r.slug));
   return cleaned;
 }
 
@@ -232,6 +229,20 @@ export function enrollProgram(slug: string) {
   if (records.some((r) => r.slug === slug)) return;
   records.push({ slug, enrolledAt: new Date().toISOString() });
   saveEnrollmentRecords(records);
+}
+
+/** Restores server-authoritative enrolments on a new browser/device. */
+export async function syncSelfpacedEnrollments(): Promise<EnrollmentRecord[]> {
+  const session = loadSession();
+  const user = loadSelfpacedUser();
+  if (!session || !user) return loadEnrollmentRecords();
+  const out = await api<{ items: Array<{ slug: string; enrolledAt: string }> }>("/selfpaced/enrolments", {}, session.accessToken, { skipAuthRedirect: true });
+  const current = loadEnrollmentRecords();
+  const bySlug = new Map(current.map((item) => [item.slug, item]));
+  for (const item of out.items) if (item.slug) bySlug.set(item.slug, { ...bySlug.get(item.slug), ...item });
+  const records = [...bySlug.values()];
+  saveEnrollmentRecords(records);
+  return records;
 }
 
 export function isEnrolled(slug: string): boolean {

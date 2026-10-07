@@ -368,6 +368,44 @@ export async function createBadgeDefinition(
   });
 }
 
+export const badgeCodeOf = (definitionId: string) => `BADGE-${definitionId.slice(0, 8).toUpperCase()}`;
+
+/**
+ * Issues a badge definition to students as StudentBadge rows. "Instant / Automated" badges are earned at once;
+ * any other approval mode leaves them pending for Student Management → Badges / Accomplishments.
+ * Students who already earned it are skipped; a pending or declined row is re-issued.
+ */
+export async function awardBadge(institutionId: string, definitionId: string, studentIds: string[]) {
+  const def = await prisma.badgeDefinition.findFirst({ where: { id: definitionId, institutionId } });
+  if (!def) throw Object.assign(new Error("Badge not found"), { status: 404, code: "NOT_FOUND" });
+  if (def.status !== "active") throw Object.assign(new Error(`${def.name} is not active`), { status: 400, code: "VALIDATION_ERROR" });
+  const instant = def.approvalMode === "Instant / Automated";
+  const code = badgeCodeOf(def.id);
+  const ids = [...new Set(studentIds.filter(Boolean))];
+  const existing = new Map(
+    (await prisma.studentBadge.findMany({ where: { institutionId, code, studentId: { in: ids } }, select: { id: true, studentId: true, status: true } })).map((b) => [b.studentId, b]),
+  );
+  const data = {
+    title: def.name,
+    description: def.badgeText || def.description || null,
+    status: instant ? "earned" : "pending",
+    earnedAt: instant ? new Date() : null,
+  };
+  let issued = 0;
+  let skipped = 0;
+  for (const studentId of ids) {
+    const prev = existing.get(studentId);
+    if (prev?.status === "earned") {
+      skipped += 1;
+      continue;
+    }
+    if (prev) await prisma.studentBadge.update({ where: { id: prev.id }, data: { ...data, rowVersion: { increment: 1 } } });
+    else await prisma.studentBadge.create({ data: { institutionId, studentId, code, ...data } });
+    issued += 1;
+  }
+  return { name: def.name, instant, issued, skipped };
+}
+
 export function gradeEntriesFromScheme(
   schemeId: string,
   overlay?: Record<string, unknown> | null,

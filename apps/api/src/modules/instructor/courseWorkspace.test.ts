@@ -116,6 +116,40 @@ function topicActivities() {
 }
 
 describe("course workspace activities keep what the instructor entered", () => {
+  it("saves canonical access restrictions with an activity", async () => {
+    const restrictions = JSON.stringify({ match: "all", rules: [{ type: "student", studentIds: [studentId] }] });
+    await act("Add Activity", {
+      TopicId: "topic-1",
+      ActivityType: "URL",
+      Name: "Private style guide",
+      "External URL": "https://example.org/private",
+      "Access restrictions": restrictions,
+    });
+    expect(topicActivities()[0]).toMatchObject({ settings: { "Access restrictions": restrictions } });
+  });
+
+  it("saves and removes section access restrictions", async () => {
+    const restrictions = JSON.stringify({ match: "all", rules: [{ type: "student", studentIds: [studentId] }] });
+    await act("Save section", { TopicId: "topic-1", Title: "Week 1", Summary: "", AccessRestrictions: restrictions });
+    expect(overlay().topicRestrictions).toEqual({ "topic-1": restrictions });
+    await act("Save section", { TopicId: "topic-1", Title: "Week 1", Summary: "", AccessRestrictions: "" });
+    expect(overlay().topicRestrictions).toEqual({});
+  });
+
+  it("updates access restrictions from the rich page editor", async () => {
+    await act("Add Activity", { TopicId: "topic-1", ActivityType: "PAGE", Name: "Week 1", "Page content": "<p>Read</p>" });
+    const page = topicActivities()[0]!;
+    const restrictions = JSON.stringify({ match: "all", rules: [{ type: "student", studentIds: [studentId] }] });
+    await act("Save page", {
+      Id: String(page.id),
+      Name: "Week 1",
+      Body: "<p>Read this</p>",
+      Hidden: "no",
+      AccessRestrictions: restrictions,
+    });
+    expect(topicActivities()[0]).toMatchObject({ settings: { "Access restrictions": restrictions } });
+  });
+
   it("saves a URL activity's external link", async () => {
     await act("Add Activity", { TopicId: "topic-1", ActivityType: "URL", Name: "Style guide", "External URL": "https://example.org/style" });
     expect(topicActivities()[0]).toMatchObject({ type: "URL", name: "Style guide", url: "https://example.org/style" });

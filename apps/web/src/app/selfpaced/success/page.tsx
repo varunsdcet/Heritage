@@ -5,32 +5,68 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { SelfpacedShell } from "@/components/selfpaced/SelfpacedShell";
 import { enrollProgram, loadSelfpacedUser } from "@/lib/selfpacedAuth";
-import { getSelfpacedProgram } from "@/lib/selfpacedPrograms";
+import { api, loadSession } from "@/lib/api";
+import { useSelfpacedCatalogue } from "@/lib/useSelfpacedCatalogue";
 
 function SuccessInner() {
   const router = useRouter();
   const params = useSearchParams();
   const slug = params.get("slug") || "";
-  const program = getSelfpacedProgram(slug);
+  const { programs } = useSelfpacedCatalogue();
+  const program = programs.find((item) => item.slug === slug || item.id === slug);
   const [hasUser, setHasUser] = useState(false);
   const [ready, setReady] = useState(false);
+  const [verified, setVerified] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const sessionId = params.get("session_id");
     const demo = params.get("demo") === "1";
-    // Only unlock after Stripe success (session_id) or explicit local demo.
-    if (slug && (sessionId || demo)) {
-      enrollProgram(slug);
-    }
-    const user = Boolean(loadSelfpacedUser());
+    const free = params.get("free") === "1";
+    const session = loadSession();
+    const user = Boolean(loadSelfpacedUser() && session);
     setHasUser(user);
-    setReady(true);
-    if (user && slug && (sessionId || demo)) {
-      const t = window.setTimeout(() => {
-        router.replace("/selfpaced/dashboard");
-      }, 900);
-      return () => window.clearTimeout(t);
+
+    if (!slug || (!sessionId && !demo && !free)) {
+      setError("This payment link is incomplete. Return to the program page and try again.");
+      setReady(true);
+      return;
     }
+
+    let cancelled = false;
+    void fetch("/api/selfpaced/checkout/verify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId, slug, demo, free, accountId: session?.accountId }),
+    })
+      .then(async (response) => {
+        const result = (await response.json()) as { verified?: boolean; error?: string; proof?: string; timestamp?: number };
+        if (!response.ok || !result.verified) throw new Error(result.error || "Payment verification failed.");
+        if (cancelled) return;
+        if (free) {
+          const token = session?.accessToken;
+          if (!token) throw new Error("Sign in with your student account before activating free access.");
+          await api("/selfpaced/enrolments/free", { method: "POST", body: JSON.stringify({ slug }) }, token, { skipAuthRedirect: true });
+        } else if (!demo) {
+          if (!session?.accessToken || !sessionId || !result.proof || !result.timestamp) throw new Error("Secure payment confirmation is incomplete.");
+          await api("/selfpaced/enrolments/paid", { method: "POST", body: JSON.stringify({ slug, sessionId, accountId: session.accountId, timestamp: result.timestamp, proof: result.proof }) }, session.accessToken, { skipAuthRedirect: true });
+        }
+        enrollProgram(slug);
+        setVerified(true);
+        setReady(true);
+        if (user) {
+          window.setTimeout(() => router.replace("/selfpaced/dashboard"), 900);
+        }
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : "Payment verification failed.");
+        setReady(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [slug, router, params]);
 
   const dashHref = "/selfpaced/dashboard";
@@ -41,6 +77,24 @@ function SuccessInner() {
       <SelfpacedShell>
         <div className="sp-success">
           <p>Confirming…</p>
+        </div>
+      </SelfpacedShell>
+    );
+  }
+
+  if (!verified) {
+    return (
+      <SelfpacedShell>
+        <div className="sp-success">
+          <p className="sp-kicker">PAYMENT NOT CONFIRMED</p>
+          <h1>We could not unlock this course</h1>
+          <p className="sp-lede">{error || "Payment verification is still pending."}</p>
+          <div className="sp-hero__cta">
+            <Link href={program ? `/selfpaced/programs/${program.slug}` : "/selfpaced#catalog"} className="sp-btn sp-btn--primary">
+              Return to program
+            </Link>
+            <a href="mailto:info@hccbc.com" className="sp-btn sp-btn--ghost">Contact support</a>
+          </div>
         </div>
       </SelfpacedShell>
     );

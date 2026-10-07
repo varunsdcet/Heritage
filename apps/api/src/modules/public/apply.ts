@@ -7,9 +7,26 @@ import { REQUIRED_APPLICANT_DOCUMENTS } from "../applicant/applicationForm.js";
 
 export const ApplyBody = z.object({
   givenName: z.string().trim().min(1).max(80),
+  middleName: z.string().trim().max(80).optional().default(""),
   familyName: z.string().trim().min(1).max(80),
   email: z.string().trim().toLowerCase().email().max(200),
   password: z.string().min(8).max(200),
+  phone: z.string().trim().max(30).optional().default(""),
+  dateOfBirth: z.string().trim().max(10).optional().default(""),
+  gender: z.string().trim().max(40).optional().default(""),
+  residency: z.string().trim().max(80).optional().default(""),
+  country: z.string().trim().max(80).optional().default(""),
+  addressLine1: z.string().trim().max(160).optional().default(""),
+  addressLine2: z.string().trim().max(80).optional().default(""),
+  city: z.string().trim().max(80).optional().default(""),
+  region: z.string().trim().max(80).optional().default(""),
+  postalCode: z.string().trim().max(20).optional().default(""),
+  sin: z.string().trim().max(30).optional().default(""),
+  programCategory: z.string().trim().max(120).optional().default(""),
+  programName: z.string().trim().max(180).optional().default(""),
+  intakeTerm: z.string().trim().max(120).optional().default(""),
+  campus: z.string().trim().max(120).optional().default(""),
+  applicationAcknowledgement: z.string().trim().max(40).optional().default(""),
 });
 
 const REFUSED =
@@ -50,7 +67,7 @@ export async function registerApplicant(input: unknown) {
   const created = await prisma
     .$transaction(async (tx) => {
       const p = await tx.person.create({
-        data: { institutionId: inst, givenName: body.givenName, familyName: body.familyName, email: body.email },
+        data: { institutionId: inst, givenName: body.givenName, middleName: body.middleName || null, familyName: body.familyName, email: body.email, phone: body.phone || null, dateOfBirth: body.dateOfBirth || null },
       });
       const a = await tx.account.create({
         data: { institutionId: inst, personId: p.id, email: body.email, passwordHash, status: "active", rolesJson: JSON.stringify(["applicant"]) },
@@ -60,11 +77,11 @@ export async function registerApplicant(input: unknown) {
           institutionId: inst,
           accountId: a.id,
           personId: p.id,
-          programName: "",
-          intakeTerm: "",
+          programName: body.programName,
+          intakeTerm: body.intakeTerm,
           status: "draft",
           progressPct: 0,
-          formJson: JSON.stringify({ givenName: body.givenName, familyName: body.familyName }),
+          formJson: JSON.stringify({ ...body, password: undefined }),
           documents: { create: REQUIRED_APPLICANT_DOCUMENTS.map((label) => ({ institutionId: inst, label, status: "missing" })) },
           timeline: { create: [{ institutionId: inst, title: "Applicant account created", detail: "Signed up online" }] },
         },

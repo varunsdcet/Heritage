@@ -200,7 +200,10 @@ export function readingCompleteReady(
 }
 
 export function lectureCompleteReady(meta: ActivityMeta): { ok: boolean; missing: string[] } {
-  return activityTimerReady(meta);
+  const timer = activityTimerReady(meta);
+  const missing = [...timer.missing];
+  if ((meta.watchPct || 0) < 90) missing.push("Watch at least 90% of the narrated lecture");
+  return { ok: missing.length === 0, missing };
 }
 
 /** Matching: timer only — score shown for practice, not a completion gate. */

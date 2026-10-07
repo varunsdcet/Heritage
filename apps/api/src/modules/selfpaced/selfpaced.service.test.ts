@@ -4,6 +4,7 @@ const tx = vi.hoisted(() => ({ credentialRecord: { create: vi.fn() } }));
 const db = vi.hoisted(() => ({
   student: { findFirst: vi.fn() },
   credentialRecord: { findFirst: vi.fn() },
+  sisScreenState: { findMany: vi.fn(), upsert: vi.fn() },
   $transaction: vi.fn(),
 }));
 
@@ -25,6 +26,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   db.student.findFirst.mockResolvedValue({ id: "stu-1", person: { givenName: "Ada", preferredName: null, familyName: "Lovelace" } });
   db.credentialRecord.findFirst.mockResolvedValue(null);
+  db.sisScreenState.findMany.mockResolvedValue([
+    { path: "selfpaced:catalogue:dynamic-course", payloadJson: JSON.stringify({ slug: "dynamic-course", status: "published", curriculum: [] }), updatedAt: issuedAt },
+  ]);
+  db.sisScreenState.upsert.mockResolvedValue({});
   db.$transaction.mockImplementation(async (work: (client: typeof tx) => Promise<unknown>) => work(tx));
   tx.credentialRecord.create.mockResolvedValue(record);
 });

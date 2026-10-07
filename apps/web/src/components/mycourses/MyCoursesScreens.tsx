@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { SaField, SuperFrame } from "@/components/superadmin/shared";
-import { CourseCell, ErrorNotice, ScheduleCell, TableState, useMc, type Offering, type Option } from "./common";
+import { CourseCell, ErrorNotice, ScheduleCell, TableState, errMsg, json, mc, useMc, type Offering, type Option } from "./common";
 
 const HOME = ["/admin"];
 
@@ -226,9 +226,34 @@ export function MyPendingSchedules() {
   const applied = sp?.get("type") ?? "";
   const { data, error, setError } = useMc<Pending>(`/pending-schedules${qs({ type: applied })}`, "Could not load pending course schedules");
   const [type, setType] = useState(applied || "All Types");
+  const [notice, setNotice] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [decided, setDecided] = useState<string[]>([]);
   useEffect(() => {
     if (data?.type) setType(data.type);
   }, [data?.type]);
+  const rows = (data?.rows ?? []).filter((r) => !decided.includes(r.id));
+
+  async function decide(id: string, decision: "accept" | "decline") {
+    let comment = "";
+    if (decision === "decline") {
+      const reason = window.prompt("Reason for declining (optional):", "");
+      if (reason === null) return;
+      comment = reason.trim();
+    }
+    setBusy(id);
+    setError(null);
+    setNotice(null);
+    try {
+      const r = await mc<{ message: string }>(`/pending-schedules/${id}/decide`, json("POST", { decision, comment }));
+      setDecided((prev) => [...prev, id]);
+      setNotice(r.message);
+    } catch (e) {
+      setError(errMsg(e, "Could not save your decision"));
+    } finally {
+      setBusy(null);
+    }
+  }
 
   function show(e: FormEvent) {
     e.preventDefault();
@@ -238,6 +263,14 @@ export function MyPendingSchedules() {
   return (
     <SuperFrame title="PENDING COURSE SCHEDULES" breadcrumbs={["Home", "Pending Course Schedules"]} breadcrumbHrefs={HOME} activeHref="/admin/my-courses/pending-schedules">
       <div className="ur">
+        {notice ? (
+          <div className="mh-sa__notice mh-sa__notice--success" role="status">
+            <span>{notice}</span>
+            <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss">
+              ×
+            </button>
+          </div>
+        ) : null}
         <ErrorNotice error={error} onClose={() => setError(null)} />
         <form className="mh-sa__card wk-toolbar" onSubmit={show}>
           <SaField label="Change Type">
@@ -261,19 +294,28 @@ export function MyPendingSchedules() {
                   <th>Course</th>
                   <th>Change Type</th>
                   <th>Submitted</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
-                {!data?.rows.length ? (
-                  <TableState cols={3} loading={!data} error={error} empty="No pending course schedules were found." />
+                {!rows.length ? (
+                  <TableState cols={4} loading={!data} error={error} empty="No pending course schedules were found." />
                 ) : (
-                  data.rows.map((r) => (
+                  rows.map((r) => (
                     <tr key={r.id}>
                       <td>
                         <CourseCell o={r} sectionId={r.sectionId} />
                       </td>
                       <td>{r.changeType}</td>
                       <td className="ur-nowrap">{r.submitted}</td>
+                      <td className="ur-nowrap">
+                        <button type="button" className="mh-sa__btn mh-sa__btn--primary" disabled={busy !== null} onClick={() => void decide(r.id, "accept")}>
+                          Accept
+                        </button>{" "}
+                        <button type="button" className="mh-sa__btn" disabled={busy !== null} onClick={() => void decide(r.id, "decline")}>
+                          Decline
+                        </button>
+                      </td>
                     </tr>
                   ))
                 )}

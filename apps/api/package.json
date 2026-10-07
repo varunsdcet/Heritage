@@ -2,6 +2,7 @@
   "name": "@myheritage/api",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "tsx watch --env-file-if-exists=../../.env src/main.ts",
     "build": "tsc -p tsconfig.json && mkdir -p dist/modules/admin && cp src/modules/admin/sis-seed.json dist/modules/admin/sis-seed.json && cp src/modules/admin/heritage-master.json dist/modules/admin/heritage-master.json",

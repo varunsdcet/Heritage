@@ -485,6 +485,7 @@ export function CourseLmsView({ config }: Props) {
           label={atypeParam}
           busy={Boolean(live?.busy)}
           roster={c.roster ?? []}
+          groups={lms.groups}
           sectionId={c.sectionId}
           onSave={(values) => {
             void (async () => {
@@ -499,7 +500,8 @@ export function CourseLmsView({ config }: Props) {
                 }),
               );
               if (ok) {
-                await live?.refresh?.();
+                // runAction returns the rebuilt live course payload, so the new module/activity is
+                // already visible without a second loading cycle.
                 go({ tab: "Course", action: null, atype: null, topic: null });
               }
             })();
@@ -512,11 +514,14 @@ export function CourseLmsView({ config }: Props) {
       return (
         <EditSectionPanel
           title={editSectionTopic.title}
-          onSave={(name, summary) => {
+          accessRestrictions={editSectionTopic.accessRestrictions}
+          roster={c.roster ?? []}
+          groups={lms.groups}
+          onSave={(name, summary, accessRestrictions) => {
             void (async () => {
               const ok = await live?.runAction?.(
                 "Save section",
-                JSON.stringify({ TopicId: editSectionTopic.id, Title: name, Summary: summary }),
+                JSON.stringify({ TopicId: editSectionTopic.id, Title: name, Summary: summary, AccessRestrictions: accessRestrictions }),
               );
               if (ok) go({ tab: "Course", action: null, sid: null });
             })();
@@ -548,6 +553,7 @@ export function CourseLmsView({ config }: Props) {
           label={viewedActivity.type}
           busy={Boolean(live?.busy)}
           roster={c.roster ?? []}
+          groups={lms.groups}
           sectionId={c.sectionId}
           heading={`Updating ${viewedActivity.type.toLowerCase()}: ${viewedActivity.name}`}
           initial={{
@@ -576,11 +582,19 @@ export function CourseLmsView({ config }: Props) {
         <PageEditPanel
           activity={viewedActivity}
           hidden={Boolean(viewedActivity.hidden)}
+          roster={c.roster ?? []}
+          groups={lms.groups}
           onSave={(values) => {
             void live
               ?.runAction?.(
                 "Save page",
-                JSON.stringify({ Id: viewedActivity.id, Name: values.name, Body: values.body, Hidden: values.hidden ? "yes" : "no" }),
+                JSON.stringify({
+                  Id: viewedActivity.id,
+                  Name: values.name,
+                  Body: values.body,
+                  Hidden: values.hidden ? "yes" : "no",
+                  AccessRestrictions: values.accessRestrictions,
+                }),
               )
               .then((ok) => {
                 if (ok) go({ tab: "Course", action: "view-activity", aid: viewedActivity.id });
@@ -787,7 +801,7 @@ export function CourseLmsView({ config }: Props) {
       );
     }
     if (tab === "Badges") {
-      return <BadgesPanel lms={lms} onAdd={() => go({ tab: "Badges", more: null, action: "add-badge" })} />;
+      return <BadgesPanel lms={lms} roster={c.roster ?? []} onAdd={() => go({ tab: "Badges", more: null, action: "add-badge" })} />;
     }
     return (
       <CourseContentPanel
@@ -1087,7 +1101,12 @@ function CourseContentPanel({
         />
       ) : null}
       {aiCourseOpen && live?.path ? (
-        <CourseAiBuilderDialog path={live.path} onClose={() => setAiCourseOpen(false)} onPublished={() => void live.refresh?.()} />
+        <CourseAiBuilderDialog
+          path={live.path}
+          defaultDelivery={searchParams.get("delivery") === "self_paced" ? "self_paced" : undefined}
+          onClose={() => setAiCourseOpen(false)}
+          onPublished={() => void live.refresh?.()}
+        />
       ) : null}
       {chooserTopicId ? (
         <AddActivityChooser
@@ -1105,7 +1124,32 @@ function CourseContentPanel({
   );
 }
 
-function BadgesPanel({ lms, onAdd }: { lms: CourseLmsState; onAdd: () => void }) {
+function BadgesPanel({
+  lms,
+  roster,
+  onAdd,
+}: {
+  lms: CourseLmsState;
+  roster: Array<{ studentId?: string; name: string; studentNumber: string }>;
+  onAdd: () => void;
+}) {
+  const live = useOptionalTeacherLive();
+  const [awarding, setAwarding] = useState<string | null>(null);
+  const [picked, setPicked] = useState<string[]>([]);
+  const students = roster.filter((r): r is typeof r & { studentId: string } => Boolean(r.studentId));
+  const toggle = (id: string) => setPicked((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  const open = (badgeId: string) => {
+    setAwarding((cur) => (cur === badgeId ? null : badgeId));
+    setPicked([]);
+  };
+  const award = async (badgeId: string) => {
+    const ok = await live?.runAction?.("Award course badge", JSON.stringify({ BadgeId: badgeId, StudentIds: picked.join(",") }));
+    if (ok) {
+      setAwarding(null);
+      setPicked([]);
+    }
+  };
+
   return (
     <section className="mh-teacher-card">
       <div className="mh-lms-toolbar">
@@ -1127,6 +1171,40 @@ function BadgesPanel({ lms, onAdd }: { lms: CourseLmsState; onAdd: () => void })
                   {badge.language || "English"}
                 </span>
               </div>
+              {live?.runAction ? (
+                <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary" onClick={() => open(badge.id)}>
+                  {awarding === badge.id ? "Cancel" : "Award"}
+                </button>
+              ) : null}
+              {awarding === badge.id ? (
+                <div className="mh-teacher-fields">
+                  {students.length === 0 ? (
+                    <p className="mh-teacher-muted">No students are enrolled in this course yet.</p>
+                  ) : (
+                    <>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={picked.length === students.length}
+                          onChange={(e) => setPicked(e.target.checked ? students.map((s) => s.studentId) : [])}
+                        />{" "}
+                        Select all ({students.length})
+                      </label>
+                      {students.map((s) => (
+                        <label key={s.studentId}>
+                          <input type="checkbox" checked={picked.includes(s.studentId)} onChange={() => toggle(s.studentId)} /> {s.name}{" "}
+                          <span className="mh-teacher-muted">{s.studentNumber}</span>
+                        </label>
+                      ))}
+                      <div className="mh-lms-toolbar">
+                        <button type="button" className="mh-teacher-btn" disabled={live?.busy || picked.length === 0} onClick={() => void award(badge.id)}>
+                          Award badge to {picked.length} student{picked.length === 1 ? "" : "s"}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ) : null}
             </div>
           ))}
         </div>
@@ -2037,4 +2115,3 @@ function AddQuestionPanel({
     </section>
   );
 }
-

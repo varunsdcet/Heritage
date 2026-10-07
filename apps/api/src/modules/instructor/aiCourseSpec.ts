@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeStoryboard, type AiDraftStoryboard } from "./aiDraftContent.js";
 
 /**
  * AI course builder — the structure every generated course must satisfy (modelled on the CAP 101 pack:
@@ -547,6 +548,8 @@ export type LessonContent = {
   selfCheck: Array<{ question: string; answer: string }>;
   exitRecord: string;
   glossary: Array<{ term: string; definition: string }>;
+  /** Generated only for self-paced delivery; synchronous/offline courses remain text-led. */
+  storyboard: AiDraftStoryboard | null;
   instructor: { facilitation: string[]; misconceptions: string[]; modelAnswers: string[]; feedback: string[] };
   flags: string[];
 };
@@ -618,6 +621,13 @@ export function normalizeLesson(
   const workshop = textList(root.workshop ?? root.practice_activity ?? root.activity_steps, 8, 600);
   if (!workshop.length) throw new Error(`${ctx.id}: no applied activity`);
   const { plan, flags } = normalizePlan(root.session_plan ?? root.study_plan, ctx);
+  const storyboard =
+    ctx.delivery === "self_paced"
+      ? normalizeStoryboard(root.storyboard ?? root.video_storyboard, `${ctx.id} · ${ctx.title}`)
+      : null;
+  if (ctx.delivery === "self_paced" && !storyboard) {
+    throw new Error(`${ctx.id}: self-paced lesson has no valid narrated video storyboard`);
+  }
   const valid = new Set(ctx.validOutcomes);
   const outcomes = outcomeRefs(root.outcomes, valid);
   const ins = obj(root.instructor ?? root.instructor_only);
@@ -646,6 +656,7 @@ export function normalizeLesson(
       .map((g) => ({ term: plainText(g.term, 80), definition: plainText(g.definition, 400) }))
       .filter((g) => g.term && g.definition)
       .slice(0, 10),
+    storyboard,
     instructor: {
       facilitation: textList(ins.facilitation ?? ins.facilitation_notes, 8, 600),
       misconceptions: textList(ins.misconceptions ?? ins.expected_misconceptions, 6, 400),

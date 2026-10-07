@@ -30,6 +30,7 @@ const tx = vi.hoisted(() => ({
 const db = vi.hoisted(() => ({
   student: { findFirst: vi.fn(), findMany: vi.fn() },
   assignment: { findMany: vi.fn() },
+  sisScreenState: { findMany: vi.fn(), findUnique: vi.fn() },
   fileObject: { findFirst: vi.fn() },
   $transaction: vi.fn(),
 }));
@@ -110,6 +111,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  db.sisScreenState.findMany.mockResolvedValue([]);
   db.student.findMany.mockResolvedValue([{ id: studentId, _count: { enrolments: 1 } }]);
   db.student.findFirst.mockResolvedValue({ id: studentId });
   db.assignment.findMany.mockResolvedValue([assignment]);
@@ -137,6 +139,30 @@ describe("student assignment journey", () => {
         }),
       }),
     );
+  });
+
+  it("does not list or open an assignment restricted to another student", async () => {
+    const otherStudentId = "10000000-0000-4000-8000-000000000099";
+    const restrictions = JSON.stringify({ match: "all", rules: [{ type: "student", studentIds: [otherStudentId] }] });
+    db.sisScreenState.findMany.mockResolvedValue([
+      {
+        path: `/instructor/sections/${assignment.sectionId}`,
+        payloadJson: JSON.stringify({
+          topicActivities: {
+            "topic-1": [
+              { id: "act-1", assignmentId, settings: { "Access restrictions": restrictions } },
+            ],
+          },
+        }),
+      },
+    ]);
+
+    const list = await fetch(`${apiBaseUrl}/student/assignments`);
+    expect(list.status).toBe(200);
+    expect(StudentAssignmentsResponse.parse(await list.json()).assignments).toHaveLength(0);
+
+    const detail = await fetch(`${apiBaseUrl}/student/assignments/${assignmentId}`);
+    expect(detail.status).toBe(404);
   });
 
   it("uploads a validated file and writes audit/outbox in the same transaction", async () => {

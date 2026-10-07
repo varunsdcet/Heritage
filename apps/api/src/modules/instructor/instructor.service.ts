@@ -40,6 +40,7 @@ import {
   buildAddBadgeFormPayload,
   buildAddCourseResourceForm,
   buildAddResourceCategoryForm,
+  awardBadge,
   createBadgeDefinition,
   createCourseResource,
   createResourceCategory,
@@ -142,6 +143,7 @@ import {
   workspaceSectionId,
   type LmsAssignmentSettings,
 } from "./lmsActivities.js";
+import { LMS_ACCESS_RESTRICTIONS_KEY, parseLmsAccessRestrictions, serializeLmsAccessRestrictions } from "./lmsAccessRestrictions.js";
 import { loadCourseGradeBoard } from "./courseGradeBoard.js";
 import { sectionLmsMeta } from "./sectionLmsMeta.js";
 import {
@@ -1036,6 +1038,31 @@ function resolveSectionFromPath(ctx: InstructorCtx, path: string) {
     ctx.sections.find((s) => s.enrolments.some((e) => e.status === "enrolled")) ||
     ctx.sections[0]
   );
+}
+
+async function assertLmsRestrictionScope(ctx: InstructorCtx, path: string, value: string | undefined) {
+  const restrictions = parseLmsAccessRestrictions(value);
+  if (!restrictions) return;
+  const section = resolveSectionFromPath(ctx, path);
+  if (!section) throw Object.assign(new Error("Open a course section before adding access restrictions"), { status: 400 });
+  const allowedStudents = new Set(section.enrolments.filter((row) => row.status !== "withdrawn").map((row) => row.studentId));
+  const overlay = await loadLmsOverlay(ctx.user.institutionId, path);
+  const extraGroups = Array.isArray(overlay?.extraGroups) ? (overlay!.extraGroups as Array<{ id?: unknown }>) : [];
+  const groupMembers = overlay?.groupMembers && typeof overlay.groupMembers === "object"
+    ? (overlay.groupMembers as Record<string, unknown>)
+    : {};
+  const allowedGroups = new Set([
+    ...extraGroups.map((group) => (typeof group.id === "string" ? group.id : "")).filter(Boolean),
+    ...Object.keys(groupMembers),
+  ]);
+  for (const rule of restrictions.rules) {
+    if (rule.type === "student" && rule.studentIds.some((id) => !allowedStudents.has(id))) {
+      throw Object.assign(new Error("A selected student is not enrolled in this course section"), { status: 400 });
+    }
+    if (rule.type === "group" && rule.groupIds.some((id) => !allowedGroups.has(id))) {
+      throw Object.assign(new Error("A selected course group no longer exists"), { status: 400 });
+    }
+  }
 }
 
 function parseNotifyStudentIds(fields: Record<string, string>): string[] | undefined {
@@ -7254,6 +7281,20 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
         ? `Published “${saved.title}” on ${saved.sectionCode}`
         : `Draft saved · ${saved.title}`;
       result = saved;
+    } else if (lower === "award course badge") {
+      const fields = parseActionFields(input.rowKey) || {};
+      const { pathname, query } = parseScreenQuery(path);
+      const sectionId = (query.get("view") || "").trim() || pathname.split("/").pop() || "";
+      const sec = ctx.sections.find((s) => s.id === sectionId);
+      if (!sec) throw Object.assign(new Error("Open the course offering to award its badges"), { status: 400 });
+      const roster = new Set(sec.enrolments.filter((e) => e.status !== "withdrawn").map((e) => e.studentId));
+      const studentIds = (fields.StudentIds || "").split(",").map((x) => x.trim()).filter(Boolean);
+      if (!studentIds.length) throw Object.assign(new Error("Select at least one student"), { status: 400 });
+      if (studentIds.some((id) => !roster.has(id))) throw Object.assign(new Error(`A selected student is not enrolled in ${sec.courseCode}`), { status: 400 });
+      const r = await awardBadge(user.institutionId, (fields.BadgeId || "").trim(), studentIds);
+      const done = r.instant ? "awarded" : "sent for approval";
+      message = `${r.name} ${done} · ${r.issued} student${r.issued === 1 ? "" : "s"}${r.skipped ? ` (${r.skipped} already had it)` : ""}`;
+      result = { ...r };
     } else if (lower === "mark all as read" || lower === "mark notification read") {
       const ids = lower === "mark all as read" ? undefined : [(input.rowKey || "").trim()];
       const { count } = await markNotificationsRead(user, ids);
@@ -8814,6 +8855,7 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
         message = "Select a topic first";
         result = { error: true };
       } else {
+        await assertLmsRestrictionScope(ctx, path, fields[LMS_ACCESS_RESTRICTIONS_KEY]);
         const content = activityContentFromForm(type, fields);
         const activity: Record<string, unknown> = {
           id: `act-${Date.now().toString(36)}`,
@@ -8911,6 +8953,7 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
         message = "Activity name is required";
         result = { error: true };
       } else {
+        await assertLmsRestrictionScope(ctx, path, fields[LMS_ACCESS_RESTRICTIONS_KEY]);
         const existing = findOverlayActivity(await loadLmsOverlay(user.institutionId, path), activityId)?.activity;
         const type = String(existing?.type || fields.ActivityType || "PAGE").toUpperCase();
         const content = activityContentFromForm(type, fields);
@@ -9043,8 +9086,17 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
         message = "Page name is required";
         result = { error: true };
       } else {
+        await assertLmsRestrictionScope(ctx, path, fields.AccessRestrictions);
+        const accessRestrictions = serializeLmsAccessRestrictions(fields.AccessRestrictions);
+        const existing = findOverlayActivity(await loadLmsOverlay(user.institutionId, path), activityId)?.activity;
+        const settings = existing?.settings && typeof existing.settings === "object"
+          ? { ...(existing.settings as Record<string, string>) }
+          : {};
+        if (accessRestrictions) settings[LMS_ACCESS_RESTRICTIONS_KEY] = accessRestrictions;
+        else delete settings[LMS_ACCESS_RESTRICTIONS_KEY];
         const edit: Record<string, unknown> = {
           name,
+          settings,
           modified: new Date().toLocaleString("en-CA", { dateStyle: "full", timeStyle: "short", timeZone: "America/Toronto" }),
         };
         if (typeof fields.Body === "string") edit.body = sanitizeLessonHtml(fields.Body.trim());
@@ -9080,13 +9132,18 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
         message = "Section name is required";
         result = { error: true };
       } else {
+        await assertLmsRestrictionScope(ctx, path, fields.AccessRestrictions);
+        const accessRestrictions = serializeLmsAccessRestrictions(fields.AccessRestrictions);
         await patchScreenOverlay(user.institutionId, path, (prev) => {
           const topicTitles = { ...((prev.topicTitles as Record<string, string>) || {}), [topicId]: title };
           const topicSummaries = {
             ...((prev.topicSummaries as Record<string, string>) || {}),
             [topicId]: fields.Summary || "",
           };
-          return { ...prev, topicTitles, topicSummaries };
+          const topicRestrictions = { ...((prev.topicRestrictions as Record<string, string>) || {}) };
+          if (accessRestrictions) topicRestrictions[topicId] = accessRestrictions;
+          else delete topicRestrictions[topicId];
+          return { ...prev, topicTitles, topicSummaries, topicRestrictions };
         });
         message = `Section updated · ${title}`;
         result = { topicId, title };

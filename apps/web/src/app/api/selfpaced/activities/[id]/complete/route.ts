@@ -50,6 +50,9 @@ export async function POST(
       missing.push("assessment_pass");
     }
   }
+  if (activity.type === "lecture" && (meta.watchPct || 0) < 90) {
+    missing.push("lecture_watch_90_percent");
+  }
 
   if (missing.length) {
     return NextResponse.json(

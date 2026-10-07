@@ -5,6 +5,7 @@ import { assertPermission } from "../superAdmin.service.js";
 import {
   attendanceDay,
   courseHistory,
+  decideSchedule,
   evaluationList,
   gradeSubmission,
   gradeSubmissions,
@@ -43,6 +44,7 @@ const AttendanceBody = z.object({
   marks: z.array(z.object({ sectionId: text(60), studentId: text(60), status: text(10), note: text(500) })).max(5000),
 });
 const GradesQuery = z.object({ course: text(60), status: text(40) });
+const ScheduleDecisionBody = z.object({ decision: z.enum(["accept", "decline"]), comment: text(1000) });
 
 myCoursesRouter.get("/counts", view((req) => myCoursesCounts(user(req))));
 myCoursesRouter.get("/nav", view((req) => myCoursesNav(user(req))));
@@ -62,6 +64,18 @@ myCoursesRouter.put(
 );
 myCoursesRouter.get("/repository", view((req) => myRepository(user(req), { course: String(req.query.course ?? "").slice(0, 120) })));
 myCoursesRouter.get("/pending-schedules", view((req) => pendingSchedules(user(req), { type: String(req.query.type ?? "").slice(0, 40) })));
+myCoursesRouter.post(
+  "/pending-schedules/:id/decide",
+  handle(async (req) => {
+    const u = user(req);
+    await assertPermission(u, "courseManagement", "view");
+    const id = z.string().uuid().parse(req.params.id);
+    const body = ScheduleDecisionBody.parse(req.body);
+    const decided = await decideSchedule(u, id, body);
+    await audit(u, "MC04", "my-courses", `schedule.${body.decision === "accept" ? "accepted" : "declined"}`, { recordId: id, after: { status: decided.status, sectionId: decided.sectionId } });
+    return decided;
+  }),
+);
 myCoursesRouter.get("/grades", view((req) => gradeSubmissions(user(req), GradesQuery.parse(req.query))));
 myCoursesRouter.get("/grades/:sectionId", view((req) => gradeSubmission(user(req), String(req.params.sectionId).slice(0, 60))));
 myCoursesRouter.get("/history", view((req) => courseHistory(user(req))));

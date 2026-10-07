@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { api, clearSession, saveSession, type Session } from "@/lib/api";
 import { loadEnrollments, saveSelfpacedUser } from "@/lib/selfpacedAuth";
 
 type Mode = "login" | "signup";
@@ -48,6 +49,7 @@ export function SelfpacedLoginModal({
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -86,29 +88,63 @@ export function SelfpacedLoginModal({
     return "/selfpaced#catalog";
   };
 
-  const submit = (e: FormEvent) => {
+  const submit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
     const trimmed = email.trim();
-    if (!trimmed.includes("@")) {
+    if (mode === "signup" && !name.trim()) {
+      setError("Enter your full name.");
+      return;
+    }
+    if (mode === "signup" && !trimmed.includes("@")) {
       setError("Enter a valid email.");
+      return;
+    }
+    if (mode === "login" && trimmed.length < 3) {
+      setError("Enter your email or student number.");
       return;
     }
     if (password.length < 8) {
       setError("Password must be at least 8 characters.");
       return;
     }
-    if (mode === "signup" && !name.trim()) {
-      setError("Enter your name.");
-      return;
+    setLoading(true);
+    try {
+      const ua = navigator.userAgent.replace(/\s+/g, " ").slice(0, 48) || "browser";
+      if (mode === "signup") {
+        await api<{ created: true; email: string; studentNumber: string }>("/selfpaced/register", {
+          method: "POST",
+          body: JSON.stringify({ name: name.trim(), email: trimmed.toLowerCase(), password }),
+        }, undefined, { skipAuthRedirect: true });
+      }
+      const session = await api<Session & { requiresMfa?: boolean }>("/auth/login", {
+        method: "POST",
+        body: JSON.stringify({
+          email: trimmed.includes("@") ? trimmed.toLowerCase() : trimmed,
+          password,
+          deviceFingerprint: `selfpaced-${ua}`.slice(0, 120),
+          remember: true,
+        }),
+      });
+      if (session.requiresMfa) throw new Error("Multi-factor authentication is required for this account.");
+      if (!session.accessToken || !session.roles?.includes("student")) {
+        throw new Error("A Heritage student account is required for self-paced learning.");
+      }
+      clearSession();
+      saveSession(session, true);
+      saveSelfpacedUser({
+        name: `${session.givenName || ""} ${session.familyName || ""}`.trim() || "Learner",
+        email: trimmed.toLowerCase(),
+      });
+      const dest = resolveDest(mode);
+      onClose();
+      window.location.assign(dest);
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : mode === "signup" ? "Account creation failed." : "Sign-in failed.";
+      setError(/Invalid credentials|unauthorized|401/i.test(raw) ? "Email/student number or password is incorrect." : raw);
+    } finally {
+      setLoading(false);
     }
-    saveSelfpacedUser({
-      name: name.trim() || trimmed.split("@")[0] || "Learner",
-      email: trimmed,
-    });
-    const dest = resolveDest(mode);
-    onClose();
-    router.push(dest);
   };
 
   return (
@@ -125,24 +161,24 @@ export function SelfpacedLoginModal({
         <h2 id="sp-login-title">{mode === "login" ? "Welcome back" : "Create your account"}</h2>
         <p className="sp-modal__lede">
           {mode === "login"
-            ? "Sign in, then complete Stripe payment for any program you have not purchased yet."
-            : "Create an account, choose a program, and pay on Stripe. Courses unlock only after payment."}
+            ? "Use your Heritage learner account. Unpurchased programs open the secure Stripe checkout."
+            : "Create a self-paced learner account, choose a course, and continue to checkout. Campus admission is a separate process."}
         </p>
         <form className="sp-modal__form" onSubmit={submit}>
           {mode === "signup" ? (
             <label>
               Full name
-              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Alex Morgan" autoComplete="name" />
+              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Alex Morgan" autoComplete="name" required />
             </label>
           ) : null}
           <label>
-            Email
+            {mode === "login" ? "Email or student number" : "Email"}
             <input
-              type="email"
+              type={mode === "login" ? "text" : "email"}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              autoComplete="email"
+              placeholder={mode === "login" ? "you@example.com or SP-2026-…" : "you@example.com"}
+              autoComplete={mode === "login" ? "username" : "email"}
               required
             />
           </label>
@@ -163,8 +199,8 @@ export function SelfpacedLoginModal({
             </div>
           </label>
           {error ? <p className="sp-error">{error}</p> : null}
-          <button type="submit" className="sp-btn sp-btn--primary sp-btn--block">
-            {mode === "login" ? "Sign in" : "Create account & continue"}
+          <button type="submit" className="sp-btn sp-btn--primary sp-btn--block" disabled={loading}>
+            {loading ? (mode === "signup" ? "Creating account…" : "Signing in…") : mode === "login" ? "Sign in" : "Create account & continue"}
           </button>
         </form>
         <p className="sp-modal__switch">

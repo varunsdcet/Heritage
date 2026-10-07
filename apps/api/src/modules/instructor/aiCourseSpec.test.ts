@@ -115,6 +115,27 @@ describe("normalizePlan", () => {
     expect(plan[0]!.activity).toMatch(/Orientation/);
     expect(flags).toHaveLength(1);
   });
+
+  it("requires a narrated storyboard for self-paced lessons but not synchronous lessons", () => {
+    const reading = Array.from({ length: 4 }, (_, i) => `Paragraph ${i} ${"word ".repeat(90)}`);
+    const base = { core_reading: reading, objectives: ["Explain the workflow"], workshop: ["Complete the practice task"] };
+    expect(() =>
+      normalizeLesson(base, { id: "M01-L01", title: "Workflow", minutes: 90, delivery: "self_paced", validOutcomes: ["CLO1"] }),
+    ).toThrow(/video storyboard/);
+    const selfPaced = normalizeLesson(
+      {
+        ...base,
+        storyboard: {
+          title: "Workflow lecture",
+          slides: Array.from({ length: 5 }, (_, i) => ({ heading: `Step ${i + 1}`, bullets: ["Key point", "Applied example"], narration: "This lesson explains the approved workflow and shows how to apply it safely." })),
+        },
+      },
+      { id: "M01-L01", title: "Workflow", minutes: 90, delivery: "self_paced", validOutcomes: ["CLO1"] },
+    );
+    expect(selfPaced.storyboard?.slides).toHaveLength(5);
+    const synchronous = normalizeLesson(base, { id: "M01-L01", title: "Workflow", minutes: 90, delivery: "synchronous", validOutcomes: ["CLO1"] });
+    expect(synchronous.storyboard).toBeNull();
+  });
 });
 
 describe("normalizeQuiz", () => {

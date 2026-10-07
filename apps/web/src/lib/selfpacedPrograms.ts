@@ -12,10 +12,28 @@ export type SelfpacedProgram = {
   internationalCad?: number;
   image: string;
   features: string[];
+  status?: "draft" | "review" | "published";
+  curriculum?: unknown[];
 };
 
 /** Exact catalog from https://hccbconline.com/ — do not invent extra programs. */
 export const SELFPACED_PROGRAMS: SelfpacedProgram[] = [
+  {
+    id: "cap-101",
+    slug: "cap-101-applied-business-capstone",
+    title: "CAP 101 – Applied Business Capstone Project",
+    subject: "Business",
+    level: "Intermediate",
+    blurb:
+      "Turn business knowledge into a complete applied capstone: define a client problem, analyse evidence, build a practical recommendation, and present a professional solution.",
+    description:
+      "CAP 101 is an applied business capstone built around a realistic Canadian workplace case. Learners move from problem definition and stakeholder discovery through research, data analysis, solution design, implementation planning, professional reporting, and a final presentation. Every chapter includes guided readings, narrated video slides, practice, assessment, and instructor-quality feedback checkpoints.",
+    hours: 120,
+    chapters: 12,
+    priceCad: 100,
+    image: "/brand/campus/learn.png",
+    features: ["12 applied modules", "Narrated video lectures and slides", "Capstone assessments and final presentation", "Verifiable Heritage certificate"],
+  },
   {
     id: "office-admin",
     slug: "office-administration-diploma",
@@ -26,12 +44,12 @@ export const SELFPACED_PROGRAMS: SelfpacedProgram[] = [
       "As professional offices become more complex, it becomes critical for offices to employ specialists in Office Administration. Graduates of this Office Administration program will be highly organized and client-ready.",
     description:
       "As professional offices become more complex, it becomes critical for offices to employ specialists in Office Administration. Graduates of this Office Administration program will be highly organized and prepared for administrative roles across Canadian workplaces — including professional communication, scheduling, records management, Microsoft Office productivity, and customer service.",
-    hours: 350,
-    chapters: 12,
+    hours: 361,
+    chapters: 11,
     priceCad: 9500,
     internationalCad: 11750,
-    image: "https://images.unsplash.com/photo-1521737711867-e3b97375f902?auto=format&fit=crop&w=1400&q=85",
-    features: ["12 chapters", "1 chapter unlocks / day", "Instructor lectures", "Premium certificate on completion"],
+    image: "https://hccbconline.com/api/files/public/8cfa958b-9646-4810-bf05-5866eafdeebe",
+    features: ["11 chapters", "1 chapter unlocks / day", "Instructor lectures", "Premium certificate on completion"],
   },
   {
     id: "pharmacy-assistant",
@@ -43,12 +61,11 @@ export const SELFPACED_PROGRAMS: SelfpacedProgram[] = [
       "The Pharmacy Assistant Certificate Program prepares students for a rewarding career in retail, hospital, and community pharmacies. Students gain hands-on training in prescription processing, pharmacy operations, and patient service.",
     description:
       "The Pharmacy Assistant Certificate Program prepares students for a rewarding career in retail, hospital, and community pharmacies. Students gain hands-on training in prescription processing, pharmacy operations, inventory support, customer service, and professional ethics.",
-    hours: 278,
-    chapters: 10,
-    priceCad: 7200,
-    internationalCad: 8900,
-    image: "https://images.unsplash.com/photo-1587854692152-cbe660dbde88?auto=format&fit=crop&w=1400&q=85",
-    features: ["10 chapters", "1 chapter unlocks / day", "Instructor lectures", "Premium certificate on completion"],
+    hours: 135.5,
+    chapters: 9,
+    priceCad: 0,
+    image: "https://hccbconline.com/api/files/public/136289e2-3c80-490a-a41c-53978b062a20",
+    features: ["9 chapters", "Free test enrolment", "Instructor video lectures and slides", "Premium certificate on completion"],
   },
   {
     id: "red-seal-electrician",
@@ -60,11 +77,11 @@ export const SELFPACED_PROGRAMS: SelfpacedProgram[] = [
       "This course is designed to help construction electricians and apprentices prepare for the Red Seal certification exam. It provides a structured approach to mastering the knowledge, skills, and strategies required for success.",
     description:
       "This course is designed to help construction electricians and apprentices prepare for the Red Seal certification exam. It provides a structured approach to mastering the knowledge, skills, and exam strategies required for the construction electrician pathway.",
-    hours: 344,
-    chapters: 8,
+    hours: 350,
+    chapters: 5,
     priceCad: 3990,
-    image: "https://images.unsplash.com/photo-1621905251189-08b45d6a269e?auto=format&fit=crop&w=1400&q=85",
-    features: ["8 chapters", "1 chapter unlocks / day", "Instructor lectures", "Premium certificate on completion"],
+    image: "https://hccbconline.com/api/files/public/6d0bcc8e-a785-4ed7-9e4d-9b2858ed6abc",
+    features: ["5 chapters", "1 chapter unlocks / day", "Instructor lectures", "Premium certificate on completion"],
   },
   {
     id: "red-seal-carpentry",
@@ -76,11 +93,11 @@ export const SELFPACED_PROGRAMS: SelfpacedProgram[] = [
       "This course is tailored to help carpenters and apprentices successfully prepare for the Red Seal certification exam. Through targeted training, practice exams, and expert guidance, participants strengthen exam readiness.",
     description:
       "This course is tailored to help carpenters and apprentices successfully prepare for the Red Seal certification exam. Through targeted training, practice exams, and expert guidance, participants strengthen exam readiness across core carpentry competencies.",
-    hours: 344,
-    chapters: 6,
+    hours: 350,
+    chapters: 5,
     priceCad: 3990,
-    image: "https://images.unsplash.com/photo-1504307651254-35680f356dfd?auto=format&fit=crop&w=1400&q=85",
-    features: ["6 chapters", "1 chapter unlocks / day", "Instructor lectures", "Premium certificate on completion"],
+    image: "https://hccbconline.com/api/files/public/4f177812-0398-4b9c-8104-96165dd95f14",
+    features: ["5 chapters", "1 chapter unlocks / day", "Instructor lectures", "Premium certificate on completion"],
   },
   {
     id: "red-seal-plumber",
@@ -92,11 +109,11 @@ export const SELFPACED_PROGRAMS: SelfpacedProgram[] = [
       "This course is designed to help journeyperson plumbers and apprentices prepare for the Red Seal certification exam. The program provides comprehensive support through focused study materials and practice.",
     description:
       "This course is designed to help journeyperson plumbers and apprentices prepare for the Red Seal certification exam. The program provides comprehensive support through focused study materials, practice exams, and exam strategy coaching.",
-    hours: 320,
-    chapters: 6,
-    priceCad: 3990,
-    image: "https://images.unsplash.com/photo-1581578731548-c64695cc6952?auto=format&fit=crop&w=1400&q=85",
-    features: ["6 chapters", "1 chapter unlocks / day", "Instructor lectures", "Premium certificate on completion"],
+    hours: 350,
+    chapters: 5,
+    priceCad: 3999,
+    image: "https://hccbconline.com/api/files/public/cfd178a3-3b54-464e-80c6-c2483f883a41",
+    features: ["5 chapters", "1 chapter unlocks / day", "Instructor lectures", "Premium certificate on completion"],
   },
   {
     id: "red-seal-chef",
@@ -108,11 +125,11 @@ export const SELFPACED_PROGRAMS: SelfpacedProgram[] = [
       "This course is tailored for chefs and culinary professionals preparing to achieve their Red Seal certification. The program provides comprehensive guidance on culinary theory, practical skills, and exam readiness.",
     description:
       "This course is tailored for chefs and culinary professionals preparing to achieve their Red Seal certification. The program provides comprehensive guidance on culinary theory, practical skills, and exam-focused strategies.",
-    hours: 300,
-    chapters: 6,
+    hours: 350,
+    chapters: 15,
     priceCad: 3990,
-    image: "https://images.unsplash.com/photo-1556910103-1c02745aae4d?auto=format&fit=crop&w=1400&q=85",
-    features: ["6 chapters", "1 chapter unlocks / day", "Instructor lectures", "Premium certificate on completion"],
+    image: "https://hccbconline.com/api/files/public/881ca2e7-8e41-4c38-89d1-406c0a90f5b8",
+    features: ["15 chapters", "1 chapter unlocks / day", "Instructor lectures", "Premium certificate on completion"],
   },
   {
     id: "red-seal-hvac",
@@ -124,11 +141,11 @@ export const SELFPACED_PROGRAMS: SelfpacedProgram[] = [
       "This comprehensive Red Seal Exam Preparation course is designed to assist experienced HVAC technicians, apprentices, and trade qualifiers in preparing for the Red Seal HVAC and Refrigeration Mechanic exam.",
     description:
       "This comprehensive Red Seal Exam Preparation course is designed to assist experienced HVAC technicians, apprentices, and trade qualifiers in preparing for the Red Seal HVAC and Refrigeration Mechanic certification exam.",
-    hours: 330,
-    chapters: 6,
+    hours: 350,
+    chapters: 5,
     priceCad: 3990,
-    image: "https://images.unsplash.com/photo-1621905252507-b35492cc74b4?auto=format&fit=crop&w=1400&q=85",
-    features: ["6 chapters", "1 chapter unlocks / day", "Instructor lectures", "Premium certificate on completion"],
+    image: "https://hccbconline.com/api/files/public/e124a768-3986-4e6f-99d5-046b312cdb61",
+    features: ["5 chapters", "1 chapter unlocks / day", "Instructor lectures", "Premium certificate on completion"],
   },
   {
     id: "red-seal-machinist",
@@ -140,13 +157,20 @@ export const SELFPACED_PROGRAMS: SelfpacedProgram[] = [
       "This course is specifically designed to assist machinists and apprentices in preparing for the Red Seal certification exam. It combines theoretical knowledge, practical skills, and exam-focused strategies.",
     description:
       "This course is specifically designed to assist machinists and apprentices in preparing for the Red Seal certification exam. It combines theoretical knowledge, practical skills, and exam-focused strategies for trade success.",
-    hours: 310,
-    chapters: 6,
-    priceCad: 3990,
-    image: "https://images.unsplash.com/photo-1565043589221-1a6fd9ae45c7?auto=format&fit=crop&w=1400&q=85",
-    features: ["6 chapters", "1 chapter unlocks / day", "Instructor lectures", "Premium certificate on completion"],
+    hours: 200,
+    chapters: 1,
+    priceCad: 3999,
+    image: "https://hccbconline.com/api/files/public/5b0e5401-43a0-4658-8576-2d942a00d0e4",
+    features: ["1 chapter", "Instructor lectures", "Practice assessment", "Premium certificate on completion"],
   },
 ];
+
+/** Merge the server catalogue in-place so existing learner helpers see admin-created programs too. */
+export function installSelfpacedPrograms(items: SelfpacedProgram[]) {
+  const merged = new Map(SELFPACED_PROGRAMS.map((item) => [item.slug, item]));
+  for (const item of items) merged.set(item.slug, { ...merged.get(item.slug), ...item });
+  SELFPACED_PROGRAMS.splice(0, SELFPACED_PROGRAMS.length, ...merged.values());
+}
 
 export function getSelfpacedProgram(slug: string): SelfpacedProgram | undefined {
   return SELFPACED_PROGRAMS.find((p) => p.slug === slug || p.id === slug);

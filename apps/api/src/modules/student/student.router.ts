@@ -62,6 +62,7 @@ import { bytesMatchMime, decodeBase64 } from "../../lib/fileSniff.js";
 import { readSubmissionFile, submissionStorageRoot } from "../../lib/submissionFiles.js";
 import { currentStudentId } from "../me/studentAlignment.js";
 import { submitQuizAttempt } from "../instructor/lmsQuiz.js";
+import { studentCanAccessLinkedAssignment } from "../instructor/lmsAccessRestrictions.js";
 
 export const studentRouter: Router = Router();
 
@@ -219,7 +220,7 @@ async function getStudent(user: AuthedRequest["user"]) {
 type AssignmentRow = Awaited<ReturnType<typeof getAssignments>>[number];
 
 async function getAssignments(institutionId: string, studentId: string, assignmentId?: string) {
-  return prisma.assignment.findMany({
+  const rows = await prisma.assignment.findMany({
     where: {
       institutionId,
       ...(assignmentId ? { id: assignmentId } : {}),
@@ -241,6 +242,31 @@ async function getAssignments(institutionId: string, studentId: string, assignme
       },
     },
     orderBy: [{ dueAt: "asc" }, { title: "asc" }],
+  });
+  const sectionIds = [...new Set(rows.map((row) => row.sectionId))];
+  const candidatePaths = sectionIds.flatMap((sectionId) => [
+    `/instructor/sections/${sectionId}`,
+    `/instructor/f/t56-active-courses?view=${sectionId}`,
+    `/instructor/f/t56-active-courses?view=${encodeURIComponent(sectionId)}`,
+  ]);
+  const states = candidatePaths.length
+    ? await prisma.sisScreenState.findMany({
+        where: { institutionId, path: { in: candidatePaths } },
+        select: { path: true, payloadJson: true },
+      })
+    : [];
+  const byPath = new Map(states.map((state) => [state.path, state.payloadJson]));
+  return rows.filter((row) => {
+    const raw =
+      byPath.get(`/instructor/sections/${row.sectionId}`) ||
+      byPath.get(`/instructor/f/t56-active-courses?view=${row.sectionId}`) ||
+      byPath.get(`/instructor/f/t56-active-courses?view=${encodeURIComponent(row.sectionId)}`);
+    if (!raw) return true;
+    try {
+      return studentCanAccessLinkedAssignment(JSON.parse(raw) as Record<string, unknown>, row.id, studentId);
+    } catch {
+      return false;
+    }
   });
 }
 
@@ -657,6 +683,30 @@ studentRouter.get("/courses/:sectionId/content", requireAuth, requireRoles("stud
     const completed = new Set<string>(
       state ? ((JSON.parse(state.payloadJson) as { completed?: string[] }).completed ?? []) : [],
     );
+    const accessStates = await prisma.sisScreenState.findMany({
+      where: {
+        institutionId: user.institutionId,
+        path: {
+          in: [
+            `/instructor/sections/${sectionId}`,
+            `/instructor/f/t56-active-courses?view=${sectionId}`,
+            `/instructor/f/t56-active-courses?view=${encodeURIComponent(sectionId)}`,
+          ],
+        },
+      },
+      select: { path: true, payloadJson: true },
+    });
+    const preferredAccessState =
+      accessStates.find((row) => row.path === `/instructor/sections/${sectionId}`) || accessStates[0];
+    let accessOverlay: Record<string, unknown> | null = null;
+    let accessOverlayInvalid = false;
+    if (preferredAccessState) {
+      try {
+        accessOverlay = JSON.parse(preferredAccessState.payloadJson) as Record<string, unknown>;
+      } catch {
+        accessOverlayInvalid = true;
+      }
+    }
     const items = [
       ...enrolment.section.classSessions.map((session) => {
         const isLab = session.sessionKind === "lab";
@@ -673,7 +723,9 @@ studentRouter.get("/courses/:sectionId/content", requireAuth, requireRoles("stud
           completed: completed.has(`session:${session.id}`),
         };
       }),
-      ...enrolment.section.assignments.map((assignment) => ({
+      ...enrolment.section.assignments
+        .filter((assignment) => !accessOverlayInvalid && studentCanAccessLinkedAssignment(accessOverlay, assignment.id, student.id))
+        .map((assignment) => ({
         id: `assignment:${assignment.id}`,
         kind: "resource" as const,
         title: assignment.title,
@@ -681,7 +733,7 @@ studentRouter.get("/courses/:sectionId/content", requireAuth, requireRoles("stud
         href: `/student/assignments/${assignment.id}`,
         joinUrl: null as string | null,
         completed: completed.has(`assignment:${assignment.id}`),
-      })),
+        })),
     ];
     const done = items.filter((i) => i.completed).length;
     res.json({

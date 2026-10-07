@@ -5,7 +5,7 @@ export type ApplicationField = {
   label: string;
   section: ApplicationSection;
   required: boolean;
-  kind: "text" | "date" | "year" | "tel" | "select";
+  kind: "text" | "email" | "date" | "year" | "tel" | "select";
   max?: number;
   options?: string[];
   /** Options come from the institution's programs / intakes at request time. */
@@ -20,22 +20,26 @@ export const SECTION_LABELS: Record<ApplicationSection, string> = {
 
 export const APPLICATION_FIELDS: ApplicationField[] = [
   { key: "givenName", label: "First name", section: "personal", required: true, kind: "text", max: 80 },
+  { key: "middleName", label: "Middle name", section: "personal", required: false, kind: "text", max: 80 },
   { key: "familyName", label: "Last name", section: "personal", required: true, kind: "text", max: 80 },
-  { key: "preferredName", label: "Preferred name", section: "personal", required: false, kind: "text", max: 80 },
+  { key: "email", label: "Email", section: "personal", required: true, kind: "email", max: 200 },
   { key: "dateOfBirth", label: "Date of birth", section: "personal", required: true, kind: "date" },
+  { key: "gender", label: "Gender", section: "personal", required: true, kind: "select", options: ["Female", "Male", "Non-binary", "Prefer not to say", "Other"] },
   { key: "phone", label: "Phone number", section: "personal", required: true, kind: "tel", max: 30 },
   { key: "addressLine1", label: "Street address", section: "personal", required: true, kind: "text", max: 160 },
+  { key: "addressLine2", label: "Apartment / unit", section: "personal", required: false, kind: "text", max: 80 },
   { key: "city", label: "City", section: "personal", required: true, kind: "text", max: 80 },
   { key: "region", label: "Province / state", section: "personal", required: false, kind: "text", max: 80 },
   { key: "postalCode", label: "Postal code", section: "personal", required: false, kind: "text", max: 20 },
   { key: "country", label: "Country", section: "personal", required: true, kind: "text", max: 80 },
+  { key: "sin", label: "Social Insurance Number (optional)", section: "personal", required: false, kind: "text", max: 30 },
   {
     key: "residency",
     label: "Residency status",
     section: "personal",
     required: true,
     kind: "select",
-    options: ["Canadian citizen", "Permanent resident", "International student", "Other"],
+    options: ["Canadian citizen", "Permanent resident", "Study permit", "Work permit", "Visitor", "Other"],
   },
   {
     key: "highestEducation",
@@ -56,12 +60,28 @@ export const APPLICATION_FIELDS: ApplicationField[] = [
     kind: "select",
     options: ["First language", "IELTS", "TOEFL", "Duolingo", "Other test", "Not yet taken"],
   },
+  {
+    key: "languageDocumentAcknowledgement",
+    label: "Language-test document is current and can be verified",
+    section: "academic",
+    required: true,
+    kind: "select",
+    options: ["Confirmed"],
+  },
+  { key: "programCategory", label: "Category", section: "program", required: true, kind: "select", options: ["Business", "Health", "Trades", "Technology", "Other"] },
   { key: "programName", label: "Program", section: "program", required: true, kind: "select", dynamic: "programs" },
-  { key: "intakeTerm", label: "Intake", section: "program", required: true, kind: "select", dynamic: "intakes" },
-  { key: "studyMode", label: "Study load", section: "program", required: true, kind: "select", options: ["Full-time", "Part-time"] },
+  { key: "intakeTerm", label: "Admission term", section: "program", required: true, kind: "select", dynamic: "intakes" },
+  { key: "campus", label: "Campus", section: "program", required: true, kind: "select", options: ["Surrey", "Victoria", "Online"] },
+  { key: "applicationAcknowledgement", label: "I confirm this application is complete and correct", section: "program", required: true, kind: "select", options: ["Confirmed"] },
 ];
 
-export const REQUIRED_APPLICANT_DOCUMENTS = ["Official transcript", "Government ID"];
+export const REQUIRED_APPLICANT_DOCUMENTS = [
+  "Grade 10 Certificate / Transcript",
+  "Grade 12 Certificate / Transcript",
+  "Post-Secondary Education Document",
+  "Passport",
+  "Language Proficiency Test Report",
+];
 
 export type FormValues = Record<string, string>;
 export type FormOptions = { programs: string[]; intakes: string[] };
@@ -114,6 +134,8 @@ export function cleanApplicationForm(input: unknown, opts: FormOptions, keep: Fo
       const age = (now.getTime() - d.getTime()) / (365.25 * 86_400_000);
       if (!DATE_RE.test(v) || Number.isNaN(d.getTime())) errors[f.key] = `${f.label} must be a valid date`;
       else if (age < 14 || age > 100) errors[f.key] = `${f.label} must be a real date of birth`;
+    } else if (f.kind === "email") {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) errors[f.key] = `${f.label} must be a valid email address`;
     } else if (f.kind === "year") {
       const y = Number(v);
       if (!/^\d{4}$/.test(v) || y < 1950 || y > now.getUTCFullYear() + 1) errors[f.key] = `${f.label} must be a year between 1950 and ${now.getUTCFullYear() + 1}`;

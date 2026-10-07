@@ -32,6 +32,7 @@ const extensionByMime: Record<string, string[]> = {
   "image/png": [".png"],
   "image/jpeg": [".jpg", ".jpeg"],
 };
+const MAX_APPLICANT_FILE_BYTES = 10 * 1024 * 1024;
 
 function decodeAndValidateApplicantFile(input: {
   filename: string;
@@ -39,6 +40,12 @@ function decodeAndValidateApplicantFile(input: {
   sizeBytes: number;
   contentBase64: string;
 }) {
+  if (!Number.isInteger(input.sizeBytes) || input.sizeBytes <= 0) {
+    throw httpError("The selected file is empty (0 bytes). Choose a file that has content.", "VALIDATION_ERROR", 400);
+  }
+  if (input.sizeBytes > MAX_APPLICANT_FILE_BYTES) {
+    throw httpError("Files must be 10 MB or smaller", "FILE_TOO_LARGE", 413);
+  }
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(input.contentBase64) || input.contentBase64.length % 4 !== 0) {
     throw httpError("File content is not valid base64", "VALIDATION_ERROR", 400);
   }
@@ -58,6 +65,9 @@ function decodeAndValidateApplicantFile(input: {
   const content = Buffer.from(input.contentBase64, "base64");
   if (content.byteLength !== input.sizeBytes) {
     throw httpError("Decoded file size does not match sizeBytes", "VALIDATION_ERROR", 400);
+  }
+  if (content.byteLength > MAX_APPLICANT_FILE_BYTES) {
+    throw httpError("Files must be 10 MB or smaller", "FILE_TOO_LARGE", 413);
   }
 
   const startsWith = (...bytes: number[]) => bytes.every((byte, index) => content[index] === byte);
@@ -173,7 +183,6 @@ export async function saveApplicationForm(user: SessionClaims, input: unknown) {
   const person: Record<string, string | null> = {};
   if (merged.givenName) person.givenName = merged.givenName;
   if (merged.familyName) person.familyName = merged.familyName;
-  if ("preferredName" in values) person.preferredName = merged.preferredName || null;
   if (merged.phone) person.phone = merged.phone;
   if (merged.dateOfBirth) person.dateOfBirth = merged.dateOfBirth;
   if (Object.keys(person).length) {

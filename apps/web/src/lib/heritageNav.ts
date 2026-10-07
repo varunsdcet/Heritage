@@ -304,6 +304,11 @@ const ROOTS: Array<{ label: string; icon: string; gate?: ModuleGate; count?: str
     icon: "list",
     gate: { modules: ["courseManagement"] },
     entries: [
+      { label: "Self-Paced Overview", screen: "SP01", section: "SELF-PACED LEARNING", href: "/admin/self-paced/overview" },
+      { label: "Programs & Catalogue", screen: "SP02", section: "SELF-PACED LEARNING", href: "/admin/self-paced/catalogue" },
+      { label: "Curriculum & AI Drafts", screen: "SP03", section: "SELF-PACED LEARNING", href: "/admin/self-paced/content" },
+      { label: "Applications & Enrolments", screen: "SP04", section: "SELF-PACED LEARNING", href: "/admin/self-paced/applications" },
+      { label: "Online Students & Enrolments", screen: "SP05", section: "SELF-PACED LEARNING", href: "/admin/self-paced/enrolments" },
       ...(
         [
           ["Courses & Sessions", "C01", "courses"],

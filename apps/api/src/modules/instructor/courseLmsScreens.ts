@@ -129,6 +129,7 @@ export type CourseLmsState = {
     id: string;
     title: string;
     summary?: string;
+    accessRestrictions?: string;
     activities: CourseLmsActivity[];
   }>;
   activityTypes?: Array<{ code: string; label: string; kind: string }>;
@@ -795,6 +796,10 @@ export function mergeCourseLmsOverlay(
     overlay.topicSummaries && typeof overlay.topicSummaries === "object"
       ? (overlay.topicSummaries as Record<string, string>)
       : {};
+  const topicRestrictions =
+    overlay.topicRestrictions && typeof overlay.topicRestrictions === "object"
+      ? (overlay.topicRestrictions as Record<string, string>)
+      : {};
   const hiddenActivityIds = new Set(
     Array.isArray(overlay.hiddenActivityIds)
       ? (overlay.hiddenActivityIds as unknown[]).filter((id): id is string => typeof id === "string")
@@ -814,6 +819,7 @@ export function mergeCourseLmsOverlay(
       ...topic,
       title: topicTitles[topic.id] || topic.title,
       summary: topicSummaries[topic.id] ?? topic.summary,
+      accessRestrictions: topicRestrictions[topic.id] || undefined,
       activities: [...topic.activities, ...(topicEdits[topic.id] || [])]
         .filter((activity) => !deletedActivityIds.has(activity.id))
         .map((activity) => ({ ...activity, ...(activityEdits[activity.id] || {}) }))

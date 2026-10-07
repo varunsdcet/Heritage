@@ -20,6 +20,7 @@ vi.mock("@myheritage/events", () => events);
 vi.mock("@myheritage/auth", () => ({ hashPassword: vi.fn(async () => "hashed") }));
 
 import { registerApplicant } from "./apply.js";
+import { REQUIRED_APPLICANT_DOCUMENTS } from "../applicant/applicationForm.js";
 
 const body = { givenName: "Ada", familyName: "Lovelace", email: "Ada@Example.com ", password: "correct-horse" };
 
@@ -42,7 +43,7 @@ describe("registerApplicant", () => {
     expect(account.passwordHash).toBe("hashed");
     const app = tx.admissionsApplication.create.mock.calls[0]?.[0]?.data;
     expect(app.status).toBe("draft");
-    expect(app.documents.create.map((d: { label: string }) => d.label)).toEqual(["Official transcript", "Government ID"]);
+    expect(app.documents.create.map((d: { label: string }) => d.label)).toEqual(REQUIRED_APPLICANT_DOCUMENTS);
     expect(events.writeAuditAndOutbox).toHaveBeenCalledOnce();
   });
 

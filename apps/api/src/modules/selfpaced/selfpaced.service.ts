@@ -4,6 +4,7 @@ import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
 import { writeAuditAndOutbox } from "@myheritage/events";
 import { expectedActivityIds, selfpacedCourse } from "./catalogue.js";
+import { listSelfpacedPrograms } from "./catalogue.service.js";
 
 const fail = (status: number, code: string, message: string) => Object.assign(new Error(message), { status, code });
 
@@ -35,9 +36,14 @@ export async function issueSelfpacedCertificate(user: SessionClaims, input: unkn
   const parsed = CompletionBody.safeParse(input);
   if (!parsed.success) throw fail(400, "VALIDATION_ERROR", parsed.error.issues[0]?.message ?? "Invalid completion record");
   const { slug, completedActivityIds } = parsed.data;
-  const course = selfpacedCourse(slug);
-  if (!course) throw fail(404, "NOT_FOUND", "Unknown self-paced course");
-  const outstanding = outstandingActivities(slug, completedActivityIds) ?? [];
+  const builtIn = selfpacedCourse(slug);
+  const dynamic = builtIn ? null : (await listSelfpacedPrograms(user.institutionId)).find((item) => item.slug === slug);
+  if (!builtIn && !dynamic) throw fail(404, "NOT_FOUND", "Unknown self-paced course");
+  const expected = builtIn
+    ? expectedActivityIds(builtIn)
+    : (dynamic?.curriculum || []).flatMap((chapter) => chapter.activities.map((activity) => activity.id));
+  const done = new Set(completedActivityIds);
+  const outstanding = expected.filter((id) => !done.has(id));
   if (outstanding.length) throw fail(409, "COURSE_INCOMPLETE", `Finish every activity before the certificate is issued (${outstanding.length} remaining)`);
 
   const student = await prisma.student.findFirst({
@@ -58,7 +64,7 @@ export async function issueSelfpacedCertificate(user: SessionClaims, input: unkn
         data: {
           institutionId: user.institutionId,
           studentId: student.id,
-          title: course.title,
+          title: builtIn?.title || dynamic!.title,
           status: "earned",
           detail: `Self-paced course completed · ${completedActivityIds.length} activities`,
           earnedAt: now,

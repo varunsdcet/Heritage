@@ -20,6 +20,7 @@ import {
   useTeacherLivePayload,
   useOptionalTeacherLive,
 } from "@/lib/useTeacherSisLive";
+import { teacherLivePath } from "@/lib/teacherLivePath";
 import {
   AccomplishmentsView,
   AvailabilityView,
@@ -8956,15 +8957,7 @@ function TeacherSisScreenGate({ path }: { path: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const studentId = searchParams.get("studentId");
-  const liveParams = new URLSearchParams(searchParams.toString());
-  const keepTab = path.includes("t83") || path.includes("program-settings");
-  if (!keepTab) liveParams.delete("tab");
-  liveParams.delete("more");
-  liveParams.delete("action");
-  liveParams.delete("qtype");
-  liveParams.delete("qid");
-  const qs = liveParams.toString();
-  const livePath = qs ? `${path}?${qs}` : path;
+  const livePath = teacherLivePath(path, searchParams);
   const chrome = getTeacherScreen(path);
   const [userName, setUserName] = useState("");
   const [allowed, setAllowed] = useState(false);

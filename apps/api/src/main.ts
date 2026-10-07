@@ -57,6 +57,7 @@ app.use(
   }),
 );
 app.use("/student", express.json({ limit: "15mb" }));
+app.use("/applicant", express.json({ limit: "15mb" }));
 app.use("/admin/super", express.json({ limit: "2mb" }));
 app.use("/admin/heritage", express.json({ limit: "12mb" }));
 app.use("/lms-files", express.json({ limit: "12mb" }));

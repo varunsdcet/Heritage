@@ -5,11 +5,13 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { type ReactNode, Suspense, useEffect, useState } from "react";
 import { SelfpacedLoginModal } from "@/components/selfpaced/SelfpacedLoginModal";
 import { clearSelfpacedUser, loadEnrollments, loadSelfpacedUser, type SelfpacedUser } from "@/lib/selfpacedAuth";
+import { logout as logoutHeritage } from "@/lib/api";
 
 const NAV = [
   { href: "/selfpaced", label: "Home" },
   { href: "/selfpaced#about", label: "About Us" },
-  { href: "/selfpaced#catalog", label: "Programs" },
+  { href: "/accuplacer", label: "English Test" },
+  { href: "/apply", label: "Apply Now" },
   { href: "/selfpaced#contact", label: "Contact Us" },
 ];
 
@@ -27,6 +29,7 @@ function ShellInner({
   const [enrollments, setEnrollments] = useState<string[]>([]);
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   useEffect(() => {
     setUser(loadSelfpacedUser());
@@ -74,12 +77,13 @@ function ShellInner({
         <Link href="/selfpaced" className="sp-brand sp-brand--logo-only">
           <img src="/brand/login_logo.png" alt="Heritage" className="sp-brand__logo" />
         </Link>
-        <nav className="sp-nav__links" aria-label="Self-paced">
+        <nav className={`sp-nav__links${mobileNavOpen ? " is-open" : ""}`} aria-label="Self-paced">
           {NAV.map((item) => (
             <Link
               key={item.href}
               href={item.href}
               className={pathname === "/selfpaced" && item.href === "/selfpaced" ? "is-active" : ""}
+              onClick={() => setMobileNavOpen(false)}
             >
               {item.label}
             </Link>
@@ -95,7 +99,16 @@ function ShellInner({
             >
               Dashboard
             </Link>
-          ) : null}
+          ) : (
+            <button
+              type="button"
+              className="sp-nav__protected"
+              onClick={() => openAuth("login")}
+              aria-label="Log in to open your dashboard"
+            >
+              <span aria-hidden>🔒</span> Dashboard
+            </button>
+          )}
         </nav>
         <div className="sp-nav__actions">
           {user ? (
@@ -110,6 +123,7 @@ function ShellInner({
                 onClick={() => {
                   clearSelfpacedUser();
                   setUser(null);
+                  void logoutHeritage();
                 }}
               >
                 Log out
@@ -125,13 +139,22 @@ function ShellInner({
               </button>
             </>
           )}
+          <button
+            type="button"
+            className="sp-nav__menu"
+            onClick={() => setMobileNavOpen((open) => !open)}
+            aria-expanded={mobileNavOpen}
+            aria-label="Toggle navigation"
+          >
+            <span aria-hidden>{mobileNavOpen ? "×" : "☰"}</span>
+          </button>
         </div>
       </header>
       <main>{children}</main>
       <footer className="sp-footer" id="contact">
         <div className="sp-footer__grid">
           <div>
-            <strong>Heritage Community College</strong>
+            <img src="/brand/login_logo.png" alt="Heritage Community College" className="sp-footer__logo" />
             <p>Empowering futures through career-focused education and real-world training.</p>
             <p>Surrey — Unit 110, 8166 128th Street, Surrey, BC V3W 1R1</p>
             <p>Victoria — 759 Courtney St, Victoria, BC V8W 1C3</p>
@@ -147,6 +170,12 @@ function ShellInner({
               </li>
               <li>
                 <Link href="/selfpaced#catalog">Programs</Link>
+              </li>
+              <li>
+                <Link href="/accuplacer">English Test</Link>
+              </li>
+              <li>
+                <Link href="/apply">Apply Now</Link>
               </li>
               <li>
                 <button type="button" onClick={() => openAuth("login")}>

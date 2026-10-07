@@ -15,10 +15,13 @@ import {
   loadEnrollments,
   loadSelfpacedUser,
   type SelfpacedUser,
+  syncSelfpacedEnrollments,
 } from "@/lib/selfpacedAuth";
 import { flattenActivities, getActivity, getCurriculum } from "@/lib/selfpacedCurriculum";
 import { getSelfpacedProgram } from "@/lib/selfpacedPrograms";
 import { coachModeFor } from "@/lib/selfpacedEngine";
+import { logout as logoutHeritage } from "@/lib/api";
+import { useSelfpacedCatalogue } from "@/lib/useSelfpacedCatalogue";
 
 const NAV = [
   { href: "/selfpaced/dashboard", label: "Dashboard", icon: "◉" },
@@ -34,6 +37,7 @@ function LearnerShellInner({
   nextAfterLogin?: string;
   requirePurchase?: boolean;
 }) {
+  useSelfpacedCatalogue();
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -46,6 +50,7 @@ function LearnerShellInner({
   useEffect(() => {
     setUser(loadSelfpacedUser());
     setEnrollments(loadEnrollments());
+    void syncSelfpacedEnrollments().then((records) => setEnrollments(records.map((item) => item.slug))).catch(() => undefined);
   }, [pathname, authOpen]);
 
   useEffect(() => {
@@ -190,6 +195,7 @@ function LearnerShellInner({
               className="sp-btn sp-btn--ghost"
               onClick={() => {
                 clearSelfpacedUser();
+                void logoutHeritage();
                 setUser(null);
                 router.push("/selfpaced");
               }}
@@ -327,6 +333,7 @@ function LearnerShellInner({
           className="sp-btn sp-btn--ghost sp-btn--sm"
           onClick={() => {
             clearSelfpacedUser();
+            void logoutHeritage();
             setUser(null);
             router.push("/selfpaced");
           }}

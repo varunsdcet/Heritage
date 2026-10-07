@@ -66,6 +66,7 @@ export function LessonPlayer({
   const [dwell, setDwell] = useState(0);
   const [scrolledEnd, setScrolledEnd] = useState(false);
   const [coachChecks, setCoachChecks] = useState(0);
+  const [watchPct, setWatchPct] = useState(0);
   const [showChecks, setShowChecks] = useState(false);
   const [assessQs, setAssessQs] = useState<QuizQuestion[]>([]);
   const [assessStarted, setAssessStarted] = useState(false);
@@ -80,6 +81,7 @@ export function LessonPlayer({
     if (meta?.dwellSeconds) setDwell(meta.dwellSeconds);
     if (meta?.scrolledEnd) setScrolledEnd(true);
     if (meta?.coachChecksCorrect) setCoachChecks(meta.coachChecksCorrect);
+    if (meta?.watchPct) setWatchPct(meta.watchPct);
   }, [slug, activity.id]);
 
   // Universal 2-minute countdown on every activity (persists across refreshes).
@@ -97,20 +99,6 @@ export function LessonPlayer({
     }, 1000);
     return () => window.clearInterval(tick);
   }, [activity.id, slug, done]);
-
-  // When the 2-minute timer ends, auto-complete non-assessment activities.
-  useEffect(() => {
-    if (done || dwell < ACTIVITY_TIMER_SECONDS) return;
-    if (activity.type === "assessment") return;
-    setActivityMeta(slug, activity.id, { dwellSeconds: ACTIVITY_TIMER_SECONDS, scrolledEnd: true });
-    markActivityComplete(slug, activity.id);
-    if (totalActivities > 0) {
-      const issued = ensureCertificate(slug, totalActivities);
-      setCourseDone(Boolean(issued));
-    }
-    setDone(true);
-    setBlockers([]);
-  }, [dwell, done, activity.type, activity.id, slug, totalActivities]);
 
   const rightOptions = useMemo(() => shuffle((activity.pairs || []).map((p) => p.right)), [activity.pairs]);
 
@@ -176,7 +164,7 @@ export function LessonPlayer({
   };
 
   const tryCompleteLecture = () => {
-    const gate = lectureCompleteReady({ dwellSeconds: dwell });
+    const gate = lectureCompleteReady({ dwellSeconds: dwell, watchPct });
     if (!gate.ok) {
       setBlockers(gate.missing);
       return;
@@ -268,9 +256,7 @@ export function LessonPlayer({
               dangerouslySetInnerHTML={{ __html: activity.html }}
             />
             <p className="sp-lesson__meta">
-              {timerReady
-                ? "Timer done — activity will complete automatically"
-                : `Complete unlocks in ${formatTimer(timerRemaining)}`}
+              {timerReady ? "Timer done — mark the reading complete when finished" : `Complete unlocks in ${formatTimer(timerRemaining)}`}
             </p>
             {!done ? (
               <button
@@ -327,7 +313,7 @@ export function LessonPlayer({
             <button
               type="button"
               className="sp-btn sp-btn--primary"
-              disabled={!timerReady}
+              disabled={!timerReady || Object.keys(answers).length < activity.questions.length}
               onClick={() => {
                 if (!requireTimer()) return;
                 setQuizSubmitted(true);
@@ -335,7 +321,7 @@ export function LessonPlayer({
                 finish();
               }}
             >
-              {timerReady ? "Mark quiz complete" : `Wait ${formatTimer(timerRemaining)}`}
+              {!timerReady ? `Wait ${formatTimer(timerRemaining)}` : Object.keys(answers).length < activity.questions.length ? "Answer every question" : "Submit practice quiz"}
             </button>
           ) : done ? (
             <p className="sp-lesson__score">
@@ -373,6 +359,10 @@ export function LessonPlayer({
           onSubmit={() => {
             if (!requireTimer()) return;
             const pairs = activity.pairs || [];
+            if (Object.keys(matches).length < pairs.length) {
+              setBlockers(["Match every item before submitting the activity"]);
+              return;
+            }
             let correct = 0;
             for (const p of pairs) {
               if (matches[p.id] === p.right) correct += 1;
@@ -426,7 +416,13 @@ export function LessonPlayer({
           <p className="sp-lede">
             Watch the lecture. A 2-minute timer runs on this page — when it ends you can mark the lecture complete.
           </p>
-          <SelfpacedLecturePlayer storyboard={activity.storyboard} />
+          <SelfpacedLecturePlayer
+            storyboard={activity.storyboard}
+            onWatchPct={(pct) => {
+              setWatchPct(pct);
+              setActivityMeta(slug, activity.id, { watchPct: pct });
+            }}
+          />
           <div className="sp-lesson__ask-instructor">
             <h3>Ask the instructor</h3>
             <SelfpacedCoachWidget
@@ -442,10 +438,10 @@ export function LessonPlayer({
             <button
               type="button"
               className="sp-btn sp-btn--primary"
-              disabled={!timerReady}
+            disabled={!timerReady || watchPct < 90}
               onClick={tryCompleteLecture}
             >
-              {timerReady ? "Mark lecture complete" : `Wait ${formatTimer(timerRemaining)}`}
+              {!timerReady ? `Wait ${formatTimer(timerRemaining)}` : watchPct < 90 ? `Watch lecture · ${Math.round(watchPct)}% credited` : "Mark lecture complete"}
             </button>
           ) : (
             <p className="sp-lesson__score">Lecture marked complete.</p>

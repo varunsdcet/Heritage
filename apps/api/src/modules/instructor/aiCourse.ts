@@ -332,6 +332,14 @@ function contentChecks(job: Job, items: Item[]): Check[] {
     const planned = lessons.reduce((a, l) => a + l.plan.reduce((x, r) => x + r.minutes, 0), 0);
     const target = lessons.reduce((a, l) => a + l.minutes, 0);
     checks.push({ label: "Lesson session plans", ok: planned === target, detail: `${lessons.length} lesson plans total ${planned} of ${target} minutes (quiz time included)` });
+    if (bp.course.delivery === "self_paced") {
+      const withVideo = lessons.filter((lesson) => lesson.storyboard?.slides.length).length;
+      checks.push({
+        label: "AI video lectures",
+        ok: withVideo === lessons.length,
+        detail: `${withVideo} of ${lessons.length} self-paced lessons include a reviewed narrated storyboard`,
+      });
+    }
   }
   const quizzes = items.filter((i) => i.kind === "quiz" && i.status === "done").map((i) => i.content as QuizContent);
   if (quizzes.length) {
@@ -602,7 +610,15 @@ export async function publishAiCourse(user: SessionClaims, path: string) {
     const acts: OverlayActivity[] = [];
     const lessons = mod.lessons.map((lesson) => ({ lesson, content: get<LessonContent>(`lesson-${lesson.id}`) ?? null }));
     for (const { lesson, content } of lessons) {
-      acts.push(page(`${lesson.id} · ${lesson.title}`, renderLesson(bp, mod, lesson, content!), { note: `${lesson.minutes} min · ${sync ? "live session" : "self-study unit"}` }));
+      const storyboard = content?.storyboard ?? null;
+      acts.push(
+        page(`${lesson.id} · ${lesson.title}`, renderLesson(bp, mod, lesson, content!), {
+          note: storyboard
+            ? `${lesson.minutes} min self-study · dynamic AI video lecture · ${storyboard.slides.length} slides`
+            : `${lesson.minutes} min · ${sync ? "live session" : "self-study unit"}`,
+          ...(storyboard ? { storyboard } : {}),
+        }),
+      );
     }
     const quiz = get<QuizContent>(`quiz-${mod.id}`) ?? null;
     if (quiz) {

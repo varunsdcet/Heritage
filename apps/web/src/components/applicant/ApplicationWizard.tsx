@@ -13,7 +13,7 @@ type Field = {
   label: string;
   section: Section;
   required: boolean;
-  kind: "text" | "date" | "year" | "tel" | "select";
+  kind: "text" | "email" | "date" | "year" | "tel" | "select";
   max?: number;
   options?: string[];
   dynamic?: "programs" | "intakes";
@@ -165,7 +165,7 @@ export function ApplicationWizard() {
             disabled={disabled}
             required={f.required}
             maxLength={f.max}
-            type={f.kind === "date" ? "date" : f.kind === "tel" ? "tel" : "text"}
+            type={f.kind === "date" ? "date" : f.kind === "tel" ? "tel" : f.kind === "email" ? "email" : "text"}
             inputMode={f.kind === "year" ? "numeric" : undefined}
             placeholder={f.kind === "year" ? "YYYY" : undefined}
             onChange={(e) => set(f.key, e.target.value)}

@@ -33,6 +33,7 @@ services:
       API_PORT: "4000"
       WEB_ORIGIN: ${WEB_ORIGIN:-http://46.202.163.202}
       NODE_ENV: production
+      FILE_STORAGE_ROOT: /app/var/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -40,6 +41,8 @@ services:
       - "4000"
     ports:
       - "4000:4000"
+    volumes:
+      - uploads:/app/var/uploads
     networks: [internal]
 
   web:
@@ -107,3 +110,4 @@ networks:
 
 volumes:
   pgdata:
+  uploads:

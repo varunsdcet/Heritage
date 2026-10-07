@@ -15,13 +15,15 @@ describe("selfpaced checkout program binding", () => {
   it("does not confuse Pharmacy price with Office Administration", () => {
     const pharmacy = getSelfpacedProgram("pharmacy-assistant");
     const office = getSelfpacedProgram("office-administration-diploma");
-    expect(pharmacy?.priceCad).toBe(7200);
+    // Intentionally free while the full learner flow is under acceptance testing.
+    expect(pharmacy?.priceCad).toBe(0);
     expect(office?.priceCad).toBe(9500);
     expect(pharmacy?.id).not.toBe(office?.id);
   });
 
-  it("matches hccbconline catalog size", () => {
-    expect(SELFPACED_PROGRAMS).toHaveLength(8);
+  it("keeps the HCCB catalogue plus the published CAP 101 course", () => {
+    expect(SELFPACED_PROGRAMS).toHaveLength(9);
+    expect(getSelfpacedProgram("cap-101-applied-business-capstone")?.priceCad).toBe(100);
     expect(getSelfpacedProgram("introduction-to-hrm")).toBeUndefined();
     expect(getSelfpacedProgram("computer-applications-in-business")).toBeUndefined();
     expect(getSelfpacedProgram("electrical-fundamentals")).toBeUndefined();

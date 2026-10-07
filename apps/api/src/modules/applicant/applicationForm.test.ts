@@ -18,8 +18,10 @@ const opts = { programs: ["Practical Nursing"], intakes: ["Winter 2027"] };
 
 const complete = {
   givenName: "Ada",
+  email: "ada@example.com",
   familyName: "Lovelace",
   dateOfBirth: "2000-05-01",
+  gender: "Female",
   phone: "+1 604 555 0101",
   addressLine1: "1 Main St",
   city: "Vancouver",
@@ -28,14 +30,14 @@ const complete = {
   highestEducation: "Secondary school",
   institutionName: "Heritage Secondary",
   graduationYear: "2018",
+  languageDocumentAcknowledgement: "Confirmed",
+  programCategory: "Health",
   programName: "Practical Nursing",
   intakeTerm: "Winter 2027",
-  studyMode: "Full-time",
+  campus: "Surrey",
+  applicationAcknowledgement: "Confirmed",
 };
-const uploaded = [
-  { label: "Official transcript", status: "uploaded" },
-  { label: "Government ID", status: "accepted" },
-];
+const uploaded = ["Grade 10 Certificate / Transcript", "Grade 12 Certificate / Transcript", "Post-Secondary Education Document", "Passport", "Language Proficiency Test Report"].map((label, index) => ({ label, status: index % 2 ? "accepted" : "uploaded" }));
 
 describe("cleanApplicationForm", () => {
   it("accepts a partial save with blanks", () => {
@@ -46,12 +48,12 @@ describe("cleanApplicationForm", () => {
 
   it("rejects malformed dates, years, phones and options not offered", () => {
     const out = cleanApplicationForm(
-      { dateOfBirth: "2020-01-01", graduationYear: "3020", phone: "call me", programName: "Astronaut", studyMode: "Weekends" },
+      { dateOfBirth: "2020-01-01", graduationYear: "3020", phone: "call me", programName: "Astronaut", campus: "Moon" },
       opts,
       {},
       now,
     );
-    expect(Object.keys(out.errors).sort()).toEqual(["dateOfBirth", "graduationYear", "phone", "programName", "studyMode"]);
+    expect(Object.keys(out.errors).sort()).toEqual(["campus", "dateOfBirth", "graduationYear", "phone", "programName"]);
   });
 
   it("keeps a previously saved option that is no longer offered", () => {
@@ -67,14 +69,14 @@ describe("applicationCompleteness", () => {
 
   it("lists missing fields by section and missing or rejected documents", () => {
     const { givenName: _g, graduationYear: _y, ...partial } = complete;
-    const out = applicationCompleteness(partial, [uploaded[0]!, { label: "Government ID", status: "rejected" }]);
-    expect(out.missing).toEqual(["Personal details: First name", "Academic history: Year completed", "Document: Government ID"]);
+    const out = applicationCompleteness(partial, uploaded.map((doc) => doc.label === "Passport" ? { ...doc, status: "rejected" } : doc));
+    expect(out.missing).toEqual(["Personal details: First name", "Academic history: Year completed", "Document: Passport"]);
     expect(out.sections.program.done).toBe(true);
     expect(out.pct).toBeLessThan(100);
   });
 
   it("treats an application with no document checklist as missing the required documents", () => {
-    expect(applicationCompleteness(complete, []).documentsMissing).toEqual(["Official transcript", "Government ID"]);
+    expect(applicationCompleteness(complete, []).documentsMissing).toEqual(uploaded.map((doc) => doc.label));
   });
 });
 
@@ -101,11 +103,11 @@ describe("submit_application", () => {
 
   it("returns 400 APPLICATION_INCOMPLETE listing what is missing", async () => {
     db.admissionsApplication.findFirst.mockResolvedValue(
-      app({ formJson: JSON.stringify({ givenName: "Ada" }), documents: [{ id: "d-0", label: "Government ID", status: "missing", fileName: null }] }),
+      app({ formJson: JSON.stringify({ givenName: "Ada" }), documents: [{ id: "d-0", label: "Passport", status: "missing", fileName: null }] }),
     );
     const err = await runApplicantAction(user, "submit_application").catch((e: unknown) => e);
     expect(err).toMatchObject({ status: 400, code: "APPLICATION_INCOMPLETE" });
-    expect((err as { missing: string[] }).missing).toContain("Document: Government ID");
+    expect((err as { missing: string[] }).missing).toContain("Document: Passport");
     expect((err as Error).message).toMatch(/^Complete these before submitting: Personal details: Last name/);
     expect(db.admissionsApplication.updateMany).not.toHaveBeenCalled();
   });

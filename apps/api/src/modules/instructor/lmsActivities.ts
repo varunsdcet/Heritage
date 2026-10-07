@@ -3,6 +3,7 @@ import { MAX_STUDENT_FILE_BYTES } from "@myheritage/contracts";
 import { prisma } from "@myheritage/db";
 import { isSafeLink } from "../../lib/safeLink.js";
 import { sanitizeLessonHtml } from "./aiDraftContent.js";
+import { LMS_ACCESS_RESTRICTIONS_KEY, serializeLmsAccessRestrictions } from "./lmsAccessRestrictions.js";
 
 /** Extensions a student may upload (mirrors the submission upload whitelist). */
 export const SUBMISSION_EXTENSIONS = [".pdf", ".doc", ".docx", ".xls", ".xlsx", ".csv", ".png", ".jpg", ".jpeg", ".zip"];
@@ -163,6 +164,9 @@ export function activityContentFromForm(type: string, fields: Record<string, str
     hidden: /hide/i.test(fields.Availability || ""),
     settings: activitySettings(fields),
   };
+  const restrictions = serializeLmsAccessRestrictions(fields[LMS_ACCESS_RESTRICTIONS_KEY]);
+  if (restrictions) content.settings[LMS_ACCESS_RESTRICTIONS_KEY] = restrictions;
+  else delete content.settings[LMS_ACCESS_RESTRICTIONS_KEY];
   const bodyHtml = (fields["Page content"] || fields.Body || "").trim();
   if (kind === "PAGE" && !bodyHtml && !fields.Storyboard) throw badRequest("Page content is required");
   if (bodyHtml) content.body = sanitizeLessonHtml(bodyHtml);

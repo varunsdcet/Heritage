@@ -7,13 +7,15 @@ import { CurriculumOutline } from "@/components/selfpaced/CurriculumOutline";
 import { SelfpacedShell } from "@/components/selfpaced/SelfpacedShell";
 import { isEnrolled, loadSelfpacedUser } from "@/lib/selfpacedAuth";
 import { getCurriculum } from "@/lib/selfpacedCurriculum";
-import { formatCad, getSelfpacedProgram } from "@/lib/selfpacedPrograms";
+import { formatCad } from "@/lib/selfpacedPrograms";
+import { useSelfpacedCatalogue } from "@/lib/useSelfpacedCatalogue";
 
 function ProgramInner() {
   const params = useParams<{ slug: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const program = getSelfpacedProgram(params.slug);
+  const { programs, loading } = useSelfpacedCatalogue();
+  const program = programs.find((item) => item.slug === params.slug || item.id === params.slug);
   const chapters = program ? getCurriculum(program.slug) : [];
   const [enrolled, setEnrolled] = useState(false);
   const [loggedIn, setLoggedIn] = useState(false);
@@ -34,6 +36,10 @@ function ProgramInner() {
     }
     router.replace(`/selfpaced/checkout?slug=${encodeURIComponent(program.slug)}`);
   }, [program, searchParams, router]);
+
+  if (!program && loading) {
+    return <SelfpacedShell><div className="sp-detail sp-detail--empty"><p>Loading live program…</p></div></SelfpacedShell>;
+  }
 
   if (!program) {
     return (
@@ -71,7 +77,7 @@ function ProgramInner() {
               <span>Hours</span>
             </div>
             <div>
-              <strong>{chapters.length}</strong>
+              <strong>{program.chapters}</strong>
               <span>Chapters</span>
             </div>
             <div>
@@ -88,7 +94,7 @@ function ProgramInner() {
         <aside className="sp-tuition">
           <p className="sp-kicker">TUITION</p>
           <p className="sp-tuition__price">{formatCad(program.priceCad)}</p>
-          <p className="sp-tuition__note">One-time payment via Stripe · 1 chapter unlocks each day · Premium certificate on completion</p>
+          <p className="sp-tuition__note">{program.priceCad === 0 ? "Free test enrolment · no card required" : "One-time payment via Stripe"} · 1 chapter unlocks each day · Premium certificate on completion</p>
           {!loggedIn ? (
             <p className="sp-tuition__auth-note">
               Sign up or log in, then pay on Stripe. The course unlocks only after successful payment.
@@ -100,7 +106,7 @@ function ProgramInner() {
             </Link>
           ) : (
             <button type="button" className="sp-btn sp-btn--primary sp-btn--block" onClick={goPay}>
-              {loggedIn ? "Pay with Stripe" : "Sign up & pay with Stripe"}
+              {program.priceCad === 0 ? (loggedIn ? "Enrol free" : "Sign up & enrol free") : loggedIn ? "Pay with Stripe" : "Sign up & pay with Stripe"}
             </button>
           )}
           <ul className="sp-tuition__features">
@@ -111,7 +117,7 @@ function ProgramInner() {
               </li>
             ))}
           </ul>
-          <p className="sp-tuition__secure">Secure checkout powered by Stripe (test mode)</p>
+          <p className="sp-tuition__secure">{program.priceCad === 0 ? "Testing course · no payment collected" : "Secure checkout powered by Stripe (test mode)"}</p>
         </aside>
       </div>
     </SelfpacedShell>

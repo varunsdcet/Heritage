@@ -13,13 +13,14 @@ House rules:
 - Do not invent institutional policy: pass marks, attendance percentages, late penalties, credit values, accreditation, certifications or mandatory host/employer signatures. If something needs a policy, say "Requires institutional approval" — unless the SOURCE OUTLINE states it.
 - Do not invent URLs, citations, statistics about real markets, or quotations from real people. Any company, person, interview or dataset you create is fictional and must be labelled synthetic.
 - Keep every number internally consistent with the facts you are given. Show working for calculations.
-- No video, audio or narration scripts — this is a text-based course.
+- Synchronous/offline courses are text-led: do not add video, audio or narration scripts to them.
+- Self-paced courses include a narrated video storyboard only when the task explicitly requests it. The storyboard must teach the same approved lesson content and must not introduce new facts.
 - Plain text inside JSON strings: no HTML, no markdown symbols (#, **, |).`;
 
 function deliveryNote(delivery: Blueprint["course"]["delivery"]) {
   return delivery === "synchronous"
-    ? "Delivery: SYNCHRONOUS live online sessions. Lessons are scheduled live sessions with instructor teaching, guided reading during class, supervised workshops in breakout teams and live checkpoints."
-    : "Delivery: SELF-PACED (asynchronous). Each lesson is a guided self-study unit: the learner reads, studies worked examples, completes a practice activity on their own, checks understanding with self-checks and records an exit reflection. Never refer to live classes, breakout rooms or the instructor speaking.";
+    ? "Delivery: SYNCHRONOUS/OFFLINE live sessions. Lessons are instructor-led with guided reading, supervised workshops and live checkpoints. Do not generate video, audio or narration scripts."
+    : "Delivery: SELF-PACED (asynchronous). Each lesson is a guided self-study unit with a course-specific AI narrated video storyboard, reading, worked examples, independent practice, self-checks and an exit reflection. Never refer to live classes or breakout rooms.";
 }
 
 function sourceBlock(outline: string, max: number) {
@@ -167,6 +168,9 @@ export function lessonPrompt(input: {
   const sync = bp.course.delivery === "synchronous";
   const quizMinutes = Math.min(bp.quizMinutes, Math.floor(lesson.minutes / 2));
   const planMinutes = lesson.minutes - (input.isLast ? quizMinutes : 0);
+  const storyboardRule = sync
+    ? "- Do not return video, audio or narration content."
+    : `- storyboard: a course-specific narrated video lecture with 5–10 slides. Each slide needs a concise heading, 2–4 short bullets and 2–4 complete spoken-narration sentences. Teach only facts already present in this generated lesson; do not invent citations, policies or statistics. Aim for 5–10 minutes and use plain Canadian English.`;
   return [
     `TASK: Write the complete learner and instructor material for ONE ${sync ? "live session" : "self-study unit"}: ${lesson.id} "${lesson.title}".`,
     deliveryNote(bp.course.delivery),
@@ -184,9 +188,10 @@ export function lessonPrompt(input: {
 - session_plan: ${sync ? "live components" : "self-study activities"} whose minutes add up to EXACTLY ${planMinutes}.${input.isLast ? ` Do not include the module quiz; the system adds the ${quizMinutes}-minute ${quizCode(mod.number)} quiz to this lesson.` : ""}
 - practical_method: 3–5 steps. workshop: 3–5 ${sync ? "supervised workshop" : "independent practice"} steps producing a tangible output. evidence: what the learner submits or keeps.
 - self_check: 1–3 questions with model responses. exit_record: 2–3 reflection prompts. glossary: 2–6 terms.
+- ${storyboardRule.slice(2)}
 - instructor: facilitation notes, expected misconceptions, model answers (with calculations), feedback guidance — instructor-only.
 - review_flags: list anything a subject expert must verify (claims, numbers, policies). Empty list if none.
-Return JSON with keys: objectives, outcomes, core_reading, key_learning, worked_example, common_error, session_plan, practical_method, workshop, evidence, self_check, exit_record, glossary, instructor, review_flags.
+Return JSON with keys: objectives, outcomes, core_reading, key_learning, worked_example, common_error, session_plan, practical_method, workshop, evidence, self_check, exit_record, glossary, storyboard, instructor, review_flags. For synchronous/offline delivery set storyboard to null.
 Gold example (CAP 101, M01-L02, synchronous 150 minutes — match this depth and style for the requested lesson):
 ${LESSON_EXAMPLE}`,
   ]

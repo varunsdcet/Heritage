@@ -172,6 +172,7 @@ export type CourseLmsState = {
     id: string;
     title: string;
     summary?: string;
+    accessRestrictions?: string;
     activities: Array<{
       id?: string;
       type: string;

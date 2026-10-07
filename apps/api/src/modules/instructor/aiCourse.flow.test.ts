@@ -110,6 +110,16 @@ function fakeAnswer(prompt: string): unknown {
       self_check: [{ question: "What is scope?", model_response: "The agreed boundary." }],
       exit_record: "One sentence on today's decision.",
       glossary: [{ term: "Scope", definition: "Boundary of work" }],
+      storyboard: {
+        title: `${id} narrated lesson`,
+        estimated_duration_sec: 360,
+        slides: Array.from({ length: 5 }, (_, i) => ({
+          number: i + 1,
+          heading: `${id} concept ${i + 1}`,
+          bullets: ["Key idea", "Applied example"],
+          narration: `This slide explains the approved ${id} lesson concept and its practical application.`,
+        })),
+      },
       instructor: { facilitation: ["Facilitate"], misconceptions: ["Mistake"], model_answers: ["INSTRUCTOR-MODEL-ANSWER"], feedback: ["Feedback"] },
     };
   }
@@ -250,10 +260,10 @@ beforeEach(() => {
   });
 });
 
-async function buildCourse() {
+async function buildCourse(delivery: "synchronous" | "self_paced" = "synchronous") {
   await startAiCourseBlueprint(teacher, PATH, {
     path: PATH,
-    brief: { hours: 12, modules: 3, lessonsPerModule: 2, delivery: "synchronous", quizQuestions: 5, outline: "CAP 101 outline" },
+    brief: { hours: 12, modules: 3, lessonsPerModule: 2, delivery, quizQuestions: 5, outline: "CAP 101 outline" },
   });
   await waitFor(async () => (await getAiCourse(teacher, PATH)).job?.blueprintTask.status === "done", "blueprint");
   const state = await getAiCourse(teacher, PATH);
@@ -266,6 +276,56 @@ async function buildCourse() {
 }
 
 describe("AI course builder end to end", () => {
+  it("filters restricted sections and activities from the student LMS payload", async () => {
+    const otherOnly = JSON.stringify({ match: "all", rules: [{ type: "student", studentIds: ["student-2"] }] });
+    store.screens.set(
+      PATH,
+      JSON.stringify({
+        extraTopics: [
+          { id: "topic-private", title: "Private section", activities: [] },
+          { id: "topic-public", title: "Public section", activities: [] },
+        ],
+        topicRestrictions: { "topic-private": otherOnly },
+        topicActivities: {
+          "topic-private": [{ id: "private-page", type: "PAGE", name: "Private page", body: "secret" }],
+          "topic-public": [
+            { id: "restricted-page", type: "PAGE", name: "Restricted page", body: "secret", settings: { "Access restrictions": otherOnly } },
+            { id: "open-page", type: "PAGE", name: "Open page", body: "open" },
+          ],
+        },
+      }),
+    );
+
+    const lms = await getStudentCourseLms(studentUser, sectionId);
+    expect(lms.topics.some((topic) => topic.id === "topic-private")).toBe(false);
+    const publicActivities = lms.topics.find((topic) => topic.id === "topic-public")?.activities || [];
+    expect(publicActivities.map((activity) => activity.id)).toEqual(["open-page"]);
+  });
+
+  it("publishes narrated video storyboards to self-paced students only", async () => {
+    await buildCourse("self_paced");
+    const generated = await getAiCourse(teacher, PATH);
+    expect(generated.checks.find((check) => check.label === "AI video lectures")).toMatchObject({ ok: true });
+    await publishAiCourse(teacher, PATH);
+    const lms = await getStudentCourseLms(studentUser, sectionId);
+    const visible = lms.topics.flatMap((topic) => topic.activities);
+    const lesson = visible.find((activity) => activity.name.startsWith("M01-L01"));
+    expect(lesson?.storyboard?.slides).toHaveLength(5);
+    expect(lesson?.body).toContain("Learning objectives");
+    expect(lesson?.body).toContain("Core reading");
+    expect(lesson?.body).toContain("Worked example");
+    expect(lesson?.body).toContain("SELF-STUDY PLAN");
+    expect(lesson?.body).toContain("Practice activity");
+    expect(lesson?.body).toContain("Formative self-check");
+    expect(lesson?.body).toContain("Exit record");
+    expect(lesson?.body).toContain("Glossary");
+    expect(visible.some((activity) => activity.type === "QUIZ" && activity.questions?.length === 5)).toBe(true);
+    const assignment = visible.find((activity) => activity.type === "ASSIGNMENT");
+    expect(assignment?.assignment?.instructions).toContain("ANALYTIC RUBRIC — 100 POINTS");
+    expect(assignment?.assignmentId).toBeTruthy();
+    expect(JSON.stringify(lesson)).not.toContain("INSTRUCTOR-MODEL-ANSWER");
+  }, 60_000);
+
   it("generates, publishes, hides answer keys from students and grades one quiz attempt", async () => {
     await buildCourse();
     const generated = await getAiCourse(teacher, PATH);

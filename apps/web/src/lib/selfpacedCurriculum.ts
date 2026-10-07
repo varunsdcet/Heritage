@@ -434,6 +434,81 @@ function buildFromSeeds(seeds: ChapterSeed[]): SelfpacedChapter[] {
   return seeds.map(richChapter);
 }
 
+const capstoneSeeds: ChapterSeed[] = [
+  {
+    id: "cap-01", title: "Module 1 · Capstone Orientation and Project Charter", hours: 10,
+    summary: "Set the project purpose, scope, roles, constraints, and evidence standards for an applied business capstone.",
+    focus: ["Problem framing", "Project scope", "Team roles", "Success measures"],
+    terms: [["Project charter", "Agreement defining purpose, scope and ownership"], ["Scope", "The agreed boundary of project work"], ["Deliverable", "A concrete project output"], ["Success measure", "Evidence used to judge the result"]],
+  },
+  {
+    id: "cap-02", title: "Module 2 · Client Discovery and Stakeholder Analysis", hours: 10,
+    summary: "Gather credible client needs and map the people who influence, use, or approve the proposed solution.",
+    focus: ["Discovery interviews", "Stakeholder mapping", "Needs analysis", "Consent and confidentiality"],
+    terms: [["Stakeholder", "Person or group affected by the project"], ["Discovery", "Structured fact-finding before solution design"], ["Influence map", "View of stakeholder power and interest"], ["Consent", "Permission to collect or use information"]],
+  },
+  {
+    id: "cap-03", title: "Module 3 · Business Research and Evidence Quality", hours: 10,
+    summary: "Build a reliable evidence base using ethical research, source evaluation, and consistent documentation.",
+    focus: ["Research questions", "Source credibility", "Primary evidence", "Citation records"],
+    terms: [["Primary research", "Evidence collected directly for the project"], ["Secondary research", "Existing published evidence"], ["Triangulation", "Checking a finding with multiple sources"], ["Bias", "A systematic influence on evidence or judgment"]],
+  },
+  {
+    id: "cap-04", title: "Module 4 · Data Analysis and Business Insight", hours: 10,
+    summary: "Clean, organize, analyse, and explain business data without overstating what the evidence supports.",
+    focus: ["Data cleanup", "Trend analysis", "Root causes", "Insight statements"],
+    terms: [["Data validation", "Checks that improve data accuracy"], ["Trend", "A pattern observed over time"], ["Root cause", "Underlying reason a problem occurs"], ["Insight", "Decision-relevant meaning drawn from evidence"]],
+  },
+  {
+    id: "cap-05", title: "Module 5 · Market and Competitive Context", hours: 10,
+    summary: "Assess customers, alternatives, competitors, and external forces shaping the client decision.",
+    focus: ["Customer segments", "Competitor review", "Value proposition", "External environment"],
+    terms: [["Segment", "Customer group with shared needs"], ["Benchmark", "Comparison point for performance"], ["Value proposition", "Reason a customer chooses an offer"], ["Differentiator", "Meaningful advantage over alternatives"]],
+  },
+  {
+    id: "cap-06", title: "Module 6 · Solution Design and Option Appraisal", hours: 10,
+    summary: "Generate feasible options and use transparent criteria to recommend the strongest response to the problem.",
+    focus: ["Option generation", "Decision criteria", "Feasibility", "Recommendation logic"],
+    terms: [["Option appraisal", "Structured comparison of possible solutions"], ["Feasibility", "Whether an option can realistically be delivered"], ["Trade-off", "Benefit accepted at the cost of another benefit"], ["Decision matrix", "Weighted comparison of options"]],
+  },
+  {
+    id: "cap-07", title: "Module 7 · Financial Reasoning and Business Case", hours: 10,
+    summary: "Estimate costs, benefits, assumptions, and sensitivity so decision-makers can assess the recommendation.",
+    focus: ["Cost estimates", "Benefit estimates", "Break-even thinking", "Sensitivity checks"],
+    terms: [["Business case", "Evidence and economics supporting a decision"], ["Fixed cost", "Cost unchanged by activity volume"], ["Break-even", "Point where benefits cover costs"], ["Sensitivity", "How results change when assumptions change"]],
+  },
+  {
+    id: "cap-08", title: "Module 8 · Risk, Ethics and Compliance", hours: 10,
+    summary: "Identify operational, financial, privacy, people, and reputation risks and plan proportionate controls.",
+    focus: ["Risk register", "Ethical review", "Privacy controls", "Mitigation ownership"],
+    terms: [["Risk register", "Record of risks, ratings, controls and owners"], ["Likelihood", "Chance that a risk occurs"], ["Impact", "Consequence if a risk occurs"], ["Mitigation", "Action reducing likelihood or impact"]],
+  },
+  {
+    id: "cap-09", title: "Module 9 · Implementation and Change Plan", hours: 10,
+    summary: "Translate the recommendation into sequenced work, ownership, communication, resources, and checkpoints.",
+    focus: ["Work breakdown", "Timeline", "Change communication", "Adoption measures"],
+    terms: [["Milestone", "Significant delivery checkpoint"], ["Dependency", "Work that relies on another task"], ["Change plan", "Approach for moving people to a new way of working"], ["Adoption", "Extent to which people use the solution"]],
+  },
+  {
+    id: "cap-10", title: "Module 10 · Professional Report Writing", hours: 10,
+    summary: "Build an executive-ready report with clear claims, traceable evidence, visuals, and actionable recommendations.",
+    focus: ["Executive summary", "Evidence structure", "Data visuals", "Editing and citation"],
+    terms: [["Executive summary", "Concise decision-focused overview"], ["Finding", "Statement supported by analysed evidence"], ["Appendix", "Supporting material outside the main report"], ["Citation", "Traceable acknowledgement of a source"]],
+  },
+  {
+    id: "cap-11", title: "Module 11 · Presentation and Stakeholder Pitch", hours: 10,
+    summary: "Deliver a concise, evidence-led presentation and respond professionally to challenge and feedback.",
+    focus: ["Narrative structure", "Slide design", "Delivery practice", "Question handling"],
+    terms: [["Pitch", "Focused presentation intended to secure a decision"], ["Call to action", "Specific next step requested from the audience"], ["Speaker note", "Private prompt supporting delivery"], ["Rehearsal", "Practice used to improve timing and clarity"]],
+  },
+  {
+    id: "cap-12", title: "Module 12 · Capstone Submission and Reflection", hours: 10,
+    summary: "Complete quality assurance, submit the integrated capstone package, and reflect on professional growth.",
+    focus: ["Quality assurance", "Final submission", "Feedback response", "Professional reflection"],
+    terms: [["Quality assurance", "Checks that confirm standards are met"], ["Sign-off", "Formal approval of a deliverable"], ["Reflection", "Evidence-based review of learning and performance"], ["Action plan", "Specific next steps for continued improvement"]],
+  },
+];
+
 const officeSeeds: ChapterSeed[] = [
   {
     id: "oa-01",
@@ -1156,23 +1231,201 @@ const machinistSeeds: ChapterSeed[] = [
   },
 ];
 
+/**
+ * Programme outlines published by HCCB are the catalogue source of truth. Reuse the richer
+ * practice vocabulary above while keeping the public chapter title, hours, and description
+ * exact. This also prevents the player outline from drifting from the chapter count shown on
+ * the catalogue card.
+ */
+function officialSeeds(
+  prefix: string,
+  chapters: Array<{ title: string; hours: number; summary: string }>,
+  practiceReferences: ChapterSeed[],
+): ChapterSeed[] {
+  return chapters.map((chapter, index) => {
+    const practice = practiceReferences[index % practiceReferences.length];
+    return {
+      id: `${prefix}-${String(index + 1).padStart(2, "0")}`,
+      title: `Chapter ${index + 1} · ${chapter.title.trim()}`,
+      hours: chapter.hours,
+      summary: chapter.summary,
+      focus: practice.focus,
+      terms: practice.terms,
+    };
+  });
+}
+
+const officialElectricalSeeds = officialSeeds(
+  "re",
+  [
+    {
+      title: "Trade Safety, Regulations & Professional Practice",
+      hours: 20,
+      summary:
+        "Build a foundation in Canadian safety legislation, regulatory frameworks, and professional practice for the Red Seal Construction Electrician exam.",
+    },
+    {
+      title: "Canadian Essential Skills and NOC Classification System Review",
+      hours: 30,
+      summary:
+        "Review the Canadian Essential Skills framework and National Occupational Classification system used to define, train, and evaluate Red Seal trades.",
+    },
+    {
+      title: "Sketches, Drawings, Tools, Canadian Codes & Key Study Areas",
+      hours: 50,
+      summary:
+        "Review electrical sketches, drawings, tools, the Canadian Electrical Code, and the core technical competency areas covered by the exam.",
+    },
+    {
+      title: "Specific Trade Exam Review",
+      hours: 241,
+      summary:
+        "Complete an exam-focused review of core Construction Electrician topics, practice questions, and test-taking strategies.",
+    },
+    {
+      title: "Troubleshooting & Maintenance",
+      hours: 9,
+      summary:
+        "Diagnose electrical faults, perform preventive maintenance, interpret system issues, and apply safe repair procedures across common electrical systems.",
+    },
+  ],
+  electricalSeeds,
+);
+
+const officialChefSeeds = officialSeeds(
+  "ch",
+  [
+    {
+      title: "Canadian Trade Safety Awareness",
+      hours: 20,
+      summary:
+        "Apply Canadian legal and regulatory safety requirements, hazard controls, and practical safety systems in a professional kitchen.",
+    },
+    {
+      title: "Canadian Essential Skills and NOC Classification System Review",
+      hours: 20,
+      summary:
+        "Interpret Canadian Essential Skills and NOC profiles, map skills to Red Seal expectations, and use them for exam and career planning.",
+    },
+    {
+      title: "Trade Mathematics and Cost Control",
+      hours: 10,
+      summary:
+        "Scale recipes, analyze yields and losses, calculate cost metrics, and use trade mathematics to support profitable menu decisions.",
+    },
+    {
+      title: "Tools, Equipment, and Kitchen Operations",
+      hours: 60,
+      summary:
+        "Select and use professional kitchen tools safely, plan equipment setup, and apply standardized Canadian kitchen operations.",
+    },
+    {
+      title: "Food Safety and Sanitation",
+      hours: 40,
+      summary:
+        "Design, apply, and troubleshoot Canadian food-safety and sanitation systems aligned with FOODSAFE principles and Red Seal expectations.",
+    },
+    {
+      title: "Stocks, Soups, and Sauces",
+      hours: 10,
+      summary:
+        "Select, produce, evaluate, and troubleshoot classical and contemporary stocks, soups, and sauces to professional standards.",
+    },
+    {
+      title: "Vegetables, Fruits, and Plant-Based Cookery",
+      hours: 20,
+      summary:
+        "Select, handle, and cook produce, legumes, grains, and plant-based proteins for quality, nutrition, consistency, and cost control.",
+    },
+    {
+      title: "Meat, Poultry, and Game",
+      hours: 10,
+      summary:
+        "Apply butchery classifications, appropriate cooking methods, doneness controls, food safety, and quality troubleshooting.",
+    },
+    {
+      title: "Fish and Seafood",
+      hours: 10,
+      summary:
+        "Classify and select seafood, apply appropriate cooking methods, control safety and quality, and calculate yields and cost.",
+    },
+    {
+      title: "Breakfast and Short Order Cookery",
+      hours: 10,
+      summary:
+        "Plan, organize, and execute high-volume breakfast and short-order service while maintaining safety, speed, and consistent quality.",
+    },
+    {
+      title: "Baking and Desserts",
+      hours: 10,
+      summary:
+        "Analyze formulas, execute and troubleshoot baked products and plated desserts, and apply professional quality and safety standards.",
+    },
+    {
+      title: "Garde Manger",
+      hours: 20,
+      summary:
+        "Plan, produce, plate, and evaluate cold-kitchen preparations with safe mise en place, efficient workflow, and Red Seal reasoning.",
+    },
+    {
+      title: "Menu Planning and Nutrition",
+      hours: 20,
+      summary:
+        "Design nutritionally balanced, cost-effective menus aligned with Canadian dietary guidance and professional kitchen realities.",
+    },
+    {
+      title: "Leadership and Kitchen Management",
+      hours: 30,
+      summary:
+        "Lead kitchen teams, organize brigade systems, coach diverse staff, and manage service, conflict, safety, and performance.",
+    },
+    {
+      title: "Red Seal Exam Review and Practice Testing",
+      hours: 60,
+      summary:
+        "Consolidate exam readiness through targeted review, practice questions, timed simulations, performance diagnosis, and an action plan.",
+    },
+  ],
+  chefSeeds,
+);
+
+const officialMachinistSeeds = officialSeeds(
+  "mc",
+  [
+    {
+      title: "Specific Trade Exam Review",
+      hours: 200,
+      summary:
+        "Complete sustained Red Seal machinist exam practice, diagnose knowledge gaps across NOA blocks, and apply disciplined exam strategies.",
+    },
+  ],
+  machinistSeeds,
+);
+
 export const SELFPACED_CURRICULUM: Record<string, SelfpacedChapter[]> = {
+  "cap-101-applied-business-capstone": withEval("cap", "CAP 101 Applied Business Capstone", buildFromSeeds(capstoneSeeds)),
   "office-administration-diploma": withEval("oa", "Office Administration Diploma", buildFromSeeds(officeSeeds)),
   "pharmacy-assistant": withEval("ph", "Pharmacy Assistant", buildFromSeeds(pharmacySeeds)),
   "red-seal-exam-preparation-electrician": withEval(
     "re",
     "Red Seal Electrician Prep",
-    buildFromSeeds(remapSeeds(electricalSeeds, "re", "Electrician")),
+    buildFromSeeds(officialElectricalSeeds),
   ),
   "red-seal-exam-preparation-carpentry": withEval("rc", "Red Seal Carpentry Prep", buildFromSeeds(carpentrySeeds)),
   "red-seal-exam-preparation-plumber": withEval("pl", "Red Seal Plumber Prep", buildFromSeeds(plumberSeeds)),
-  "red-seal-exam-preparation-chef": withEval("ch", "Red Seal Chef Prep", buildFromSeeds(chefSeeds)),
+  "red-seal-exam-preparation-chef": withEval("ch", "Red Seal Chef Prep", buildFromSeeds(officialChefSeeds)),
   "red-seal-exam-preparation-hvac": withEval("hv", "Red Seal HVAC Prep", buildFromSeeds(hvacSeeds)),
-  "red-seal-exam-preparation-machinist": withEval("mc", "Red Seal Machinist Prep", buildFromSeeds(machinistSeeds)),
+  "red-seal-exam-preparation-machinist": withEval("mc", "Red Seal Machinist Prep", buildFromSeeds(officialMachinistSeeds)),
 };
 
 export function getCurriculum(slug: string): SelfpacedChapter[] {
   return SELFPACED_CURRICULUM[slug] || [];
+}
+
+/** Installs a validated server-authored outline for an admin-created programme. */
+export function installSelfpacedCurriculum(slug: string, chapters: SelfpacedChapter[]) {
+  if (!slug || !Array.isArray(chapters) || chapters.length === 0) return;
+  SELFPACED_CURRICULUM[slug] = chapters;
 }
 
 export function getChapter(slug: string, chapterId: string): SelfpacedChapter | undefined {

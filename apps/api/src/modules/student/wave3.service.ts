@@ -25,6 +25,7 @@ import {
   mergeCourseLmsOverlay,
   studentQuizQuestionsForActivity,
 } from "../instructor/courseLmsScreens.js";
+import { LMS_ACCESS_RESTRICTIONS_KEY, studentCanAccessLms } from "../instructor/lmsAccessRestrictions.js";
 import { quizFromActivity, studentQuizAttempts, studentQuizQuestions } from "../instructor/lmsQuiz.js";
 import { sectionLmsMeta } from "../instructor/sectionLmsMeta.js";
 import { liveClassUrl } from "../../lib/liveClass.js";
@@ -227,13 +228,15 @@ export async function getStudentCourseLms(user: SessionClaims, sectionId: string
     overlay,
   );
   const quizAttempts = await studentQuizAttempts(user.institutionId, sectionId, student.id);
+  const studentGroupIds = lms.groups.filter((group) => group.members.some((member) => member.id === student.id)).map((group) => group.id);
+  const mayAccess = (value: unknown) => studentCanAccessLms(value, { studentId: student.id, groupIds: studentGroupIds });
 
-  const topics = lms.topics.map((topic) => ({
+  const topics = lms.topics.filter((topic) => mayAccess(topic.accessRestrictions)).map((topic) => ({
     id: topic.id,
     title: topic.title,
     summary: topic.summary,
     activities: topic.activities
-      .filter((a) => !a.hidden)
+      .filter((a) => !a.hidden && mayAccess(a.settings?.[LMS_ACCESS_RESTRICTIONS_KEY]))
       .map((a) => {
         const type = a.type.toUpperCase();
         const base = {

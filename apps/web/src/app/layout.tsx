@@ -1,35 +1,6 @@
 import type { Metadata } from "next";
-import { Cormorant_Garamond, Inter, Playfair_Display, Plus_Jakarta_Sans } from "next/font/google";
 import "@myheritage/tokens/css";
 import "./globals.css";
-
-const sans = Inter({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
-  display: "swap",
-  variable: "--font-sans",
-});
-
-const display = Plus_Jakarta_Sans({
-  subsets: ["latin"],
-  weight: ["500", "600", "700", "800"],
-  display: "swap",
-  variable: "--font-display",
-});
-
-const certBody = Cormorant_Garamond({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
-  display: "swap",
-  variable: "--font-cert-body",
-});
-
-const certDisplay = Playfair_Display({
-  subsets: ["latin"],
-  weight: ["600", "700", "800"],
-  display: "swap",
-  variable: "--font-cert-display",
-});
 
 export const metadata: Metadata = {
   title: "MyHeritage",
@@ -38,7 +9,15 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${sans.variable} ${display.variable} ${certBody.variable} ${certDisplay.variable}`}>
+    <html
+      lang="en"
+      style={{
+        "--font-sans": 'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
+        "--font-display": '"Trebuchet MS", ui-sans-serif, system-ui, sans-serif',
+        "--font-cert-body": 'Georgia, "Times New Roman", serif',
+        "--font-cert-display": 'Georgia, "Times New Roman", serif',
+      } as React.CSSProperties}
+    >
       <body>{children}</body>
     </html>
   );

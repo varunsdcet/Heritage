@@ -69,6 +69,7 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
         background: "var(--mh-surface)",
         display: "grid",
         gap: 12,
+        minWidth: 0,
       }}
     >
       <h2 style={{ margin: 0, fontSize: 16 }}>{title}</h2>
@@ -79,7 +80,7 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label style={{ display: "grid", gap: 4, fontSize: 13 }}>
+    <label style={{ display: "grid", gap: 4, fontSize: 13, minWidth: 0 }}>
       <span style={{ color: "var(--mh-text-muted)" }}>{label}</span>
       {children}
     </label>
@@ -87,6 +88,10 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 const inputStyle: React.CSSProperties = {
+  width: "100%",
+  minWidth: 0,
+  maxWidth: "100%",
+  boxSizing: "border-box",
   border: "1px solid var(--mh-border)",
   borderRadius: 8,
   padding: "8px 10px",
@@ -314,7 +319,7 @@ export function AdminFinancePostingView() {
       {error ? <p style={{ color: "var(--mh-danger)" }}>{error}</p> : null}
       {notice ? <p style={{ color: "var(--mh-success, #0f766e)" }}>{notice}</p> : null}
       <Card title="Post ledger entry">
-        <form onSubmit={onPost} style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))" }}>
+        <form onSubmit={onPost} className="mh-finance-posting__form">
           <Field label="Student">
             <select style={inputStyle} required value={form.studentId} onChange={(e) => setForm({ ...form, studentId: e.target.value })}>
               <option value="">Select…</option>
@@ -347,15 +352,15 @@ export function AdminFinancePostingView() {
       </Card>
       <Card title={`Ledger (${items.length})`}>
         {items.map((row) => (
-          <div key={String(row.id)} style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: "8px 0", borderBottom: "1px solid var(--mh-border)" }}>
-            <div>
+          <div key={String(row.id)} className="mh-finance-posting__row">
+            <div className="mh-finance-posting__entry">
               <strong>{String(row.studentName)}</strong> · {String(row.label)}
               <div style={{ fontSize: 12, color: "var(--mh-text-muted)" }}>
                 {String(row.kind)} · CAD {String(row.amountCad)} · {String(row.status)}
                 {row.source ? ` · ${String(row.source)}` : ""}
               </div>
             </div>
-            <div style={{ display: "flex", gap: 6 }}>
+            <div className="mh-finance-posting__actions">
               <Button type="button" variant="secondary" onClick={() => void adjust(String(row.id), "mark_paid")}>Paid</Button>
               <Button type="button" variant="secondary" onClick={() => void adjust(String(row.id), "waive")}>Waive</Button>
               <Button type="button" variant="secondary" onClick={() => void adjust(String(row.id), "reverse")}>Reverse</Button>
@@ -623,7 +628,7 @@ export function AdminStudentDocumentsView() {
       {error ? <p style={{ color: "var(--mh-danger)" }}>{error}</p> : null}
       {notice ? <p style={{ color: "var(--mh-success, #0f766e)" }}>{notice}</p> : null}
       <Card title="Assign document">
-        <form onSubmit={onSave} style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))" }}>
+        <form onSubmit={onSave} className="mh-student-documents__form">
           <Field label="Student">
             <select style={inputStyle} required value={form.studentId} onChange={(e) => setForm({ ...form, studentId: e.target.value })}>
               <option value="">Select…</option>
@@ -642,12 +647,14 @@ export function AdminStudentDocumentsView() {
       </Card>
       <Card title={`Documents (${items.length})`}>
         {items.map((row) => (
-          <div key={String(row.id)} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "8px 0", borderBottom: "1px solid var(--mh-border)" }}>
-            <div>
+          <div key={String(row.id)} className="mh-student-documents__row">
+            <div className="mh-student-documents__entry">
               <strong>{String(row.recordName)}</strong> · {String(row.studentName)}
               <div style={{ fontSize: 12, color: "var(--mh-text-muted)" }}>{String(row.recordDate ?? "—")} · {String(row.docLabel ?? "—")}</div>
             </div>
-            <Button type="button" variant="secondary" onClick={() => void onDelete(String(row.id))}>Delete</Button>
+            <div className="mh-student-documents__actions">
+              <Button type="button" variant="secondary" onClick={() => void onDelete(String(row.id))}>Delete</Button>
+            </div>
           </div>
         ))}
         {!items.length ? <p style={{ color: "var(--mh-text-muted)" }}>No documents.</p> : null}

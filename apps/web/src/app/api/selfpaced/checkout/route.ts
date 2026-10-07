@@ -2,9 +2,17 @@ import Stripe from "stripe";
 import { NextRequest, NextResponse } from "next/server";
 import { getSelfpacedProgram } from "@/lib/selfpacedPrograms";
 import { STRIPE_SECRET_KEY, useHostedStripeCheckout } from "@/lib/selfpacedStripe";
+import { API_URL } from "@/lib/api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+async function resolveProgram(slug: string) {
+  const local = getSelfpacedProgram(slug);
+  if (local) return local;
+  const response = await fetch(`${API_URL.replace(/\/$/, "")}/selfpaced/programs/${encodeURIComponent(slug)}`, { cache: "no-store" });
+  return response.ok ? await response.json() as ReturnType<typeof getSelfpacedProgram> : undefined;
+}
 
 function originFrom(req: NextRequest): string {
   const proto = req.headers.get("x-forwarded-proto") || "http";
@@ -15,12 +23,22 @@ function originFrom(req: NextRequest): string {
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as { slug?: string };
-    const program = getSelfpacedProgram(body.slug || "");
+    const program = await resolveProgram(body.slug || "");
     if (!program) {
       return NextResponse.json({ error: "Unknown program" }, { status: 404 });
     }
 
     const origin = originFrom(req);
+
+    if (program.priceCad === 0) {
+      return NextResponse.json({
+        url: `${origin}/selfpaced/success?slug=${encodeURIComponent(program.slug)}&free=1&programId=${encodeURIComponent(program.id)}&amount=0`,
+        mode: "free",
+        programId: program.id,
+        programSlug: program.slug,
+        priceCad: 0,
+      });
+    }
 
     if (!useHostedStripeCheckout()) {
       // Explicit demo only — never silently skip the payment gateway in production.

@@ -1,4 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@myheritage/db";
 import { registerApplicant } from "./apply.js";
@@ -37,6 +38,76 @@ publicRouter.post("/apply", rateLimit("apply", 5, "Too many sign-up attempts fro
     next(err);
   }
 });
+
+const EnglishTestRegistration = z
+  .object({
+    institutionName: z.string().trim().min(1).max(160),
+    branchProfile: z.string().trim().max(160).default(""),
+    siteName: z.string().trim().max(160).default(""),
+    voucherCode: z.string().trim().max(80).default(""),
+    firstName: z.string().trim().min(1).max(80),
+    middleName: z.string().trim().max(80).default(""),
+    lastName: z.string().trim().min(1).max(80),
+    dateOfBirth: z.string().date(),
+    gender: z.string().trim().min(1).max(40),
+    highSchoolEnrolled: z.enum(["Yes", "No"]),
+    address1: z.string().trim().min(1).max(160),
+    address2: z.string().trim().max(160).default(""),
+    country: z.string().trim().min(1).max(80),
+    province: z.string().trim().min(1).max(80),
+    otherProvince: z.string().trim().max(80).default(""),
+    city: z.string().trim().min(1).max(80),
+    postalCode: z.string().trim().min(1).max(20),
+    email: z.string().trim().toLowerCase().email().max(200),
+    homePhone: z.string().trim().max(30).default(""),
+    mobilePhone: z.string().trim().min(6).max(30),
+    studentId: z.string().trim().min(1).max(80),
+    confirmStudentId: z.string().trim().min(1).max(80),
+    supplementalStudentId: z.string().trim().max(80).default(""),
+    resultInstitutions: z.array(z.string().trim().min(1).max(160)).max(10).default([]),
+    optOutCollegePlanningEmail: z.boolean().default(false),
+    privacyAccepted: z.literal(true),
+  })
+  .superRefine((value, ctx) => {
+    if (value.studentId !== value.confirmStudentId) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["confirmStudentId"], message: "Student IDs do not match." });
+    }
+    if (value.province === "Other" && !value.otherProvince) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["otherProvince"], message: "Specify the province/state." });
+    }
+  });
+
+publicRouter.post(
+  "/english-test-registrations",
+  rateLimit("english-test", 5, "Too many English Test registrations from this network. Try again later."),
+  async (req, res, next) => {
+    try {
+      const body = EnglishTestRegistration.parse(req.body);
+      const institution = await prisma.institution.findFirst({
+        where: process.env.PUBLIC_INSTITUTION_ID ? { institutionId: process.env.PUBLIC_INSTITUTION_ID } : {},
+        orderBy: { createdAt: "asc" },
+        select: { institutionId: true },
+      });
+      if (!institution) {
+        res.status(503).json({ error: { code: "UNAVAILABLE", message: "English Test registration is not open right now." } });
+        return;
+      }
+      const registrationId = randomUUID();
+      const reference = `HET-${new Date().getUTCFullYear()}-${registrationId.slice(0, 8).toUpperCase()}`;
+      const submittedAt = new Date().toISOString();
+      await prisma.sisScreenState.create({
+        data: {
+          institutionId: institution.institutionId,
+          path: `selfpaced:english-test:${registrationId}`,
+          payloadJson: JSON.stringify({ registrationId, reference, status: "received", submittedAt, ...body }),
+        },
+      });
+      res.status(201).json({ ok: true, registrationId, reference, status: "received", submittedAt });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 /**
  * Identity match needs both the student number and the registered family name, so a

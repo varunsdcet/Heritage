@@ -52,7 +52,7 @@ const COMMON: LmsFormSection[] = [
   },
   {
     title: "Restrict access",
-    fields: [stat("restrictions", "Access restrictions", "None"), stat("addRestriction", "Add restriction", "Add restriction…")],
+    fields: [],
   },
   {
     title: "Tags",

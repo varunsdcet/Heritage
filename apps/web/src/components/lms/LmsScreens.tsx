@@ -9,6 +9,7 @@ import { LiveClassPanel } from "@/components/LiveClassPanel";
 import { AiDraftVideoPlayer } from "@/components/ai-draft/AiDraftVideoPlayer";
 import type { AiDraftStoryboard } from "@/lib/aiDraftSamples";
 import { downloadLmsFile, formatFileSize } from "@/lib/lmsFiles";
+import { LmsAccessRestrictionsEditor } from "./LmsAccessRestrictions";
 
 export function AttendancePanel({
   lms,
@@ -742,16 +743,23 @@ export function SettingsPanel({ courseCode, title }: { courseCode: string; title
 
 export function EditSectionPanel({
   title,
+  accessRestrictions = "",
+  roster = [],
+  groups = [],
   onSave,
   onCancel,
 }: {
   title: string;
-  onSave: (name: string, summary: string) => void;
+  accessRestrictions?: string;
+  roster?: Array<{ studentId?: string; name: string; studentNumber: string; email?: string }>;
+  groups?: Array<{ id: string; name: string; members: Array<{ id: string; name: string }> }>;
+  onSave: (name: string, summary: string, accessRestrictions: string) => void;
   onCancel: () => void;
 }) {
   const [custom, setCustom] = useState(true);
   const [name, setName] = useState(title);
   const [summary, setSummary] = useState("");
+  const [restrictions, setRestrictions] = useState(accessRestrictions);
   return (
     <section className="mh-teacher-card">
       <h2>Edit section</h2>
@@ -771,10 +779,10 @@ export function EditSectionPanel({
       </div>
       <details className="mh-lms-addform__sec">
         <summary>Restrict access</summary>
-        <p className="mh-teacher-muted">None</p>
+        <LmsAccessRestrictionsEditor value={restrictions} roster={roster} groups={groups} onChange={setRestrictions} />
       </details>
       <div className="mh-lms-toolbar">
-        <button type="button" className="mh-teacher-btn" onClick={() => onSave(name, summary)}>
+        <button type="button" className="mh-teacher-btn" onClick={() => onSave(name, summary, restrictions)}>
           Save changes
         </button>
         <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary" onClick={onCancel}>
@@ -1367,16 +1375,20 @@ export function PermissionsPanel({ onBack }: { onBack: () => void }) {
   );
 }
 
-export type PageEditValues = { name: string; body: string; hidden: boolean };
+export type PageEditValues = { name: string; body: string; hidden: boolean; accessRestrictions: string };
 
 export function PageEditPanel({
   activity,
   hidden = false,
+  roster = [],
+  groups = [],
   onSave,
   onCancel,
 }: {
   activity: Activity;
   hidden?: boolean;
+  roster?: Array<{ studentId?: string; name: string; studentNumber: string; email?: string }>;
+  groups?: Array<{ id: string; name: string; members: Array<{ id: string; name: string }> }>;
   onSave: (values: PageEditValues) => void;
   onCancel: () => void;
 }) {
@@ -1384,6 +1396,7 @@ export function PageEditPanel({
   const editorRef = useRef<HTMLDivElement>(null);
   const [name, setName] = useState(activity.name);
   const [visibility, setVisibility] = useState(hidden ? "hide" : "show");
+  const [restrictions, setRestrictions] = useState(activity.settings?.["Access restrictions"] || "");
   const initialHtml = useMemo(() => {
     const body = activity.body || "";
     if (!body.trim() || /<[a-z][^>]*>/i.test(body)) return body;
@@ -1434,12 +1447,23 @@ export function PageEditPanel({
           </select>
         </label>
       </details>
+      <details className="mh-lms-addform__sec">
+        <summary>Restrict access</summary>
+        <LmsAccessRestrictionsEditor value={restrictions} roster={roster} groups={groups} onChange={setRestrictions} />
+      </details>
       <div className="mh-lms-toolbar">
         <button
           type="button"
           className="mh-teacher-btn"
           disabled={live?.busy || !name.trim()}
-          onClick={() => onSave({ name: name.trim(), body: editorRef.current?.innerHTML ?? activity.body ?? "", hidden: visibility === "hide" })}
+          onClick={() =>
+            onSave({
+              name: name.trim(),
+              body: editorRef.current?.innerHTML ?? activity.body ?? "",
+              hidden: visibility === "hide",
+              accessRestrictions: restrictions,
+            })
+          }
         >
           Save and return to course
         </button>

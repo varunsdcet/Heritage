@@ -71,9 +71,9 @@ async function call<T>(path: string, init?: RequestInit) {
   return api<T>(path, init, session.accessToken);
 }
 
-export function CourseAiBuilderDialog({ path, onClose, onPublished }: { path: string; onClose: () => void; onPublished?: () => void }) {
+export function CourseAiBuilderDialog({ path, onClose, onPublished, defaultDelivery }: { path: string; onClose: () => void; onPublished?: () => void; defaultDelivery?: Delivery }) {
   const [state, setState] = useState<State | null>(null);
-  const [brief, setBrief] = useState<Brief>(DEFAULT_BRIEF);
+  const [brief, setBrief] = useState<Brief>(() => ({ ...DEFAULT_BRIEF, ...(defaultDelivery ? { delivery: defaultDelivery, deliveryMethod: "Self-paced online", breakdown: "100% asynchronous online" } : {}) }));
   const [edit, setEdit] = useState<Blueprint | null>(null);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState("");
@@ -306,9 +306,9 @@ export function CourseAiBuilderDialog({ path, onClose, onPublished }: { path: st
               <textarea rows={2} maxLength={4000} value={brief.notes} onChange={(e) => setBrief({ ...brief, notes: e.target.value })} />
             </label>
             <p className="mh-ai-draft-modal__help">
-              {lessons} {brief.delivery === "synchronous" ? "sessions" : "study units"} of about {lessonMinutes} minutes each. Text-only course (no video): each
-              lesson gets core reading, a worked example, a timed plan, a workshop and a self-check. Each module gets an auto-graded quiz, and assessments get
-              rubrics out of 100. Instructor guides with answer keys stay hidden from students.
+              {lessons} {brief.delivery === "synchronous" ? "sessions" : "study units"} of about {lessonMinutes} minutes each. Each lesson gets core reading, a
+              worked example, a timed plan, a workshop and a self-check. {brief.delivery === "self_paced" ? "Self-paced lessons also get a course-specific narrated AI video lecture for admin/SME review. " : "Synchronous/offline lessons stay text-led without generated video or audio. "}
+              Each module gets an auto-graded quiz, and assessments get rubrics out of 100. Instructor guides with answer keys stay hidden from students.
             </p>
             {briefError ? (
               <p className="mh-ai-draft-modal__note" role="alert">

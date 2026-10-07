@@ -5,22 +5,25 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { SelfpacedShell } from "@/components/selfpaced/SelfpacedShell";
 import { isEnrolled, loadSelfpacedUser } from "@/lib/selfpacedAuth";
-import { formatCad, getSelfpacedProgram } from "@/lib/selfpacedPrograms";
+import { formatCad } from "@/lib/selfpacedPrograms";
+import { useSelfpacedCatalogue } from "@/lib/useSelfpacedCatalogue";
 
 function CheckoutInner() {
   const router = useRouter();
   const params = useSearchParams();
   const slug = params.get("slug") || "";
-  const program = useMemo(() => getSelfpacedProgram(slug), [slug]);
+  const { programs, loading: catalogueLoading } = useSelfpacedCatalogue();
+  const program = useMemo(() => programs.find((item) => item.slug === slug || item.id === slug), [programs, slug]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
   const [needsAuth, setNeedsAuth] = useState(false);
 
   useEffect(() => {
-    if (!program) {
+    if (!program && !catalogueLoading) {
       setBusy(false);
       return;
     }
+    if (!program) return;
 
     // Already paid for this program — skip Stripe.
     if (isEnrolled(program.slug)) {
@@ -67,8 +70,9 @@ function CheckoutInner() {
     return () => {
       cancelled = true;
     };
-  }, [program, router]);
+  }, [program, catalogueLoading, router]);
 
+  if (!program && catalogueLoading) return <SelfpacedShell><div className="sp-checkout"><p>Loading live program…</p></div></SelfpacedShell>;
   if (!program) {
     return (
       <SelfpacedShell>
@@ -87,18 +91,18 @@ function CheckoutInner() {
     <SelfpacedShell nextAfterLogin={`/selfpaced/checkout?slug=${encodeURIComponent(program.slug)}`}>
       <div className="sp-checkout" style={{ gridTemplateColumns: "1fr" }}>
         <div className="sp-checkout__panel">
-          <p className="sp-kicker">SECURE PAYMENT</p>
-          <h1>{needsAuth ? "Sign in to pay" : busy ? "Opening Stripe…" : "Checkout"}</h1>
+          <p className="sp-kicker">{program.priceCad === 0 ? "FREE TEST ENROLMENT" : "SECURE PAYMENT"}</p>
+          <h1>{needsAuth ? "Sign in to continue" : busy ? (program.priceCad === 0 ? "Activating access…" : "Opening Stripe…") : "Checkout"}</h1>
           <p className="sp-lede">
             {program.title} · {formatCad(program.priceCad)}
           </p>
           {needsAuth ? (
             <p className="sp-tuition__note">
-              Create an account or log in first. After that we open the Stripe payment gateway for this program.
+              Create an account or log in first. {program.priceCad === 0 ? "No card will be requested for this testing course." : "After that we open the Stripe payment gateway for this program."}
             </p>
           ) : null}
           {busy && !needsAuth ? (
-            <p className="sp-tuition__note">Redirecting to Stripe’s secure payment page… Do not close this window.</p>
+            <p className="sp-tuition__note">{program.priceCad === 0 ? "Creating your free enrolment…" : "Redirecting to Stripe’s secure payment page… Do not close this window."}</p>
           ) : null}
           {error ? (
             <>
