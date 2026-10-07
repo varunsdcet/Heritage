@@ -18,6 +18,12 @@ export function splitScript(script: string): ScriptPart[] {
     .split(/\n\s*\n|\n(?=\s*\S)/)
     .map((p) => p.replace(/\s+/g, " ").trim())
     .filter(Boolean)
+    .reduce<string[]>((acc, line) => {
+      const prev = acc[acc.length - 1];
+      if (prev && !ENDS_WITH_PAUSE.test(prev) && ENDS_WITH_CONNECTIVE.test(prev)) acc[acc.length - 1] = `${prev} ${line}`;
+      else acc.push(line);
+      return acc;
+    }, [])
     .map((line) => (ENDS_WITH_PAUSE.test(line) || ENDS_WITH_CONNECTIVE.test(line) ? line : `${line}.`));
   const parts: ScriptPart[] = [];
   let buf = "";

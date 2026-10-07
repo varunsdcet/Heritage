@@ -36,6 +36,14 @@ describe("splitScript", () => {
     expect(bare(parts[0].text)).toEqual(bare(script));
   });
 
+  it("never splits a connective such as “and” from the line that follows it", () => {
+    const filler = "word ".repeat(42).trim();
+    const script = [filler, "We will cover pricing,", "and", "exchanging value.", "Next point."].join("\n\n");
+    const parts = splitScript(script);
+    expect(parts.some((p) => p.text.startsWith("exchanging") || p.text.endsWith(" and"))).toBe(false);
+    expect(parts.some((p) => p.text.includes("and exchanging value."))).toBe(true);
+  });
+
   it("breaks a run-on sentence with no punctuation", () => {
     const script = "word ".repeat(400).trim();
     const parts = splitScript(script);
