@@ -682,7 +682,7 @@ export function balancedPositions(count: number, seed: number): number[] {
 
 export function normalizeQuiz(
   raw: unknown,
-  ctx: { moduleNumber: number; moduleTitle: string; count: number; minutes: number; lessonIds: string[] },
+  ctx: { moduleNumber: number; moduleTitle: string; count: number; minutes: number; lessonIds: string[]; seed?: number },
 ): QuizContent {
   const code = quizCode(ctx.moduleNumber);
   const flags: string[] = [];
@@ -703,7 +703,7 @@ export function normalizeQuiz(
     valid.push({ text, options, answer, rationale: plainText(q.rationale ?? q.explanation, 600), lessonId: ctx.lessonIds.includes(lesson) ? lesson : null });
   }
   if (valid.length < ctx.count) throw new Error(`${code}: only ${valid.length} valid questions (need ${ctx.count})`);
-  const positions = balancedPositions(ctx.count, ctx.moduleNumber);
+  const positions = balancedPositions(ctx.count, ctx.seed ?? ctx.moduleNumber);
   const questions = valid.slice(0, ctx.count).map((q, i) => {
     const target = positions[i]!;
     const correct = q.options[q.answer]!;

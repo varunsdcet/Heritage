@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import type { SessionClaims } from "@myheritage/contracts";
 import { prisma } from "@myheritage/db";
 import { z } from "zod";
@@ -230,7 +230,8 @@ async function generateItem(job: Job, item: Item, items: Item[]): Promise<{ cont
         const lessons = mod.lessons.map((l) => ({ lesson: l, content: items.find((i) => i.key === `lesson-${l.id}`)!.content as LessonContent }));
         const { data, model } = await askJson(quizPrompt(bp, mod, lessons) + retry, 6000);
         return {
-          content: normalizeQuiz(data, { moduleNumber: mod.number, moduleTitle: mod.title, count: bp.quizQuestions, minutes: bp.quizMinutes, lessonIds: mod.lessons.map((l) => l.id) }),
+          // A random seed per generation so answer keys are not the same pattern in every course.
+          content: normalizeQuiz(data, { moduleNumber: mod.number, moduleTitle: mod.title, count: bp.quizQuestions, minutes: bp.quizMinutes, lessonIds: mod.lessons.map((l) => l.id), seed: randomInt(1, 2 ** 31) }),
           model,
         };
       }

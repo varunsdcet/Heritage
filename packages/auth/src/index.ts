@@ -137,7 +137,8 @@ export async function loginWithPassword(input: {
       where: { accountId: account.id },
       orderBy: { createdAt: "asc" },
     });
-    if (oldest) await prisma.session.delete({ where: { id: oldest.id } });
+    // deleteMany: a concurrent login may already have removed this session.
+    if (oldest) await prisma.session.deleteMany({ where: { id: oldest.id } });
   }
 
   const roles = JSON.parse(account.rolesJson) as RoleName[];

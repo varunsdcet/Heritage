@@ -134,6 +134,13 @@ describe("normalizeQuiz", () => {
     expect(new Set(quiz.questions.map((q) => q.answer)).size).toBeGreaterThan(1);
   });
 
+  it("spreads answers across A–D and varies the key between generations of the same module", () => {
+    const ctx = { moduleNumber: 1, moduleTitle: "Intro", count: 10, minutes: 20, lessonIds: [] };
+    const keys = [11, 22, 33, 44].map((seed) => normalizeQuiz({ questions }, { ...ctx, seed }).questions.map((q) => q.answer));
+    for (const key of keys) expect(Math.max(...[0, 1, 2, 3].map((n) => key.filter((k) => k === n).length))).toBeLessThanOrEqual(3);
+    expect(new Set(keys.map((k) => k.join(""))).size).toBeGreaterThan(1);
+  });
+
   it("drops malformed and duplicate questions, then fails when too few remain", () => {
     const bad = [questions[0], questions[0], { question: "x", options: ["a", "b"], answer: 0 }, { question: "y", options: ["a", "a", "b", "c"], answer: 0 }];
     expect(() => normalizeQuiz({ questions: bad }, { moduleNumber: 2, moduleTitle: "T", count: 5, minutes: 10, lessonIds: [] })).toThrow(/only 1 valid/);
