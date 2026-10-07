@@ -2619,7 +2619,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
         "Transfer Courses & Equivalence",
       ],
       activeTab: "Course Sessions & Offerings",
-      statusFilter: "Not Started",
+      statusFilter: "",
       statusOptions: [
         { label: "Not Started", value: "Not Started" },
         { label: "In Progress", value: "In Progress" },

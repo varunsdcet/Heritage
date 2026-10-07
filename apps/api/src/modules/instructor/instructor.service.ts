@@ -961,7 +961,7 @@ function buildCourseAdmin(ctx: InstructorCtx, path: string): InstructorLivePaylo
         "Transfer Courses & Equivalence",
       ],
       activeTab: "Course Sessions & Offerings",
-      statusFilter: "Not Started",
+      statusFilter: "",
       statusOptions: [
         { label: "Not Started", value: "Not Started" },
         { label: "In Progress", value: "In Progress" },

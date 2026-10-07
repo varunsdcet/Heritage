@@ -476,7 +476,7 @@ export function scheduleText(r: { start: string; end: string; continuous: boolea
 
 function SessionsTab({ course, notice }: { course: CourseRec; notice: Notice }) {
   const { meta } = useMeta();
-  const [status, setStatus] = useState("Not Started");
+  const [status, setStatus] = useState("");
   const { data, error, reload } = useLoad<{ items: SessionRow[] }>(`/courses/${course.id}/sessions${qs({ status })}`, "Could not load sessions");
   const [confirm, setConfirm] = useState<SessionRow | null>(null);
   const [seats, setSeats] = useState<SessionRow | null>(null);

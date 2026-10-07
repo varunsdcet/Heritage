@@ -7005,7 +7005,7 @@ function CourseAdminView({ config }: { config: TeacherScreenConfig }) {
   const searchParams = useSearchParams();
   const data = config.courseAdmin;
   const [tab, setTab] = useState(data?.activeTab || "Course Sessions & Offerings");
-  const [status, setStatus] = useState(data?.statusFilter || "Not Started");
+  const [status, setStatus] = useState(data?.statusFilter ?? "");
   const [linkedOpen, setLinkedOpen] = useState(false);
   const [textbookOpen, setTextbookOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
