@@ -8,6 +8,13 @@ import { DashboardContent } from "@/components/dashboard/DashboardContent";
 import { SisActionBtn } from "@/components/SisActionBtn";
 import { SisLiveProvider, useSisLive } from "@/lib/useAdminSisLive";
 import { api, loadSession } from "@/lib/api";
+import { allows, useMyAccess, type MyAccess } from "@/lib/access";
+
+function roleLabel(access: MyAccess | null | undefined, roles: string[]) {
+  if (access?.superAdmin) return "Administrator";
+  if (access?.accessLevel) return access.accessLevel;
+  return roles.includes("admin") ? "Administrator" : "Registrar's Office";
+}
 
 type CampusOverview = {
   institutionName: string;
@@ -65,9 +72,26 @@ function KpiButton({
   );
 }
 
-function AdminHomeBody({ stats, failed, onRetry }: { stats: CampusOverview | null; failed: boolean; onRetry: () => void }) {
+function AdminHomeBody({
+  stats,
+  failed,
+  onRetry,
+  firstName,
+  access,
+}: {
+  stats: CampusOverview | null;
+  failed: boolean;
+  onRetry: () => void;
+  firstName: string;
+  access: MyAccess | null | undefined;
+}) {
   const router = useRouter();
   const live = useSisLive();
+  const canOnboardUsers = allows(access, { modules: ["userManagement"], edit: true });
+  const canEditStudents = allows(access, { modules: ["studentRecords"], edit: true });
+  const canSeeFinance = allows(access, { modules: ["financialManagement"] });
+  const canPostFinance = allows(access, { modules: ["financialManagement"], edit: true });
+  const canSeeStudents = allows(access, { modules: ["studentRecords"] });
   const loading = stats === null;
   const blank = failed ? "—" : "…";
   const todos: AdminTodo[] | null = stats
@@ -92,7 +116,7 @@ function AdminHomeBody({ stats, failed, onRetry }: { stats: CampusOverview | nul
       </div>
       <div className="mh-sis-dash__welcome">
         <div className="mh-sis-dash__welcome-text">
-          <h1>Welcome back, Administrator</h1>
+          <h1>Welcome back{firstName ? `, ${firstName}` : ""}</h1>
           <p>
             {stats
               ? `${stats.institutionName} · ${stats.termName} · ${stats.pendingApprovals} pending approvals · ${stats.enrolments} enrolments`
@@ -102,9 +126,15 @@ function AdminHomeBody({ stats, failed, onRetry }: { stats: CampusOverview | nul
           </p>
         </div>
         <div className="mh-sis-dash__banner-actions">
-          <SisActionBtn label="Student onboard" href="/admin/user-management/new?accessLevel=student" tone="secondary" />
-          <SisActionBtn label="Instructor onboard" href="/admin/user-management/new?accessLevel=faculty" tone="secondary" />
-          <SisActionBtn label="Enrol student" href="/admin/enrolments" />
+          {canOnboardUsers ? (
+            <>
+              <SisActionBtn label="Student onboard" href="/admin/user-management/new?accessLevel=student" tone="secondary" />
+              <SisActionBtn label="Instructor onboard" href="/admin/user-management/new?accessLevel=faculty" tone="secondary" />
+            </>
+          ) : canEditStudents ? (
+            <SisActionBtn label="Create student" href="/admin/student-management/create" tone="secondary" />
+          ) : null}
+          {canEditStudents ? <SisActionBtn label="Enrol student" href="/admin/enrolments" /> : null}
         </div>
       </div>
       {live.toast ? (
@@ -159,21 +189,23 @@ function AdminHomeBody({ stats, failed, onRetry }: { stats: CampusOverview | nul
         />
       </div>
 
-      <h2 className="mh-sis-dash__section-title">Fees & queues</h2>
+      <h2 className="mh-sis-dash__section-title">{canSeeFinance ? "Fees & queues" : "Queues"}</h2>
       <div className="mh-sis-dash__kpis mh-sis-dash__kpis--wrap">
-        <KpiButton
-          label="Fees / AR open"
-          value={loading ? blank : money(stats.feesOpenCad)}
-          hint={
-            loading
-              ? "Finance"
-              : stats.feesPastDueCad > 0
-                ? `${money(stats.feesPastDueCad)} past due`
-                : `${money(stats.feesPostedCad)} posted`
-          }
-          href="/admin/financial/transactions"
-          danger={!loading && stats.feesPastDueCad > 0}
-        />
+        {canSeeFinance ? (
+          <KpiButton
+            label="Fees / AR open"
+            value={loading ? blank : money(stats.feesOpenCad)}
+            hint={
+              loading
+                ? "Finance"
+                : stats.feesPastDueCad > 0
+                  ? `${money(stats.feesPastDueCad)} past due`
+                  : `${money(stats.feesPostedCad)} posted`
+            }
+            href="/admin/financial/transactions"
+            danger={!loading && stats.feesPastDueCad > 0}
+          />
+        ) : null}
         <KpiButton
           label="Pending approvals"
           value={loading ? blank : stats.pendingApprovals}
@@ -255,15 +287,21 @@ function AdminHomeBody({ stats, failed, onRetry }: { stats: CampusOverview | nul
               </div>
             </div>
             <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-              <button type="button" className="mh-sis-dash__link-btn" onClick={() => router.push("/admin/finance/posting")}>
-                AR posting
-              </button>
-              <button type="button" className="mh-sis-dash__link-btn" onClick={() => router.push("/admin/student-documents")}>
-                Documents
-              </button>
-              <button type="button" className="mh-sis-dash__link-btn" onClick={() => router.push("/admin/tax-documents")}>
-                Tax docs
-              </button>
+              {canPostFinance ? (
+                <button type="button" className="mh-sis-dash__link-btn" onClick={() => router.push("/admin/finance/posting")}>
+                  AR posting
+                </button>
+              ) : null}
+              {canSeeStudents ? (
+                <button type="button" className="mh-sis-dash__link-btn" onClick={() => router.push("/admin/student-documents")}>
+                  Documents
+                </button>
+              ) : null}
+              {canSeeFinance ? (
+                <button type="button" className="mh-sis-dash__link-btn" onClick={() => router.push("/admin/tax-documents")}>
+                  Tax docs
+                </button>
+              ) : null}
             </div>
           </div>
         </section>
@@ -275,9 +313,12 @@ function AdminHomeBody({ stats, failed, onRetry }: { stats: CampusOverview | nul
 export default function AdminHomePage() {
   const router = useRouter();
   const [userName, setUserName] = useState("Admin User");
+  const [firstName, setFirstName] = useState("");
+  const [roles, setRoles] = useState<string[]>([]);
   const [stats, setStats] = useState<CampusOverview | null>(null);
   const [failed, setFailed] = useState(false);
   const [allowed, setAllowed] = useState(false);
+  const access = useMyAccess();
 
   const loadStats = useCallback((accessToken: string) => {
     setStats(null);
@@ -302,6 +343,8 @@ export default function AdminHomePage() {
       return;
     }
     setUserName(`${s.givenName} ${s.familyName}`.trim() || "Admin User");
+    setFirstName(s.givenName || "");
+    setRoles(s.roles);
     setAllowed(true);
     loadStats(s.accessToken);
   }, [router, loadStats]);
@@ -315,9 +358,9 @@ export default function AdminHomePage() {
   if (!allowed) return null;
 
   return (
-    <AdminSisShell activeHref="/admin" userName={userName} userRole="Registrar's Office">
+    <AdminSisShell activeHref="/admin" userName={userName} userRole={roleLabel(access, roles)}>
       <SisLiveProvider path="/admin" onPayload={() => undefined}>
-        <AdminHomeBody stats={stats} failed={failed} onRetry={retry} />
+        <AdminHomeBody stats={stats} failed={failed} onRetry={retry} firstName={firstName} access={access} />
       </SisLiveProvider>
     </AdminSisShell>
   );

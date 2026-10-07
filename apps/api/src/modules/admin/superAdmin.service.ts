@@ -204,13 +204,42 @@ function defaultAccessLevels(): AccessLevel[] {
       assignableByNonAdmins: false,
       permissions: permissionsWith({}, "full"),
     },
+    registrarAccessLevel(),
   ];
+}
+
+/** Registrar's office: student lifecycle (admissions, records, enrolment, grades, requests); no system or user administration. */
+function registrarAccessLevel(): AccessLevel {
+  return {
+    id: "registrar",
+    name: "Registrar",
+    profileType: "Staff",
+    assignableByNonAdmins: false,
+    permissions: permissionsWith(
+      {
+        userManagement: "read",
+        programManagement: "full",
+        courseManagement: "full",
+        locationManagement: "read",
+        studentRecords: "full",
+        facultyProfiles: "read",
+        agentManagement: "read",
+        housingManagement: "read",
+        financialManagement: "read",
+        userRequests: "full",
+        reporting: "full",
+        emailMessaging: "full",
+      },
+      "none",
+    ),
+  };
 }
 
 export async function listAccessLevels(institutionId: string): Promise<AccessLevel[]> {
   const stored = await kvGet<AccessLevel[] | null>(institutionId, "access-levels", null);
   if (!stored) return defaultAccessLevels();
-  return stored.map((l) => ({ ...l, permissions: normalizePermissions(l.permissions) }));
+  const levels = stored.map((l) => ({ ...l, permissions: normalizePermissions(l.permissions) }));
+  return levels.some((l) => l.id === "registrar") ? levels : [...levels, registrarAccessLevel()];
 }
 
 export const AccessLevelBody = z.object({
@@ -332,7 +361,7 @@ async function loadUserMeta(institutionId: string) {
 
 function derivedAccessLevelId(roles: string[]) {
   if (roles.includes("admin")) return "system-administrator";
-  if (roles.includes("registrar")) return "admin";
+  if (roles.includes("registrar")) return "registrar";
   if (roles.includes("instructor")) return "faculty";
   if (roles.includes("student")) return "student";
   return null;
@@ -657,19 +686,34 @@ async function saveUserLocked(user: SessionClaims, accountId: string | null, bod
         await tx.session.deleteMany({ where: { accountId } });
       }
     } else {
-      const personId = randomUUID();
+      // A registrar-created student (or any profile) already owns this e-mail's Person; the login joins that person.
+      const person = await tx.person.findFirst({ where: { institutionId, email: { equals: email, mode: "insensitive" } }, include: { accounts: { select: { id: true } } } });
+      if (person?.accounts.length) throw httpError(409, "Another user already uses this e-mail address", "CONFLICT");
+      const personId = person?.id ?? randomUUID();
       id = randomUUID();
-      await tx.person.create({
-        data: {
-          id: personId,
-          institutionId,
-          givenName: body.givenName,
-          familyName: body.familyName,
-          preferredName: body.preferredName || null,
-          phone: body.phone || null,
-          email,
-        },
-      });
+      if (person)
+        await tx.person.update({
+          where: { id: person.id },
+          data: {
+            givenName: body.givenName,
+            familyName: body.familyName,
+            ...(body.preferredName ? { preferredName: body.preferredName } : {}),
+            ...(body.phone ? { phone: body.phone } : {}),
+            rowVersion: { increment: 1 },
+          },
+        });
+      else
+        await tx.person.create({
+          data: {
+            id: personId,
+            institutionId,
+            givenName: body.givenName,
+            familyName: body.familyName,
+            preferredName: body.preferredName || null,
+            phone: body.phone || null,
+            email,
+          },
+        });
       await tx.account.create({
         data: {
           id,

@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { SaNotice } from "@/components/superadmin/shared";
 import {
   BASE,
   Btn,
@@ -26,6 +28,7 @@ import {
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 type Form = Record<string, string>;
+type Created = { id: string; studentNumber: string; login: { email: string; temporaryPassword?: string } | null };
 
 const REQUIRED: Array<[string, string]> = [
   ["lastName", "Last Name"],
@@ -64,6 +67,8 @@ export function CreateStudent() {
   const [advisors, setAdvisors] = useState<string[]>([]);
   const [assignAgent, setAssignAgent] = useState(false);
   const [transcripts, setTranscripts] = useState<PendingFile[]>([]);
+  const [createLogin, setCreateLogin] = useState(true);
+  const [created, setCreated] = useState<Created | null>(null);
   const { busy, error: saveError, setError, run } = useSubmit();
 
   const v = (k: string) => f[k] ?? "";
@@ -89,10 +94,17 @@ export function CreateStudent() {
       window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }
+    if (createLogin && v("password") && v("password").length < 8) {
+      setError("Password must be at least 8 characters, or leave it blank to generate a temporary password");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
     const out = await run(
       () =>
-        send<{ id: string; studentNumber: string }>("/", "POST", {
+        send<Created>("/", "POST", {
           ...f,
+          createLogin,
+          password: createLogin ? v("password") : "",
           acknowledgements: acks,
           assignAdvisors,
           advisors,
@@ -101,20 +113,44 @@ export function CreateStudent() {
         }),
       "Could not save student details",
     );
-    if (out) router.push(`${profileHref(out.id)}?notice=${encodeURIComponent(`Student profile created (${out.studentNumber}).`)}`);
+    const notice = (o: Created) => `${profileHref(o.id)}?notice=${encodeURIComponent(`Student profile created (${o.studentNumber}).${o.login ? ` Login: ${o.login.email}.` : ""}`)}`;
+    if (out?.login?.temporaryPassword) setCreated(out);
+    else if (out) router.push(notice(out));
     else window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  if (created?.login?.temporaryPassword)
+    return (
+      <StuFrame title="Create Student Profile" crumbs={["Create Student Profile"]} nav={`${BASE}/create`}>
+        <SaNotice tone="success">Student profile and login created.</SaNotice>
+        <Card title="STUDENT LOGIN">
+          <p>
+            {created.studentNumber} can now sign in with <strong>{created.login.email}</strong> and this temporary password:
+          </p>
+          <p>
+            <code style={{ fontSize: 16, userSelect: "all" }}>{created.login.temporaryPassword}</code>
+          </p>
+          <p className="mh-sa__muted">It is shown only once. Give it to the student, who can replace it with Change Password or Forgot Password.</p>
+          <div className="mh-sa__actions">
+            <Btn tone="primary" onClick={() => router.push(`${profileHref(created.id)}?notice=${encodeURIComponent(`Student profile created (${created.studentNumber}).`)}`)}>
+              Open Student Profile
+            </Btn>
+          </div>
+        </Card>
+      </StuFrame>
+    );
+
   return (
     <StuFrame title="Create Student Profile" crumbs={["Create Student Profile"]} nav={`${BASE}/create`}>
-      <ErrorLine>{saveError}</ErrorLine>
+      {saveError ? <SaNotice tone="error">{saveError}</SaNotice> : null}
       <form
+        className="mh-sa__stack"
         onSubmit={(e) => {
           e.preventDefault();
           void submit();
         }}
       >
-        <Card title="Contact Information">
+        <Card title="CONTACT INFORMATION">
           <Grid>
             <F label="Last Name" req>
               <Txt value={v("lastName")} onChange={set("lastName")} />
@@ -172,7 +208,24 @@ export function CreateStudent() {
           </Grid>
         </Card>
 
-        <Card title="Emergency Contact">
+        <Card title="STUDENT LOGIN">
+          <div className="lx-checks">
+            <Check checked={createLogin} onChange={setCreateLogin}>
+              Create a login account for this student (signs in with the e-mail address above)
+            </Check>
+          </div>
+          {createLogin ? (
+            <Grid>
+              <F label="Password" hint="Optional. Leave blank to generate a temporary password that is shown once after saving.">
+                <Txt type="password" value={v("password")} onChange={set("password")} />
+              </F>
+            </Grid>
+          ) : (
+            <p className="mh-sa__muted">Without a login the student cannot sign in or reset a password until one is added in User Management.</p>
+          )}
+        </Card>
+
+        <Card title="EMERGENCY CONTACT">
           <Grid>
             <F label="Emergency Contact Name" req>
               <Txt value={v("emergencyName")} onChange={set("emergencyName")} />
@@ -183,7 +236,7 @@ export function CreateStudent() {
           </Grid>
         </Card>
 
-        <Card title="Enrolment Information">
+        <Card title="ENROLMENT INFORMATION">
           <Grid>
             <F label="Discount Code">
               <Txt value={v("discountCode")} onChange={set("discountCode")} />
@@ -206,7 +259,7 @@ export function CreateStudent() {
             <F label="Admission Term">
               <Sel value={v("admissionTerm")} onChange={set("admissionTerm")} empty="— Select —" options={meta.admissionTerms} />
             </F>
-            <F label="Academic History" wide hint="The original academic-history option list was not captured; enter the history as text.">
+            <F label="Academic History" wide hint="Previous schools, programs and credentials earned.">
               <textarea className="mh-sa__input" rows={3} value={v("academicHistory")} onChange={(e) => set("academicHistory")(e.target.value)} />
             </F>
             <div className="mh-sa__field mh-sa__field--wide">
@@ -216,7 +269,7 @@ export function CreateStudent() {
           </Grid>
         </Card>
 
-        <Card title="Declaration">
+        <Card title="DECLARATION">
           <Grid>
             <F label="This form was completed by">
               <Sel value={v("declarationBy")} onChange={set("declarationBy")} empty="— Select —" options={opts.declarationBy ?? []} />
@@ -231,7 +284,7 @@ export function CreateStudent() {
           </div>
         </Card>
 
-        <Card title="Miscellaneous Information">
+        <Card title="FEE STATUS, ADVISORS & AGENT">
           <div className="lx-checks">
             <Check checked={assignAdvisors} onChange={setAssignAdvisors}>
               Assign advisor(s)
@@ -268,9 +321,12 @@ export function CreateStudent() {
           </Grid>
         </Card>
 
-        <div className="st-filters__actions">
+        <div className="mh-sa__actions">
+          <Link href={`${BASE}/browse`} className="mh-sa__btn">
+            Cancel
+          </Link>
           <Btn type="submit" tone="primary" disabled={busy}>
-            {busy ? "Saving…" : "Save Student Details"}
+            {busy ? "Saving…" : "Save Student"}
           </Btn>
         </div>
       </form>

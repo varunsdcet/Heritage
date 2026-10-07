@@ -1,20 +1,33 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { allows, useMyAccess, type ModuleGate } from "@/lib/access";
 
 type Tone = "navy" | "rose" | "cyan" | "red" | "sky" | "blue" | "violet" | "indigo" | "amber" | "green" | "brown";
 type IconName = "user-plus" | "teacher" | "check" | "search" | "mail" | "clipboard" | "dollar" | "file" | "receipt";
 
-const QUICK_ACCESS: Array<{ label: string; href: string; tone: Tone; icon: IconName }> = [
-  { label: "Student onboard", href: "/admin/user-management/new?accessLevel=student", tone: "rose", icon: "user-plus" },
-  { label: "Instructor onboard", href: "/admin/user-management/new?accessLevel=faculty", tone: "violet", icon: "teacher" },
-  { label: "Enrol student", href: "/admin/enrolments", tone: "green", icon: "check" },
-  { label: "Search Students", href: "/admin/student-search", tone: "cyan", icon: "search" },
-  { label: "Messages", href: "/admin/messages", tone: "red", icon: "mail" },
+type QuickItem = { label: string; href: string; tone: Tone; icon: IconName; gate?: ModuleGate; onlyWithout?: ModuleGate };
+
+const USER_ONBOARDING: ModuleGate = { modules: ["userManagement"], edit: true };
+
+const QUICK_ACCESS: QuickItem[] = [
+  { label: "Student onboard", href: "/admin/user-management/new?accessLevel=student", tone: "rose", icon: "user-plus", gate: USER_ONBOARDING },
+  {
+    label: "Create student",
+    href: "/admin/student-management/create",
+    tone: "rose",
+    icon: "user-plus",
+    gate: { modules: ["studentRecords"], edit: true },
+    onlyWithout: USER_ONBOARDING,
+  },
+  { label: "Instructor onboard", href: "/admin/user-management/new?accessLevel=faculty", tone: "violet", icon: "teacher", gate: USER_ONBOARDING },
+  { label: "Enrol student", href: "/admin/enrolments", tone: "green", icon: "check", gate: { modules: ["studentRecords"], edit: true } },
+  { label: "Search Students", href: "/admin/student-search", tone: "cyan", icon: "search", gate: { modules: ["studentRecords"] } },
+  { label: "Messages", href: "/admin/messages", tone: "red", icon: "mail", gate: { modules: ["emailMessaging"] } },
   { label: "Approvals", href: "/admin/approvals", tone: "amber", icon: "clipboard" },
-  { label: "AR posting", href: "/admin/finance/posting", tone: "navy", icon: "dollar" },
-  { label: "Documents", href: "/admin/student-documents", tone: "sky", icon: "file" },
-  { label: "Tax docs", href: "/admin/tax-documents", tone: "indigo", icon: "receipt" },
+  { label: "AR posting", href: "/admin/finance/posting", tone: "navy", icon: "dollar", gate: { modules: ["financialManagement"], edit: true } },
+  { label: "Documents", href: "/admin/student-documents", tone: "sky", icon: "file", gate: { modules: ["studentRecords"] } },
+  { label: "Tax docs", href: "/admin/tax-documents", tone: "indigo", icon: "receipt", gate: { modules: ["financialManagement"] } },
 ];
 
 export type AdminTodo = { label: string; href: string };
@@ -100,11 +113,16 @@ function QuickIcon({ name }: { name: IconName }) {
 
 export function AdminQuickAccess({ todos, failed = false }: { todos: AdminTodo[] | null; failed?: boolean }) {
   const router = useRouter();
+  const access = useMyAccess();
+  const items =
+    access === undefined
+      ? []
+      : QUICK_ACCESS.filter((item) => allows(access, item.gate) && !(item.onlyWithout && allows(access, item.onlyWithout)));
   return (
     <aside className="mh-ct-dash__aside">
       <h2>Quick Access</h2>
       <div className="mh-ct-dash__qa-grid">
-        {QUICK_ACCESS.map((item) => (
+        {items.map((item) => (
           <button
             key={item.label}
             type="button"
