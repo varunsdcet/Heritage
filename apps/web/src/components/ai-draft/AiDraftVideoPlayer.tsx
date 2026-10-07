@@ -62,6 +62,14 @@ export function AiDraftVideoPlayer({ storyboard, onClose }: Props) {
     };
   }, []);
 
+  useEffect(() => {
+    if (avatarReady) return;
+    const ping = () => iframeRef.current?.contentWindow?.postMessage({ type: "th-ping" }, "*");
+    ping();
+    const timer = window.setInterval(ping, 1000);
+    return () => window.clearInterval(timer);
+  }, [avatarReady, gender]);
+
   const speakSlide = useCallback((text: string) => {
     return new Promise<void>((resolve) => {
       const id = ++speakIdRef.current;

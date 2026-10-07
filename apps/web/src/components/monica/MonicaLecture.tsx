@@ -89,6 +89,13 @@ export function MonicaLecture() {
   }, []);
 
   useEffect(() => {
+    if (avatarReady) return;
+    post({ type: "th-ping" });
+    const timer = window.setInterval(() => post({ type: "th-ping" }), 1000);
+    return () => window.clearInterval(timer);
+  }, [avatarReady]);
+
+  useEffect(() => {
     if (mode === "lecture") partRefs.current[index]?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [index, mode]);
 

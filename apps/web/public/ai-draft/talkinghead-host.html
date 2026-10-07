@@ -101,6 +101,7 @@
       const node = document.getElementById("avatar");
       let head = null;
       let bootId = 0;
+      let ready = false;
 
       async function ensureAudio() {
         if (!head?.audioCtx) return;
@@ -146,6 +147,7 @@
 
       async function boot(nextGender) {
         const id = ++bootId;
+        ready = false;
         gender = nextGender === "male" ? "male" : "female";
         preset = PRESETS[gender];
         status.style.display = "";
@@ -222,6 +224,7 @@
           await ensureAudio();
           faceStraight();
           status.style.display = "none";
+          ready = true;
           parent.postMessage({ type: "th-ready", gender, voice: preset.ttsVoice }, "*");
         } catch (err) {
           console.error(err);
@@ -235,6 +238,12 @@
 
         if (data.type === "th-resume") {
           await ensureAudio();
+          return;
+        }
+
+        // The parent may attach its listener after boot finished; answer its ping so "th-ready" is never lost.
+        if (data.type === "th-ping") {
+          if (ready) parent.postMessage({ type: "th-ready", gender, voice: preset.ttsVoice }, "*");
           return;
         }
 
