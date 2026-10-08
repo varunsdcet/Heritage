@@ -48,6 +48,8 @@ import {
 } from "./finance.core.js";
 import { postCredit, postFee, setCreditStatus, studentCtx, type StudentCtx } from "./finance.ledger.js";
 import { withStudentMoneyLock } from "./studentLock.js";
+import { termLabel } from "../../../lib/sectionTerm.js";
+import { loadSectionTerms } from "../../instructor/myCoursesFacts.js";
 
 /* ------------------------------------------------------------------ */
 /* Academic facts used by promotion requirements and the profile header */
@@ -71,6 +73,7 @@ export async function academicsOf(inst: string, studentId: string) {
     prisma.enrolment.findMany({ where: { institutionId: inst, studentId }, include: { section: { include: { course: true, term: true } } } }),
     prisma.gradeItem.findMany({ where: { institutionId: inst, studentId, status: "published", enrolment: { countsTowardCgpa: true } } }),
   ]);
+  const sectionTerms = await loadSectionTerms(inst, enrolments.map((e) => e.section));
   const scored = grades.filter((g) => g.score != null && g.maxScore > 0);
   const pcts = scored.map((g) => ((g.score ?? 0) / g.maxScore) * 100);
   const points = scored.map((g, i) => LETTER_POINTS[s(g.letter)] ?? letterFromPct(pcts[i]!));
@@ -81,8 +84,8 @@ export async function academicsOf(inst: string, studentId: string) {
     average: pcts.length ? r2(pcts.reduce((a, b) => a + b, 0) / pcts.length) : null,
     enrolledCourses: enrolled.length,
     completedCourses: completed.length,
-    completedTerms: new Set(completed.map((e) => e.section.termId)).size,
-    termNames: [...new Set(enrolments.map((e) => e.section.term.name))],
+    completedTerms: new Set(completed.map((e) => sectionTerms.get(e.sectionId)?.id ?? e.section.termId)).size,
+    termNames: [...new Set(enrolments.map((e) => termLabel(sectionTerms.get(e.sectionId))))],
     courseLabels: [...new Set(enrolments.map((e) => `${e.section.course.code} — ${e.section.course.title}`))],
   };
 }
@@ -352,10 +355,20 @@ export async function createAdjustment(user: SessionClaims, body: Data) {
   if (!reason) throw httpError(400, "Reason is required");
   const number = await nextNumber(c.inst, "adjustment");
   const ledgerEntryId = s(body.ledgerEntryId);
+  const ledgerAction = s(body.ledgerAction);
   const r = await add(
     user,
     S.ADJUSTMENT,
-    { number, direction, amount, reason, status: "Pending", requestedBy: user.accountId, requestedAt: new Date().toISOString(), ...(ledgerEntryId ? { ledgerEntryId } : {}) },
+    {
+      number,
+      direction,
+      amount,
+      reason,
+      status: "Pending",
+      requestedBy: user.accountId,
+      requestedAt: new Date().toISOString(),
+      ...(ledgerEntryId ? { ledgerEntryId, ...(ledgerAction ? { ledgerAction } : {}) } : {}),
+    },
     c.st.id,
   );
   await finAudit(user, c.st.id, "Adjustment requested", `Adjustment #${number}`, { direction, amount: cad(amount), reason }, r.id);
@@ -381,8 +394,15 @@ async function reviewAdjustmentLocked(user: SessionClaims, id: string, body: Dat
   let entryId = "";
   if (decision === "Approved / Complete") {
     await assertPeriodOpen(user, c.cfg, c.st.campus, new Date(), "This adjustment");
+    const chargeId = s(r.data.ledgerEntryId);
+    if (chargeId && s(r.data.ledgerAction) !== "reverse") {
+      const charge = c.book.charges.find((ch) => ch.id === chargeId);
+      if (!charge || charge.owing < amount - 0.005) {
+        throw httpError(409, `The charge this adjustment writes off is no longer open for ${cad(amount)}. Decline this adjustment instead.`, "CONFLICT");
+      }
+    }
     if (r.data.direction === "Increase balance (debit)") entryId = (await postFee(c, { type: undefined, label: "Financial Adjustment", unit: amount, quantity: 1, termId: null, note: s(r.data.reason), extra: { adjustmentId: r.id } })).id;
-    else entryId = (await postCredit(c, { typeName: "Financial Adjustment", typeId: "", amount, note: s(r.data.reason), extra: { adjustmentId: r.id } })).id;
+    else entryId = (await postCredit(c, { typeName: "Financial Adjustment", typeId: "", amount, note: s(r.data.reason), extra: { adjustmentId: r.id }, ...(chargeId ? { chargeIds: [chargeId] } : {}) })).id;
   }
   await save(user, r.id, { ...r.data, status: decision, reviewedBy: user.accountId, reviewedAt: new Date().toISOString(), reviewNote: text(body.note), entryId });
   await finAudit(user, c.st.id, decision === "Declined" ? "Adjustment declined" : "Adjustment approved", `Adjustment #${num(r.data.number)}`, { direction: s(r.data.direction), amount: cad(amount), note: text(body.note) }, r.id);

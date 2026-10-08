@@ -17458,6 +17458,10 @@ strong.mh-hcc-plan-course__name {
 .mh-hcc-status--dropped {
   color: #b42318;
 }
+.mh-hcc-status--danger {
+  color: #b42318;
+  font-weight: 600;
+}
 .mh-hcc-marks-head {
   margin: 8px 0 18px;
 }

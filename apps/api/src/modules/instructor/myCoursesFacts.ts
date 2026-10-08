@@ -1,4 +1,5 @@
 import { prisma } from "@myheritage/db";
+import { institutionTerms, sectionTerm, type TermRef } from "../../lib/sectionTerm.js";
 import { institutionTimezone, ymdIn } from "../../lib/workshopPolicy.js";
 import { sectionOfferings, type Offering } from "../courses/sectionOffering.js";
 import { dateBoundsFromSessions, deliveryFromSessions } from "../courses/sectionSchedule.js";
@@ -57,4 +58,11 @@ export async function loadSectionRunFacts(institutionId: string, sectionIds: str
   const today = ymdIn(new Date(), tz);
   for (const s of sections) out.set(s.id, sectionRunFacts(s, offerings.get(s.id), tz, today));
   return out;
+}
+
+/** The term each section actually runs in (`sectionTerm` on its run dates), so a stored fallback term is never shown. */
+export async function loadSectionTerms(institutionId: string, sections: Array<{ id: string; term: TermRef | null }>) {
+  const ids = [...new Set(sections.map((s) => s.id))];
+  const [facts, terms] = await Promise.all([loadSectionRunFacts(institutionId, ids), ids.length ? institutionTerms(institutionId) : []]);
+  return new Map(sections.map((s) => [s.id, sectionTerm(s.term, facts.get(s.id) ?? {}, terms)] as const));
 }

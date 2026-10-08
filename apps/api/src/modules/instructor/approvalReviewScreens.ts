@@ -68,6 +68,11 @@ async function decisionComments(db: Db, institutionId: string, decisionsJson: st
   });
 }
 
+/** Gradebook requests reference `section:<id>`; older / seeded rows use the bare section id. */
+function sectionIdOf(subjectRef: string | null) {
+  return subjectRef?.startsWith("section:") ? subjectRef.slice("section:".length) : subjectRef;
+}
+
 function emptyReview(title: string, subtitle: string, emptyMessage: string) {
   return {
     title,
@@ -92,7 +97,7 @@ export async function buildGradeCorrectionReview(ctx: ReviewCtx, db: Db = prisma
     return emptyReview(title, "No course sections are assigned to you", "Grade changes for your course sections appear here once you teach a section.");
   }
   const requests = await db.approvalRequest.findMany({
-    where: { institutionId: ctx.user.institutionId, type: { in: GRADE_APPROVAL_TYPES }, subjectRef: { in: sectionIds } },
+    where: { institutionId: ctx.user.institutionId, type: { in: GRADE_APPROVAL_TYPES }, subjectRef: { in: [...sectionIds, ...sectionIds.map((id) => `section:${id}`)] } },
     orderBy: { createdAt: "desc" },
     take: 20,
   });
@@ -104,7 +109,7 @@ export async function buildGradeCorrectionReview(ctx: ReviewCtx, db: Db = prisma
     );
   }
   const latest = requests[0]!;
-  const sec = ctx.sections.find((s) => s.id === latest.subjectRef);
+  const sec = ctx.sections.find((s) => s.id === sectionIdOf(latest.subjectRef));
   const ids = parseJson<{ gradeItemIds?: unknown }>(latest.proposedDiffJson, {}).gradeItemIds;
   const gradeItemIds = Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
   const items = gradeItemIds.length
@@ -172,7 +177,7 @@ export async function buildCourseApprovalReview(ctx: ReviewCtx, db: Db = prisma)
     );
   }
   const latest = requests[0]!;
-  const sec = ctx.sections.find((s) => s.id === latest.subjectRef);
+  const sec = ctx.sections.find((s) => s.id === sectionIdOf(latest.subjectRef));
   const pending = requests.filter((r) => r.status === "pending").length;
   return {
     title,
@@ -189,7 +194,7 @@ export async function buildCourseApprovalReview(ctx: ReviewCtx, db: Db = prisma)
         { label: "Status", value: statusLabel(latest.status) },
       ],
       proposed: requests.map((r) => {
-        const s = ctx.sections.find((x) => x.id === r.subjectRef);
+        const s = ctx.sections.find((x) => x.id === sectionIdOf(r.subjectRef));
         return {
           label: `${shortDate(r.createdAt)} · ${typeLabel(r.type)}`,
           value: `${s ? `${s.courseCode} ${s.code} · ` : ""}${statusLabel(r.status)}`,

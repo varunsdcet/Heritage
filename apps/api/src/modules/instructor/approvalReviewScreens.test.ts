@@ -43,9 +43,17 @@ describe("buildGradeCorrectionReview", () => {
     await buildGradeCorrectionReview(ctx, db as never);
     expect(db.approvalRequest.findMany.mock.calls[0]![0].where).toMatchObject({
       institutionId,
-      subjectRef: { in: ["sec-a"] },
+      subjectRef: { in: ["sec-a", "section:sec-a"] },
       type: { in: ["grade_publish", "grade.publish"] },
     });
+  });
+
+  it("matches gradebook requests that reference the section as section:<id>", async () => {
+    db.approvalRequest.findMany.mockResolvedValue([{ ...request, type: "grade.publish", status: "pending", subjectRef: "section:sec-a", decisionsJson: "[]" }]);
+    const screen = await buildGradeCorrectionReview(ctx, db as never);
+    expect(screen.subtitle).toBe("QAI1010A QAI1010A-01 · submitted 2026-10-05 · 1 pending");
+    expect(screen.syllabusDiff.badge).toBe("Pending Review");
+    expect(screen.syllabusDiff.current[0]).toEqual({ label: "Course", value: "QAI1010A QAI1010A-01 · QA_I_1010 Course A" });
   });
 
   it("shows the latest request's grades and the reviewer's comment", async () => {
@@ -81,7 +89,7 @@ describe("buildCourseApprovalReview", () => {
   });
 
   it("lists every submitted request", async () => {
-    db.approvalRequest.findMany.mockResolvedValue([request, { ...request, id: "req-0", status: "approved", decisionsJson: "[]" }]);
+    db.approvalRequest.findMany.mockResolvedValue([request, { ...request, id: "req-0", status: "approved", subjectRef: "section:sec-a", decisionsJson: "[]" }]);
     const screen = await buildCourseApprovalReview(ctx, db as never);
     expect(screen.subtitle).toBe("2 requests · 0 pending");
     expect(screen.syllabusDiff.proposed.map((p) => p.value)).toEqual([

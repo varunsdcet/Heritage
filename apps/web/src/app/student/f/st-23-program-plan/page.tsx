@@ -31,6 +31,7 @@ type PlanPayload = {
     averagePercent: number | null;
     cgpa: number | null;
     completed: number;
+    failed: number;
     inProgress: number;
     notStarted: number;
     dropped: number;
@@ -42,6 +43,7 @@ type PlanPayload = {
 
 function statusLabel(status: string) {
   if (status === "completed") return "Completed";
+  if (status === "failed") return "Failed";
   if (status === "in_progress") return "In Progress";
   if (status === "dropped") return "Dropped Course";
   return "Not Started";
@@ -49,6 +51,7 @@ function statusLabel(status: string) {
 
 function statusClass(status: string) {
   if (status === "completed") return "mh-hcc-status mh-hcc-status--done";
+  if (status === "failed") return "mh-hcc-status mh-hcc-status--danger";
   if (status === "in_progress") return "mh-hcc-status mh-hcc-status--progress";
   if (status === "dropped") return "mh-hcc-status mh-hcc-status--dropped";
   return "mh-hcc-status mh-hcc-status--muted";
@@ -122,6 +125,7 @@ export default function ProgramPlanPage() {
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
               <option value="all">All</option>
               <option value="completed">Completed</option>
+              <option value="failed">Failed</option>
               <option value="in_progress">In Progress</option>
               <option value="dropped">Dropped Course</option>
               <option value="not_started">Not Started</option>
@@ -214,7 +218,7 @@ export default function ProgramPlanPage() {
                           <td>
                             <span className={statusClass(item.status)}>
                               {statusLabel(item.status)}
-                              {item.status === "completed" && item.grade ? ` (${item.grade})` : ""}
+                              {(item.status === "completed" || item.status === "failed") && item.grade ? ` (${item.grade})` : ""}
                             </span>
                           </td>
                         </tr>

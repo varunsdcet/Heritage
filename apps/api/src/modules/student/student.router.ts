@@ -58,6 +58,8 @@ import {
   updateMailboxSettings,
 } from "./wave3.service.js";
 import { sessionJoinUrl } from "../../lib/liveClass.js";
+import { institutionTimezone } from "../../lib/workshopPolicy.js";
+import { DEFAULT_TZ } from "../courses/sectionSchedule.js";
 import { bytesMatchMime, decodeBase64 } from "../../lib/fileSniff.js";
 import { readSubmissionFile, submissionStorageRoot } from "../../lib/submissionFiles.js";
 import { currentStudentId } from "../me/studentAlignment.js";
@@ -198,10 +200,12 @@ function submissionDeadline(row: { dueAt: Date | null; cutoffAt?: Date | null })
   return row.cutoffAt ?? row.dueAt;
 }
 
-function assertSubmissionWindow(row: { dueAt: Date | null; cutoffAt?: Date | null; availableFrom?: Date | null }) {
+async function assertSubmissionWindow(institutionId: string, row: { dueAt: Date | null; cutoffAt?: Date | null; availableFrom?: Date | null }) {
   const now = Date.now();
   if (row.availableFrom && row.availableFrom.getTime() > now) {
-    throw httpError(`Submissions open on ${row.availableFrom.toISOString()}`, "SUBMISSION_LOCKED", 409);
+    const tz = await institutionTimezone(institutionId).catch(() => DEFAULT_TZ);
+    const opens = new Intl.DateTimeFormat("en-US", { timeZone: tz, dateStyle: "medium", timeStyle: "short" }).format(row.availableFrom);
+    throw httpError(`Submissions open on ${opens}`, "SUBMISSION_LOCKED", 409);
   }
   const deadline = submissionDeadline(row);
   if (deadline && deadline.getTime() < now) {
@@ -374,7 +378,7 @@ studentRouter.post("/assignments/:assignmentId/files", async (req, res, next) =>
     if (assignment.gradeItems.length > 0) {
       throw httpError("Graded work is locked", "SUBMISSION_LOCKED", 409);
     }
-    assertSubmissionWindow(assignment);
+    await assertSubmissionWindow(user.institutionId, assignment);
     const existing = assignment.submissions[0];
     if (existing?.status === "submitted") {
       throw httpError("The submission is already submitted", "SUBMISSION_LOCKED", 409);
@@ -531,7 +535,7 @@ studentRouter.put("/assignments/:assignmentId/text", async (req, res, next) => {
       throw httpError("This assignment accepts file uploads only", "VALIDATION_ERROR", 400);
     }
     if (assignment.gradeItems.length > 0) throw httpError("Graded work is locked", "SUBMISSION_LOCKED", 409);
-    assertSubmissionWindow(assignment);
+    await assertSubmissionWindow(user.institutionId, assignment);
     const existing = assignment.submissions[0];
     if (existing?.status === "submitted") {
       throw httpError("The submission is already submitted", "SUBMISSION_LOCKED", 409);
@@ -614,7 +618,7 @@ studentRouter.post("/assignments/:assignmentId/submit", async (req, res, next) =
     if (submission.files.length === 0 && !hasText) {
       throw httpError(emptyMessage, "VALIDATION_ERROR", 400);
     }
-    assertSubmissionWindow(assignment);
+    await assertSubmissionWindow(user.institutionId, assignment);
 
     const submittedAt = new Date();
     const updated = await prisma.$transaction(async (tx) => {

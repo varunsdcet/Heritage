@@ -1,9 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@myheritage/db", () => ({ prisma: {} }));
+const db = vi.hoisted(() => ({
+  section: { findMany: vi.fn() },
+  heritageRecord: { findMany: vi.fn() },
+  institution: { findFirst: vi.fn() },
+  term: { findMany: vi.fn() },
+}));
+vi.mock("@myheritage/db", () => ({ prisma: db }));
 
 import type { Offering } from "../courses/sectionOffering.js";
-import { sectionRunFacts } from "./myCoursesFacts.js";
+import { loadSectionTerms, sectionRunFacts } from "./myCoursesFacts.js";
 
 const tz = "America/Vancouver";
 const term = { startsOn: "2026-09-01", endsOn: "2026-12-20" };
@@ -67,5 +73,36 @@ describe("sectionRunFacts", () => {
 
   it("has no timing when nothing dates the section", () => {
     expect(sectionRunFacts({ term: null, academicBlock: null, classSessions: [] }, undefined, tz, "2026-10-07").timing).toBeNull();
+  });
+});
+
+describe("loadSectionTerms", () => {
+  const fall25 = { id: "t25", code: "2025F", name: "Fall 2025", startsOn: "2025-09-01", endsOn: "2025-12-20" };
+  const fall26 = { id: "t26", code: "2026F", name: "Fall 2026", startsOn: "2026-09-01", endsOn: "2026-12-20" };
+
+  it("labels a section by the term covering its run dates, not its stored fallback term", async () => {
+    db.institution.findFirst.mockResolvedValue({ timezone: tz });
+    db.term.findMany.mockResolvedValue([fall25, fall26]);
+    db.heritageRecord.findMany.mockImplementation(async ({ where }: { where: { screenId: unknown } }) =>
+      where.screenId === "CM:SESSION"
+        ? [
+            { contextKey: "jun", dataJson: JSON.stringify({ startDate: "2026-06-01", endDate: "2026-08-28" }) },
+            { contextKey: "sep", dataJson: JSON.stringify({ startDate: "2026-09-08", endDate: "2026-12-15" }) },
+          ]
+        : [],
+    );
+    db.section.findMany.mockResolvedValue([
+      { id: "jun", term: fall25, academicBlock: null, classSessions: [] },
+      { id: "sep", term: fall25, academicBlock: null, classSessions: [] },
+      { id: "old", term: fall25, academicBlock: null, classSessions: [] },
+    ]);
+    const terms = await loadSectionTerms("inst", [
+      { id: "jun", term: fall25 },
+      { id: "sep", term: fall25 },
+      { id: "old", term: fall25 },
+    ]);
+    expect(terms.get("jun")).toBeNull();
+    expect(terms.get("sep")).toBe(fall26);
+    expect(terms.get("old")).toBe(fall25);
   });
 });

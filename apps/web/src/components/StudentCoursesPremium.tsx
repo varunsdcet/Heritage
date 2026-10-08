@@ -25,7 +25,7 @@ type Course = {
   instructorName: string;
   credits: number;
   enrolmentStatus: "enrolled" | "completed" | "waitlisted";
-  courseStatus?: "completed" | "in_progress" | "not_started" | "dropped";
+  courseStatus?: "completed" | "failed" | "in_progress" | "not_started" | "dropped";
   progressPercent: number | null;
   deliveryMethod?: string | null;
   location?: string | null;
@@ -416,14 +416,16 @@ export function StudentCoursesPremiumView() {
     return ["All Terms", ...[...set].sort()];
   }, [courses]);
 
-  const statusOptions = ["Active & Upcoming Courses", "All Courses", "Completed Courses"];
+  const statusOptions = ["Active & Upcoming Courses", "All Courses", "Completed Courses", "Failed Courses"];
 
   const filtered = useMemo(() => {
     const rows = courses.filter((c) => {
       if (term !== "All Terms" && c.termName !== term) return false;
+      const failed = c.courseStatus === "failed";
       const done = c.courseStatus ? c.courseStatus === "completed" : c.enrolmentStatus === "completed";
       if (status === "Completed Courses") return done;
-      if (status === "Active & Upcoming Courses") return !done;
+      if (status === "Failed Courses") return failed;
+      if (status === "Active & Upcoming Courses") return !done && !failed;
       return true;
     });
     return [...rows].sort((a, b) => {

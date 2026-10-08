@@ -385,6 +385,7 @@ export const StudentAttendanceRecord = z.object({
   meetingLabel: z.string().min(1),
   status: z.enum(["present", "absent", "late", "excused"]),
   recordedAt: IsoDateTime,
+  note: z.string().default(""),
 });
 
 export const StudentAttendanceResponse = z.object({

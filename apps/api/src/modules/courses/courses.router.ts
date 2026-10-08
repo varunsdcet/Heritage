@@ -14,6 +14,7 @@ import {
   scheduleTextFromSessions,
 } from "./sectionSchedule.js";
 import { currentStudentId } from "../me/studentAlignment.js";
+import { enrolmentMark } from "../academic/program-plan.service.js";
 
 export const coursesRouter: Router = Router();
 
@@ -110,7 +111,7 @@ coursesRouter.get("/me", requireAuth, async (req, res, next) => {
         },
         gradeItems: {
           where: { institutionId: user.institutionId, status: "published" },
-          select: { score: true, maxScore: true },
+          select: { score: true, maxScore: true, letter: true, assignment: { select: { weightPercent: true } } },
         },
       },
       orderBy: { createdAt: "desc" },
@@ -174,7 +175,7 @@ coursesRouter.get("/me", requireAuth, async (req, res, next) => {
             credits: e.section.course.credits,
             instructorName: instructorDisplayName(personById.get(e.section.instructorPersonId)) ?? "TBA",
             enrolmentStatus: e.status as "enrolled" | "completed" | "waitlisted",
-            courseStatus: courseStatus({ status: e.status, startsOn, endsOn, averagePercent: progressPercent }, today),
+            courseStatus: courseStatus({ status: e.status, startsOn, endsOn, averagePercent: progressPercent, letter: enrolmentMark(e.status, e.gradeItems).letter }, today),
             progressPercent,
             deliveryMethod: offering?.deliveryMethod || deliveryFromSessions(sessions),
             location: offering?.location || roomFromSessions(sessions) || "TBD",

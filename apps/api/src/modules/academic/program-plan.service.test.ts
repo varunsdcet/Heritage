@@ -80,6 +80,11 @@ describe("program plan rows", () => {
     expect(f).toMatchObject({ status: "completed", grade: "A" });
   });
 
+  it("shows a course with a failing final mark as Failed with its grade", () => {
+    const f = planItemFacts({ courseId: "c-1", courseCode: "HCA101" }, [history({ courseStatus: "failed", averagePercent: 40, letter: "F" })]);
+    expect(f).toMatchObject({ status: "failed", grade: "F" });
+  });
+
   it("prefers the latest live attempt over a dropped one, and ignores other courses", () => {
     const rows = [history({ courseStatus: "dropped", status: "withdrawn", attemptNumber: 2, sectionId: "sec-old" }), history({ attemptNumber: 1 }), history({ courseId: "c-2", courseCode: "HCA102", sectionId: "sec-2" })];
     expect(planItemFacts({ courseId: "c-1", courseCode: "HCA101" }, rows)?.sectionId).toBe("sec-1");

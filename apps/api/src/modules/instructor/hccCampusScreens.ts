@@ -6,6 +6,7 @@ import { entityRecords } from "../admin/heritage/sysconfig.js";
 import { STATUS_TREE } from "../admin/heritage/students.spec.js";
 import { dateBoundsFromSessions, instructorDisplayName, scheduleTextFromSessions } from "../courses/sectionSchedule.js";
 import { COURSE_STATUS_LABEL } from "../../lib/courseStatus.js";
+import { UNASSIGNED_TERM } from "../../lib/sectionTerm.js";
 import { FLAG_TYPES, listInstructorFlags } from "./instructorFlags.js";
 import { loadSectionRunFacts, type SectionRunFacts } from "./myCoursesFacts.js";
 import {
@@ -131,14 +132,17 @@ function formatYmd(iso: string) {
   return new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" });
 }
 
+function runRangeLabel(run?: { startsOn: string | null; endsOn: string | null }) {
+  return run?.startsOn && run.endsOn
+    ? `${formatYmd(run.startsOn)} - ${formatYmd(run.endsOn)}`
+    : run?.startsOn
+      ? `From ${formatYmd(run.startsOn)}`
+      : "";
+}
+
 function scheduleLabel(sessions: SessionRow[], sectionCode: string, run?: { startsOn: string | null; endsOn: string | null }) {
   const mine = sessions.filter((s) => s.sectionCode === sectionCode);
-  const runRange =
-    run?.startsOn && run.endsOn
-      ? `${formatYmd(run.startsOn)} - ${formatYmd(run.endsOn)}`
-      : run?.startsOn
-        ? `From ${formatYmd(run.startsOn)}`
-        : "";
+  const runRange = runRangeLabel(run);
   if (!mine.length) return runRange ? `${runRange}\nTBA` : "TBA";
   const days = [...new Set(mine.map((s) => campusWeekday(s.startsAt)))].sort();
   const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -153,6 +157,13 @@ function scheduleLabel(sessions: SessionRow[], sectionCode: string, run?: { star
   const startIso = first.startsAt.toLocaleDateString("en-US", { timeZone: DISPLAY_TZ, month: "short", day: "numeric", year: "numeric" });
   const endIso = end.toLocaleDateString("en-US", { timeZone: DISPLAY_TZ, month: "short", day: "numeric", year: "numeric" });
   return `${runRange || `${startIso} - ${endIso}`}\n${dayLabel}, ${formatClock(first.startsAt)} - ${formatClock(end)}`;
+}
+
+/** Section dates and timing on the same basis as My Courses (offering form, block, class sessions, then term). */
+async function runFactsFor(ctx: { user?: { institutionId: string }; sections: SectionRow[] }) {
+  return ctx.user?.institutionId
+    ? await loadSectionRunFacts(ctx.user.institutionId, ctx.sections.map((s) => s.id))
+    : new Map<string, SectionRunFacts>();
 }
 
 export async function buildHccMyCourses(
@@ -204,9 +215,7 @@ export async function buildHccMyCourses(
     return "unknown";
   }
 
-  const runFacts = ctx.user?.institutionId
-    ? await loadSectionRunFacts(ctx.user.institutionId, ctx.sections.map((s) => s.id))
-    : new Map<string, SectionRunFacts>();
+  const runFacts = await runFactsFor(ctx);
   const sectionTiming = (s: SectionRow) => runFacts.get(s.id)?.timing ?? termTiming(s.termCode);
 
   // Include sections with no enrolments so a newly created course can be opened and activities added.
@@ -328,8 +337,8 @@ export async function buildHccCourseEvaluations(
   const qs = path.includes("?") ? new URLSearchParams(path.slice(path.indexOf("?") + 1)) : new URLSearchParams();
   const sectionId = (qs.get("sectionId") || "").trim();
 
-  const past = ctx.term ? ctx.sections.filter((s) => s.termCode !== ctx.term!.code) : [];
-  const pool = past.length ? past : ctx.sections;
+  const runFacts = await runFactsFor(ctx);
+  const pool = ctx.sections.filter((s) => runFacts.get(s.id)?.timing !== "upcoming");
 
   if (sectionId) {
     const section = pool.find((s) => s.id === sectionId) ?? ctx.sections.find((s) => s.id === sectionId);
@@ -395,16 +404,19 @@ export async function buildHccCourseEvaluations(
     }
   }
 
-  const rows = pool.map((s) => ({
-    id: s.id,
-    course: s.courseCode,
-    title: s.courseTitle,
-    offering: s.code,
-    evaluation: "End of course evaluation",
-    dates: scheduleLabel(ctx.classSessions, s.code).split("\n")[0] || "—",
-    schedule: scheduleLabel(ctx.classSessions, s.code).split("\n")[1] || "Mon-Fri",
-    href: `/instructor/f/t36-course-evaluations?sectionId=${encodeURIComponent(s.id)}`,
-  }));
+  const rows = pool.map((s) => {
+    const [dates, schedule] = scheduleLabel(ctx.classSessions, s.code, runFacts.get(s.id)).split("\n");
+    return {
+      id: s.id,
+      course: s.courseCode,
+      title: s.courseTitle,
+      offering: s.code,
+      evaluation: "End of course evaluation",
+      dates: dates || "—",
+      schedule: schedule || "TBA",
+      href: `/instructor/f/t36-course-evaluations?sectionId=${encodeURIComponent(s.id)}`,
+    };
+  });
   return {
     title: "COURSE EVALUATION RESULTS",
     breadcrumbs: ["Home", "Course Evaluations"],
@@ -415,6 +427,7 @@ export async function buildHccCourseEvaluations(
 }
 
 export async function buildHccCourseHistory(ctx: {
+  user?: { institutionId: string };
   displayName?: string;
   sections: SectionRow[];
   classSessions: SessionRow[];
@@ -422,58 +435,36 @@ export async function buildHccCourseHistory(ctx: {
   terms?: Array<{ code: string; name: string; startsOn?: string; endsOn?: string }>;
 }) {
   const termMeta = new Map((ctx.terms ?? []).map((t) => [t.code, t]));
-  const currentCode = ctx.term?.code;
+  const runFacts = await runFactsFor(ctx);
 
-  // HCC Course History lists all assigned offerings. Prefer past terms first; if the
-  // instructor only has current-term sections, still show those so the page isn't blank.
-  const past = currentCode
-    ? ctx.sections.filter((s) => s.termCode !== currentCode)
-    : [];
-  const source = past.length ? past : ctx.sections;
-
-  const rows = source
+  const rows = ctx.sections
+    .filter((s) => runFacts.get(s.id)?.timing === "ended")
     .map((s) => {
+      const run = runFacts.get(s.id);
       const sessions = ctx.classSessions.filter((c) => c.sectionCode === s.code);
-      const scheduleParts = scheduleLabel(ctx.classSessions, s.code).split("\n");
-      const meta = termMeta.get(s.termCode);
-      const first = sessions[0];
-      const last = sessions[sessions.length - 1];
-      const start =
-        meta?.startsOn ||
-        (first
-          ? first.startsAt.toLocaleDateString("en-US", { timeZone: DISPLAY_TZ, month: "short", day: "numeric", year: "numeric" })
-          : null);
-      const endRaw = last?.endsAt ?? last?.startsAt ?? null;
-      const end =
-        meta?.endsOn ||
-        (endRaw
-          ? endRaw.toLocaleDateString("en-US", { timeZone: DISPLAY_TZ, month: "short", day: "numeric", year: "numeric" })
-          : null);
-      const dates =
-        start && end && start !== end ? `${start} - ${end}` : start || end || meta?.name || s.termCode || "—";
-      const room = sessions.find((x) => x.location)?.location || "TBA";
+      const [dates, schedule] = scheduleLabel(ctx.classSessions, s.code, run).split("\n");
       return {
         id: s.id,
         course: s.courseCode,
         title: s.courseTitle,
         offering: s.code,
-        room,
-        dates,
-        schedule: scheduleParts[1] || scheduleParts[0] || "TBA",
+        room: sessions.find((x) => x.location)?.location || "TBA",
+        dates: dates || "—",
+        schedule: schedule || "TBA",
         instructor: ctx.displayName || "",
-        term: meta?.name || s.termCode,
-        termStartsOn: meta?.startsOn || "",
+        term: termMeta.get(s.termCode)?.name || s.termCode || UNASSIGNED_TERM,
+        startsOn: run?.startsOn ?? "",
         href: `/instructor/sections/${s.id}`,
       };
     })
-    .sort((a, b) => String(a.termStartsOn || a.dates).localeCompare(String(b.termStartsOn || b.dates)));
+    .sort((a, b) => a.startsOn.localeCompare(b.startsOn) || a.offering.localeCompare(b.offering));
 
   return {
     title: "COURSE HISTORY",
     breadcrumbs: ["Home", "Course History"],
     archetype: "hccCourseHistory",
     hccCourseHistory: {
-      rows: rows.map(({ termStartsOn: _t, ...rest }) => rest),
+      rows: rows.map(({ startsOn: _s, ...rest }) => rest),
       empty: rows.length ? undefined : "No course history was found for your faculty record.",
     },
     countLabel: `${rows.length} course(s)`,
@@ -953,6 +944,7 @@ export async function buildHccRepository() {
 
 export async function buildHccPendingSchedules(
   ctx: {
+    user?: { institutionId: string };
     displayName: string;
     sections: SectionRow[];
     classSessions: SessionRow[];
@@ -964,14 +956,12 @@ export async function buildHccPendingSchedules(
   const changeType = (qs.get("type") || "All Types").trim() || "All Types";
   const show = qs.get("show") === "1" || qs.get("show") === "true";
 
-  const current = ctx.term
-    ? ctx.sections.filter((s) => s.termCode === ctx.term!.code)
-    : ctx.sections;
-  const source = current.length ? current : ctx.sections;
+  const runFacts = await runFactsFor(ctx);
+  const source = ctx.sections.filter((s) => runFacts.get(s.id)?.timing !== "ended");
 
   const allRows = source.map((s) => {
     const sessions = ctx.classSessions.filter((c) => c.sectionCode === s.code);
-    const schedule = scheduleLabel(ctx.classSessions, s.code);
+    const schedule = scheduleLabel(ctx.classSessions, s.code, runFacts.get(s.id));
     const loc = sessions.find((x) => x.location)?.location || "TBA";
     let type = "New Schedule";
     let status = "Needs Confirmation";

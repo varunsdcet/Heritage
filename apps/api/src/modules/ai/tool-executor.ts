@@ -84,13 +84,15 @@ export async function executeAiTool(name: AiToolName, ctx: AiRequestContext, inp
       return prisma.course.findMany({ where: { institutionId }, orderBy: { code: "asc" }, take: 100 });
     }
     case "get_admissions_application_summary": {
-      return prisma.admissionsApplication.findFirst({
+      const { redactApplication } = await import("../applicant/governmentIdPurge.js");
+      const app = await prisma.admissionsApplication.findFirst({
         where: {
           institutionId,
           ...(ctx.roles.includes("applicant") ? { accountId: ctx.accountId } : {}),
         },
         include: { documents: true, offers: true },
       });
+      return app ? redactApplication(app) : null;
     }
     case "get_rubric": {
       const { getRubricForAssignment } = await import("./domain-actions.service.js");

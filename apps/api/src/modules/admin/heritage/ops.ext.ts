@@ -7,6 +7,9 @@ import { SAFE_LINK_MESSAGE, isSafeLink } from "../../../lib/safeLink.js";
 import { OPEN_SERVICE_REQUEST_STATUSES, applyApprovedRequest, settleRejectedApproval } from "../../approvals/approvals.service.js";
 import type { Data, EntityKey, ModuleKey, OpsRef } from "./ops.spec.js";
 import { APP_ADMITTED, APP_EARLY, MORE_ENTITIES } from "./ops.spec.more.js";
+import { isGovernmentIdDocument } from "../../applicant/applicationForm.js";
+
+const GOVERNMENT_ID_DOC_MESSAGE = "The college does not collect passports, SIN cards or other government ID";
 import { addDays, age, bump, httpError, n, parse, pct, personName, records, s, stampOf, take, today, type Adapter, type Change, type Ctx, type Opt, type Row } from "./ops.util.js";
 
 type Kpi = { label: string; value: string | number; hint?: string; tone?: "danger" | "warn" | "ok"; slug?: string };
@@ -269,7 +272,7 @@ export const EXT_TABLES: Partial<Record<EntityKey, Adapter>> = {
           progressPct: n(d.progressPct) ?? 50,
           notes: s(d.notes) || null,
           submittedAt: LEADS.includes(status) ? null : new Date(),
-          documents: { create: ["Official transcript", "Government ID"].map((label) => ({ institutionId: inst, label, status: "missing" })) },
+          documents: { create: ["Official transcript"].map((label) => ({ institutionId: inst, label, status: "missing" })) },
           timeline: { create: [{ institutionId: inst, title: "Application created by Admissions", detail: `${s(d.programName)} · ${s(d.intakeTerm)}` }] },
         },
       });
@@ -299,12 +302,16 @@ export const EXT_TABLES: Partial<Record<EntityKey, Adapter>> = {
   appDocuments: {
     async list(inst) {
       const rows = await prisma.applicationDocument.findMany({ where: { institutionId: inst }, orderBy: [{ updatedAt: "desc" }] });
-      return rows.map((r) => ({ id: r.id, applicationId: r.applicationId, label: r.label, status: r.status, fileName: r.fileName ?? "", updatedAt: r.updatedAt.toISOString() }));
+      return rows
+        .filter((r) => !isGovernmentIdDocument(r.label))
+        .map((r) => ({ id: r.id, applicationId: r.applicationId, label: r.label, status: r.status, fileName: r.fileName ?? "", updatedAt: r.updatedAt.toISOString() }));
     },
     async create(inst, d) {
+      if (isGovernmentIdDocument(s(d.label))) throw httpError(400, GOVERNMENT_ID_DOC_MESSAGE, "VALIDATION_ERROR");
       return (await prisma.applicationDocument.create({ data: { institutionId: inst, applicationId: s(d.applicationId), label: s(d.label), status: s(d.status) } })).id;
     },
     async update(_inst, id, d) {
+      if (isGovernmentIdDocument(s(d.label))) throw httpError(400, GOVERNMENT_ID_DOC_MESSAGE, "VALIDATION_ERROR");
       await prisma.applicationDocument.update({ where: { id }, data: { applicationId: s(d.applicationId), label: s(d.label), status: s(d.status), ...bump } });
     },
     async remove(_inst, id) {

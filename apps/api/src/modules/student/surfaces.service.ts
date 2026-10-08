@@ -241,6 +241,7 @@ export async function listStudentAttendance(user: SessionClaims) {
       meetingLabel: r.meetingLabel,
       status: r.status as "present" | "absent" | "late" | "excused",
       recordedAt: r.recordedAt.toISOString(),
+      note: r.note,
     })),
   });
 }
@@ -554,18 +555,18 @@ export async function logPracticumHours(user: SessionClaims, body: unknown, corr
 
 export async function listStudentFinance(user: SessionClaims, financialTermId?: string | null) {
   const student = await requireStudent(user);
-  const terms = await prisma.financialTerm.findMany({
-    where: { institutionId: user.institutionId },
-    orderBy: { startsOn: "desc" },
-  });
-  // Without an explicit term the statement covers the whole account, so entries posted without a
-  // financial term are included and the balance matches the admin ledger.
-  const selectedId = financialTermId && terms.some((t) => t.id === financialTermId) ? financialTermId : null;
   const allEntries = await prisma.financeLedgerEntry.findMany({
     where: { institutionId: user.institutionId, studentId: student.id },
     include: { financialTerm: true },
     orderBy: { postedAt: "desc" },
   });
+  // Only terms the student was actually charged / paid in, so an institution-wide term never appears as a filter.
+  const terms = [...new Map(allEntries.flatMap((e) => (e.financialTerm ? [[e.financialTerm.id, e.financialTerm] as const] : []))).values()].sort(
+    (a, b) => b.startsOn.localeCompare(a.startsOn),
+  );
+  // Without an explicit term the statement covers the whole account, so entries posted without a
+  // financial term are included and the balance matches the admin ledger.
+  const selectedId = financialTermId && terms.some((t) => t.id === financialTermId) ? financialTermId : null;
   const entries = selectedId ? allEntries.filter((e) => e.financialTermId === selectedId) : allEntries;
   const isCounted = (e: (typeof allEntries)[number]) => e.status !== "waived" && e.status !== "void";
   const raisesBalance = (e: (typeof allEntries)[number]) => e.kind === "charge" || e.kind === "refund";

@@ -2,6 +2,7 @@ import type { RoleName, SessionClaims } from "@myheritage/contracts";
 import { prisma } from "@myheritage/db";
 import type { GroundedCoachFact } from "@myheritage/ai";
 import { currentStudentId } from "../me/studentAlignment.js";
+import { isGovernmentIdDocument } from "../applicant/applicationForm.js";
 
 const rolePrefixes: Array<{ prefix: string; role: RoleName }> = [
   { prefix: "/student", role: "student" },
@@ -642,7 +643,7 @@ export async function buildCoachFacts(user: SessionClaims, role: RoleName): Prom
         kind: "portal",
       });
       facts.push(
-        ...application.documents.map((doc) => ({
+        ...application.documents.filter((doc) => !isGovernmentIdDocument(doc.label)).map((doc) => ({
           id: `document:${doc.id}`,
           title: doc.label,
           uri: "/applicant/documents",

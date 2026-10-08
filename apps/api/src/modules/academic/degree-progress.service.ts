@@ -1,5 +1,6 @@
 import type { DegreePlanAnalysis, AiClaim } from "@myheritage/contracts";
 import { prisma } from "@myheritage/db";
+import { passingLetter } from "../../lib/courseStatus.js";
 import { ensureProgramVersion } from "./program-version.js";
 import { getCourseHistory, transcriptCourses } from "./program-plan.service.js";
 
@@ -30,7 +31,7 @@ export function courseStanding(
   for (const r of rows) {
     const code = r.courseCode.toUpperCase();
     if (drop.has(code) || fail.has(code)) continue;
-    if (r.final && r.countsTowardCgpa && r.letter !== "F" && r.gradePoints !== 0) out.set(code, { credits: r.credits, status: "satisfied" });
+    if (r.final && r.countsTowardCgpa && passingLetter(r.letter)) out.set(code, { credits: r.credits, status: "satisfied" });
     else if (!r.final && r.status === "enrolled" && out.get(code)?.status !== "satisfied") out.set(code, { credits: r.credits, status: "in_progress" });
   }
   return out;

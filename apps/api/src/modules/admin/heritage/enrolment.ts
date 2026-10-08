@@ -22,6 +22,8 @@ import {
   type Data,
   type Db,
 } from "./finance.core.js";
+import { termLabel, type TermRef } from "../../../lib/sectionTerm.js";
+import { loadSectionTerms } from "../../instructor/myCoursesFacts.js";
 import { isInternational } from "./finance.ledger.js";
 import { withStudentMoneyLock } from "./studentLock.js";
 
@@ -98,10 +100,11 @@ export async function quoteSectionFee(inst: string, sectionId: string, studentId
   const { session, course } = await settingsFor(inst, section);
   const st = studentId ? await requireStudent(inst, studentId) : null;
   const quote = courseFeeQuote(course, session, section.course.credits, st ? isInternational(st) : false);
+  const term = (await loadSectionTerms(inst, [section])).get(section.id);
   return {
     sectionId: section.id,
     label: `${section.course.code} ${section.code}`,
-    termName: section.term.name,
+    termName: termLabel(term),
     rateCategory: st?.rateCategory ?? null,
     ...quote,
     seats: { ...seatRule(session), ...(await seatCounts(prisma, section.id)) },
@@ -132,7 +135,7 @@ export type EnrolResult = {
   feeNote: string | null;
 };
 
-type Plan = { section: LoadedSection; label: string; rule: SeatRule; fee: number; feeNote: string | null };
+type Plan = { section: LoadedSection; term: TermRef | null; label: string; rule: SeatRule; fee: number; feeNote: string | null };
 
 /**
  * Enrols a student in one or more sections under the per-student money lock. Every seat check, enrolment and optional
@@ -158,7 +161,11 @@ export async function enrolInSections(user: SessionClaims, studentId: string, se
       if (quote.amount >= EPS) fee = quote.amount;
       else feeNote = quote.included ? `${label} tuition is included in the program cost; no course fee was posted.` : `${label} has no course cost set; no course fee was posted.`;
     }
-    plans.push({ section, label, rule: seatRule(session), fee, feeNote });
+    plans.push({ section, term: null, label, rule: seatRule(session), fee, feeNote });
+  }
+  if (plans.some((p) => p.fee >= EPS)) {
+    const terms = await loadSectionTerms(inst, plans.map((p) => p.section));
+    for (const p of plans) p.term = terms.get(p.section.id) ?? null;
   }
   let cfg: Config | null = null;
   if (info && plans.some((p) => p.fee >= EPS)) {
@@ -188,7 +195,7 @@ export async function enrolInSections(user: SessionClaims, studentId: string, se
           : await tx.enrolment.create({ data: { institutionId: inst, sectionId: section.id, studentId: student.id, status } });
         let fee: EnrolResult["fee"] = null;
         if (plan.fee >= EPS && status === "enrolled") {
-          const term = await ensureFinancialTerm(inst, section.term, tx);
+          const term = plan.term ? await ensureFinancialTerm(inst, plan.term, tx) : null;
           const { entry, number } = await postEntry(
             user,
             {
@@ -196,8 +203,8 @@ export async function enrolInSections(user: SessionClaims, studentId: string, se
               kind: "charge",
               label: `${typeName} · ${label}`,
               amount: plan.fee,
-              termId: term.id,
-              note: `Course fee for ${section.course.code} ${section.course.title} (${section.code}), ${section.term.name}`,
+              termId: term?.id ?? null,
+              note: `Course fee for ${section.course.code} ${section.course.title} (${section.code}), ${termLabel(plan.term)}`,
               courseId: section.courseId,
               sectionId: section.id,
             },

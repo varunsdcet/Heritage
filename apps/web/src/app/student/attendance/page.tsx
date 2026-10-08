@@ -287,6 +287,12 @@ export default function StudentAttendancePage() {
                         <span>Status</span>
                         <strong style={{ textTransform: "capitalize" }}>{selected.status}</strong>
                       </div>
+                      {selected.note ? (
+                        <div>
+                          <span>Instructor note</span>
+                          <strong>{selected.note}</strong>
+                        </div>
+                      ) : null}
                     </div>
                     <div className="mh-student-lab__actions">
                       <Button type="button" variant="secondary" onClick={() => router.push("/student/f/st-16-services")}>

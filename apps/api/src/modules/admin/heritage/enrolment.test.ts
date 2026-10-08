@@ -32,6 +32,8 @@ vi.mock("./courses.js", () => ({ S: { session: "CM:SESSION", courseSettings: "CM
 vi.mock("./finance.core.js", async (importOriginal) => ({ ...(await importOriginal<typeof import("./finance.core.js")>()), ...fin }));
 vi.mock("./finance.ledger.js", () => ({ isInternational: (st: { rateCategory?: string }) => /international/i.test(st.rateCategory ?? "") }));
 vi.mock("./studentLock.js", () => ({ withStudentMoneyLock: (_inst: string, _student: string, work: () => Promise<unknown>) => work() }));
+const facts = vi.hoisted(() => ({ loadSectionTerms: vi.fn() }));
+vi.mock("../../instructor/myCoursesFacts.js", () => facts);
 
 import { courseFeeQuote, enrolInSections, seatDecision, seatRule } from "./enrolment.js";
 
@@ -67,6 +69,7 @@ beforeEach(() => {
   fin.loadConfig.mockResolvedValue({ ledgerTypes: [{ id: "lt-fee", data: { name: "Course Fee" } }] });
   fin.ensureFinancialTerm.mockResolvedValue({ id: "fin-term-1" });
   fin.postEntry.mockResolvedValue({ entry: { id: "entry-1" }, number: 42 });
+  facts.loadSectionTerms.mockImplementation(async (_inst: string, sections: Array<{ id: string; term: unknown }>) => new Map(sections.map((s) => [s.id, s.term])));
 });
 
 describe("seat rules", () => {
@@ -119,6 +122,20 @@ describe("enrolInSections", () => {
       user,
       expect.objectContaining({ studentId: "stu-1", kind: "charge", amount: 400, termId: "fin-term-1", courseId: "course-1", sectionId: "sec-1" }),
       expect.objectContaining({ ledgerTypeId: "lt-fee", enrolmentId: "enr-1" }),
+      tx,
+    );
+  });
+
+  it("posts the fee without a term when the stored term does not cover the section's dates", async () => {
+    settings({ maxEnrolments: 10 }, { tuitionIncluded: false, costCalculation: "Flat", domestic: 900 });
+    seats(0, 0);
+    facts.loadSectionTerms.mockResolvedValue(new Map([["sec-1", null]]));
+    await enrolInSections(user, "stu-1", ["sec-1"], { source: "test", postFee: true });
+    expect(fin.ensureFinancialTerm).not.toHaveBeenCalled();
+    expect(fin.postEntry).toHaveBeenCalledWith(
+      user,
+      expect.objectContaining({ termId: null, note: "Course fee for CS101 Intro to Computing (01), Not assigned" }),
+      expect.anything(),
       tx,
     );
   });

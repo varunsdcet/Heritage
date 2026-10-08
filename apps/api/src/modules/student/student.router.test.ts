@@ -32,6 +32,7 @@ const db = vi.hoisted(() => ({
   assignment: { findMany: vi.fn() },
   sisScreenState: { findMany: vi.fn(), findUnique: vi.fn() },
   fileObject: { findFirst: vi.fn() },
+  institution: { findFirst: vi.fn() },
   $transaction: vi.fn(),
 }));
 
@@ -359,10 +360,11 @@ describe("instructor assignment settings are enforced", () => {
   });
 
   it("keeps submissions closed before the open date", async () => {
-    db.assignment.findMany.mockResolvedValue([{ ...assignment, availableFrom: new Date("2099-01-01T00:00:00.000Z") }]);
+    db.institution.findFirst.mockResolvedValue({ timezone: "America/Vancouver" });
+    db.assignment.findMany.mockResolvedValue([{ ...assignment, availableFrom: new Date("2099-07-01T07:00:00.000Z") }]);
     const { status, body } = await uploadFile("essay.pdf", pdf);
     expect(status).toBe(409);
-    expect(body.error?.message).toMatch(/^Submissions open on/);
+    expect(body.error?.message).toBe("Submissions open on Jul 1, 2099, 12:00 AM");
   });
 
   it("allows late uploads until the cut-off date", async () => {

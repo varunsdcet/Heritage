@@ -6535,9 +6535,14 @@ function parseWeightPercent(weight?: string): number {
   return Number.isFinite(n) && n > 0 ? n : 20;
 }
 
-function parseDateOrOffset(value: string | undefined, fallbackDays: number): Date {
+/** With `startOfDayTz`, a date-only value means 00:00 of that day in the zone; otherwise it reads as local noon. */
+export function parseDateOrOffset(value: string | undefined, fallbackDays: number, startOfDayTz?: string): Date {
   if (value?.trim()) {
-    const d = new Date(value.includes("T") ? value : `${value.trim()}T12:00:00`);
+    const raw = value.trim();
+    const d =
+      startOfDayTz && /^\d{4}-\d{2}-\d{2}$/.test(raw)
+        ? zonedToUtc(raw, "00:00", startOfDayTz)
+        : new Date(raw.includes("T") ? raw : `${raw}T12:00:00`);
     if (!Number.isNaN(d.getTime())) return d;
   }
   const d = new Date();
@@ -6648,7 +6653,8 @@ async function createOrSaveAssessment(
   const title = (fields.title || `Assessment · ${new Date().toLocaleDateString()}`).trim();
   const type = (fields.type || "Written Exam").trim();
   const weightPercent = parseWeightPercent(fields.weight);
-  const opensAt = parseDateOrOffset(fields.openDate, 0);
+  const tz = await institutionTimezone(ctx.user.institutionId);
+  const opensAt = parseDateOrOffset(fields.openDate, 0, tz);
   const closesAt = parseDateOrOffset(fields.dueDate, 14);
   if (closesAt.getTime() <= opensAt.getTime()) {
     closesAt.setTime(opensAt.getTime() + 3 * 24 * 60 * 60 * 1000);
@@ -6675,7 +6681,7 @@ async function createOrSaveAssessment(
     title,
     type,
     weight: `${weightPercent}%`,
-    openDate: opensAt.toISOString().slice(0, 10),
+    openDate: ymdIn(opensAt, tz),
     dueDate: closesAt.toISOString().slice(0, 10),
     rubricRows,
   };

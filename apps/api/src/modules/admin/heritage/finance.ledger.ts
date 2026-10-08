@@ -3,6 +3,8 @@
 import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
 import { buildDocumentPdf, type DocLine } from "../../../lib/taxPdf.js";
+import { termLabel } from "../../../lib/sectionTerm.js";
+import { loadSectionTerms } from "../../instructor/myCoursesFacts.js";
 import { ensureSeed, type Rec } from "./sysconfig.js";
 import { ADVANCE_CREDIT } from "./finance.spec.js";
 import { withStudentMoneyLock } from "./studentLock.js";
@@ -168,7 +170,8 @@ export async function feeCourseLink(inst: string, body: Data) {
     const x = await prisma.section.findFirst({ where: { id: sectionId, institutionId: inst }, include: { course: true, term: true } });
     if (!x) throw httpError(400, "The selected course section was not found");
     if (courseId && courseId !== x.courseId) throw httpError(400, "The selected section does not belong to the selected course");
-    return { courseId: x.courseId, sectionId: x.id, label: `${x.course.code} ${x.code}`, term: x.term };
+    const term = (await loadSectionTerms(inst, [x])).get(x.id) ?? null;
+    return { courseId: x.courseId, sectionId: x.id, label: `${x.course.code} ${x.code}`, term };
   }
   if (courseId) {
     const course = await prisma.course.findFirst({ where: { id: courseId, institutionId: inst } });
@@ -187,15 +190,17 @@ export async function feeSectionOptions(user: SessionClaims, studentId: string) 
     orderBy: { createdAt: "desc" },
   });
   const seen = new Set<string>();
+  const terms = await loadSectionTerms(c.inst, rows.map((e) => e.section));
+  const termOf = (e: (typeof rows)[number]) => terms.get(e.sectionId) ?? null;
   return {
     items: rows
       .filter((e) => !seen.has(e.sectionId) && seen.add(e.sectionId))
-      .sort((a, b) => b.section.term.startsOn.localeCompare(a.section.term.startsOn) || a.section.course.code.localeCompare(b.section.course.code))
+      .sort((a, b) => (termOf(b)?.startsOn ?? "").localeCompare(termOf(a)?.startsOn ?? "") || a.section.course.code.localeCompare(b.section.course.code))
       .map((e) => ({
         sectionId: e.sectionId,
         courseId: e.section.courseId,
         label: `${e.section.course.code} ${e.section.code} — ${e.section.course.title}`,
-        termName: e.section.term.name,
+        termName: termLabel(termOf(e)),
         enrolmentStatus: e.status,
       })),
   };

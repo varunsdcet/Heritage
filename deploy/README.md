@@ -47,6 +47,14 @@ cp deploy/.env.production.example .env.production
 nano .env.production
 ```
 
+`TRUST_PROXY` controls which proxies the API believes for the client IP used by the public rate limits
+(`/verify`, `/apply`, certificates). The default (`loopback, linklocal, uniquelocal`) is right for
+nginx → web → api. Behind a CDN or public load balancer set the hop count (e.g. `TRUST_PROXY=3`),
+or every visitor lands in one rate-limit bucket and gets 429 after 30 requests per 15 minutes.
+
+Uploaded files live in the `uploads` volume (`FILE_STORAGE_ROOT=/app/var/uploads`), not in the
+synced source tree; the sync scripts also protect any `var/uploads/` folder from `rsync --delete`.
+
 Expected DB URL inside compose network:
 
 ```text

@@ -18,7 +18,9 @@ rsync -az --delete \
   --exclude '.env.local' \
   --exclude '.env' \
   --exclude '.env.production' \
+  --exclude 'var/uploads/' \
   --filter 'P .env.production' \
+  --filter 'P var/uploads/' \
   "${LOCAL_ROOT}/" "${HOST}:${ROOT_REMOTE}/"
 
 echo "==> rebuild API only (SEED=0, web unchanged)"

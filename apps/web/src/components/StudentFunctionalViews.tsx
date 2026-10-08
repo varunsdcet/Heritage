@@ -697,6 +697,18 @@ export function StudentAssignmentDetailView({ assignmentId }: { assignmentId: st
   const [notice, setNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [textDraft, setTextDraft] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const opensAt = assignment?.availableFrom ? new Date(assignment.availableFrom).getTime() : null;
+  const notYetOpen = opensAt != null && opensAt > now;
+
+  useEffect(() => {
+    if (opensAt == null) return;
+    const wait = opensAt - Date.now();
+    // setTimeout overflows past ~24.8 days; a reload picks up later openings.
+    if (wait <= 0 || wait > 2 ** 31 - 1) return;
+    const timer = setTimeout(() => setNow(Date.now()), wait + 1000);
+    return () => clearTimeout(timer);
+  }, [opensAt]);
 
   async function upload(file: File | undefined) {
     if (!file || !resource.session) return;
@@ -807,6 +819,7 @@ export function StudentAssignmentDetailView({ assignmentId }: { assignmentId: st
   const canUpload = assignment?.submission?.status !== "submitted" && assignment?.state !== "graded";
   const canRemove = assignment?.submission?.status === "draft";
   const submittedLocked = !canUpload;
+  const canEdit = canUpload && !notYetOpen;
   const allowsFiles = assignment?.fileSubmissions !== false;
   const allowsText = Boolean(assignment?.onlineText);
   const savedText = assignment?.submission?.textBody ?? "";
@@ -1007,7 +1020,7 @@ export function StudentAssignmentDetailView({ assignmentId }: { assignmentId: st
                 {allowsText ? (
                   <label style={{ display: "grid", gap: 6 }}>
                     <span style={{ fontWeight: 600 }}>Online text</span>
-                    {canUpload ? (
+                    {canEdit ? (
                       <textarea
                         rows={8}
                         value={textValue}
@@ -1016,12 +1029,16 @@ export function StudentAssignmentDetailView({ assignmentId }: { assignmentId: st
                         onChange={(event) => setTextDraft(event.target.value)}
                       />
                     ) : (
-                      <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>{savedText || "No online text was submitted."}</p>
+                      <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>{savedText || (notYetOpen ? "" : "No online text was submitted.")}</p>
                     )}
                   </label>
                 ) : null}
 
-                {canUpload ? (
+                {canUpload && notYetOpen ? (
+                  <p className="mh-teacher-muted" style={{ margin: 0 }}>
+                    Submissions open on {formatDate(assignment.availableFrom)}. You can upload and submit your work from then.
+                  </p>
+                ) : canUpload ? (
                   <>
                     {allowsFiles ? (
                     <label className="mh-teacher-dropzone mh-student-assign__drop">

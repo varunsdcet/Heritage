@@ -6,11 +6,13 @@ import { hashPassword } from "@myheritage/auth";
 import { requireAuth, requireRoles, type AuthedRequest } from "../../middleware/auth.js";
 import { getSisScreen, runSisAction, getCampusOverview } from "./sis.service.js";
 import { superAdminRouter } from "./superAdmin.router.js";
-import { assertPermission, type PermissionModuleKey } from "./superAdmin.service.js";
+import { assertPermission, canView, effectiveAccess, type PermissionModuleKey } from "./superAdmin.service.js";
 import { heritageRouter } from "./heritage/heritage.router.js";
 import { enrolInSection, quoteSectionFee, seatRule } from "./heritage/enrolment.js";
 import { S as CM, settingsOf } from "./heritage/courses.js";
 import { knownProgramName } from "../academic/program-version.js";
+import { termLabel } from "../../lib/sectionTerm.js";
+import { loadSectionTerms } from "../instructor/myCoursesFacts.js";
 import {
   UpsertCohortBody,
   GeneratePlanBody,
@@ -112,7 +114,8 @@ adminRouter.use(async (req, _res, next) => {
 adminRouter.get("/campus-overview", async (req, res, next) => {
   try {
     const user = (req as AuthedRequest).user;
-    res.json(await getCampusOverview(user.institutionId));
+    const [overview, access] = await Promise.all([getCampusOverview(user.institutionId), effectiveAccess(user.institutionId, user.accountId)]);
+    res.json(canView(access.permissions.userRequests) ? overview : { ...overview, pendingApprovals: 0, pendingGrades: 0 });
   } catch (err) {
     next(err);
   }
@@ -247,7 +250,6 @@ adminRouter.post("/users", async (req, res, next) => {
             documents: {
               create: [
                 { institutionId: user.institutionId, label: "Official transcript", status: "missing" },
-                { institutionId: user.institutionId, label: "Government ID", status: "missing" },
               ],
             },
             timeline: {
@@ -362,18 +364,19 @@ adminRouter.get("/sections", async (req, res, next) => {
       where: { id: { in: [...new Set(sections.map((s) => s.instructorPersonId))] } },
     });
     const names = new Map(instructors.map((p) => [p.id, `${p.givenName} ${p.familyName}`]));
-    const settings = await settingsOf(user.institutionId, CM.session, sections.map((s) => s.id));
+    const [settings, terms] = await Promise.all([settingsOf(user.institutionId, CM.session, sections.map((s) => s.id)), loadSectionTerms(user.institutionId, sections)]);
     res.json({
       items: sections.map((s) => {
         const rule = seatRule(settings.get(s.id)?.data);
+        const term = terms.get(s.id);
         return {
           sectionId: s.id,
           code: s.code,
           courseCode: s.course.code,
           courseTitle: s.course.title,
           credits: s.course.credits,
-          termCode: s.term.code,
-          termName: s.term.name,
+          termCode: term?.code ?? "",
+          termName: termLabel(term),
           instructorName: names.get(s.instructorPersonId) ?? "TBA",
           instructorPersonId: s.instructorPersonId,
           enrolmentCount: s.enrolments.filter((e) => e.status === "enrolled").length,

@@ -4,7 +4,9 @@ import { randomBytes } from "node:crypto";
 import { prisma } from "@myheritage/db";
 import { hashPassword } from "@myheritage/auth";
 import type { SessionClaims } from "@myheritage/contracts";
+import { termLabel } from "../../../lib/sectionTerm.js";
 import { ymdIn } from "../../../lib/workshopPolicy.js";
+import { loadSectionTerms } from "../../instructor/myCoursesFacts.js";
 import { DEFAULT_TZ } from "../../courses/sectionSchedule.js";
 import { getTranscriptSummary } from "../../academic/program-plan.service.js";
 import { ensureSeed, sanitizeHtml, entityRecords } from "./sysconfig.js";
@@ -228,6 +230,7 @@ export async function directory(user: SessionClaims, q: DirectoryQuery) {
     students.map((x) => x.id),
   );
   const advisorName = new Map(advisors.map((a) => [a.id, a.name]));
+  const programTerms = await loadSectionTerms(inst, students.flatMap((st) => (st.enrolments[0] ? [st.enrolments[0].section] : [])));
   const want = (k: string) => text(q[k], 200);
   const f = {
     q: want("q").toLowerCase(),
@@ -291,7 +294,7 @@ export async function directory(user: SessionClaims, q: DirectoryQuery) {
     const m = (metaMap[st.id] ?? {}) as Record<string, string | undefined>;
     const p = profiles.get(st.id);
     const status = statusOf(m, st.enrolments.length);
-    const programTerm = st.enrolments[0]?.section.term.name ?? "";
+    const programTerm = st.enrolments[0] ? termLabel(programTerms.get(st.enrolments[0].sectionId)) : "";
     const start = p?.scheduleStart || st.createdAt.toISOString().slice(0, 10);
     const end = p?.scheduleEnd || "";
     return {

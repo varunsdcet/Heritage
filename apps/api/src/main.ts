@@ -152,6 +152,13 @@ if (process.env.NODE_ENV !== "test") {
     console.log(`MyHeritage API listening on http://localhost:${port}`);
   });
 
+  void import("./modules/applicant/governmentIdPurge.js")
+    .then(({ purgeLegacyGovernmentIdData }) => purgeLegacyGovernmentIdData())
+    .then((summary) => {
+      if (summary.documents || summary.forms) console.log("government ID purge", summary);
+    })
+    .catch((err) => console.error("government ID purge failed", err));
+
   // Campus compliance: pre-class reminders, miss escalation, teacher SLAs.
   const sweepMs = Number(process.env.COMPLIANCE_SWEEP_MS ?? 60_000);
   setTimeout(() => {

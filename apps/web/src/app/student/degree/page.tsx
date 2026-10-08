@@ -18,6 +18,7 @@ function StudentDegreeBody() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [userName, setUserName] = useState("Student");
+  const [failedCodes, setFailedCodes] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const session = loadSession();
@@ -30,6 +31,12 @@ function StudentDegreeBody() {
       return;
     }
     setUserName(`${session.givenName} ${session.familyName}`.trim() || "Student");
+    api<Record<"main" | "practicum" | "makeup", Array<{ courseCode: string; status: string }> | undefined>>("/student/program-plan", {}, session.accessToken)
+      .then((plan) => {
+        const items = [...(plan.main ?? []), ...(plan.practicum ?? []), ...(plan.makeup ?? [])];
+        setFailedCodes(new Set(items.filter((i) => i.status === "failed").map((i) => i.courseCode.toUpperCase())));
+      })
+      .catch(() => undefined);
     api<DegreeProgressResponse>("/student/degree-progress", {}, session.accessToken)
       .then(async (data) => {
         setLoading(false);
@@ -228,26 +235,30 @@ function StudentDegreeBody() {
             <section className="mh-sis-dash__card" style={{ marginTop: 20 }}>
               <h2>Open requirements</h2>
               <div style={{ display: "grid", gap: 10 }}>
-                {view.remainingRequirements.map((req) => (
-                  <div key={req.id} style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                    <div>
-                      <strong>
-                        {req.code} · {req.title}
-                      </strong>
-                      <div style={{ color: "var(--mh-text-muted)", fontSize: 13 }}>
-                        {req.credits} credits
-                        {req.blockedByCourseCodes.length
-                          ? ` · blocked by ${req.blockedByCourseCodes.join(", ")}`
-                          : ""}
+                {view.remainingRequirements.map((req) => {
+                  const failed = req.status === "missing" && failedCodes.has(req.code.toUpperCase());
+                  return (
+                    <div key={req.id} style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                      <div>
+                        <strong>
+                          {req.code} · {req.title}
+                        </strong>
+                        <div style={{ color: "var(--mh-text-muted)", fontSize: 13 }}>
+                          {req.credits} credits
+                          {failed ? " · failed, retake required" : ""}
+                          {req.blockedByCourseCodes.length
+                            ? ` · blocked by ${req.blockedByCourseCodes.join(", ")}`
+                            : ""}
+                        </div>
                       </div>
+                      <StatusPill
+                        tone={req.status === "blocked" || failed ? "danger" : req.status === "in_progress" ? "warning" : "neutral"}
+                      >
+                        {failed ? "failed" : req.status.replace("_", " ")}
+                      </StatusPill>
                     </div>
-                    <StatusPill
-                      tone={req.status === "blocked" ? "danger" : req.status === "in_progress" ? "warning" : "neutral"}
-                    >
-                      {req.status.replace("_", " ")}
-                    </StatusPill>
-                  </div>
-                ))}
+                  );
+                })}
                 {!view.remainingRequirements.length ? (
                   <p>All catalog requirements in this version are satisfied.</p>
                 ) : null}

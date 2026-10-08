@@ -1,5 +1,5 @@
 import { prisma } from "@myheritage/db";
-import { courseStatus, hasFinalMark, type CourseStatus } from "../../lib/courseStatus.js";
+import { courseStatus, gradePointsOrNull, hasFinalMark, passingLetter, type CourseStatus } from "../../lib/courseStatus.js";
 import { institutionTerms, sectionTerm, termLabel } from "../../lib/sectionTerm.js";
 import { ymdIn } from "../../lib/workshopPolicy.js";
 import { sectionOfferings } from "../courses/sectionOffering.js";
@@ -24,33 +24,6 @@ function letterFromPct(p: number | null) {
   return "F";
 }
 
-function gradePoints(letter: string) {
-  const map: Record<string, number> = {
-    A: 4.0,
-    "A-": 3.7,
-    "B+": 3.3,
-    B: 3.0,
-    "B-": 2.7,
-    "C+": 2.3,
-    C: 2.0,
-    "C-": 1.7,
-    D: 1.0,
-    F: 0,
-    P: 0,
-    I: 0,
-    IP: 0,
-  };
-  return map[letter] ?? 0;
-}
-
-/** Letter grades that show blank grade-points on Final Marks (MySIS). */
-function gradePointsOrNull(letter: string): number | null {
-  if (!letter || letter === "—" || letter === "P" || letter === "I" || letter === "IP" || letter === "W") {
-    return null;
-  }
-  return gradePoints(letter);
-}
-
 function displayLetter(row: {
   status: string;
   letter: string;
@@ -67,7 +40,7 @@ type CourseHistory = Awaited<ReturnType<typeof getCourseHistory>>;
 type HistoryRow = CourseHistory["all"][number];
 type FactsRow = Pick<HistoryRow, "courseId" | "courseCode" | "status" | "courseStatus" | "attemptNumber" | "startsOn" | "endsOn" | "scheduleText" | "sectionId" | "letter" | "averagePercent">;
 
-const STATUS_RANK: Record<CourseStatus, number> = { completed: 0, in_progress: 1, not_started: 2, dropped: 3 };
+const STATUS_RANK: Record<CourseStatus, number> = { completed: 0, failed: 1, in_progress: 2, not_started: 3, dropped: 4 };
 
 /**
  * What the student's enrolments say about one plan course: the latest non-dropped attempt (a dropped attempt only
@@ -87,7 +60,7 @@ export function planItemFacts(course: { courseId?: string | null; courseCode: st
     endsOn: best.endsOn ?? null,
     scheduleText: best.scheduleText ?? null,
     sectionId: best.sectionId,
-    grade: best.courseStatus === "completed" ? displayLetter({ ...best, status: "completed" }) : null,
+    grade: best.courseStatus === "completed" || best.courseStatus === "failed" ? displayLetter({ ...best, status: "completed" }) : null,
   };
 }
 
@@ -178,6 +151,7 @@ export async function getProgramPlan(institutionId: string, studentId: string, k
         averagePercent: null as number | null,
         cgpa: null as number | null,
         completed: 0,
+        failed: 0,
         inProgress: 0,
         notStarted: 0,
         dropped: 0,
@@ -240,8 +214,7 @@ export async function getProgramPlan(institutionId: string, studentId: string, k
   const practicum = items.filter((i) => i.category === "practicum");
   const makeup = items.filter((i) => i.category === "makeup");
 
-  const passed = (i: (typeof items)[number]) => i.status === "completed" && i.grade !== "F";
-  const earnedCredits = items.filter(passed).reduce((n, i) => n + i.credits, 0);
+  const earnedCredits = items.filter((i) => i.status === "completed").reduce((n, i) => n + i.credits, 0);
   const totalCredits = items.reduce((n, i) => n + i.credits, 0);
   const { averagePercent, cgpa } = summarizeCourses(transcriptCourses(history, ""));
 
@@ -263,6 +236,7 @@ export async function getProgramPlan(institutionId: string, studentId: string, k
       averagePercent,
       cgpa,
       completed: items.filter((i) => i.status === "completed").length,
+      failed: items.filter((i) => i.status === "failed").length,
       inProgress: items.filter((i) => i.status === "in_progress").length,
       notStarted: items.filter((i) => i.status === "not_started").length,
       dropped: items.filter((i) => i.status === "dropped").length,
@@ -285,6 +259,18 @@ export function weightedPercent(items: Array<{ score: number | null; maxScore: n
     ? scored.reduce((n, g) => n + ((g.score ?? 0) / g.maxScore) * Math.max(Number(g.weightPercent) || 0, 0), 0) / weight
     : scored.reduce((n, g) => n + (g.score ?? 0) / g.maxScore, 0) / scored.length;
   return Number((pct * 100).toFixed(1));
+}
+
+/** One enrolment's weighted percent and letter from its published grades (a single published grade keeps its own letter). */
+export function enrolmentMark(
+  status: string,
+  gradeItems: Array<{ score: number | null; maxScore: number; letter: string | null; assignment: { weightPercent: number | null } }>,
+) {
+  const published = gradeItems.filter((g) => g.score != null && g.maxScore > 0);
+  const averagePercent = weightedPercent(published.map((g) => ({ score: g.score, maxScore: g.maxScore, weightPercent: g.assignment.weightPercent })));
+  const explicit = published.length === 1 ? published[0]!.letter : null;
+  const letter = explicit || (averagePercent != null ? letterFromPct(averagePercent) : status === "withdrawn" ? "W" : "—");
+  return { averagePercent, letter };
 }
 
 /** Credit-weighted mean; an all-zero-credit set falls back to a plain mean. */
@@ -339,10 +325,7 @@ export async function getCourseHistory(institutionId: string, studentId: string)
   const planByCode = new Map(planItems.map((i) => [i.courseCode, i]));
 
   const rows = enrolments.map((e) => {
-    const published = e.gradeItems.filter((g) => g.score != null && g.maxScore > 0);
-    const avgPct = weightedPercent(published.map((g) => ({ score: g.score, maxScore: g.maxScore, weightPercent: g.assignment.weightPercent })));
-    const explicit = published.length === 1 ? published[0]!.letter : null;
-    const letter = explicit || (avgPct != null ? letterFromPct(avgPct) : e.status === "withdrawn" ? "W" : "—");
+    const { averagePercent: avgPct, letter } = enrolmentMark(e.status, e.gradeItems);
     const sessions = e.section.classSessions;
     const fromSessions = dateBoundsFromSessions(sessions, tz);
     const plan = planBySection.get(e.sectionId) ?? planByCode.get(e.section.course.code);
@@ -360,7 +343,7 @@ export async function getCourseHistory(institutionId: string, studentId: string)
       credits: e.section.course.credits,
       termCode: term?.code ?? "",
       termName: termLabel(term),
-      courseStatus: courseStatus({ status: e.status, startsOn, endsOn, averagePercent: avgPct }, today),
+      courseStatus: courseStatus({ status: e.status, startsOn, endsOn, averagePercent: avgPct, letter }, today),
       sectionCode: e.section.code,
       status: e.status,
       attemptNumber: e.attemptNumber,
@@ -468,7 +451,7 @@ export function summarizeCourses(rows: SummaryRow[]) {
   const finals = rows.filter((r) => r.final && r.countsTowardCgpa);
   const current = rows.filter((r) => r.status === "enrolled" && !r.final && r.averagePercent != null);
   return {
-    earnedCredits: finals.filter((r) => r.letter !== "F" && r.gradePoints !== 0).reduce((n, r) => n + r.credits, 0),
+    earnedCredits: finals.filter((r) => passingLetter(r.letter)).reduce((n, r) => n + r.credits, 0),
     attemptedCredits: rows.filter((r) => r.status !== "withdrawn" && r.status !== "waitlisted").reduce((n, r) => n + r.credits, 0),
     averagePercent: creditWeighted(finals.filter((r) => r.averagePercent != null).map((r) => ({ credits: r.credits, value: r.averagePercent! }))),
     cgpa: creditWeighted(finals.filter((r) => r.gradePoints != null).map((r) => ({ credits: r.credits, value: r.gradePoints! }))),

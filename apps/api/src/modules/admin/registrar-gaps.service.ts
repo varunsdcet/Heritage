@@ -8,6 +8,8 @@ import { assertSeat } from "./heritage/enrolment.js";
 import { getCourseHistory, planItemRows } from "../academic/program-plan.service.js";
 import { S as FIN_SCREENS } from "./heritage/finance.core.js";
 import { createAdjustment } from "./heritage/finance.records.js";
+import { studentCtx } from "./heritage/finance.ledger.js";
+import { withStudentMoneyLock } from "./heritage/studentLock.js";
 
 function httpError(message: string, code: string, status: number) {
   return Object.assign(new Error(message), { code, status });
@@ -407,20 +409,34 @@ async function requestChargeWriteOff(
   entry: { id: string; studentId: string; label: string; amountCad: number },
   body: z.infer<typeof LedgerAdjustBody>,
 ) {
-  const pending = await prisma.heritageRecord.findMany({
-    where: { institutionId: user.institutionId, screenId: FIN_SCREENS.ADJUSTMENT, contextKey: entry.studentId, deletedAt: null, dataJson: { contains: entry.id } },
-    select: { dataJson: true },
+  // Same lock as adjustment review, so parallel requests see each other's adjustment before creating one.
+  const created = await withStudentMoneyLock(user.institutionId, entry.studentId, async () => {
+    const linked = await prisma.heritageRecord.findMany({
+      where: { institutionId: user.institutionId, screenId: FIN_SCREENS.ADJUSTMENT, contextKey: entry.studentId, deletedAt: null, dataJson: { contains: entry.id } },
+      select: { dataJson: true },
+    });
+    const prior = linked
+      .map((r) => JSON.parse(r.dataJson) as { status?: string; number?: number; ledgerEntryId?: string })
+      .find((d) => d.ledgerEntryId === entry.id && (d.status === "Pending" || d.status === "Approved / Complete"));
+    if (prior?.status === "Pending") throw httpError(`Adjustment #${prior.number} for this charge is already waiting for approval`, "CONFLICT", 409);
+    if (prior) throw httpError(`Adjustment #${prior.number} already wrote off this charge`, "CONFLICT", 409);
+    let amount = Math.abs(entry.amountCad);
+    if (body.action === "waive") {
+      const ctx = await studentCtx(user, entry.studentId, "edit");
+      amount = ctx.book.charges.find((c) => c.id === entry.id)?.owing ?? amount;
+      if (amount < 0.005) throw httpError("This charge has nothing left to pay", "CONFLICT", 409);
+    }
+    const verb = body.action === "waive" ? "Waive" : "Reverse";
+    return createAdjustment(user, {
+      studentId: entry.studentId,
+      direction: "Decrease balance (credit)",
+      amount,
+      reason: `${verb} ledger charge "${entry.label}"${body.note ? `: ${body.note}` : ""}`,
+      ledgerEntryId: entry.id,
+      ledgerAction: body.action,
+    });
   });
-  const open = pending.map((r) => JSON.parse(r.dataJson) as { status?: string; number?: number; ledgerEntryId?: string }).find((d) => d.ledgerEntryId === entry.id && d.status === "Pending");
-  if (open) throw httpError(`Adjustment #${open.number} for this charge is already waiting for approval`, "CONFLICT", 409);
   const verb = body.action === "waive" ? "Waive" : "Reverse";
-  const created = await createAdjustment(user, {
-    studentId: entry.studentId,
-    direction: "Decrease balance (credit)",
-    amount: Math.abs(entry.amountCad),
-    reason: `${verb} ledger charge "${entry.label}"${body.note ? `: ${body.note}` : ""}`,
-    ledgerEntryId: entry.id,
-  });
   await audit(user, "FinanceLedger.writeOffRequested", "finance_ar", entry, { adjustmentId: created.id, action: body.action }, "admin.finance.adjust");
   return {
     pendingApproval: true,
