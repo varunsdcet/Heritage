@@ -53,6 +53,7 @@ import {
   type Data,
 } from "./students.core.js";
 import { studentMetaMap } from "../superAdmin.service.js";
+import { applicantLeads } from "./applicationStatus.js";
 import {
   ACTION_STATUSES,
   ASSESSMENT_STATUSES,
@@ -214,7 +215,7 @@ type DirectoryQuery = Record<string, unknown>;
 export async function directory(user: SessionClaims, q: DirectoryQuery) {
   await canStudents(user, "view");
   const inst = user.institutionId;
-  const [students, metaMap, advisors] = await Promise.all([
+  const [students, metaMap, advisors, leads] = await Promise.all([
     prisma.student.findMany({
       where: { institutionId: inst },
       include: {
@@ -224,6 +225,7 @@ export async function directory(user: SessionClaims, q: DirectoryQuery) {
     }),
     studentMetaMap(inst),
     staffAccounts(inst),
+    applicantLeads(inst),
   ]);
   const profiles = await profilesFor(
     inst,
@@ -319,8 +321,41 @@ export async function directory(user: SessionClaims, q: DirectoryQuery) {
       start,
       end,
       createdAt: st.createdAt.toISOString(),
+      href: "",
     };
   });
+  /* Applicant leads carry only name and email, so any other advanced criterion excludes them. */
+  const { sisEmail, lastName, firstName, email, ...profileOnly } = adv;
+  const leadCriteriaOk = !Object.values(profileOnly).some(Boolean);
+  for (const a of leads) {
+    const p = a.person;
+    if (!leadCriteriaOk || !(has(p.email, sisEmail) && has(p.familyName, lastName) && has(p.givenName, firstName) && has(p.personalEmail ?? p.email, email))) continue;
+    const createdAt = (a.submittedAt ?? a.createdAt).toISOString();
+    all.push({
+      id: `application:${a.id}`,
+      personId: a.personId,
+      name: fullName(p),
+      initials: `${p.givenName[0] ?? ""}${p.familyName[0] ?? ""}`.toUpperCase(),
+      last: p.familyName,
+      studentNumber: "",
+      applicationNumber: "",
+      status: a.lifecycleStatus,
+      advisors: [],
+      advisorIds: [],
+      agentId: "",
+      program: a.programName,
+      programTerm: "",
+      admissionTerm: a.intakeTerm,
+      campus: "",
+      pathway: "",
+      schedule: "",
+      nationality: "",
+      start: createdAt.slice(0, 10),
+      end: "",
+      createdAt,
+      href: `/admin/ops/admissions/applications?id=${encodeURIComponent(a.id)}`,
+    });
+  }
   const items = all
     .filter((r) => {
       if (f.q && !r.studentNumber.toLowerCase().includes(f.q) && !r.last.toLowerCase().startsWith(f.q) && !r.name.toLowerCase().includes(f.q)) return false;
@@ -858,7 +893,7 @@ export async function auditTrail(user: SessionClaims, id: string, q: Data, onlyF
 export async function counts(user: SessionClaims) {
   await canStudents(user, "view");
   const inst = user.institutionId;
-  const [students, metaMap, flags, reqs, loas, withdraws, grades, alerts, assess, marks, badges, changes] = await Promise.all([
+  const [students, metaMap, flags, reqs, loas, withdraws, grades, alerts, assess, marks, badges, changes, leads] = await Promise.all([
     prisma.student.findMany({ where: { institutionId: inst }, select: { id: true, _count: { select: { enrolments: { where: { status: "enrolled" } } } } } }),
     studentMetaMap(inst),
     rows(inst, STU.FLAG),
@@ -871,12 +906,14 @@ export async function counts(user: SessionClaims) {
     rows(inst, STU.TEST),
     prisma.studentBadge.count({ where: { institutionId: inst, status: "pending" } }),
     rows(inst, STU.TRANSCRIPT_CHANGE),
+    applicantLeads(inst),
   ]);
-  const out: Record<string, number> = { "students:all": students.length };
+  const out: Record<string, number> = { "students:all": students.length + leads.length };
   for (const st of students) {
     const status = statusOf((metaMap[st.id] ?? {}) as Record<string, string | undefined>, st._count.enrolments);
     out[`students:${status}`] = (out[`students:${status}`] ?? 0) + 1;
   }
+  for (const a of leads) out[`students:${a.lifecycleStatus}`] = (out[`students:${a.lifecycleStatus}`] ?? 0) + 1;
   out["queue:alerts"] = alerts.filter((a) => s(a.data.status) !== "Dismissed" && s(a.data.resolved) !== "Yes").length;
   out["queue:flags"] = flags.filter((f) => (s(f.data.status) || "Active") === "Active" && s(f.data.resolved) !== "Yes").length;
   out["queue:assessments"] = assess.filter((a) => ["Pending Assignment", "Pending Review"].includes(s(a.data.status))).length;

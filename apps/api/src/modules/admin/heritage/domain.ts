@@ -4,6 +4,7 @@ import type { SessionClaims } from "@myheritage/contracts";
 import { CAMPUSES, STUDENT_STATUSES, assertPermission, patchStudentMeta, studentMetaMap, type PermissionModuleKey } from "../superAdmin.service.js";
 import { withStudentMoneyLock } from "./studentLock.js";
 import { normalizeDelivery } from "./students.spec.js";
+import { applicationLifecycleStatus } from "./applicationStatus.js";
 
 export type DomainRow = {
   id: string;
@@ -17,20 +18,6 @@ export type DomainCtx = { user: SessionClaims; contextKey: string; contextId: st
 const day = (d: Date | string | null | undefined) => (d ? new Date(d).toISOString().slice(0, 10) : "");
 const money = (n: number) => Math.round(n * 100) / 100;
 const fullName = (p: { givenName: string; familyName: string }) => `${p.familyName}, ${p.givenName}`;
-
-const APP_STATUS: Record<string, string> = {
-  draft: "New Inquiry",
-  submitted: "New Inquiry",
-  in_review: "New Inquiry",
-  under_review: "New Inquiry",
-  accepted: "Approved Application",
-  approved: "Approved Application",
-  offer: "Approved Application",
-  offered: "Approved Application",
-  declined: "Declined Application",
-  rejected: "Declined Application",
-  withdrawn: "Cancelled / Did not proceed",
-};
 
 async function students(ctx: DomainCtx): Promise<DomainResult> {
   const { institutionId } = ctx.user;
@@ -75,7 +62,7 @@ async function students(ctx: DomainCtx): Promise<DomainResult> {
   for (const a of apps) {
     if (studentPeople.has(a.personId)) continue;
     const p = people.get(a.personId);
-    const status = APP_STATUS[a.status] ?? "Pre-enrolment Application";
+    const status = applicationLifecycleStatus(a.status);
     out.push({
       id: `application:${a.id}`,
       status,

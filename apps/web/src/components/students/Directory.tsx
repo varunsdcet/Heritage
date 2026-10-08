@@ -40,7 +40,11 @@ type DirRow = {
   programTerm: string;
   admissionTerm: string;
   createdAt: string;
+  /** Set for applicant leads (no student record yet): they open in Admissions, not the student profile. */
+  href?: string;
 };
+
+const rowHref = (r: DirRow) => r.href || profileHref(r.id);
 
 const BASIC = ["campus", "program", "pathway", "schedule", "programTerm", "admissionTerm", "nationality", "status", "agent", "advisor", "startDate", "endDate"] as const;
 const ADVANCED = ["sisEmail", "lastName", "firstName", "middleName", "preferredName", "dobMonth", "dobDay", "dobYear", "residency", "street", "city", "postal", "phone", "email", "discountCode", "delivery"] as const;
@@ -173,7 +177,7 @@ function Results({ criteria, run }: { criteria: Criteria; run: number }) {
               </span>
             </td>
             <td>
-              <Link href={profileHref(r.id)}>{r.name}</Link>
+              <Link href={rowHref(r)}>{r.name}</Link>
             </td>
             <td>{r.studentNumber || "—"}</td>
             <td>{r.status}</td>
@@ -183,7 +187,7 @@ function Results({ criteria, run }: { criteria: Criteria; run: number }) {
             <td>{r.admissionTerm || "—"}</td>
             <td>{fmtStamp(r.createdAt)}</td>
             <td className="st-right">
-              <Link href={profileHref(r.id)} className="mh-sa__btn mh-sa__btn--sm">
+              <Link href={rowHref(r)} className="mh-sa__btn mh-sa__btn--sm">
                 VIEW
               </Link>
             </td>
