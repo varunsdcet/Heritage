@@ -452,7 +452,11 @@ export function buildAddProgramFormGroups(): Array<{ title: string; fields: AddP
           label: "Campus",
           value: "All Campuses",
           type: "select",
-          options: opts("All Campuses", "#110 Heritage College- Surrey", "Heritage College - Main"),
+          options: [
+            { label: "All Campuses", value: "All Campuses" },
+            { label: "#110 CampusOne - Surrey", value: "#110 Heritage College- Surrey" },
+            { label: "CampusOne - Main", value: "Heritage College - Main" },
+          ],
         },
       ],
     },

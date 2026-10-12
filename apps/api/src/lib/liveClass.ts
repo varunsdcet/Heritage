@@ -1,12 +1,16 @@
 import { isJitsiMeetUrl } from "./jitsiMeet.js";
 
+export type LiveClassProvider = "jitsi" | "bigbluebutton";
+
 /** In-app launcher; the web route resolves it to a BigBlueButton (or Jitsi fallback) join URL per user. */
-export function liveClassUrl(sectionId: string) {
-  return `/live/${sectionId}`;
+export function liveClassUrl(sectionId: string, provider?: LiveClassProvider | null) {
+  return `/live/${sectionId}${provider ? `?provider=${provider}` : ""}`;
 }
 
 export function isLiveClassUrl(url: string | null | undefined) {
-  return Boolean(url && /^\/live\/[0-9a-zA-Z-]+$/.test(url.trim()));
+  return Boolean(
+    url && /^\/live\/[0-9a-zA-Z-]+(?:\?provider=(?:jitsi|bigbluebutton))?$/.test(url.trim()),
+  );
 }
 
 /** Teacher-supplied external meeting link (Zoom, Teams, …), or null for platform rooms. */
@@ -17,8 +21,12 @@ export function externalJoinUrl(url: string | null | undefined) {
 }
 
 /** What clients should open for a section's online class. Legacy Jitsi links now route through the launcher. */
-export function classJoinUrl(sectionId: string, stored?: string | null) {
-  return externalJoinUrl(stored) || liveClassUrl(sectionId);
+export function classJoinUrl(
+  sectionId: string,
+  stored?: string | null,
+  provider?: LiveClassProvider | null,
+) {
+  return externalJoinUrl(stored) || liveClassUrl(sectionId, provider);
 }
 
 /** Same as `classJoinUrl`, but keeps sessions without any join link (in-person) link-free. */

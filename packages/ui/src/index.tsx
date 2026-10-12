@@ -70,7 +70,7 @@ export function LogoMark({ size = 28 }: { size?: number }) {
         flexShrink: 0,
       }}
     >
-      H
+      C
     </div>
   );
 }
@@ -78,8 +78,8 @@ export function LogoMark({ size = 28 }: { size?: number }) {
 export function BrandLockup({ compact = false }: { compact?: boolean }) {
   return (
     <img
-      src="/brand/login_logo.png"
-      alt="Heritage Community College"
+      src="/brand/campusone/logo.png"
+      alt="CampusOne"
       style={{
         display: "block",
         height: compact ? 36 : 52,
@@ -303,7 +303,7 @@ export function AIBlock({
         fontSize: "var(--mh-body-compact)",
       }}
     >
-      <strong>Ask MyHeritage</strong>
+      <strong>Ask CampusOne</strong>
       <p style={{ margin: "0.5rem 0" }}>{text}</p>
       <ul style={{ margin: 0, paddingLeft: "1.1rem" }}>
         {sources.map((s) => (
@@ -380,7 +380,7 @@ export function AppShell({
   active?: string;
   onNavigate?: (item: string) => void;
 }) {
-  const searchPlaceholder = role === "admin" ? "Search administration" : "Search MyHeritage";
+  const searchPlaceholder = role === "admin" ? "Search administration" : "Search CampusOne";
   const initials =
     userName
       .split(" ")
@@ -473,7 +473,7 @@ export function AppShell({
           <Button
             variant={role === "student" ? "ai" : "primary"}
             type="button"
-            onClick={() => onNavigate?.("Ask MyHeritage")}
+            onClick={() => onNavigate?.("Ask CampusOne")}
             style={{
               padding: "8px 12px",
               fontSize: 13,
@@ -484,7 +484,7 @@ export function AppShell({
           >
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               <img src="/brand/icons/sparkle.svg" alt="" width={16} height={16} />
-              <span className="mh-appshell-ask-label">Ask MyHeritage</span>
+              <span className="mh-appshell-ask-label">Ask CampusOne</span>
             </span>
           </Button>
           <button

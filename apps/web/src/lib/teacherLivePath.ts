@@ -7,6 +7,7 @@ const TRANSIENT_TEACHER_SCREEN_PARAMS = [
   "atype",
   "topic",
   "sid",
+  "edit",
 ] as const;
 
 /**

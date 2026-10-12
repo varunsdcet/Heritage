@@ -106,7 +106,7 @@ const BASE_NAV: NavItem[] = [
       { label: "Message Center", href: "/student/messages" },
       { label: "Notifications", href: "/student/notifications" },
       { label: "Search", href: "/student/search" },
-      { label: "Ask MyHeritage", href: "/student/ask" },
+      { label: "Ask CampusOne", href: "/student/ask" },
     ],
   },
 ];
@@ -388,10 +388,10 @@ function StudentSisShellInner({
           <button
             type="button"
             className="mh-teacher__brand mh-student-shell__brand"
-            aria-label="Heritage Community College"
+            aria-label="CampusOne"
             onClick={() => router.push("/student")}
           >
-            <img src="/brand/login_logo.png" alt="Heritage Community College" className="mh-student-shell__logo" />
+            <img src="/brand/campusone/logo.png" alt="CampusOne" className="mh-student-shell__logo" />
           </button>
 
           <nav className="mh-teacher__nav" aria-label="Student">

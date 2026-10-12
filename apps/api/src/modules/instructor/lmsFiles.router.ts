@@ -4,6 +4,8 @@ import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
 import { requireAuth, type AuthedRequest } from "../../middleware/auth.js";
 import { bytesMatchMime, decodeBase64 } from "../../lib/fileSniff.js";
+import { studentCanAccessLmsFile } from "./lmsAccessRestrictions.js";
+import { loadSectionOverlay } from "./lmsQuiz.js";
 
 /** Files attached to course activities (FILE / FOLDER). Stored per section; readable by the section's teacher, admins and its students. */
 export const lmsFilesRouter: Router = Router();
@@ -17,14 +19,16 @@ function httpError(message: string, code: string, status: number) {
   return Object.assign(new Error(message), { code, status });
 }
 
-async function sectionAccess(user: SessionClaims, sectionId: string): Promise<"manage" | "read"> {
+type SectionAccess = { mode: "manage" } | { mode: "read"; studentId: string };
+
+async function sectionAccess(user: SessionClaims, sectionId: string): Promise<SectionAccess> {
   const section = await prisma.section.findFirst({
     where: { id: sectionId, institutionId: user.institutionId },
     select: { id: true, instructorPersonId: true },
   });
   if (!section) throw httpError("Course section not found", "NOT_FOUND", 404);
-  if (section.instructorPersonId === user.personId) return "manage";
-  if (user.roles.includes("admin") || user.roles.includes("registrar")) return "manage";
+  if (section.instructorPersonId === user.personId) return { mode: "manage" };
+  if (user.roles.includes("admin") || user.roles.includes("registrar")) return { mode: "manage" };
   const enrolled = await prisma.enrolment.findFirst({
     where: {
       institutionId: user.institutionId,
@@ -32,9 +36,9 @@ async function sectionAccess(user: SessionClaims, sectionId: string): Promise<"m
       status: { in: ["enrolled", "completed"] },
       student: { personId: user.personId },
     },
-    select: { id: true },
+    select: { studentId: true },
   });
-  if (enrolled) return "read";
+  if (enrolled) return { mode: "read", studentId: enrolled.studentId };
   throw httpError("You are not part of this course", "FORBIDDEN", 403);
 }
 
@@ -49,7 +53,7 @@ lmsFilesRouter.post("/", requireAuth, async (req, res, next) => {
   try {
     const user = (req as AuthedRequest).user;
     const body = UploadBody.parse(req.body);
-    if ((await sectionAccess(user, body.sectionId)) !== "manage") {
+    if ((await sectionAccess(user, body.sectionId)).mode !== "manage") {
       throw httpError("Only the course instructor or an administrator can upload course files", "FORBIDDEN", 403);
     }
     const mime = body.mime.toLowerCase();
@@ -84,12 +88,18 @@ lmsFilesRouter.get("/:sectionId/:fileId", requireAuth, async (req, res, next) =>
   try {
     const user = (req as AuthedRequest).user;
     const sectionId = String(req.params.sectionId);
-    await sectionAccess(user, sectionId);
+    const access = await sectionAccess(user, sectionId);
     const rec = await prisma.heritageRecord.findFirst({
       where: { id: String(req.params.fileId), institutionId: user.institutionId, screenId: SCREEN, contextKey: sectionId, deletedAt: null },
       select: { dataJson: true },
     });
     if (!rec) throw httpError("This file is no longer available", "NOT_FOUND", 404);
+    if (access.mode === "read") {
+      const overlay = await loadSectionOverlay(user.institutionId, sectionId);
+      if (!studentCanAccessLmsFile(overlay, String(req.params.fileId), access.studentId)) {
+        throw httpError("This file is not available", "NOT_FOUND", 404);
+      }
+    }
     const d = JSON.parse(rec.dataJson) as { name?: string; mime?: string; base64?: string };
     res.json({ name: d.name || "file", mime: d.mime || "application/octet-stream", base64: d.base64 || "" });
   } catch (err) {

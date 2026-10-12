@@ -394,7 +394,7 @@ export default function StudentHomePage() {
                 Program Plan
               </button>
               <button type="button" className="mh-ct-dash__control-chip" onClick={() => router.push("/student/ask")}>
-                Ask MyHeritage
+                Ask CampusOne
               </button>
             </div>
           </section>

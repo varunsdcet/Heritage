@@ -15,6 +15,9 @@ rsync -az --delete \
   --exclude .next \
   --exclude .git \
   --exclude '*.log' \
+  --exclude .venv \
+  --exclude __pycache__ \
+  --exclude '/.tmp/' \
   --exclude '.env.local' \
   --exclude '.env' \
   --exclude '.env.production' \

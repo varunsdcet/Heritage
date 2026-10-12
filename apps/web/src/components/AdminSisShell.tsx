@@ -284,6 +284,7 @@ function pageBlocked(pathname: string, access: MyAccess | null | undefined) {
 export function AdminSisShell({
   children,
   activeHref = "/admin",
+  navigationPath,
   activeSearch = "",
   breadcrumbs = ["Home", "System Admin", "Dashboard"],
   breadcrumbHrefs,
@@ -292,6 +293,8 @@ export function AdminSisShell({
 }: {
   children: ReactNode;
   activeHref?: string;
+  /** Use an admin route for sidebar state when an admin reviews a shared staff screen. */
+  navigationPath?: string;
   activeSearch?: string;
   breadcrumbs?: string[];
   /** Optional link per breadcrumb, aligned by index. */
@@ -300,7 +303,8 @@ export function AdminSisShell({
   userRole?: string;
 }) {
   const router = useRouter();
-  const pathname = usePathname() || activeHref;
+  const actualPathname = usePathname();
+  const pathname = navigationPath || actualPathname || activeHref;
   const [searchQ, setSearchQ] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [openGroup, setOpenGroup] = useState<string | null>(null);
@@ -364,9 +368,9 @@ export function AdminSisShell({
         />
       ) : null}
       <aside className="mh-sis__sidebar" id="mh-sis-sidebar">
-        <Link href="/admin" className="mh-sis__brand" aria-label="Heritage Community College — Home">
+        <Link href="/admin" className="mh-sis__brand" aria-label="CampusOne — Home">
           <span className="mh-sis__brand-mark">
-            <img src="/brand/login_logo.png" alt="Heritage Community College" width={261} height={64} />
+            <img src="/brand/campusone/logo.png" alt="CampusOne" width={261} height={64} />
           </span>
         </Link>
 
@@ -586,7 +590,7 @@ export function AdminSisShell({
             </div>
             <button type="button" className="mh-sis__copilot" onClick={() => router.push("/admin/ai/ask")}>
               <img src="/brand/icons/sparkle.svg" alt="" width={14} height={14} />
-              <span>Ask Heritage AI</span>
+              <span>Ask CampusOne AI</span>
             </button>
             <button type="button" className="mh-sis__bell" aria-label="Notifications" onClick={() => router.push("/admin/ops/workspace/notifications")}>
               <img src="/brand/icons/bell.svg" alt="" width={16} height={16} />

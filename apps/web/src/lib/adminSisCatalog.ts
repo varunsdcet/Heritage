@@ -1876,7 +1876,7 @@ export const ADMIN_SIS_SCREENS: Record<string, SisScreenConfig> = {
       balance: "$4,250.00",
       dueNote: "Next installment due: Nov 01, 2026 ($1,416.00)",
       planTitle: "Active Payment Plan",
-      planBody: "3-Month installment option. 2 of 3 payments remaining. Tracked automatically by Heritage Bursar.",
+      planBody: "3-Month installment option. 2 of 3 payments remaining. Tracked automatically by CampusOne Bursar.",
       tabs: ["Ledger Summary", "Outstanding Charges", "Payments Applied", "Grants & Financial Aid"],
       ledger: [
         { date: "Oct 01, 2026", desc: "Lab Fee - Chemistry 302", debit: "$500.00", credit: "-", balance: "$4,250.00" },
@@ -2610,7 +2610,7 @@ export const ADMIN_SIS_SCREENS: Record<string, SisScreenConfig> = {
     path: "/admin/f/pl-05-integrations",
     figmaId: "66:1977",
     title: "Platform Integrations",
-    subtitle: "Manage third-party connections, LTI tools, and external services linked to MyHeritage.",
+    subtitle: "Manage third-party connections, LTI tools, and external services linked to CampusOne.",
     breadcrumbs: ["Home", "Platform", "Integrations"],
     activeHref: "/admin/f/pl-07-institution-settings",
     platformNav: true,
@@ -2677,7 +2677,7 @@ export const ADMIN_SIS_SCREENS: Record<string, SisScreenConfig> = {
     secondaryAction: "Reset Defaults",
     settingsForm: {
       fields: [
-        { label: "College Name", value: "Heritage Community College" },
+        { label: "College Name", value: "CampusOne" },
         { label: "Primary Support Contact Email", value: "admin@heritage.edu" },
         { label: "Primary Timezone", value: "Pacific Standard Time (PST - America/Los_Angeles)" },
         { label: "Current Academic Term Prefix", value: "Fall 2026 (Semesters)" },
@@ -2712,7 +2712,7 @@ export const ADMIN_SIS_SCREENS: Record<string, SisScreenConfig> = {
             to: "all-students@heritage.edu",
             channel: "SMS CHANNEL",
             subject: "EMERGENCY: Campus Alert",
-            body: "Heritage Alert: Immediate campus advisory in effect. Follow official instructions and check MyHeritage for updates.",
+            body: "CampusOne Alert: Immediate campus advisory in effect. Follow official instructions and check CampusOne for updates.",
           },
         },
         {
@@ -2725,7 +2725,7 @@ export const ADMIN_SIS_SCREENS: Record<string, SisScreenConfig> = {
             to: "marcus.student@heritage.edu",
             channel: "EMAIL CHANNEL",
             subject: "Course Enrollment Confirmation: CS 301",
-            body: "Dear Marcus, This automated system message confirms that you have successfully enrolled in CS 301: Advanced Data Structures with Professor Eleanor Vance. The course syllabus is now accessible inside your MyHeritage dashboard student panel.",
+            body: "Dear Marcus, This automated system message confirms that you have successfully enrolled in CS 301: Advanced Data Structures with Professor Eleanor Vance. The course syllabus is now accessible inside your CampusOne dashboard student panel.",
           },
         },
         {
@@ -2764,7 +2764,7 @@ export const ADMIN_SIS_SCREENS: Record<string, SisScreenConfig> = {
             to: "marcus.student@heritage.edu",
             channel: "SMS CHANNEL",
             subject: "Tuition past due",
-            body: "Heritage Finance: your tuition balance of {{balance}} is past due. Pay now in MyHeritage to avoid registration holds.",
+            body: "CampusOne Finance: your tuition balance of {{balance}} is past due. Pay now in CampusOne to avoid registration holds.",
           },
         },
       ],
@@ -2772,7 +2772,7 @@ export const ADMIN_SIS_SCREENS: Record<string, SisScreenConfig> = {
         to: "marcus.student@heritage.edu",
         channel: "EMAIL CHANNEL",
         subject: "Course Enrollment Confirmation: CS 301",
-        body: "Dear Marcus, This automated system message confirms that you have successfully enrolled in CS 301: Advanced Data Structures with Professor Eleanor Vance. The course syllabus is now accessible inside your MyHeritage dashboard student panel.",
+        body: "Dear Marcus, This automated system message confirms that you have successfully enrolled in CS 301: Advanced Data Structures with Professor Eleanor Vance. The course syllabus is now accessible inside your CampusOne dashboard student panel.",
       },
     },
   },
@@ -3156,7 +3156,7 @@ export const ADMIN_SIS_SCREENS: Record<string, SisScreenConfig> = {
       },
       {
         primary: "llama-3-1-70b-instruct",
-        cells: ["llama-3-1-70b-instruct", "Heritage (Host)", "f1-weights", "Testing", "internal.heritage.edu/inference", "Oct 14, 2024"],
+        cells: ["llama-3-1-70b-instruct", "CampusOne (Host)", "f1-weights", "Testing", "internal.heritage.edu/inference", "Oct 14, 2024"],
         badge: "Testing",
         badgeTone: "review",
       },
@@ -4243,7 +4243,7 @@ export const ADMIN_SIS_SCREENS: Record<string, SisScreenConfig> = {
       eyebrow: "Academic Records PDF Preview",
       pageTitle: "Official Transcript Generator",
       transcript: {
-        school: "Heritage Community College",
+        school: "CampusOne",
         studentLine: "Marcus Vance · #2024-8902",
         program: "A.S. in Computer Science",
         terms: [

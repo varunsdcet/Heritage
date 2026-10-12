@@ -83,10 +83,10 @@ export default function MobileLoginPage() {
           >
             H
           </div>
-          <strong style={{ fontSize: 16 }}>Heritage</strong>
+          <strong style={{ fontSize: 16 }}>CampusOne</strong>
         </div>
         <h1 style={{ margin: "1.25rem 0 0.35rem", fontSize: 22, fontWeight: 700 }}>Sign in</h1>
-        <p style={{ margin: 0, opacity: 0.9, fontSize: 13 }}>MyHeritage</p>
+        <p style={{ margin: 0, opacity: 0.9, fontSize: 13 }}>CampusOne</p>
       </header>
 
       <form onSubmit={onSubmit} style={{ padding: "1.25rem 1.15rem 2rem", display: "grid", gap: 14 }}>

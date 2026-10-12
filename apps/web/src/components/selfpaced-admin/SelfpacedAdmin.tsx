@@ -60,8 +60,8 @@ function Overview({ screen }: { screen: OnlineAdminScreen }) {
       <section className="spa-hero">
         <div>
           <span className="spa-eyebrow">HCC Online · Admin workspace</span>
-          <h2>Manage every self-paced learning operation from Heritage.</h2>
-          <p>Heritage remains the system of record. Content, activity and attempts stay linked to the correct student, academic item and enrolment.</p>
+          <h2>Manage every self-paced learning operation from CampusOne.</h2>
+          <p>CampusOne remains the system of record. Content, activity and attempts stay linked to the correct student, academic item and enrolment.</p>
         </div>
         <div className="spa-hero__health"><span>●</span><strong>Integration healthy</strong><small>Last refresh 5 minutes ago</small></div>
       </section>
@@ -98,11 +98,13 @@ function Overview({ screen }: { screen: OnlineAdminScreen }) {
 
 function DataTable({ screen, compact }: { screen: OnlineAdminScreen; compact?: boolean }) {
   const [query, setQuery] = useState("");
+  const [opened, setOpened] = useState<string[] | null>(null);
   const rows = screen.rows.filter((row) => row.join(" ").toLowerCase().includes(query.toLowerCase()));
   return (
     <>
       {!compact ? <div className="spa-toolbar"><label><span className="sr-only">Search</span><input className="mh-sa__input" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={`Search ${screen.label.toLowerCase()}…`} /></label><button className="mh-sa__btn" type="button">Filters</button><button className="mh-sa__btn" type="button">Export</button></div> : null}
-      <div className="mh-sa__table-wrap"><table className="mh-sa__table spa-table"><thead><tr>{screen.columns.map((col) => <th key={col}>{col}</th>)}<th>Actions</th></tr></thead><tbody>{rows.map((row, r) => <tr key={`${screen.slug}-${r}`}>{row.map((cell, c) => <td key={c}>{c === row.length - 2 ? <Status tone={/active|published|healthy|clear|complete|satisfied|matched|synced|present/i.test(cell) ? "good" : /pending|review|flag|blocked|conflict|below/i.test(cell) ? "warn" : "info"}>{cell}</Status> : cell}</td>)}<td><button type="button" className="mh-sa__link">Open</button></td></tr>)}</tbody></table></div>
+      <div className="mh-sa__table-wrap"><table className="mh-sa__table spa-table"><thead><tr>{screen.columns.map((col) => <th key={col}>{col}</th>)}<th>Actions</th></tr></thead><tbody>{rows.map((row, r) => <tr key={`${screen.slug}-${r}`}>{row.map((cell, c) => <td key={c}>{c === row.length - 2 ? <Status tone={/active|published|healthy|clear|complete|satisfied|matched|synced|present/i.test(cell) ? "good" : /pending|review|flag|blocked|conflict|below/i.test(cell) ? "warn" : "info"}>{cell}</Status> : cell}</td>)}<td><button type="button" className="mh-sa__link" onClick={() => setOpened(row)}>Open</button></td></tr>)}</tbody></table></div>
+      {opened ? <SaModal title={`${screen.label} · ${opened[0] ?? "Record"}`} onClose={() => setOpened(null)} wide footer={<button type="button" className="mh-sa__btn mh-sa__btn--primary" onClick={() => setOpened(null)}>Close</button>}><div className="mh-sa__grid">{screen.columns.map((col, c) => <SaField key={col} label={col}><div className="mh-sa__input">{opened[c] || "—"}</div></SaField>)}</div></SaModal> : null}
     </>
   );
 }
@@ -205,9 +207,9 @@ function ContentWorkspace({ screen }: { screen: OnlineAdminScreen }) {
   }, []);
   return (
     <Shell screen={screen} actions={<Link className="mh-sa__btn" href="/admin/my-courses">All course sections</Link>}>
-      <section className="spa-intro"><div><span className="spa-eyebrow">LIVE AUTHORING</span><h2>Choose the exact section before creating or publishing content.</h2><p>Admin, registrar and assigned instructors use one Heritage course workspace. Manual and AI content publish to the same student section.</p></div><Status tone="good">Production workflow</Status></section>
+      <section className="spa-intro"><div><span className="spa-eyebrow">LIVE AUTHORING</span><h2>Choose the exact section before creating or publishing content.</h2><p>Admin, registrar and assigned instructors use one CampusOne course workspace. Manual and AI content publish to the same student section.</p></div><Status tone="good">Production workflow</Status></section>
       <SaCard title="Live course authoring workspaces">
-        <p>Select the exact Heritage section. The manual editor supports topics, pages, resources, quizzes and assignments. The AI builder creates a CAP-101-depth blueprint, narrated self-paced lesson videos, quizzes, assignments and hidden instructor guides; review checks must pass before Publish is enabled.</p>
+        <p>Select the exact CampusOne section. The manual editor supports topics, pages, resources, quizzes and assignments. The AI builder creates a CAP-101-depth blueprint, narrated self-paced lesson videos, quizzes, assignments and hidden instructor guides; review checks must pass before Publish is enabled.</p>
         {sectionsError ? <p className="sp-error">{sectionsError}</p> : null}
         <div className="spa-cards">
           {sections.map((section) => (
@@ -232,7 +234,7 @@ function Coverage({ screen }: { screen: OnlineAdminScreen }) {
 }
 
 function GenericWorkspace({ screen }: { screen: OnlineAdminScreen }) {
-  return <Shell screen={screen} actions={<><button className="mh-sa__btn">Export</button><button className="mh-sa__btn mh-sa__btn--primary">{screen.actions[0]}</button></>}><section className="spa-intro"><div><span className="spa-eyebrow">{screen.group}</span><h2>{screen.description}</h2></div><Status tone="info">Heritage linked</Status></section><SaCard title={`${screen.label} records`}><DataTable screen={screen} /></SaCard><Coverage screen={screen} /></Shell>;
+  return <Shell screen={screen} actions={<><button className="mh-sa__btn">Export</button><button className="mh-sa__btn mh-sa__btn--primary">{screen.actions[0]}</button></>}><section className="spa-intro"><div><span className="spa-eyebrow">{screen.group}</span><h2>{screen.description}</h2></div><Status tone="info">CampusOne linked</Status></section><SaCard title={`${screen.label} records`}><DataTable screen={screen} /></SaCard><Coverage screen={screen} /></Shell>;
 }
 
 type EnglishTestRegistration = {
@@ -272,7 +274,7 @@ function EnglishTestWorkspace({ screen }: { screen: OnlineAdminScreen }) {
   }, []);
   return (
     <Shell screen={screen} actions={<button className="mh-sa__btn">Export</button>}>
-      <section className="spa-intro"><div><span className="spa-eyebrow">Academic delivery</span><h2>Live English Test registration review queue</h2></div><Status tone="info">Heritage linked</Status></section>
+      <section className="spa-intro"><div><span className="spa-eyebrow">Academic delivery</span><h2>Live English Test registration review queue</h2></div><Status tone="info">CampusOne linked</Status></section>
       <SaCard title="Received registrations">
         {loading ? <p>Loading registrations…</p> : error ? <p className="sp-error">{error}</p> : items.length === 0 ? <p>No registrations received yet.</p> : (
           <div className="mh-sa__table-wrap"><table className="mh-sa__table spa-table"><thead><tr><th>Reference</th><th>Applicant</th><th>Contact</th><th>Student ID</th><th>Received</th><th>Status</th><th>Action</th></tr></thead><tbody>{items.map((item) => <tr key={item.registrationId}><td>{item.reference}</td><td>{[item.firstName, item.middleName, item.lastName].filter(Boolean).join(" ")}<br /><small>{item.city}, {item.province}</small></td><td>{item.email}<br /><small>{item.mobilePhone}</small></td><td>{item.studentId || "Not supplied"}</td><td>{new Date(item.submittedAt).toLocaleString()}</td><td><Status tone="warn">{item.status}</Status></td><td><button className="mh-sa__link" onClick={() => setSelected(item)}>View profile</button></td></tr>)}</tbody></table></div>

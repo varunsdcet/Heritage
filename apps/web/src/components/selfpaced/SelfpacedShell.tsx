@@ -75,7 +75,7 @@ function ShellInner({
     <div className="sp-root">
       <header className="sp-nav">
         <Link href="/selfpaced" className="sp-brand sp-brand--logo-only">
-          <img src="/brand/login_logo.png" alt="Heritage" className="sp-brand__logo" />
+          <img src="/brand/campusone/logo.png" alt="CampusOne" className="sp-brand__logo" />
         </Link>
         <nav className={`sp-nav__links${mobileNavOpen ? " is-open" : ""}`} aria-label="Self-paced">
           {NAV.map((item) => (
@@ -154,7 +154,7 @@ function ShellInner({
       <footer className="sp-footer" id="contact">
         <div className="sp-footer__grid">
           <div>
-            <img src="/brand/login_logo.png" alt="Heritage Community College" className="sp-footer__logo" />
+            <img src="/brand/campusone/logo.png" alt="CampusOne" className="sp-footer__logo" />
             <p>Empowering futures through career-focused education and real-world training.</p>
             <p>Surrey — Unit 110, 8166 128th Street, Surrey, BC V3W 1R1</p>
             <p>Victoria — 759 Courtney St, Victoria, BC V8W 1C3</p>
@@ -196,7 +196,7 @@ function ShellInner({
             </ul>
           </div>
         </div>
-        <p className="sp-footer__meta">© {new Date().getFullYear()} Heritage Community College. All rights reserved.</p>
+        <p className="sp-footer__meta">© {new Date().getFullYear()} CampusOne. All rights reserved.</p>
       </footer>
       <SelfpacedLoginModal
         open={authOpen}

@@ -84,7 +84,7 @@ function toBase64(bytes: Uint8Array) {
 export function LiveScreen({
   path,
   mobile = false,
-  mobileTitle = "Heritage",
+  mobileTitle = "CampusOne",
   mobileActive = "Home",
 }: {
   path: string;
@@ -106,7 +106,7 @@ export function LiveScreen({
 function GenericLiveScreen({
   path,
   mobile = false,
-  mobileTitle = "Heritage",
+  mobileTitle = "CampusOne",
   mobileActive = "Home",
   chrome = "appshell",
 }: {

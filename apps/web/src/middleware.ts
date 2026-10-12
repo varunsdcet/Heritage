@@ -49,6 +49,11 @@ function canAccess(portal: string, roles: string[]): boolean {
   return roles.includes(portal);
 }
 
+function canReviewCourseWork(pathname: string, roles: string[]): boolean {
+  if (!roles.includes("admin") && !roles.includes("registrar")) return false;
+  return pathname === "/instructor/gradebook" || pathname === "/instructor/submissions";
+}
+
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const portal = portalForPath(pathname);
@@ -62,7 +67,7 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(login);
   }
 
-  if (!canAccess(portal, roles)) {
+  if (!canAccess(portal, roles) && !canReviewCourseWork(pathname, roles)) {
     const dest = request.nextUrl.clone();
     dest.pathname = homeForRoles(roles);
     dest.search = "";

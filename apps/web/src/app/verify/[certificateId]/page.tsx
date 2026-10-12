@@ -68,9 +68,9 @@ export default function VerifyCertificatePage() {
             {certificate.issuedAt ? ` · ${new Date(certificate.issuedAt).toLocaleDateString("en-CA")}` : ""}
           </p>
           {revoked ? (
-            <p className="sp-tuition__note">Heritage has revoked this certificate. It is no longer valid.</p>
+            <p className="sp-tuition__note">CampusOne has revoked this certificate. It is no longer valid.</p>
           ) : (
-            <p className="sp-tuition__note">This record was confirmed against Heritage Community College records.</p>
+            <p className="sp-tuition__note">This record was confirmed against CampusOne records.</p>
           )}
         </div>
       </SelfpacedShell>
@@ -85,10 +85,10 @@ export default function VerifyCertificatePage() {
         <p className="sp-lede">
           {state.kind === "missing"
             ? "We could not find a certificate with that ID."
-            : "We could not reach Heritage records. Try again shortly."}
+            : "We could not reach CampusOne records. Try again shortly."}
         </p>
         <Link href="/selfpaced" className="sp-btn sp-btn--primary">
-          Heritage eLearning
+          CampusOne eLearning
         </Link>
       </div>
     </SelfpacedShell>

@@ -61,7 +61,7 @@ export default function SelfpacedHomePage() {
       <section className="sp-home-hero">
         <div className="sp-home-hero__inner">
           <div className="sp-home-hero__copy">
-            <p className="sp-kicker">16+ years of trusted education · Heritage Community College</p>
+            <p className="sp-kicker">Trusted education powered by CampusOne</p>
             <h1>
               A classical education,
               <br />
@@ -85,7 +85,7 @@ export default function SelfpacedHomePage() {
             </div>
           </div>
           <div className="sp-home-hero__visual">
-            <img src="/brand/campus/hero.png" alt="Heritage Community College campus and learners" />
+            <img src="/brand/campus/hero.png" alt="CampusOne learners" />
             <div className="sp-home-hero__stat">
               <strong>12,400+</strong>
               <span>Learners enrolled</span>

@@ -67,6 +67,7 @@ services:
       HEYGEN_API_KEY: ${HEYGEN_API_KEY:-}
       HEYGEN_VOICE_ID: ${HEYGEN_VOICE_ID:-}
       HEYGEN_MALE_VOICE_ID: ${HEYGEN_MALE_VOICE_ID:-}
+      XTTS_URL: ${XTTS_URL:-http://xtts:8020,http://xtts2:8020}
     depends_on:
       - api
     expose:
@@ -92,6 +93,25 @@ services:
         condition: service_started
     networks: [internal]
 
+  # /akshatsir voice. The first start downloads the XTTS-v2 model (~1.8 GB) into the xtts-models volume.
+  # XTTS only uses about one CPU core per request, so two copies (~3.5 GB RAM each) prepare a lecture twice as fast;
+  # generated audio is shared through the xtts-cache volume.
+  xtts: &xtts
+    build:
+      context: ./apps/xtts
+      dockerfile: ../../deploy/Dockerfile.xtts
+    restart: unless-stopped
+    environment:
+      XTTS_CACHE_DIR: /app/cache
+    volumes:
+      - xtts-models:/root/.local/share/tts
+      - xtts-cache:/app/cache
+    expose:
+      - "8020"
+    networks: [internal]
+
+  xtts2: *xtts
+
   nginx:
     image: nginx:1.27-alpine
     restart: unless-stopped
@@ -111,3 +131,5 @@ networks:
 volumes:
   pgdata:
   uploads:
+  xtts-models:
+  xtts-cache:

@@ -87,7 +87,7 @@ export default function StudentAdvisingPage() {
                 router.push("/student/ask?q=" + encodeURIComponent("Book my advisor to review my degree plan"))
               }
             >
-              Ask Heritage to book
+              Ask CampusOne to book
             </Button>
           </form>
         </section>

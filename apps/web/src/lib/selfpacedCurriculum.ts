@@ -128,7 +128,7 @@ function makeStoryboard(seed: ChapterSeed): LectureStoryboard {
       {
         number: 1,
         heading: `Welcome · ${short}`,
-        bullets: [seed.summary, "Taught by your Heritage instructor avatar", "Watch, then finish the chapter activities"],
+        bullets: [seed.summary, "Taught by your CampusOne instructor avatar", "Watch, then finish the chapter activities"],
         narration: `Welcome to this instructor lecture on ${short}. ${seed.summary} I will walk you through the key ideas, then you can return to your reading, quiz, and matching activities with more confidence.`,
       },
       {
@@ -368,13 +368,13 @@ function closingLecture(prefix: string, label: string): SelfpacedActivity {
         number: 3,
         heading: "How to finish strong",
         bullets: ["Review evaluation weights", "Retake any weak practice quizzes", "Mark the final checkpoint complete"],
-        narration: `To finish strong, review the evaluation criteria, re-attempt any practice quizzes you found difficult, then complete the final checkpoint. When those are done, you are ready for your Heritage branded certificate.`,
+        narration: `To finish strong, review the evaluation criteria, re-attempt any practice quizzes you found difficult, then complete the final checkpoint. When those are done, you are ready for your CampusOne branded certificate.`,
       },
       {
         number: 4,
         heading: "Thank you",
         bullets: ["Keep your study log", "Apply one idea at work this week", "Return to any chapter lecture anytime"],
-        narration: `Thank you for learning with Heritage. Keep a short study log, apply one idea from this program at work this week, and remember you can replay any chapter lecture whenever you need a refresher. I am proud of the work you put in.`,
+        narration: `Thank you for learning with CampusOne. Keep a short study log, apply one idea from this program at work this week, and remember you can replay any chapter lecture whenever you need a refresher. I am proud of the work you put in.`,
       },
     ],
   });

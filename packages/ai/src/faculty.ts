@@ -1,7 +1,7 @@
 import { citeOrRefuse } from "./coach.js";
 import type { CoachAction, GroundedCoachFact, GroundedCoachResult } from "./types.js";
 
-/** Teaching Operations Assistant — instructor Ask Heritage capability. */
+/** Teaching Operations Assistant — instructor Ask CampusOne capability. */
 export type FacultyOpsIntent =
   | "dashboard"
   | "schedule"
@@ -142,7 +142,7 @@ function card(title: string, lines: string[]) {
 function actionsFor(intent: FacultyOpsIntent): CoachAction[] {
   const base: CoachAction[] = [
     { label: "Open sections", href: "/instructor/sections" },
-    { label: "Ask Heritage", href: "/instructor/ask" },
+    { label: "Ask CampusOne", href: "/instructor/ask" },
   ];
   if (intent === "attendance" || intent === "write_preview") {
     return [{ label: "Open attendance", href: "/instructor/attendance" }, ...base];

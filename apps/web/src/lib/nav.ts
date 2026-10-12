@@ -40,7 +40,7 @@ const ADMIN: Record<string, string> = {
   Notifications: "/admin/notifications",
   Profile: "/admin/profile",
   Search: "/admin/search",
-  "Ask Heritage": "/admin/ai/ask",
+  "Ask CampusOne": "/admin/ai/ask",
   "AI governance": "/admin/ai/governance",
   "Executive intelligence": "/admin/ai/executive",
   Integrations: "/admin/integrations",

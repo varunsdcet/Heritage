@@ -55,9 +55,9 @@ export type AddSessionFormConfig = {
 
 const CAMPUSES = [
   { label: "-- Select Campus / Location --", value: "" },
-  { label: "#110 Heritage College- Surrey", value: "#110 Heritage College- Surrey" },
-  { label: "Heritage Community College - Distance", value: "Heritage Community College - Distance" },
-  { label: "Heritage Community College - Victoria", value: "Heritage Community College - Victoria" },
+  { label: "#110 CampusOne - Surrey", value: "#110 Heritage College- Surrey" },
+  { label: "CampusOne - Distance", value: "Heritage Community College - Distance" },
+  { label: "CampusOne - Victoria", value: "Heritage Community College - Victoria" },
 ];
 
 const CLASSROOMS = [

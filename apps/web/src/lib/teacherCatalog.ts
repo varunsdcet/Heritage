@@ -214,6 +214,48 @@ export type CourseLmsState = {
   attendanceDates?: string[];
   evaluationRows?: Array<{ component: string; weight: string }>;
   logParticipants?: string[];
+  reporting?: {
+    generatedAt: string;
+    logs: Array<{
+      id: string;
+      at: string;
+      participant: string;
+      action: string;
+      activity: string;
+      source: string;
+      detail?: string;
+    }>;
+    activities: Array<{
+      id: string;
+      name: string;
+      type: string;
+      completions: number;
+      submissions: number;
+      attempts: number;
+      responses: number;
+      lastActivityAt?: string;
+    }>;
+    participation: Array<{
+      studentId: string;
+      name: string;
+      studentNumber: string;
+      status: string;
+      completed: number;
+      submissions: number;
+      quizAttempts: number;
+      choiceResponses: number;
+      lastActivityAt?: string;
+    }>;
+    competencies: Array<{
+      id: string;
+      name: string;
+      resource: string;
+      linkedActivities: number;
+      participants: number;
+      completed: number;
+      progressPercent: number;
+    }>;
+  };
   questionBank: {
     category: string;
     categoryHelp: string;
@@ -2023,7 +2065,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
         { label: "Staff ID", value: "EMP-2847" },
       ],
       expertise: ["Financial Reporting", "IFRS", "Managerial Accounting", "Audit Analytics", "ESG Reporting"],
-      bio: "Dr. Sarah Mitchell is a Lead Instructor in Accounting & Finance at Heritage Community College. Her teaching focuses on financial reporting standards, corporate finance foundations, and applied analytics for undergraduate learners. She previously practiced as a CPA auditor and publishes on ESG disclosure quality.",
+      bio: "Dr. Sarah Mitchell is a Lead Instructor in Accounting & Finance at CampusOne. Her teaching focuses on financial reporting standards, corporate finance foundations, and applied analytics for undergraduate learners. She previously practiced as a CPA auditor and publishes on ESG disclosure quality.",
     },
   },
 
@@ -2142,7 +2184,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     courseDetail: {
       code: "ACSW 200",
       title: "SOCIAL SERVICE WORK FUNDAMENTALS",
-      meta: "ACSWAPR26-01: Apr. 27, 2026 - May. 1, 2026 · #110 Heritage College- Surrey",
+      meta: "ACSWAPR26-01: Apr. 27, 2026 - May. 1, 2026 · #110 CampusOne - Surrey",
       status: "Ended",
       tabs: ["Course", "Class List", "Attendance", "Grades", "Badges", "More"],
       activeTab: "Course",
@@ -2436,7 +2478,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
           current: true,
         },
         { device: "iPhone 15 · Safari", location: "Toronto, ON", lastActive: "2 hours ago" },
-        { device: "Campus Lab PC · Edge", location: "Heritage Main", lastActive: "Yesterday" },
+        { device: "Campus Lab PC · Edge", location: "CampusOne Main", lastActive: "Yesterday" },
       ],
       recentActivity: [
         { event: "Successful sign-in", when: "Today · 08:12" },
@@ -2962,8 +3004,8 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
           value: "ALL CAMPUSES",
           options: [
             { label: "ALL CAMPUSES", value: "ALL CAMPUSES" },
-            { label: "#110 Heritage College- Surrey", value: "#110 Heritage College- Surrey" },
-            { label: "Heritage College - Main", value: "Heritage College - Main" },
+            { label: "#110 CampusOne - Surrey", value: "#110 Heritage College- Surrey" },
+            { label: "CampusOne - Main", value: "Heritage College - Main" },
           ],
         },
         course: {
@@ -3057,7 +3099,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
           code: "ACSW 200",
           section: "ACSWAPR26-01",
           title: "Social Service Work Fundamentals",
-          location: "#110 Heritage College- Surrey",
+          location: "#110 CampusOne - Surrey",
           room: "Room Not Set",
           instructors: "Not Set",
           dates: "Apr. 27, 2026 - May. 1, 2026",
@@ -3071,7 +3113,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
           code: "0",
           section: "01",
           title: "DAP Practicum",
-          location: "#110 Heritage College- Surrey",
+          location: "#110 CampusOne - Surrey",
           room: "Room Not Set",
           instructors: "Not Set",
           dates: "Continuous",
@@ -3085,7 +3127,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
           code: "0",
           section: "DAP-01",
           title: "DAP Practicum",
-          location: "#110 Heritage College- Surrey",
+          location: "#110 CampusOne - Surrey",
           room: "Room Not Set",
           instructors: "Not Set",
           dates: "Continuous",
@@ -3099,7 +3141,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
           code: "0",
           section: "01",
           title: "Work Experience",
-          location: "#110 Heritage College- Surrey",
+          location: "#110 CampusOne - Surrey",
           room: "Room Not Set",
           instructors: "Not Set",
           dates: "Jan. 10, 2022 (Mon.) – Feb. 4, 2022 (Fri.)",
@@ -3541,7 +3583,7 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     primaryAction: "+ Start a new version",
     primaryActionHref: "/instructor/f/in-13-studio-generation",
     aiStudio: {
-      eyebrow: "HERITAGE AI STUDIO",
+      eyebrow: "CAMPUSONE AI STUDIO",
       courseTitle: "CS 301 AI Assistant & Studio v2.4",
       version: "v2.4",
       drafts: [
@@ -5366,9 +5408,9 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
       campusFilterLabel: "Filter Campus",
       campusOptions: [
         { label: "ALL CAMPUSES", value: "" },
-        { label: "#110 Heritage College- Surrey", value: "#110 Heritage College- Surrey" },
-        { label: "Heritage Community College - Distance", value: "Heritage Community College - Distance" },
-        { label: "Heritage Community College - Victoria", value: "Heritage Community College - Victoria" },
+        { label: "#110 CampusOne - Surrey", value: "#110 Heritage College- Surrey" },
+        { label: "CampusOne - Distance", value: "Heritage Community College - Distance" },
+        { label: "CampusOne - Victoria", value: "Heritage Community College - Victoria" },
       ],
       terms: [],
     },
@@ -5399,13 +5441,13 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
               value: "",
               type: "checkboxes",
               options: [
-                { label: "#110 Heritage College- Surrey", value: "#110 Heritage College- Surrey" },
+                { label: "#110 CampusOne - Surrey", value: "#110 Heritage College- Surrey" },
                 {
-                  label: "Heritage Community College - Distance",
+                  label: "CampusOne - Distance",
                   value: "Heritage Community College - Distance",
                 },
                 {
-                  label: "Heritage Community College - Victoria",
+                  label: "CampusOne - Victoria",
                   value: "Heritage Community College - Victoria",
                 },
               ],

@@ -3,8 +3,8 @@ import "@myheritage/tokens/css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "MyHeritage",
-  description: "MyHeritage — Heritage Community College",
+  title: "CampusOne",
+  description: "CampusOne education portal",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

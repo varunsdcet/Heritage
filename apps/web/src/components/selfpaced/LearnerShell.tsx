@@ -211,7 +211,7 @@ function LearnerShellInner({
   const Sidebar = (
     <aside className="sp-side">
       <Link href="/selfpaced/dashboard" className="sp-side__brand sp-side__brand--logo-only" onClick={() => setNavOpen(false)}>
-        <img src="/brand/login_logo.png" alt="Heritage" />
+        <img src="/brand/campusone/logo.png" alt="CampusOne" />
       </Link>
 
       <nav className="sp-side__nav" aria-label="Learner">

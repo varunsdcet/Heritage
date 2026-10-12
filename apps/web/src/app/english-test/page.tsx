@@ -7,7 +7,7 @@ import { api } from "@/lib/api";
 
 type Values = Record<string, string | boolean>;
 const initial: Values = {
-  institutionName: "Heritage Community College",
+  institutionName: "CampusOne",
   branchProfile: "",
   siteName: "",
   voucherCode: "",
@@ -30,7 +30,7 @@ const initial: Values = {
   studentId: "",
   confirmStudentId: "",
   supplementalStudentId: "",
-  resultInstitutions: "Heritage Community College",
+  resultInstitutions: "CampusOne",
   optOutCollegePlanningEmail: false,
   privacyAccepted: false,
 };

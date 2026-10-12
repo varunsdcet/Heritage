@@ -43,7 +43,7 @@ export function SelfpacedCertificate({
         className={`sp-cert-mini${locked ? " is-locked" : ""}`}
         aria-label={locked ? "Certificate preview (locked)" : "Certificate of completion"}
       >
-        <img src="/brand/login_logo.png" alt="" className="sp-cert-mini__logo" />
+        <img src="/brand/campusone/logo.png" alt="" className="sp-cert-mini__logo" />
         <p className="sp-cert-mini__eyebrow">{locked ? "Certificate · Locked" : "Certificate of Completion"}</p>
         <p className="sp-cert-mini__name">{learnerName}</p>
         <p className="sp-cert-mini__program">{programTitle}</p>
@@ -76,9 +76,9 @@ export function SelfpacedCertificate({
 
             {locked ? <span className="sp-cert__watermark" aria-hidden>LOCKED</span> : null}
 
-            <img src="/brand/login_logo.png" alt="Heritage Community College" className="sp-cert__logo" />
+            <img src="/brand/campusone/logo.png" alt="CampusOne" className="sp-cert__logo" />
 
-            <p className="sp-cert__brand">Heritage Community College</p>
+            <p className="sp-cert__brand">CampusOne</p>
             <h1 className="sp-cert__heading">Certificate of Completion</h1>
             <p className="sp-cert__subtitle">This certificate is proudly presented to</p>
             <div className="sp-cert__divider" aria-hidden />

@@ -1,4 +1,4 @@
-/** Canonical MyHeritage screen catalogue — synced from Figma inventory (deduped by path). */
+/** Canonical CampusOne screen catalogue — synced from Figma inventory (deduped by path). */
 
 export type ScreenEntry = {
   id: string;
@@ -195,7 +195,7 @@ export const ALL_SCREENS: ScreenEntry[] = [
   { id: "AP-MSG", role: "applicant", path: "/applicant/messages", title: "Messages", group: "Applicant" },
   { id: "AP-NOTIF", role: "applicant", path: "/applicant/notifications", title: "Notifications", group: "Applicant" },
   { id: "AP-TL", role: "applicant", path: "/applicant/timeline", title: "Timeline", group: "Applicant" },
-  { id: "AP-ASK", role: "applicant", path: "/applicant/ask", title: "Ask Heritage", group: "Applicant" },
+  { id: "AP-ASK", role: "applicant", path: "/applicant/ask", title: "Ask CampusOne", group: "Applicant" },
   { id: "AP-SRC", role: "applicant", path: "/applicant/search", title: "Search", group: "Applicant" },
   { id: "EM-01", role: "employer", path: "/employer", title: "Employer home", group: "Employer" },
   { id: "EM-02", role: "employer", path: "/employer/placements", title: "Placements", group: "Employer" },
@@ -204,7 +204,7 @@ export const ALL_SCREENS: ScreenEntry[] = [
   { id: "EM-05", role: "employer", path: "/employer/agreements", title: "Agreements", group: "Employer" },
   { id: "EM-06", role: "employer", path: "/employer/profile", title: "Profile", group: "Employer" },
   { id: "EM-NOTIF", role: "employer", path: "/employer/notifications", title: "Notifications", group: "Employer" },
-  { id: "EM-ASK", role: "employer", path: "/employer/ask", title: "Ask Heritage", group: "Employer" },
+  { id: "EM-ASK", role: "employer", path: "/employer/ask", title: "Ask CampusOne", group: "Employer" },
   { id: "EM-SRC", role: "employer", path: "/employer/search", title: "Search", group: "Employer" },
   { id: "UI-state-archived", role: "shared", path: "/archive", title: "state-archived", group: "Design System", figmaId: "26:1017" },
   { id: "SH-14", role: "shared", path: "/denied", title: "sh-14-error-404", group: "Shared", figmaId: "66:390" },
@@ -441,8 +441,8 @@ export const ALL_SCREENS: ScreenEntry[] = [
   { id: "HUB-IN-37", role: "instructor", path: "/instructor/sections/demo", title: "Section detail demo", group: "Instructor" },
   { id: "HUB-IN-38", role: "instructor", path: "/instructor/studio", title: "AI course studio", group: "Instructor" },
   { id: "HUB-IN-39", role: "instructor", path: "/instructor/submissions", title: "Submissions", group: "Instructor" },
-  { id: "AD-ASK", role: "admin", path: "/admin/ai/ask", title: "Ask Heritage", group: "Admin" },
-  { id: "IN-ASK", role: "instructor", path: "/instructor/ask", title: "Ask Heritage", group: "Instructor" },
+  { id: "AD-ASK", role: "admin", path: "/admin/ai/ask", title: "Ask CampusOne", group: "Admin" },
+  { id: "IN-ASK", role: "instructor", path: "/instructor/ask", title: "Ask CampusOne", group: "Instructor" },
   { id: "IN-AI-DRAFT", role: "instructor", path: "/instructor/ai-draft", title: "AI Draft", group: "Instructor" },
   { id: "AD-SP-01", role: "admin", path: "/admin/self-paced/overview", title: "Self-Paced Learning Overview", group: "Admin" },
   { id: "AD-SP-02", role: "admin", path: "/admin/self-paced/catalogue", title: "Self-Paced Programs and Catalogue", group: "Admin" },

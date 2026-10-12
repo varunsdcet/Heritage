@@ -25,7 +25,7 @@ export function AppError({ error, reset }: { error: Error & { digest?: string };
   return (
     <main style={{ minHeight: "60vh", display: "grid", placeItems: "center", padding: 24, fontFamily: "var(--font-sans, system-ui, sans-serif)" }}>
       <div style={{ maxWidth: 440, textAlign: "center" }}>
-        <h1 style={{ fontSize: 22, margin: "0 0 8px" }}>{stale ? "MyHeritage was updated" : "Something went wrong"}</h1>
+        <h1 style={{ fontSize: 22, margin: "0 0 8px" }}>{stale ? "CampusOne was updated" : "Something went wrong"}</h1>
         <p style={{ color: "#5b6472", margin: "0 0 18px", lineHeight: 1.5 }}>
           {stale ? "A newer version is available. Reload the page to continue." : "This page hit an unexpected error. Try again, or reload the page."}
         </p>

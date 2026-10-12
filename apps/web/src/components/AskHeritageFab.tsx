@@ -11,7 +11,7 @@ const ASK_HREF: Record<string, string> = {
   employer: "/employer/ask",
 };
 
-/** Fixed bottom-right Ask MyHeritage launcher — same on every shell screen. */
+/** Fixed bottom-right Ask CampusOne launcher — same on every shell screen. */
 export function AskHeritageFab({
   role,
 }: {
@@ -32,11 +32,11 @@ export function AskHeritageFab({
     <Link
       href={href}
       className="mh-ask-fab"
-      aria-label="Ask MyHeritage"
-      title="Ask MyHeritage"
+      aria-label="Ask CampusOne"
+      title="Ask CampusOne"
     >
       <img src="/brand/icons/sparkle.svg" alt="" width={18} height={18} />
-      <span className="mh-ask-fab__label">Ask MyHeritage</span>
+      <span className="mh-ask-fab__label">Ask CampusOne</span>
     </Link>
   );
 }

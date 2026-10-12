@@ -15,7 +15,7 @@ type FinancePayload = {
     balance: { amountCents: number };
     pastDue: { amountCents: number };
     nextDueAt: string | null;
-    paymentExecutionEnabled: false;
+    paymentExecutionEnabled: boolean;
   };
   entries: Array<{
     id: string;
@@ -157,6 +157,47 @@ export function StudentFeesView() {
     }
   }
 
+  const paidSession = search.get("session_id");
+  const canceled = search.get("canceled") === "1";
+  useEffect(() => {
+    if (canceled) setNotice("Payment cancelled. You were not charged.");
+    if (!paidSession) return;
+    const session = loadSession();
+    if (!session) return;
+    setBusy(true);
+    api<{ amountCad: number; number: number }>(
+      "/student/finance/checkout/confirm",
+      { method: "POST", body: JSON.stringify({ sessionId: paidSession }) },
+      session.accessToken,
+    )
+      .then((r) => {
+        setNotice(`Payment of ${money(r.amountCad)} received (transaction #${r.number}). Thank you!`);
+        resource.refresh();
+      })
+      .catch((err) => setNotice(err instanceof Error ? err.message : "We could not confirm your payment."))
+      .finally(() => {
+        setBusy(false);
+        router.replace("/student/fees");
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paidSession, canceled]);
+
+  async function payBalance() {
+    const session = loadSession();
+    if (!session) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const r = await api<{ url: string }>("/student/finance/checkout", { method: "POST", body: JSON.stringify({}) }, session.accessToken);
+      window.location.assign(r.url);
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Could not start payment");
+      setBusy(false);
+    }
+  }
+
+  const accountOwing = (resource.data?.summary.balance.amountCents ?? 0) / 100;
+
   function onTermChange(next: string) {
     setTermId(next || null);
     router.replace(next ? `/student/fees?term=${encodeURIComponent(next)}` : "/student/fees");
@@ -213,6 +254,14 @@ export function StudentFeesView() {
               </button>
             </div>
             {notice ? <p className="mh-teacher-muted">{notice}</p> : null}
+            {resource.data?.summary.paymentExecutionEnabled && accountOwing >= 1 ? (
+              <div className="mh-sis-finance__balance">
+                <span>Account balance owing: {owed(accountOwing)}</span>
+                <button type="button" className="mh-hcc-btn" onClick={() => void payBalance()} disabled={busy}>
+                  {busy ? "Please wait…" : `Pay ${money(accountOwing)} by card`}
+                </button>
+              </div>
+            ) : null}
 
             {!statement || (statement.charges.length === 0 && statement.totalPaymentsCad === 0) ? (
               <EmptyState title="No fees posted" body="New fees & charges will appear when finance posts your term statement." />

@@ -1,7 +1,7 @@
 /** FD-07 fixture content for screens without a full backend yet. */
 
 export const FD07 = {
-  institution: "Heritage College",
+  institution: "CampusOne",
   campus: "Surrey, BC",
   term: "Fall 2026",
   student: {

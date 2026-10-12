@@ -115,6 +115,49 @@ export type CourseLmsBadge = {
   language?: string;
 };
 
+export type CourseLmsReporting = {
+  generatedAt: string;
+  logs: Array<{
+    id: string;
+    at: string;
+    participant: string;
+    action: string;
+    activity: string;
+    source: string;
+    detail?: string;
+  }>;
+  activities: Array<{
+    id: string;
+    name: string;
+    type: string;
+    completions: number;
+    submissions: number;
+    attempts: number;
+    responses: number;
+    lastActivityAt?: string;
+  }>;
+  participation: Array<{
+    studentId: string;
+    name: string;
+    studentNumber: string;
+    status: string;
+    completed: number;
+    submissions: number;
+    quizAttempts: number;
+    choiceResponses: number;
+    lastActivityAt?: string;
+  }>;
+  competencies: Array<{
+    id: string;
+    name: string;
+    resource: string;
+    linkedActivities: number;
+    participants: number;
+    completed: number;
+    progressPercent: number;
+  }>;
+};
+
 export type CourseLmsState = {
   session: string;
   location: string;
@@ -139,6 +182,7 @@ export type CourseLmsState = {
   attendanceDates?: string[];
   evaluationRows?: Array<{ component: string; weight: string }>;
   logParticipants?: string[];
+  reporting?: CourseLmsReporting;
   questionBank: {
     category: string;
     categoryHelp: string;

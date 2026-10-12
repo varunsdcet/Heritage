@@ -123,6 +123,21 @@ describe("contracts", () => {
     expect(
       StudentCalendarEvent.parse({ ...event, joinUrl: "/live/00000000-0000-4000-8000-000000000001" }).joinUrl,
     ).toBe("/live/00000000-0000-4000-8000-000000000001");
+    expect(
+      StudentCalendarEvent.parse({
+        ...event,
+        joinUrl: "/live/00000000-0000-4000-8000-000000000001?provider=jitsi",
+      }).joinUrl,
+    ).toBe("/live/00000000-0000-4000-8000-000000000001?provider=jitsi");
+    expect(
+      StudentCalendarEvent.parse({
+        ...event,
+        joinUrl: "/live/00000000-0000-4000-8000-000000000001?provider=bigbluebutton",
+      }).joinUrl,
+    ).toBe("/live/00000000-0000-4000-8000-000000000001?provider=bigbluebutton");
+    expect(() =>
+      StudentCalendarEvent.parse({ ...event, joinUrl: "/live/00000000-0000-4000-8000-000000000001?provider=zoom" }),
+    ).toThrow();
     expect(() => StudentCalendarEvent.parse({ ...event, joinUrl: "/live/../admin" })).toThrow();
     expect(() => StudentCalendarEvent.parse({ ...event, joinUrl: "//evil.example.test/live/x" })).toThrow();
   });

@@ -82,7 +82,7 @@ export default function CareerPage() {
             <div className="mh-teacher-list__item">
               <div>
                 <strong>{openCount} open role{openCount === 1 ? "" : "s"}</strong>
-                <span>Posted for Heritage students in matching programs</span>
+                <span>Posted for CampusOne students in matching programs</span>
               </div>
               <span className="mh-teacher-badge is-active">Live</span>
             </div>

@@ -45,6 +45,36 @@ describe("workspace activity content", () => {
     expect(() => activityContentFromForm("PAGE", { Name: "Empty" })).toThrow("Page content is required");
   });
 
+  it("keeps book content and a choice prompt as activity body content", () => {
+    expect(activityContentFromForm("BOOK", { Name: "Handbook", "Book content": "Read chapters 1 and 2" }).body).toContain(
+      "Read chapters 1 and 2",
+    );
+    const choice = activityContentFromForm("CHOICE", {
+      Name: "Class time",
+      "Choice question": "Which session works best?",
+      "Option 1": "Morning",
+    });
+    expect(choice.body).toContain("Which session works best?");
+    expect(choice.settings["Option 1"]).toBe("Morning");
+  });
+
+  it("keeps universal content and every entered setting for any activity type", () => {
+    const content = activityContentFromForm("DATABASE", {
+      Name: "Research sources",
+      Description: "Add one source used in your paper.",
+      "Activity content": "Include the title, author and publication date.",
+      "Approval required": "yes",
+      "Maximum number of entries": "5",
+    });
+    expect(content.body).toContain("Include the title, author and publication date.");
+    expect(content.description).toBe("Add one source used in your paper.");
+    expect(content.settings).toMatchObject({
+      "Activity content": "Include the title, author and publication date.",
+      "Approval required": "yes",
+      "Maximum number of entries": "5",
+    });
+  });
+
   it("keeps the external URL of a URL activity", () => {
     const content = activityContentFromForm("URL", { Name: "Docs", "External URL": "https://example.org/guide" });
     expect(content.url).toBe("https://example.org/guide");

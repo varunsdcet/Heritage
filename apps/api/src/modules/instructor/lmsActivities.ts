@@ -167,7 +167,14 @@ export function activityContentFromForm(type: string, fields: Record<string, str
   const restrictions = serializeLmsAccessRestrictions(fields[LMS_ACCESS_RESTRICTIONS_KEY]);
   if (restrictions) content.settings[LMS_ACCESS_RESTRICTIONS_KEY] = restrictions;
   else delete content.settings[LMS_ACCESS_RESTRICTIONS_KEY];
-  const bodyHtml = (fields["Page content"] || fields.Body || "").trim();
+  const bodyHtml = (
+    fields["Page content"] ||
+    fields["Book content"] ||
+    fields["Choice question"] ||
+    fields["Activity content"] ||
+    fields.Body ||
+    ""
+  ).trim();
   if (kind === "PAGE" && !bodyHtml && !fields.Storyboard) throw badRequest("Page content is required");
   if (bodyHtml) content.body = sanitizeLessonHtml(bodyHtml);
   const description = (fields.Description || "").trim();

@@ -76,7 +76,14 @@ export const LMS_ACTIVITY_FORMS: Record<string, { heading: string; error?: strin
     sections: [
       {
         title: "General",
-        fields: [text("Name", "Assignment name", true), area("Description", "Description"), displayOnPage, area("Activity instructions", "Activity instructions"), file("Additional files", "Additional files"), chk("Only show files during submission", "Only show files during submission")],
+        fields: [
+          text("Name", "Assignment name", true),
+          area("Description", "Description"),
+          displayOnPage,
+          area("Activity instructions", "Activity instructions"),
+          file("Additional files", "Assignment PDF or supporting file", "Upload one PDF, Office document, text file or image up to 8 MB. The file will appear with the assignment."),
+          chk("Only show files during submission", "Only show files during submission"),
+        ],
       },
       {
         title: "Availability",
@@ -107,9 +114,15 @@ export const LMS_ACTIVITY_FORMS: Record<string, { heading: string; error?: strin
     ],
   },
   bigbluebutton: {
-    heading: "Adding a new Online Class (BigBlueButton)",
+    heading: "Adding a new Online Class",
     sections: [
-      { title: "Instance", fields: [sel("Instance type", "Instance type", ["Room with recordings", "Room only", "Recordings only"])] },
+      {
+        title: "Instance",
+        fields: [
+          sel("Provider", "Video provider", ["Jitsi Meet", "BigBlueButton"]),
+          sel("Instance type", "Instance type", ["Room with recordings", "Room only", "Recordings only"]),
+        ],
+      },
       { title: "General", fields: [text("Name", "Room name", true, "Online Class Link")] },
       {
         title: "Publish to students",
@@ -145,7 +158,16 @@ export const LMS_ACTIVITY_FORMS: Record<string, { heading: string; error?: strin
   book: {
     heading: "Adding a new Book",
     sections: [
-      { title: "General", fields: [text("Name", "Name", true), area("Description", "Description"), displayOnPage] },
+      {
+        title: "General",
+        fields: [
+          text("Name", "Book name", true),
+          area("Description", "Description"),
+          displayOnPage,
+          file("Book file", "Upload book file", "Upload a PDF, Word document, text file or image up to 8 MB."),
+          area("Book content", "Book introduction or chapter content"),
+        ],
+      },
       { title: "Appearance", fields: [sel("Chapter formatting", "Chapter formatting", ["Numbers", "Bullets", "Indented", "None"]), chk("Custom titles", "Custom titles")] },
       ...COMMON,
     ],
@@ -178,7 +200,13 @@ export const LMS_ACTIVITY_FORMS: Record<string, { heading: string; error?: strin
     sections: [
       {
         title: "General",
-        fields: [text("Name", "Choice name", true), area("Description", "Description"), displayOnPage, sel("Display mode for options", "Display mode for options", ["Display horizontally", "Display vertically"])],
+        fields: [
+          text("Name", "Choice name", true),
+          area("Choice question", "Choice question or prompt", true),
+          area("Description", "Additional instructions"),
+          displayOnPage,
+          sel("Display mode for options", "Display mode for options", ["Display horizontally", "Display vertically"]),
+        ],
       },
       {
         title: "Options",
@@ -460,8 +488,22 @@ export const LMS_ACTIVITY_FORMS: Record<string, { heading: string; error?: strin
 
 export function formForActivity(code: string) {
   const mapped = code === "mcgrawhill" ? "externaltool" : code;
-  return LMS_ACTIVITY_FORMS[mapped] || {
+  const spec = LMS_ACTIVITY_FORMS[mapped] || {
     heading: `Adding a new ${code}`,
     sections: [{ title: "General", fields: [text("Name", "Name", true), area("Description", "Description")] }, ...COMMON],
+  };
+  // Every activity needs an actual learner-facing content field. Several Moodle-style
+  // forms previously saved only configuration fields, so the activity opened to an
+  // empty page even though the instructor had just completed and saved the form.
+  if (["assignment", "book", "choice", "page"].includes(mapped)) return spec;
+  const content: LmsFormSection = {
+    title: "Content",
+    fields: [area("Activity content", "Activity content or instructions")],
+  };
+  const generalIndex = spec.sections.findIndex((section) => section.title === "General");
+  const insertAt = generalIndex >= 0 ? generalIndex + 1 : 0;
+  return {
+    ...spec,
+    sections: [...spec.sections.slice(0, insertAt), content, ...spec.sections.slice(insertAt)],
   };
 }

@@ -165,6 +165,41 @@ async function loadInstructorLmsOverlay(institutionId: string, sectionId: string
   return null;
 }
 
+type ChoiceResponse = { selected: string[]; submittedAt: string };
+
+async function studentChoiceResponses(institutionId: string, sectionId: string, studentId: string) {
+  const rows = await prisma.sisScreenState.findMany({
+    where: {
+      institutionId,
+      path: { startsWith: `/student/lms-choice/${sectionId}/`, endsWith: `/${studentId}` },
+    },
+    select: { path: true, payloadJson: true },
+  });
+  const responses = new Map<string, ChoiceResponse>();
+  for (const row of rows) {
+    const activityId = row.path.split("/")[4];
+    if (!activityId) continue;
+    try {
+      const value = JSON.parse(row.payloadJson) as ChoiceResponse;
+      if (Array.isArray(value.selected) && typeof value.submittedAt === "string") responses.set(activityId, value);
+    } catch {
+      // Ignore a corrupt legacy response rather than breaking the whole course page.
+    }
+  }
+  return responses;
+}
+
+function choiceFromSettings(settings: Record<string, string> | undefined, response?: ChoiceResponse) {
+  const options = Array.from({ length: 20 }, (_, index) => settings?.[`Option ${index + 1}`]?.trim() || "").filter(Boolean);
+  if (!options.length) return undefined;
+  return {
+    options,
+    multiple: /yes/i.test(settings?.["Allow more than one choice to be selected"] || ""),
+    displayMode: /horizontal/i.test(settings?.["Display mode for options"] || "") ? ("horizontal" as const) : ("vertical" as const),
+    response: response || null,
+  };
+}
+
 export async function getStudentCourseLms(user: SessionClaims, sectionId: string) {
   const student = await requireStudent(user);
   const enrolment = await prisma.enrolment.findFirst({
@@ -227,7 +262,10 @@ export async function getStudentCourseLms(user: SessionClaims, sectionId: string
     }),
     overlay,
   );
-  const quizAttempts = await studentQuizAttempts(user.institutionId, sectionId, student.id);
+  const [quizAttempts, choiceResponses] = await Promise.all([
+    studentQuizAttempts(user.institutionId, sectionId, student.id),
+    studentChoiceResponses(user.institutionId, sectionId, student.id),
+  ]);
   const studentGroupIds = lms.groups.filter((group) => group.members.some((member) => member.id === student.id)).map((group) => group.id);
   const mayAccess = (value: unknown) => studentCanAccessLms(value, { studentId: student.id, groupIds: studentGroupIds });
 
@@ -254,6 +292,7 @@ export async function getStudentCourseLms(user: SessionClaims, sectionId: string
           joinUrl: type === "BIGBLUEBUTTON" ? a.joinUrl || joinUrl : null,
           description: a.description || undefined,
           url: a.url && /^https?:\/\//i.test(a.url) && isSafeLink(a.url) ? a.url : undefined,
+          settings: a.settings,
           assignmentId: a.assignmentId,
           assignment: a.assignment
             ? {
@@ -269,6 +308,7 @@ export async function getStudentCourseLms(user: SessionClaims, sectionId: string
                 acceptedTypes: a.assignment.acceptedTypes,
               }
             : undefined,
+          choice: type === "CHOICE" ? choiceFromSettings(a.settings, choiceResponses.get(a.id)) : undefined,
           gradingMethod: /final\s*exam/i.test(a.name) ? "Highest grade" : a.note?.includes("Grading method") ? a.note : undefined,
         };
         if (type === "QUIZ") {
@@ -344,6 +384,37 @@ export async function getStudentCourseLms(user: SessionClaims, sectionId: string
     instructorName,
     joinUrl: lms.joinUrl || joinUrl,
   });
+}
+
+export async function submitStudentChoiceResponse(
+  user: SessionClaims,
+  sectionId: string,
+  activityId: string,
+  body: unknown,
+) {
+  const student = await requireStudent(user);
+  const course = await getStudentCourseLms(user, sectionId);
+  const activity = course.topics.flatMap((topic) => topic.activities).find((item) => item.id === activityId && item.type === "CHOICE");
+  if (!activity?.choice) throw httpError("This choice is not available", "NOT_FOUND", 404);
+  const raw = (body as { selected?: unknown } | null)?.selected;
+  if (!Array.isArray(raw) || raw.some((item) => typeof item !== "string")) {
+    throw httpError("Select an available choice", "VALIDATION_ERROR", 400);
+  }
+  const selected = [...new Set(raw.map((item) => item.trim()).filter(Boolean))];
+  if (!selected.length || selected.some((item) => !activity.choice!.options.includes(item))) {
+    throw httpError("Select an available choice", "VALIDATION_ERROR", 400);
+  }
+  if (!activity.choice.multiple && selected.length !== 1) {
+    throw httpError("Select one choice", "VALIDATION_ERROR", 400);
+  }
+  const response: ChoiceResponse = { selected, submittedAt: new Date().toISOString() };
+  const path = `/student/lms-choice/${sectionId}/${activityId}/${student.id}`;
+  await prisma.sisScreenState.upsert({
+    where: { institutionId_path: { institutionId: user.institutionId, path } },
+    create: { institutionId: user.institutionId, path, payloadJson: JSON.stringify(response) },
+    update: { payloadJson: JSON.stringify(response) },
+  });
+  return response;
 }
 
 export async function getCourseEvaluation(user: SessionClaims, evaluationId: string) {

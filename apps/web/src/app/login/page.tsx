@@ -199,15 +199,15 @@ function LoginForm() {
         }}
       >
         <img
-          src="/brand/login_logo.png"
-          alt="Heritage Community College"
-          style={{ display: "block", height: 56, width: "auto", maxWidth: 280, objectFit: "contain" }}
+          src="/brand/campusone/logo.png"
+          alt="CampusOne"
+          style={{ display: "block", height: 64, width: "auto", maxWidth: 320, objectFit: "contain" }}
         />
 
         <form onSubmit={onSubmit} noValidate style={{ width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 24 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <h1 style={{ margin: 0, fontFamily: "var(--mh-font-display)", fontSize: 34, fontWeight: 600, lineHeight: 1.15, letterSpacing: "-0.03em", color: "#1F2937" }}>
-              Sign in to MyHeritage
+              Sign in to CampusOne
             </h1>
             <p style={{ margin: 0, color: "#5C5F5A", fontSize: 15, lineHeight: 1.4 }}>
               Students, instructors, and staff sign in with campus email or student number.
@@ -306,7 +306,7 @@ function LoginForm() {
                 }}
                 onBlur={() => setTouchedEmail(true)}
                 autoComplete="username"
-                placeholder="ST-2024-001 or name@heritage.edu"
+                placeholder="ST-2024-001 or your campus email"
                 aria-invalid={Boolean(emailError)}
                 style={{
                   width: "100%",
@@ -442,7 +442,7 @@ function LoginForm() {
               {loading ? "Signing in…" : "Sign in"}
             </button>
             <p style={{ margin: 0, fontSize: 14, color: "#5C5F5A", textAlign: "center" }}>
-              Applying to Heritage?{" "}
+              Applying to CampusOne?{" "}
               <a href="/apply" style={{ color: "#2563EB", fontWeight: 600, textDecoration: "none" }}>
                 Create an applicant account
               </a>
@@ -464,7 +464,7 @@ function LoginForm() {
         }}
       >
         <img
-          src="/brand/login/hero.png"
+          src="/brand/campusone/login-hero.png"
           alt=""
           style={{
             position: "absolute",
@@ -480,7 +480,7 @@ function LoginForm() {
             position: "absolute",
             inset: 0,
             backgroundImage:
-              "linear-gradient(90deg, rgba(1,127,63,0.15), rgba(1,127,63,0.15)), linear-gradient(90deg, rgba(132,159,56,0.2), rgba(132,159,56,0.2))",
+              "linear-gradient(135deg, rgba(8,35,83,0.08), rgba(0,159,227,0.12))",
             pointerEvents: "none",
           }}
         />

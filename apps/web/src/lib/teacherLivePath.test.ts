@@ -5,7 +5,7 @@ describe("teacherLivePath", () => {
   it("keeps a course workspace on one persistence key while activity panels change", () => {
     const path = "/instructor/sections/80000000-0000-4000-8000-00000000000a";
     const addAssignment = new URLSearchParams(
-      "tab=Course&action=add-activity&atype=assignment&topic=topic-week-1",
+      "tab=Course&edit=1&action=add-activity&atype=assignment&topic=topic-week-1",
     );
     const viewAssignment = new URLSearchParams(
       "tab=Course&action=view-activity&aid=act-123",

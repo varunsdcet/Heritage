@@ -16,6 +16,7 @@ import { webPublicUrl } from "../../lib/liveClass.js";
 export const liveRouter: Router = Router();
 
 type LiveRole = "moderator" | "viewer";
+type LiveProvider = "bigbluebutton" | "jitsi";
 
 function httpError(message: string, code: string, status: number) {
   return Object.assign(new Error(message), { code, status });
@@ -68,8 +69,27 @@ async function resolveRoom(user: SessionClaims, sectionId: string) {
   };
 }
 
-function logoutUrl(req: Request, sectionId: string) {
-  const path = `/live/${sectionId}?left=1`;
+function requestedProvider(req: Request): LiveProvider | null {
+  const value = typeof req.query.provider === "string" ? req.query.provider.toLowerCase() : "";
+  return value === "bigbluebutton" || value === "jitsi" ? value : null;
+}
+
+function resolveProvider(req: Request) {
+  const requested = requestedProvider(req);
+  const cfg = bbbConfig();
+  const provider: LiveProvider = requested || (cfg ? "bigbluebutton" : "jitsi");
+  if (provider === "bigbluebutton" && !cfg) {
+    throw httpError(
+      "BigBlueButton is not configured. Choose Jitsi Meet, or ask an administrator to configure BBB_URL and BBB_SECRET.",
+      "BBB_NOT_CONFIGURED",
+      409,
+    );
+  }
+  return { provider, cfg };
+}
+
+function logoutUrl(req: Request, sectionId: string, provider: LiveProvider) {
+  const path = `/live/${sectionId}?provider=${provider}&left=1`;
   const origin = req.header("origin");
   if (origin) {
     try {
@@ -83,17 +103,21 @@ function logoutUrl(req: Request, sectionId: string) {
 }
 
 liveRouter.get("/config", requireAuth, (_req, res) => {
-  res.json({ provider: bbbConfig() ? "bigbluebutton" : "jitsi" });
+  const bbbAvailable = Boolean(bbbConfig());
+  res.json({
+    provider: bbbAvailable ? "bigbluebutton" : "jitsi",
+    providers: { jitsi: true, bigbluebutton: bbbAvailable },
+  });
 });
 
 liveRouter.get("/sections/:sectionId", requireAuth, async (req, res, next) => {
   try {
     const user = (req as AuthedRequest).user;
     const room = await resolveRoom(user, String(req.params.sectionId));
-    const cfg = bbbConfig();
-    const info = cfg ? await meetingInfo(cfg, room.meetingId) : null;
+    const { provider, cfg } = resolveProvider(req);
+    const info = provider === "bigbluebutton" && cfg ? await meetingInfo(cfg, room.meetingId) : null;
     res.json({
-      provider: cfg ? "bigbluebutton" : "jitsi",
+      provider,
       sectionId: room.section.id,
       meetingName: room.meetingName,
       courseCode: room.section.course.code,
@@ -117,8 +141,8 @@ liveRouter.post("/sections/:sectionId/join", requireAuth, async (req, res, next)
     if (room.completed) {
       throw httpError("You have completed this course, so its live class is closed. Published recordings are still available.", "COURSE_COMPLETED", 403);
     }
-    const cfg = bbbConfig();
-    if (!cfg) {
+    const { provider, cfg } = resolveProvider(req);
+    if (provider === "jitsi") {
       res.json({
         status: "ready",
         provider: "jitsi",
@@ -128,12 +152,13 @@ liveRouter.post("/sections/:sectionId/join", requireAuth, async (req, res, next)
       });
       return;
     }
+    if (!cfg) throw httpError("BigBlueButton is not configured", "BBB_NOT_CONFIGURED", 409);
     if (room.role === "moderator") {
       await createMeeting(cfg, {
         meetingId: room.meetingId,
         name: room.meetingName,
         welcome: `Welcome to <b>${room.meetingName}</b>.`,
-        logoutUrl: logoutUrl(req, room.section.id),
+        logoutUrl: logoutUrl(req, room.section.id, provider),
         context: room.section.term?.name ?? undefined,
       });
     } else {
@@ -165,8 +190,10 @@ liveRouter.post("/sections/:sectionId/end", requireAuth, async (req, res, next) 
     const user = (req as AuthedRequest).user;
     const room = await resolveRoom(user, String(req.params.sectionId));
     if (room.role !== "moderator") throw httpError("Only the instructor can end the class", "FORBIDDEN", 403);
-    const cfg = bbbConfig();
-    if (!cfg) throw httpError("Live classes are not connected to BigBlueButton", "BBB_NOT_CONFIGURED", 409);
+    const { provider, cfg } = resolveProvider(req);
+    if (provider !== "bigbluebutton" || !cfg) {
+      throw httpError("Jitsi rooms close when everyone leaves", "JITSI_NO_END_ACTION", 409);
+    }
     const ended = await endMeeting(cfg, room.meetingId);
     res.json({ ended });
   } catch (err) {
@@ -178,11 +205,12 @@ liveRouter.get("/sections/:sectionId/recordings", requireAuth, async (req, res, 
   try {
     const user = (req as AuthedRequest).user;
     const room = await resolveRoom(user, String(req.params.sectionId));
-    const cfg = bbbConfig();
-    if (!cfg) {
+    const { provider, cfg } = resolveProvider(req);
+    if (provider === "jitsi") {
       res.json({ provider: "jitsi", recordings: [] });
       return;
     }
+    if (!cfg) throw httpError("BigBlueButton is not configured", "BBB_NOT_CONFIGURED", 409);
     const recordings = await listRecordings(cfg, room.meetingId);
     res.json({
       provider: "bigbluebutton",

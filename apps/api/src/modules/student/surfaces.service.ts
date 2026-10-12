@@ -44,6 +44,7 @@ import {
 } from "../../lib/workshopPolicy.js";
 import { studentMetaMap } from "../admin/superAdmin.service.js";
 import { currentStudentId } from "../me/studentAlignment.js";
+import { studentPaymentsEnabled } from "./finance.payments.js";
 
 function httpError(message: string, code: string, status: number) {
   return Object.assign(new Error(message), { code, status });
@@ -613,7 +614,7 @@ export async function listStudentFinance(user: SessionClaims, financialTermId?: 
       balance: { amountCents: Math.round(accountBalanceCad * 100), currency: "CAD" },
       pastDue: { amountCents: Math.round(pastDue * 100), currency: "CAD" },
       nextDueAt: nextDue?.toISOString() ?? null,
-      paymentExecutionEnabled: false,
+      paymentExecutionEnabled: studentPaymentsEnabled(),
     },
     entries: entries.map(mapEntry),
     financialTerms: terms.map((t) => ({

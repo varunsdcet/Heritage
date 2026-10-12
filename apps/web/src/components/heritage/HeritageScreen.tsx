@@ -113,7 +113,7 @@ export function HeritageScreenPage({ screenId }: { screenId: string }) {
   const session = useAdminSession();
   const pathname = usePathname() ?? "";
   const sp = useSearchParams();
-  const [crumbs, setCrumbs] = useState<string[]>(["Home", "Heritage SIS", screenId.toUpperCase()]);
+  const [crumbs, setCrumbs] = useState<string[]>(["Home", "CampusOne SIS", screenId.toUpperCase()]);
   if (!session) return null;
   return (
     <AdminSisShell activeHref={pathname} activeSearch={sp?.toString() ?? ""} breadcrumbs={crumbs} userName={`${session.givenName} ${session.familyName}`}>
@@ -182,7 +182,7 @@ function HeritageScreen({ screenId, onCrumbs }: { screenId: string; onCrumbs: (c
       const v = await hx<View>(`/screens/${screenId}?${params.toString()}`);
       setView(v);
       setLoadError(null);
-      onCrumbs(["Home", "Heritage SIS", v.schema.module, v.schema.name]);
+      onCrumbs(["Home", "CampusOne SIS", v.schema.module, v.schema.name]);
     } catch (e) {
       setLoadError(errMsg(e, "Could not load screen"));
     }
@@ -369,7 +369,7 @@ function HeritageScreen({ screenId, onCrumbs }: { screenId: string; onCrumbs: (c
       <div className="mh-sa hx">
         <SaNotice tone="error">{loadError}</SaNotice>
         <Link className="mh-sa__btn" href="/admin/heritage">
-          Back to Heritage screen index
+          Back to CampusOne screen index
         </Link>
       </div>
     );
@@ -808,7 +808,7 @@ function ScreenHeader({ view }: { view: View }) {
       <div className="hx-head__top">
         <div>
           <div className="hx-head__eyebrow">
-            <Link href="/admin/heritage">Heritage SIS</Link> · {s.module} · <code>{s.id}</code>
+            <Link href="/admin/heritage">CampusOne SIS</Link> · {s.module} · <code>{s.id}</code>
           </div>
           <h1>{s.name}</h1>
         </div>

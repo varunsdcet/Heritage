@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { TeacherSisShell } from "@/components/TeacherSisShell";
+import { CourseReviewShell } from "@/components/CourseReviewShell";
 import { api, loadSession, type Session } from "@/lib/api";
 import { fetchSubmissionFile } from "@/lib/submissionFiles";
 
@@ -119,7 +119,6 @@ function InstructorSubmissionsInner() {
   }
 
   if (!session) return null;
-  const userName = `${session.givenName} ${session.familyName}`.trim() || "Instructor";
   const assignment = data?.assignments.find((a) => a.id === data.assignmentId) ?? null;
   const submittedCount = data?.rows.filter((r) => r.submission?.status === "submitted").length ?? 0;
   const sectionOptions =
@@ -128,12 +127,10 @@ function InstructorSubmissionsInner() {
       : sections;
 
   return (
-    <TeacherSisShell
+    <CourseReviewShell
+      session={session}
       title="Submissions"
       subtitle={data ? `${data.section.code} · ${data.section.title}` : "Student work by assignment"}
-      activeHref="/instructor/gradebook"
-      userName={userName}
-      userRole="INSTRUCTOR"
     >
       <div className="mh-teacher-stack">
         <div className="mh-teacher-page-head">
@@ -267,6 +264,6 @@ function InstructorSubmissionsInner() {
           </section>
         )}
       </div>
-    </TeacherSisShell>
+    </CourseReviewShell>
   );
 }

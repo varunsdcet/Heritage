@@ -55,7 +55,7 @@ export const COMPLIANCE_NAV: AdminNavChild[] = [
 
 export const AI_NAV: AdminNavChild[] = [
   { label: "AI Hub", href: "/admin/ai" },
-  { label: "Ask MyHeritage", href: "/admin/ai/ask" },
+  { label: "Ask CampusOne", href: "/admin/ai/ask" },
   { label: "AI Dashboard", href: "/admin/ops/ai" },
   { label: "Interactions", href: "/admin/ops/ai/interactions" },
   { label: "Knowledge", href: "/admin/ops/ai/knowledge" },
@@ -152,11 +152,11 @@ export const USER_MANAGEMENT_NAV: AdminNavChild[] = [
 
 export const ADMIN_SIDEBAR: AdminSidebarEntry[] = [
   { type: "item", item: { label: "Dashboard", href: "/admin", icon: "home" } },
-  { type: "label", label: "HERITAGE SIS" },
+  { type: "label", label: "CAMPUSONE SIS" },
   ...HERITAGE_SIDEBAR.map((item): AdminSidebarEntry => ({ type: "item", item })),
   { type: "item", item: { label: "Search Students", href: "/admin/student-search", icon: "school", gate: { modules: ["studentRecords"] } } },
   { type: "item", item: { label: "My E-mail / Messages", href: "/admin/messages", icon: "mail" } },
-  { type: "item", item: { label: "Ask Heritage", href: "/admin/ai/ask", icon: "sparkle" } },
+  { type: "item", item: { label: "Ask CampusOne", href: "/admin/ai/ask", icon: "sparkle" } },
   { type: "label", label: "RECRUIT" },
   {
     type: "item",

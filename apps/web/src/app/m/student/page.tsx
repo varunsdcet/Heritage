@@ -136,7 +136,7 @@ export default function MobileStudentHomePage() {
   };
 
   return (
-    <MobileChrome title="Heritage" active="Home">
+    <MobileChrome title="CampusOne" active="Home">
       <div style={{ marginBottom: 16 }}>
         <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>{`${greeting()}, ${name}`}</h1>
         <p style={{ margin: "4px 0 0", color: "var(--mh-text-muted)", fontSize: 13 }}>{today}</p>

@@ -7,10 +7,10 @@ import { EmptyState } from "@myheritage/ui";
 import { ApiError, api, loadSession, type Session } from "@/lib/api";
 import { StudentFrame } from "@/components/StudentSisShell";
 import { courseStatusLabel, courseStatusTone, formatHccDateRange, parseDate } from "@/lib/hccCourseFormat";
-import { liveSectionId, openClassLink } from "@/lib/liveClass";
+import { liveClassRef, openClassLink } from "@/lib/liveClass";
 import { LiveClassPanel } from "@/components/LiveClassPanel";
 import { AiDraftVideoPlayer } from "@/components/ai-draft/AiDraftVideoPlayer";
-import { LessonBody, LmsAssignmentSummary, LmsFileCard, LmsUrlCard } from "@/components/lms/LmsScreens";
+import { LessonBody, LmsActivitySettings, LmsAssignmentSummary, LmsFileCard, LmsUrlCard } from "@/components/lms/LmsScreens";
 import type { AiDraftStoryboard } from "@/lib/aiDraftSamples";
 import type { LmsAssignmentSettings } from "@/lib/teacherCatalog";
 
@@ -63,8 +63,15 @@ type LmsActivity = {
   storyboard?: AiDraftStoryboard;
   description?: string;
   url?: string;
+  settings?: Record<string, string>;
   assignmentId?: string;
   assignment?: LmsAssignmentSettings;
+  choice?: {
+    options: string[];
+    multiple: boolean;
+    displayMode: "horizontal" | "vertical";
+    response?: { selected: string[]; submittedAt: string } | null;
+  };
 };
 
 type CourseLms = {
@@ -555,6 +562,9 @@ export function StudentCourseDetailPremiumView({ sectionId }: { sectionId: strin
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [quizSubmitting, setQuizSubmitting] = useState(false);
   const [quizError, setQuizError] = useState("");
+  const [choiceSelections, setChoiceSelections] = useState<Record<string, string[]>>({});
+  const [choiceSubmitting, setChoiceSubmitting] = useState(false);
+  const [choiceMessage, setChoiceMessage] = useState("");
   const [quizResult, setQuizResult] = useState<{
     activityId: string;
     score: number;
@@ -748,6 +758,33 @@ export function StudentCourseDetailPremiumView({ sectionId }: { sectionId: strin
       if (err instanceof ApiError && err.status === 409) lms.refresh();
     } finally {
       setQuizSubmitting(false);
+    }
+  }
+
+  async function submitChoice(activity: LmsActivity) {
+    const choice = activity.choice;
+    if (!choice) return;
+    const selected = choiceSelections[activity.id] ?? choice.response?.selected ?? [];
+    if (!selected.length) {
+      setChoiceMessage("Select an option first.");
+      return;
+    }
+    const session = loadSession();
+    if (!session?.accessToken) return;
+    setChoiceSubmitting(true);
+    setChoiceMessage("");
+    try {
+      await api(
+        `/student/courses/${sectionId}/choices/${encodeURIComponent(activity.id)}/responses`,
+        { method: "POST", body: JSON.stringify({ selected }) },
+        session.accessToken,
+      );
+      setChoiceMessage("Your choice has been saved.");
+      lms.refresh();
+    } catch (err) {
+      setChoiceMessage(err instanceof Error ? err.message : "Could not save your choice.");
+    } finally {
+      setChoiceSubmitting(false);
     }
   }
 
@@ -955,10 +992,13 @@ export function StudentCourseDetailPremiumView({ sectionId }: { sectionId: strin
                     </div>
                   </div>
                 )}
-                {viewed.type === "BIGBLUEBUTTON" && liveSectionId(viewed.joinUrl || joinUrl) ? (
+                {viewed.type === "BIGBLUEBUTTON" && liveClassRef(viewed.joinUrl || joinUrl) ? (
                   /* Screen 4 — BigBlueButton live class (student + teacher same room) */
                   <div data-screen="bbb">
-                    <LiveClassPanel sectionId={liveSectionId(viewed.joinUrl || joinUrl)!} />
+                    <LiveClassPanel
+                      sectionId={liveClassRef(viewed.joinUrl || joinUrl)!.sectionId}
+                      provider={liveClassRef(viewed.joinUrl || joinUrl)!.provider}
+                    />
                   </div>
                 ) : viewed.type === "BIGBLUEBUTTON" ? (
                   <div className="mh-lms-bbb mh-student-bbb" data-screen="bbb">
@@ -1023,9 +1063,56 @@ export function StudentCourseDetailPremiumView({ sectionId }: { sectionId: strin
                   </>
                 ) : viewed.type === "URL" ? (
                   <LmsUrlCard url={viewed.url} description={viewed.description} />
+                ) : viewed.type === "BOOK" ? (
+                  <div className="mh-lms-pagebody" data-screen="book">
+                    {viewed.description ? <p style={{ whiteSpace: "pre-wrap" }}>{viewed.description}</p> : null}
+                    <LessonBody body={viewed.body} empty={viewed.fileId ? "" : "Your instructor has not added book content yet."} />
+                    {viewed.fileId ? <LmsFileCard activity={viewed} sectionId={sectionId} audience="student" /> : null}
+                  </div>
+                ) : viewed.type === "CHOICE" && viewed.choice ? (
+                  <div className="mh-lms-pagebody mh-lms-choice" data-screen="choice">
+                    <LessonBody body={viewed.body} empty="Choose one of the available options." />
+                    {viewed.description ? <p style={{ whiteSpace: "pre-wrap" }}>{viewed.description}</p> : null}
+                    <div className={`mh-lms-choice-options${viewed.choice.displayMode === "horizontal" ? " is-horizontal" : ""}`}>
+                      {viewed.choice.options.map((option) => {
+                        const selected = choiceSelections[viewed.id] ?? viewed.choice?.response?.selected ?? [];
+                        return (
+                          <label key={option} className="mh-lms-check">
+                            <input
+                              type={viewed.choice?.multiple ? "checkbox" : "radio"}
+                              name={`choice-${viewed.id}`}
+                              checked={selected.includes(option)}
+                              onChange={(event) =>
+                                setChoiceSelections((previous) => ({
+                                  ...previous,
+                                  [viewed.id]: viewed.choice?.multiple
+                                    ? event.target.checked
+                                      ? [...new Set([...selected, option])]
+                                      : selected.filter((item) => item !== option)
+                                    : [option],
+                                }))
+                              }
+                            />
+                            <span>{option}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <button type="button" className="mh-hcc-btn" disabled={choiceSubmitting} onClick={() => void submitChoice(viewed)}>
+                      {choiceSubmitting ? "Saving…" : viewed.choice.response ? "Update choice" : "Submit choice"}
+                    </button>
+                    {choiceMessage ? <p role="status" className="mh-teacher-muted">{choiceMessage}</p> : null}
+                    {viewed.choice.response ? <p className="mh-teacher-muted">Last submitted {formatDate(viewed.choice.response.submittedAt)}</p> : null}
+                  </div>
                 ) : viewed.type === "ASSIGNMENT" ? (
                   <div data-screen="assignment">
                     <LmsAssignmentSummary assignment={viewed.assignment} description={viewed.description} />
+                    {viewed.fileId ? (
+                      <div className="mh-lms-attachment-block">
+                        <h3>Assignment attachment</h3>
+                        <LmsFileCard activity={viewed} sectionId={sectionId} audience="student" />
+                      </div>
+                    ) : null}
                     {viewed.assignmentId ? (
                       <button
                         type="button"
@@ -1042,12 +1129,23 @@ export function StudentCourseDetailPremiumView({ sectionId }: { sectionId: strin
                   /* Screen 5 — PAGE (Brief Course Description / Learning Objectives) */
                   <div className="mh-lms-pagebody mh-student-pagebody" data-screen="page">
                     {viewed.storyboard ? <AiDraftVideoPlayer key={viewed.id} storyboard={viewed.storyboard} /> : null}
-                    <LessonBody body={viewed.body} empty={`${viewed.name} content will appear here when published by your instructor.`} />
+                    {viewed.description ? <p style={{ whiteSpace: "pre-wrap" }}>{viewed.description}</p> : null}
+                    {viewed.body ? <LessonBody body={viewed.body} empty="" /> : null}
+                    {viewed.fileId ? <LmsFileCard activity={viewed} sectionId={sectionId} audience="student" /> : null}
+                    {!viewed.storyboard && !viewed.description && !viewed.body && !viewed.fileId ? (
+                      <p className="mh-teacher-muted">{viewed.name} content will appear here when published by your instructor.</p>
+                    ) : null}
                     {viewed.modified ? (
                       <p className="mh-teacher-muted">Last modified: {viewed.modified}</p>
                     ) : null}
                   </div>
                 )}
+                {(viewed.type === "URL" || viewed.type === "BIGBLUEBUTTON") && viewed.body ? (
+                  <div className="mh-lms-pagebody">
+                    <LessonBody body={viewed.body} empty="" />
+                  </div>
+                ) : null}
+                <LmsActivitySettings settings={viewed.settings} audience="student" />
               </section>
             ) : (
               /* Screen 7 — Course outline: RESOURCES → EVALUATION → DAY 1–8 */

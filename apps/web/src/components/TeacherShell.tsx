@@ -352,12 +352,12 @@ export function TeacherShell({
         <button
           type="button"
           className="mh-teacher__brand mh-teacher__brand--logo"
-          aria-label="Heritage Community College"
+          aria-label="CampusOne"
           onClick={() => router.push("/instructor")}
         >
           <img
-            src="/brand/login_logo.png"
-            alt="Heritage Community College"
+            src="/brand/campusone/logo.png"
+            alt="CampusOne"
             className="mh-teacher__brand-logo"
           />
         </button>

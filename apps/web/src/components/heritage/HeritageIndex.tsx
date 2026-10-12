@@ -62,7 +62,7 @@ export function HeritageIndex() {
   const liveCount = data?.modules.reduce((n, m) => n + m.screens.filter((s) => s.live).length, 0) ?? 0;
 
   return (
-    <SuperFrame title="Heritage SIS — Screen Index" breadcrumbs={["Home", "Heritage SIS", "Screen Index"]} activeHref="/admin/heritage">
+    <SuperFrame title="CampusOne SIS — Screen Index" breadcrumbs={["Home", "CampusOne SIS", "Screen Index"]} activeHref="/admin/heritage">
       <div className="hx hx-index mh-sa__stack">
         {error ? <SaNotice tone="error">{error}</SaNotice> : null}
         {!data ? (

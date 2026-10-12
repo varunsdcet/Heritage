@@ -1631,7 +1631,7 @@ const SERVICE_LINKS: Array<{ title: string; body: string; href: string }> = [
   { title: "Extracurricular & badges", body: "Activities and digital accomplishments.", href: "/student/f/st-25-extracurricular" },
   { title: "Messages", body: "Inbox threads with instructors and campus.", href: "/student/messages" },
   { title: "Leave of absence", body: "Start a request form for registrar review.", href: "/student/leave-of-absence" },
-  { title: "Ask MyHeritage", body: "Grounded answers from your campus records.", href: "/student/ask" },
+  { title: "Ask CampusOne", body: "Grounded answers from your campus records.", href: "/student/ask" },
   { title: "Profile & settings", body: "Timezone, security, and correction requests.", href: "/student/profile" },
 ];
 

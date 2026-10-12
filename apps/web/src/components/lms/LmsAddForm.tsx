@@ -22,7 +22,7 @@ type Props = {
   /** Saved form values when editing an existing activity. */
   initial?: Record<string, string>;
   heading?: string;
-  onSave: (values: Record<string, string>) => void;
+  onSave: (values: Record<string, string>) => boolean | void | Promise<boolean | void>;
   onCancel: () => void;
 };
 
@@ -47,14 +47,7 @@ export function LmsAddForm({ code, label, busy, roster = [], groups = [], sectio
     () => spec.sections.flatMap((s) => s.fields.filter((f) => f.type === "datetime").map((f) => f.name)),
     [spec],
   );
-  const [open, setOpen] = useState<Record<string, boolean>>(() => {
-    const next: Record<string, boolean> = {};
-    spec.sections.forEach((s, i) => {
-      next[s.title] = i < 3;
-    });
-    return next;
-  });
-  const [values, setValues] = useState<Record<string, string>>(() => {
+  const initialFormValues = useMemo(() => {
     const next: Record<string, string> = {
       Name: isOnlineClass ? "Online Class Link" : `New ${label}`,
       Audience: "All enrolled students",
@@ -75,10 +68,21 @@ export function LmsAddForm({ code, label, busy, roster = [], groups = [], sectio
       }
     }
     return next;
+  }, [initial, isOnlineClass, label, spec]);
+  const [open, setOpen] = useState<Record<string, boolean>>(() => {
+    const next: Record<string, boolean> = {};
+    spec.sections.forEach((s, i) => {
+      next[s.title] = i < 3;
+    });
+    return next;
   });
+  const [values, setValues] = useState<Record<string, string>>(() => initialFormValues);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [formVersion, setFormVersion] = useState(0);
+  const [restrictionsValid, setRestrictionsValid] = useState(true);
   const needsFile = !editing && /^file$/i.test(code) && spec.sections.some((s) => s.fields.some((f) => f.type === "file"));
 
   async function pickFile(fieldName: string, file: File | undefined) {
@@ -154,11 +158,12 @@ export function LmsAddForm({ code, label, busy, roster = [], groups = [], sectio
                 roster={roster}
                 groups={groups}
                 onChange={(value) => set(LMS_ACCESS_RESTRICTIONS_KEY, value)}
+                onValidityChange={setRestrictionsValid}
               />
             ) : null}
             {section.fields.map((field) => (
               <Field
-                key={field.name}
+                key={`${field.name}-${formVersion}`}
                 field={field}
                 value={values[field.name] || ""}
                 onChange={set}
@@ -214,8 +219,8 @@ export function LmsAddForm({ code, label, busy, roster = [], groups = [], sectio
         <button
           type="button"
           className="mh-teacher-btn"
-          disabled={busy || uploading}
-          onClick={() => {
+          disabled={busy || saving || uploading || !restrictionsValid}
+          onClick={async () => {
             if (!String(values.Name || "").trim()) {
               setError("Name is required.");
               return;
@@ -243,14 +248,26 @@ export function LmsAddForm({ code, label, busy, roster = [], groups = [], sectio
             const publishMeeting = /yes/i.test(values["Publish meeting"] || "Yes") ? "yes" : "no";
             const out = { ...values };
             for (const name of dateFields) if (out[name]) out[name] = toIso(out[name]);
-            onSave({
-              ...out,
-              PublishMeeting: publishMeeting,
-              NotifyStudentIds: audienceSelected ? selectedIds.join(",") : "",
-            });
+            setSaving(true);
+            try {
+              const saved = await onSave({
+                ...out,
+                PublishMeeting: publishMeeting,
+                NotifyStudentIds: audienceSelected ? selectedIds.join(",") : "",
+              });
+              if (saved === true && !editing) {
+                setValues({ ...initialFormValues });
+                setSelectedIds([]);
+                setFormVersion((version) => version + 1);
+              }
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "Save failed");
+            } finally {
+              setSaving(false);
+            }
           }}
         >
-          {isOnlineClass && !editing ? "Publish online class" : "Save and return to course"}
+          {saving ? "Saving…" : isOnlineClass && !editing ? "Publish online class" : "Save and return to course"}
         </button>
         <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary" onClick={onCancel}>
           Cancel

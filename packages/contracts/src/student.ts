@@ -245,7 +245,7 @@ export const StudentFinanceSummary = z.object({
   balance: MoneyCad,
   pastDue: MoneyCad,
   nextDueAt: IsoDateTime.nullable(),
-  paymentExecutionEnabled: z.literal(false),
+  paymentExecutionEnabled: z.boolean(),
 });
 
 export const StudentFinanceLedgerEntry = z.object({
@@ -706,6 +706,7 @@ export const StudentLmsActivityView = z.object({
   joinUrl: z.string().nullable().optional(),
   description: z.string().optional(),
   url: z.string().optional(),
+  settings: z.record(z.string(), z.string()).optional(),
   assignmentId: z.string().optional(),
   assignment: z
     .object({
@@ -719,6 +720,17 @@ export const StudentLmsActivityView = z.object({
       maxFiles: z.number().optional(),
       maxFileBytes: z.number().optional(),
       acceptedTypes: z.string().optional(),
+    })
+    .optional(),
+  choice: z
+    .object({
+      options: z.array(z.string()).min(1),
+      multiple: z.boolean(),
+      displayMode: z.enum(["horizontal", "vertical"]),
+      response: z
+        .object({ selected: z.array(z.string()), submittedAt: z.string() })
+        .nullable()
+        .optional(),
     })
     .optional(),
   gradingMethod: z.string().optional(),

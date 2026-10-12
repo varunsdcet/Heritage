@@ -1,6 +1,7 @@
 import type { SessionClaims } from "@myheritage/contracts";
 import { prisma } from "@myheritage/db";
 import { z } from "zod";
+import { studentCanAccessLmsActivity } from "./lmsAccessRestrictions.js";
 
 /** Auto-graded multiple-choice quiz stored on a QUIZ activity in the section overlay. Answer keys never leave staff endpoints. */
 export type LmsQuizQuestion = { id: string; text: string; options: string[]; answer: number; rationale?: string; lessonId?: string | null };
@@ -97,8 +98,11 @@ export async function submitQuizAttempt(
     select: { id: true },
   });
   if (!enrolment) throw httpError("Section not in your enrolment", "NOT_FOUND", 404);
-  const found = findVisibleQuiz(await loadSectionOverlay(user.institutionId, sectionId), activityId);
-  if (!found) throw httpError("This quiz is not available", "NOT_FOUND", 404);
+  const overlay = await loadSectionOverlay(user.institutionId, sectionId);
+  const found = findVisibleQuiz(overlay, activityId);
+  if (!found || !studentCanAccessLmsActivity(overlay, activityId, student.id)) {
+    throw httpError("This quiz is not available", "NOT_FOUND", 404);
+  }
   const graded = gradeQuiz(found.quiz, input.answers);
   const attempt: LmsQuizAttempt = {
     studentId: student.id,

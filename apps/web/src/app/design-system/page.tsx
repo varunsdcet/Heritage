@@ -76,11 +76,11 @@ export default function DesignSystemPage() {
               Danger
             </Button>
             <Button type="button" variant="ai">
-              Ask MyHeritage
+              Ask CampusOne
             </Button>
           </div>
           <div style={{ maxWidth: 360 }}>
-            <Input placeholder="Search MyHeritage ⌘K" />
+            <Input placeholder="Search CampusOne ⌘K" />
           </div>
         </Panel>
 

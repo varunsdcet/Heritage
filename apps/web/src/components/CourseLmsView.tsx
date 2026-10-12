@@ -6,13 +6,16 @@ import { AddActivityChooser } from "@/components/AddActivityChooser";
 import { CourseAiBuilderDialog } from "@/components/ai-draft/CourseAiBuilderDialog";
 import { CourseAiDraftDialog } from "@/components/ai-draft/CourseAiDraftDialog";
 import { LmsAddForm } from "@/components/lms/LmsAddForm";
+import { LMS_ACCESS_RESTRICTIONS_KEY } from "@/components/lms/LmsAccessRestrictions";
 import {
   ActionMenu,
   ActivityCompetenciesPanel,
   AddGradeItemPanel,
   AttendancePanel,
+  ActivityReportPanel,
   ClassListPanel,
   CompetencyBreakdownPanel,
+  CourseParticipationPanel,
   CreateGroupForm,
   EditSectionPanel,
   FiltersPanel,
@@ -364,7 +367,7 @@ function fallbackLms(c: NonNullable<TeacherScreenConfig["courseDetail"]>): Cours
     competencyEmpty: "No competencies have been linked to this course.",
     badges: [],
     badgeForm: {
-      issuerName: "Heritage Community College",
+      issuerName: "CampusOne",
       issuerContact: "support@myhccbc.com",
       languages: [{ label: "English", value: "English" }],
       imageTypes: ["Image (GIF) .gif", "Image (JPEG) .jpe .jpeg .jpg", "Image (PNG) .png"],
@@ -390,6 +393,7 @@ export function CourseLmsView({ config }: Props) {
   const atypeFromUrl = searchParams.get("atype") || "";
   const topicFromUrl = searchParams.get("topic") || "";
   const sidFromUrl = searchParams.get("sid") || "";
+  const editFromUrl = searchParams.get("edit") === "1";
   const [moreParam, setMoreParam] = useState<CourseLmsMoreId | "">(moreFromUrl);
   const [actionParam, setActionParam] = useState(actionFromUrl);
   const [qtypeParam, setQtypeParam] = useState(qtypeFromUrl);
@@ -401,7 +405,7 @@ export function CourseLmsView({ config }: Props) {
   const [editingQuestion, setEditingQuestion] = useState<CourseLmsQuestion | undefined>();
   const [tab, setTab] = useState(LMS_TABS.includes(tabParam as (typeof LMS_TABS)[number]) ? tabParam : "Course");
   const [moreOpen, setMoreOpen] = useState(false);
-  const [editMode, setEditMode] = useState(false);
+  const [editMode, setEditMode] = useState(editFromUrl);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [postMarksOpen, setPostMarksOpen] = useState(false);
 
@@ -422,8 +426,9 @@ export function CourseLmsView({ config }: Props) {
     setAtypeParam(atypeFromUrl);
     setTopicParam(topicFromUrl);
     setSidParam(sidFromUrl);
+    setEditMode(editFromUrl);
     setTab(LMS_TABS.includes(tabParam as (typeof LMS_TABS)[number]) ? tabParam : "Course");
-  }, [moreFromUrl, actionFromUrl, qtypeFromUrl, qidFromUrl, aidFromUrl, atypeFromUrl, topicFromUrl, sidFromUrl, tabParam]);
+  }, [moreFromUrl, actionFromUrl, qtypeFromUrl, qidFromUrl, aidFromUrl, atypeFromUrl, topicFromUrl, sidFromUrl, editFromUrl, tabParam]);
 
   if (!c) {
     return (
@@ -487,24 +492,23 @@ export function CourseLmsView({ config }: Props) {
           roster={c.roster ?? []}
           groups={lms.groups}
           sectionId={c.sectionId}
-          onSave={(values) => {
-            void (async () => {
-              const ok = await live?.runAction?.(
-                "Add an activity or resource",
-                JSON.stringify({
-                  ...values,
-                  TopicId: topicParam,
-                  ActivityType: atypeParam.toUpperCase(),
-                  Name: values.Name || `New ${atypeParam}`,
-                  Code: atypeParam,
-                }),
-              );
-              if (ok) {
-                // runAction returns the rebuilt live course payload, so the new module/activity is
-                // already visible without a second loading cycle.
-                go({ tab: "Course", action: null, atype: null, topic: null });
-              }
-            })();
+          onSave={async (values) => {
+            const ok = await live?.runAction?.(
+              "Add an activity or resource",
+              JSON.stringify({
+                ...values,
+                TopicId: topicParam,
+                ActivityType: atypeParam.toUpperCase(),
+                Name: values.Name || `New ${atypeParam}`,
+                Code: atypeParam,
+              }),
+            );
+            if (ok) {
+              // runAction returns the rebuilt live course payload, so the new module/activity is
+              // already visible without a second loading cycle.
+              go({ tab: "Course", action: null, atype: null, topic: null });
+            }
+            return Boolean(ok);
           }}
           onCancel={() => go({ tab: "Course", action: null, atype: null, topic: null })}
         />
@@ -544,8 +548,18 @@ export function CourseLmsView({ config }: Props) {
         </section>
       );
     }
-    if (actionParam === "edit-activity" && viewedActivity && !/^(PAGE|BIGBLUEBUTTON)$/i.test(viewedActivity.type)) {
+    if (actionParam === "edit-activity" && viewedActivity && !/^PAGE$/i.test(viewedActivity.type)) {
       const code = viewedActivity.type.toLowerCase().replace(/\s+/g, "");
+      const fileFieldName =
+        viewedActivity.type.toUpperCase() === "BOOK"
+          ? "Book file"
+          : viewedActivity.type.toUpperCase() === "FILE"
+            ? "Select files"
+            : viewedActivity.type.toUpperCase() === "FOLDER"
+              ? "Files"
+              : /^(H5P|IMSCP|SCORM)$/i.test(viewedActivity.type)
+                ? "Package file"
+                : "Additional files";
       return (
         <LmsAddForm
           key={viewedActivity.id}
@@ -559,6 +573,17 @@ export function CourseLmsView({ config }: Props) {
           initial={{
             ...(viewedActivity.description ? { Description: viewedActivity.description } : {}),
             ...(viewedActivity.url ? { "External URL": viewedActivity.url } : {}),
+            ...(viewedActivity.body && viewedActivity.type.toUpperCase() === "BOOK" ? { "Book content": viewedActivity.body } : {}),
+            ...(viewedActivity.body && viewedActivity.type.toUpperCase() === "CHOICE" ? { "Choice question": viewedActivity.body } : {}),
+            ...(viewedActivity.body && !/^(BOOK|CHOICE|PAGE)$/i.test(viewedActivity.type)
+              ? { "Activity content": viewedActivity.body }
+              : {}),
+            ...(viewedActivity.fileId
+              ? {
+                  FileId: viewedActivity.fileId,
+                  [fileFieldName]: `${viewedActivity.fileName || viewedActivity.name}${viewedActivity.fileSize ? ` · ${viewedActivity.fileSize} bytes` : ""}`,
+                }
+              : {}),
             ...(viewedActivity.settings || {}),
             Name: viewedActivity.name,
             Availability: viewedActivity.hidden ? "Hide from students" : "Show on course page",
@@ -771,13 +796,13 @@ export function CourseLmsView({ config }: Props) {
         <div className="mh-lms-reports">
           <ReportNav current={current} onSelect={(id) => go({ tab: "More", more: id, action: null })} />
           {current === "competency-breakdown" ? (
-            <CompetencyBreakdownPanel onAdd={() => go({ tab: "More", more: "competencies", action: null })} />
+            <CompetencyBreakdownPanel lms={lms} onAdd={() => go({ tab: "More", more: "competencies", action: null })} />
           ) : current === "live-logs" ? (
             <LogsPanel lms={lms} title="Live logs" />
           ) : current === "activity-report" ? (
-            <LogsPanel lms={lms} title="Activity report" />
+            <ActivityReportPanel lms={lms} />
           ) : current === "course-participation" ? (
-            <LogsPanel lms={lms} title="Course participation" />
+            <CourseParticipationPanel lms={lms} />
           ) : (
             <LogsPanel lms={lms} title="Logs" />
           )}
@@ -842,7 +867,19 @@ export function CourseLmsView({ config }: Props) {
           </p>
         </div>
         <label className="mh-lms-edit">
-          <input type="checkbox" checked={editMode} onChange={(e) => setEditMode(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={editMode}
+            onChange={(e) => {
+              const checked = e.target.checked;
+              setEditMode(checked);
+              const params = new URLSearchParams(searchParams.toString());
+              if (checked) params.set("edit", "1");
+              else params.delete("edit");
+              const query = params.toString();
+              router.replace(`${pathname}${query ? `?${query}` : ""}`, { scroll: false });
+            }}
+          />
           Edit mode
         </label>
       </header>
@@ -990,6 +1027,7 @@ function CourseContentPanel({
                 {shut ? "▸" : "▾"}
               </button>
               <h2>{topic.title}</h2>
+              {topic.accessRestrictions ? <span className="mh-lms-restricted-badge">Restricted</span> : null}
               {editMode ? (
                 <ActionMenu
                   label={`Section actions for ${topic.title}`}
@@ -1037,6 +1075,7 @@ function CourseContentPanel({
                         </button>
                         {activity.note ? <p>{activity.note}</p> : null}
                         {activity.hidden ? <p className="mh-teacher-muted">Hidden from students</p> : null}
+                        {activity.settings?.[LMS_ACCESS_RESTRICTIONS_KEY] ? <p className="mh-lms-restricted-note">Access restricted</p> : null}
                       </div>
                       {editMode ? (
                         <ActionMenu

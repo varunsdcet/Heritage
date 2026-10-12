@@ -128,7 +128,7 @@ export function SelfpacedLoginModal({
       });
       if (session.requiresMfa) throw new Error("Multi-factor authentication is required for this account.");
       if (!session.accessToken || !session.roles?.includes("student")) {
-        throw new Error("A Heritage student account is required for self-paced learning.");
+        throw new Error("A CampusOne student account is required for self-paced learning.");
       }
       clearSession();
       saveSession(session, true);
@@ -155,13 +155,13 @@ export function SelfpacedLoginModal({
           ×
         </button>
         <div className="sp-modal__brand sp-modal__brand--logo-only">
-          <img src="/brand/login_logo.png" alt="Heritage" />
+          <img src="/brand/campusone/logo.png" alt="CampusOne" />
         </div>
         <p className="sp-kicker">{mode === "login" ? "SIGN IN" : "CREATE ACCOUNT"}</p>
         <h2 id="sp-login-title">{mode === "login" ? "Welcome back" : "Create your account"}</h2>
         <p className="sp-modal__lede">
           {mode === "login"
-            ? "Use your Heritage learner account. Unpurchased programs open the secure Stripe checkout."
+            ? "Use your CampusOne learner account. Unpurchased programs open the secure Stripe checkout."
             : "Create a self-paced learner account, choose a course, and continue to checkout. Campus admission is a separate process."}
         </p>
         <form className="sp-modal__form" onSubmit={submit}>

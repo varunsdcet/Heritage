@@ -2186,7 +2186,7 @@ function SettingsView({ config }: { config: SisScreenConfig }) {
             <div className="mh-sis-settings-logo">
               <span className="mh-sis-reviewer__avatar mh-sis-reviewer__avatar--sm">H</span>
               <div>
-                <div>Heritage</div>
+                <div>CampusOne</div>
                 <small>Community College</small>
               </div>
             </div>
@@ -2262,7 +2262,7 @@ function TemplatesView({ config }: { config: SisScreenConfig }) {
             <div className="mh-sis-template-mail__body">
               <div className="mh-sis-settings-logo">
                 <span className="mh-sis-reviewer__avatar mh-sis-reviewer__avatar--sm">H</span>
-                <strong>Heritage Community College</strong>
+                <strong>CampusOne</strong>
               </div>
               <h3>{preview.subject}</h3>
               <p>{preview.body}</p>
@@ -3041,7 +3041,7 @@ function RegistrarRecordView({ config }: { config: SisScreenConfig }) {
           <div className="mh-sis-table">
             <div className="mh-sis-table__head" style={{ gridTemplateColumns: "minmax(120px,1fr) minmax(120px,1fr) 120px" }}>
               <span>External Course</span>
-              <span>Heritage Equivalent</span>
+              <span>CampusOne Equivalent</span>
               <span>Status</span>
             </div>
             {r.transfer.rows.map((row) => (

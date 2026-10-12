@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { loadSession } from "@/lib/api";
-import { joinLiveClass } from "@/lib/liveClass";
+import { joinLiveClass, type LiveProvider } from "@/lib/liveClass";
 import { LiveClassPanel } from "@/components/LiveClassPanel";
 import "@/components/liveClass.css";
 
@@ -21,6 +21,9 @@ function LiveLauncher() {
   const searchParams = useSearchParams();
   const left = searchParams.get("left") === "1";
   const from = searchParams.get("from") || "";
+  const providerParam = searchParams.get("provider");
+  const provider: LiveProvider | undefined =
+    providerParam === "jitsi" || providerParam === "bigbluebutton" ? providerParam : undefined;
   const [state, setState] = useState<"joining" | "waiting" | "error" | "left">(left ? "left" : "joining");
   const [title, setTitle] = useState("");
   const [error, setError] = useState("");
@@ -29,7 +32,7 @@ function LiveLauncher() {
 
   const attempt = useCallback(async () => {
     try {
-      const res = await joinLiveClass(sectionId);
+      const res = await joinLiveClass(sectionId, provider);
       setTitle(res.meetingName);
       if (res.status === "ready") {
         window.location.replace(res.url);
@@ -41,12 +44,16 @@ function LiveLauncher() {
       setError(err instanceof Error ? err.message : "Could not open the class.");
       setState("error");
     }
-  }, [sectionId]);
+  }, [provider, sectionId]);
 
   useEffect(() => {
     const session = loadSession();
     if (!session) {
-      router.replace(`/login?next=${encodeURIComponent(`/live/${sectionId}${left ? "?left=1" : ""}`)}`);
+      const params = new URLSearchParams();
+      if (provider) params.set("provider", provider);
+      if (left) params.set("left", "1");
+      const query = params.toString();
+      router.replace(`/login?next=${encodeURIComponent(`/live/${sectionId}${query ? `?${query}` : ""}`)}`);
       return;
     }
     // BigBlueButton's logout redirect drops the referrer, so remember the in-app page that opened the class.
@@ -98,11 +105,11 @@ function LiveLauncher() {
               <h1>You left the class</h1>
               <p>Rejoin below, or head back to your courses.</p>
             </div>
-            <LiveClassPanel sectionId={sectionId} />
+            <LiveClassPanel sectionId={sectionId} provider={provider} />
           </>
         ) : null}
         <a className="mh-live-launch__back" href={home}>
-          ← Back to MyHeritage
+          ← Back to CampusOne
         </a>
       </div>
     </main>

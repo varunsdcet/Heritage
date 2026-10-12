@@ -212,7 +212,7 @@ const NAV: NavItem[] = [
       { label: "Message Center", href: "/instructor/messages", match: ["/instructor/f/t16-teacher-messages-chat", "/instructor/mail"] },
       { label: "Notifications", href: "/instructor/notifications" },
       { label: "Search", href: "/instructor/search" },
-      { label: "Ask MyHeritage", href: "/instructor/ask" },
+      { label: "Ask CampusOne", href: "/instructor/ask" },
     ],
   },
 ];
@@ -365,7 +365,7 @@ function pageBlocked(pathname: string, search: URLSearchParams, access: MyAccess
 export function TeacherSisShell({
   children,
   activeHref = "/instructor",
-  title = "MyHeritage",
+  title = "CampusOne",
   subtitle,
   shell = "campus",
   studioActive,
@@ -506,8 +506,8 @@ export function TeacherSisShell({
         <header className="mh-teacher-studio__nav">
           <div className="mh-teacher-studio__brand">
             <img
-              src="/brand/login_logo.png"
-              alt="Heritage Community College"
+              src="/brand/campusone/logo.png"
+              alt="CampusOne"
               className="mh-teacher-studio__brand-logo"
             />
             <nav className="mh-teacher-studio__links" aria-label="Course studio">
@@ -554,12 +554,12 @@ export function TeacherSisShell({
           <button
             type="button"
             className="mh-teacher__brand mh-teacher__brand--logo"
-            aria-label="Heritage Community College"
+            aria-label="CampusOne"
             onClick={() => router.push("/instructor")}
           >
             <img
-              src="/brand/login_logo.png"
-              alt="Heritage Community College"
+              src="/brand/campusone/logo.png"
+              alt="CampusOne"
               className="mh-teacher__brand-logo"
             />
           </button>

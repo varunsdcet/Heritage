@@ -416,7 +416,7 @@ export function requestCertificate(slug: string, totalActivities: number): Promi
     if (!current) return { ok: false, reason: "not_enrolled", message: "You are not enrolled in this course." };
     if (isIssuedCertificateId(current.certificateId)) return { ok: true, record: current };
     const session = loadSession();
-    if (!session) return { ok: false, reason: "sign_in", message: "Sign in with your Heritage account to issue your verifiable certificate." };
+    if (!session) return { ok: false, reason: "sign_in", message: "Sign in with your CampusOne account to issue your verifiable certificate." };
     try {
       const out = await api<{ certificateId: string; issuedAt: string }>(
         "/selfpaced/certificates",

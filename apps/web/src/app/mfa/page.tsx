@@ -32,7 +32,7 @@ export default function MfaPage() {
           boxShadow: "0 18px 40px rgba(26, 31, 22, 0.06)",
         }}
       >
-        <div style={{ fontFamily: "var(--mh-font-display)", fontSize: "1.6rem" }}>MyHeritage</div>
+        <div style={{ fontFamily: "var(--mh-font-display)", fontSize: "1.6rem" }}>CampusOne</div>
         <p style={{ color: "var(--mh-text-muted)", marginTop: "0.35rem" }}>Multi-factor authentication</p>
         {error ? <Banner>{error}</Banner> : null}
         <label style={{ display: "grid", gap: "0.35rem", marginTop: "1rem" }}>

@@ -132,6 +132,8 @@ import {
   instructorNameParts,
   mergeCourseLmsOverlay,
   questionFromFields,
+  type CourseLmsReporting,
+  type CourseLmsState,
 } from "./courseLmsScreens.js";
 import { normalizeStoryboard, sanitizeLessonHtml } from "./aiDraftContent.js";
 import {
@@ -160,7 +162,7 @@ import {
   recordAdminFlag,
   seesAllStudents,
 } from "./adminStudentRecords.js";
-import { classJoinUrl, liveClassUrl, sessionJoinUrl } from "../../lib/liveClass.js";
+import { classJoinUrl, liveClassUrl, sessionJoinUrl, type LiveClassProvider } from "../../lib/liveClass.js";
 import { addDays, hmIn, institutionTimezone, ymdIn, zonedToUtc } from "../../lib/workshopPolicy.js";
 import { createClassSessionWithNotifications } from "../campusCompliance/sessions.js";
 import { applyDraftToSubmittedAttendance, writeAttendanceRecords } from "./attendanceSessions.js";
@@ -1069,6 +1071,31 @@ async function assertLmsRestrictionScope(ctx: InstructorCtx, path: string, value
   }
 }
 
+async function uploadedLmsFile(ctx: InstructorCtx, path: string, fileId: string) {
+  if (!fileId) return null;
+  const section = resolveSectionFromPath(ctx, path);
+  const file = section
+    ? await prisma.heritageRecord.findFirst({
+        where: {
+          id: fileId,
+          institutionId: ctx.user.institutionId,
+          screenId: "LMS:FILE",
+          contextKey: section.id,
+          deletedAt: null,
+        },
+        select: { id: true, dataJson: true },
+      })
+    : null;
+  if (!file) throw Object.assign(new Error("Uploaded file not found for this course. Upload it again."), { status: 400 });
+  const meta = JSON.parse(file.dataJson) as { name?: string; mime?: string; size?: number };
+  return {
+    fileId: file.id,
+    fileName: meta.name || "Course file",
+    fileMime: meta.mime || "",
+    fileSize: Number(meta.size) || 0,
+  };
+}
+
 function parseNotifyStudentIds(fields: Record<string, string>): string[] | undefined {
   const audience = (fields.Audience || fields.audience || "All enrolled students").trim().toLowerCase();
   if (audience.startsWith("all") || audience === "") return undefined;
@@ -1084,6 +1111,13 @@ function parseNotifyStudentIds(fields: Record<string, string>): string[] | undef
     });
   }
   return ids;
+}
+
+function onlineClassProvider(fields: Record<string, string>): LiveClassProvider | undefined {
+  const value = (fields.Provider || fields.provider || "").trim().toLowerCase();
+  if (value.includes("bigbluebutton")) return "bigbluebutton";
+  if (value.includes("jitsi")) return "jitsi";
+  return undefined;
 }
 
 async function publishOnlineClassSession(
@@ -1103,7 +1137,7 @@ async function publishOnlineClassSession(
     `${sec.courseCode} Online Class`;
   const openRaw = (fields["Open date/time"] || fields.StartsAt || fields.startsAt || "").trim();
   const startsAt = openRaw ? new Date(openRaw) : new Date();
-  const joinUrl = classJoinUrl(sec.id, fields.JoinUrl || fields.joinUrl);
+  const joinUrl = classJoinUrl(sec.id, fields.JoinUrl || fields.joinUrl, onlineClassProvider(fields));
   const notifyStudentIds = parseNotifyStudentIds(fields);
   const published = await createClassSessionWithNotifications({
     institutionId: ctx.user.institutionId,
@@ -1204,6 +1238,257 @@ async function loadSectionAttendancePayload(
         ? "No attendance submitted for this section yet. Mark attendance, then return here."
         : undefined,
     attendanceDates,
+  };
+}
+
+function safeJsonRecord(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function latestIso(values: Array<string | undefined>) {
+  return values.filter((value): value is string => Boolean(value)).sort().at(-1);
+}
+
+function reportIso(value: Date | string | null | undefined, fallback = new Date().toISOString()) {
+  if (!value) return fallback;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? fallback : date.toISOString();
+}
+
+async function loadCourseLmsReporting(
+  ctx: InstructorCtx,
+  section: InstructorCtx["sections"][number],
+  baseLms: CourseLmsState,
+): Promise<CourseLmsReporting> {
+  const institutionId = ctx.user.institutionId;
+  const enrolled = section.enrolments.filter((row) => row.status === "enrolled" || row.status === "completed");
+  const studentIds = enrolled.map((row) => row.studentId);
+  const overlayPaths = [
+    `/instructor/sections/${section.id}`,
+    `/instructor/f/t56-active-courses?view=${section.id}`,
+    `/instructor/f/t56-active-courses?view=${encodeURIComponent(section.id)}`,
+  ];
+  const [overlayStates, submissions, interactionStates, progressStates, studentAccounts] = await Promise.all([
+    prisma.sisScreenState.findMany({
+      where: { institutionId, path: { in: overlayPaths } },
+      select: { path: true, payloadJson: true, updatedAt: true },
+    }),
+    prisma.submission.findMany({
+      where: { institutionId, assignment: { sectionId: section.id } },
+      include: { assignment: { select: { id: true, title: true } } },
+      orderBy: { updatedAt: "desc" },
+    }),
+    prisma.sisScreenState.findMany({
+      where: {
+        institutionId,
+        OR: [
+          { path: { startsWith: `/student/lms-quiz/${section.id}/` } },
+          { path: { startsWith: `/student/lms-choice/${section.id}/` } },
+        ],
+      },
+      select: { id: true, path: true, payloadJson: true, updatedAt: true },
+    }),
+    prisma.sisScreenState.findMany({
+      where: { institutionId, path: { startsWith: "/student/content-progress/", endsWith: `/${section.id}` } },
+      select: { id: true, path: true, payloadJson: true, updatedAt: true },
+    }),
+    studentIds.length
+      ? prisma.student.findMany({
+          where: { institutionId, id: { in: studentIds } },
+          select: { id: true, person: { select: { accounts: { select: { id: true } } } } },
+        })
+      : Promise.resolve([]),
+  ]);
+
+  const preferredOverlay = overlayStates.find((row) => row.path === overlayPaths[0]) || overlayStates[0];
+  const overlay = preferredOverlay ? safeJsonRecord(preferredOverlay.payloadJson) : {};
+  const lms = mergeCourseLmsOverlay(baseLms, overlay);
+  const activities = lms.topics.flatMap((topic) => topic.activities);
+  const activityById = new Map(activities.map((activity) => [activity.id, activity]));
+  const assignmentActivity = new Map(
+    activities.filter((activity) => activity.assignmentId).map((activity) => [activity.assignmentId!, activity]),
+  );
+  const studentById = new Map(enrolled.map((row) => [row.studentId, row]));
+  const studentByAccount = new Map<string, string>();
+  for (const row of studentAccounts) {
+    for (const account of row.person.accounts) studentByAccount.set(account.id, row.id);
+  }
+
+  type StudentStat = {
+    completed: Set<string>;
+    submissions: number;
+    quizAttempts: number;
+    choiceResponses: number;
+    times: string[];
+  };
+  const studentStats = new Map<string, StudentStat>();
+  const statFor = (studentId: string) => {
+    const existing = studentStats.get(studentId);
+    if (existing) return existing;
+    const created: StudentStat = { completed: new Set(), submissions: 0, quizAttempts: 0, choiceResponses: 0, times: [] };
+    studentStats.set(studentId, created);
+    return created;
+  };
+  for (const row of enrolled) statFor(row.studentId);
+
+  const logs: CourseLmsReporting["logs"] = [];
+  for (const submission of submissions) {
+    const stat = statFor(submission.studentId);
+    stat.submissions += 1;
+    if (submission.status !== "draft") stat.completed.add(assignmentActivity.get(submission.assignmentId)?.id || `assignment:${submission.assignmentId}`);
+    const at = reportIso(submission.submittedAt || submission.updatedAt || submission.createdAt);
+    stat.times.push(at);
+    logs.push({
+      id: `submission-${submission.id}`,
+      at,
+      participant: studentById.get(submission.studentId)?.studentName || "Student",
+      action: submission.submittedAt ? "Submitted" : "Saved draft",
+      activity:
+        submission.assignment?.title ||
+        section.assignments.find((assignment) => assignment.id === submission.assignmentId)?.title ||
+        "Assignment",
+      source: "Assignment",
+      detail: submission.status,
+    });
+  }
+
+  for (const state of interactionStates) {
+    const parts = state.path.split("/");
+    const kind = parts[2];
+    const activityId = parts[4] || "";
+    const studentId = parts[5] || "";
+    if (!studentId) continue;
+    const payload = safeJsonRecord(state.payloadJson);
+    const submittedAt = typeof payload.submittedAt === "string" ? payload.submittedAt : reportIso(state.updatedAt);
+    const stat = statFor(studentId);
+    stat.completed.add(activityId);
+    stat.times.push(submittedAt);
+    if (kind === "lms-quiz") stat.quizAttempts += 1;
+    else stat.choiceResponses += 1;
+    const activity = activityById.get(activityId);
+    logs.push({
+      id: state.id,
+      at: submittedAt,
+      participant: studentById.get(studentId)?.studentName || "Student",
+      action: kind === "lms-quiz" ? "Quiz submitted" : "Choice submitted",
+      activity: activity?.name || activityId || "Course activity",
+      source: kind === "lms-quiz" ? "Quiz" : "Choice",
+      detail:
+        kind === "lms-quiz" && typeof payload.score === "number" && typeof payload.maxScore === "number"
+          ? `${payload.score}/${payload.maxScore}`
+          : undefined,
+    });
+  }
+
+  for (const state of progressStates) {
+    const accountId = state.path.split("/")[3] || "";
+    const studentId = studentByAccount.get(accountId);
+    if (!studentId) continue;
+    const payload = safeJsonRecord(state.payloadJson);
+    const completed = Array.isArray(payload.completed)
+      ? payload.completed.filter((item): item is string => typeof item === "string")
+      : [];
+    const at = typeof payload.updatedAt === "string" ? payload.updatedAt : reportIso(state.updatedAt);
+    const stat = statFor(studentId);
+    for (const item of completed) stat.completed.add(item.replace(/^(activity|assignment|lesson|session):/, ""));
+    stat.times.push(at);
+    logs.push({
+      id: state.id,
+      at,
+      participant: studentById.get(studentId)?.studentName || "Student",
+      action: "Progress updated",
+      activity: "Course content",
+      source: "Content progress",
+      detail: `${completed.length} item${completed.length === 1 ? "" : "s"} completed`,
+    });
+  }
+
+  const instructorActivity = Array.isArray(overlay.activity) ? overlay.activity : [];
+  for (const [index, value] of instructorActivity.entries()) {
+    if (!value || typeof value !== "object") continue;
+    const row = value as Record<string, unknown>;
+    const at = typeof row.at === "string" ? row.at : reportIso(preferredOverlay?.updatedAt);
+    const rowKey = typeof row.rowKey === "string" ? row.rowKey : "";
+    logs.push({
+      id: `instructor-${index}-${at}`,
+      at,
+      participant: ctx.displayName,
+      action: typeof row.action === "string" ? row.action : "Course updated",
+      activity: rowKey && !rowKey.startsWith("{") ? rowKey : "Course workspace",
+      source: "Instructor",
+    });
+  }
+
+  const activityRows = activities.map((activity) => {
+    const matchingSubmissions = submissions.filter((row) => row.assignmentId === activity.assignmentId);
+    const matchingStates = interactionStates.filter((row) => row.path.split("/")[4] === activity.id);
+    const quizStates = matchingStates.filter((row) => row.path.split("/")[2] === "lms-quiz");
+    const choiceStates = matchingStates.filter((row) => row.path.split("/")[2] === "lms-choice");
+    const completed = [...studentStats.values()].filter((stat) => stat.completed.has(activity.id)).length;
+    return {
+      id: activity.id,
+      name: activity.name,
+      type: activity.type,
+      completions: Math.max(completed, matchingSubmissions.filter((row) => row.status !== "draft").length, quizStates.length, choiceStates.length),
+      submissions: matchingSubmissions.length,
+      attempts: quizStates.length,
+      responses: choiceStates.length,
+      lastActivityAt: latestIso([
+        ...matchingSubmissions.map((row) => reportIso(row.submittedAt || row.updatedAt || row.createdAt)),
+        ...matchingStates.map((row) => reportIso(row.updatedAt)),
+      ]),
+    };
+  });
+
+  const participation = enrolled.map((student) => {
+    const stat = statFor(student.studentId);
+    return {
+      studentId: student.studentId,
+      name: student.studentName,
+      studentNumber: student.studentNumber,
+      status: student.status,
+      completed: stat.completed.size,
+      submissions: stat.submissions,
+      quizAttempts: stat.quizAttempts,
+      choiceResponses: stat.choiceResponses,
+      lastActivityAt: latestIso(stat.times),
+    };
+  });
+
+  const competencies = lms.competencies.map((competency) => {
+    const needle = (competency.resource || competency.name).trim().toLowerCase();
+    const linked = activities.filter((activity) => {
+      const name = activity.name.toLowerCase();
+      return Boolean(needle) && (name.includes(needle) || needle.includes(name));
+    });
+    const completedStudents = linked.length
+      ? participation.filter((student) => {
+          const stat = studentStats.get(student.studentId);
+          return linked.some((activity) => stat?.completed.has(activity.id));
+        }).length
+      : 0;
+    return {
+      id: competency.id,
+      name: competency.name,
+      resource: competency.resource || "Course level",
+      linkedActivities: linked.length,
+      participants: enrolled.length,
+      completed: completedStudents,
+      progressPercent: enrolled.length ? Math.round((completedStudents / enrolled.length) * 100) : 0,
+    };
+  });
+
+  return {
+    generatedAt: new Date().toISOString(),
+    logs: logs.sort((a, b) => b.at.localeCompare(a.at)).slice(0, 200),
+    activities: activityRows,
+    participation,
+    competencies,
   };
 }
 
@@ -1388,8 +1673,10 @@ async function buildCourseDetail(ctx: InstructorCtx, path: string): Promise<Inst
   }
   if (detail.lms) {
     const gradeBoard = await loadCourseGradeBoard(ctx.user.institutionId, sec.id);
+    const reporting = await loadCourseLmsReporting(ctx, sec, detail.lms as CourseLmsState);
     Object.assign(detail.lms, {
       gradeBoard,
+      reporting,
       gradeEmpty: gradeBoard.rows.length ? undefined : "No students are currently registered in this course offering.",
     });
   }
@@ -8918,21 +9205,9 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
           ...(content.description ? { description: content.description } : {}),
           ...(content.url ? { url: content.url } : {}),
         };
-        const fileId = (fields.FileId || "").trim();
-        if (fileId && (type === "FILE" || type === "FOLDER")) {
-          const sec = resolveSectionFromPath(ctx, path);
-          const file = sec
-            ? await prisma.heritageRecord.findFirst({
-                where: { id: fileId, institutionId: user.institutionId, screenId: "LMS:FILE", contextKey: sec.id, deletedAt: null },
-                select: { id: true, dataJson: true },
-              })
-            : null;
-          if (!file) throw Object.assign(new Error("Uploaded file not found for this course. Upload it again."), { status: 400 });
-          const meta = JSON.parse(file.dataJson) as { name?: string; mime?: string; size?: number };
-          activity.fileId = file.id;
-          activity.fileName = meta.name || name;
-          activity.fileMime = meta.mime || "";
-          activity.fileSize = Number(meta.size) || 0;
+        const upload = await uploadedLmsFile(ctx, path, (fields.FileId || "").trim());
+        if (upload) {
+          Object.assign(activity, upload);
           activity.modified = new Date().toLocaleString("en-CA", { dateStyle: "full", timeStyle: "short", timeZone: "America/Toronto" });
         }
         if (content.body) {
@@ -8976,7 +9251,7 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
             message = `Online class ready · ${name} · ${published.notified} student(s) notified`;
           } else {
             const sec = resolveSectionFromPath(ctx, path);
-            activity.joinUrl = sec ? liveClassUrl(sec.id) : null;
+            activity.joinUrl = sec ? liveClassUrl(sec.id, onlineClassProvider(fields)) : null;
             activity.note = "Room ready — publish to notify students.";
             result = { topicId, activity };
             message = `Added ${type} · ${name}`;
@@ -9016,6 +9291,12 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
           description: content.description ?? "",
           modified: new Date().toLocaleString("en-CA", { dateStyle: "full", timeStyle: "short", timeZone: "America/Toronto" }),
         };
+        if (type === "BIGBLUEBUTTON") {
+          const section = resolveSectionFromPath(ctx, path);
+          if (section) edit.joinUrl = liveClassUrl(section.id, onlineClassProvider(fields));
+        }
+        const upload = await uploadedLmsFile(ctx, path, (fields.FileId || "").trim());
+        if (upload) Object.assign(edit, upload);
         if (content.body !== undefined) edit.body = content.body;
         if (content.url) edit.url = content.url;
         if (content.assignment) {

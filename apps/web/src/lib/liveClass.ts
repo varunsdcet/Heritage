@@ -1,4 +1,4 @@
-import { api, loadSession } from "@/lib/api";
+import { api, loadSession } from "./api";
 
 export type LiveProvider = "bigbluebutton" | "jitsi";
 
@@ -31,24 +31,42 @@ export type LiveRecording = {
   lengthMinutes: number | null;
 };
 
-/** Section id from an in-app launcher link (`/live/<sectionId>`), or null for external meeting links. */
+export function liveClassRef(url: string | null | undefined): { sectionId: string; provider?: LiveProvider } | null {
+  const raw = url?.trim();
+  if (!raw?.startsWith("/live/")) return null;
+  const parsed = new URL(raw, "http://campusone.local");
+  const m = parsed.pathname.match(/^\/live\/([0-9a-zA-Z-]+)$/);
+  if (!m) return null;
+  const provider = parsed.searchParams.get("provider");
+  return {
+    sectionId: m[1],
+    ...(provider === "jitsi" || provider === "bigbluebutton" ? { provider } : {}),
+  };
+}
+
+/** Section id from an in-app launcher link, or null for external meeting links. */
 export function liveSectionId(url: string | null | undefined) {
-  const m = url?.trim().match(/^\/live\/([0-9a-zA-Z-]+)$/);
-  return m ? m[1] : null;
+  return liveClassRef(url)?.sectionId ?? null;
 }
 
 /** In-app launcher link that remembers the opening page (new tabs are opened with noreferrer). */
-export function liveLauncherHref(sectionId: string) {
-  if (typeof window === "undefined") return `/live/${sectionId}`;
+export function liveLauncherHref(sectionId: string, provider?: LiveProvider) {
+  const params = new URLSearchParams();
+  if (provider) params.set("provider", provider);
+  if (typeof window === "undefined") {
+    const query = params.toString();
+    return `/live/${sectionId}${query ? `?${query}` : ""}`;
+  }
   const from = `${window.location.pathname}${window.location.search}`;
-  return `/live/${sectionId}?from=${encodeURIComponent(from)}`;
+  params.set("from", from);
+  return `/live/${sectionId}?${params.toString()}`;
 }
 
 export function openClassLink(url: string | null | undefined) {
   if (!url) return false;
-  const section = liveSectionId(url);
-  if (section) {
-    window.open(liveLauncherHref(section), "_blank", "noopener,noreferrer");
+  const room = liveClassRef(url);
+  if (room) {
+    window.open(liveLauncherHref(room.sectionId, room.provider), "_blank", "noopener,noreferrer");
     return true;
   }
   if (url.startsWith("https://") || url.startsWith("http://")) {
@@ -62,18 +80,22 @@ function token() {
   return loadSession()?.accessToken;
 }
 
-export function fetchLiveStatus(sectionId: string) {
-  return api<LiveRoomStatus>(`/live/sections/${sectionId}`, {}, token());
+function providerQuery(provider?: LiveProvider) {
+  return provider ? `?provider=${provider}` : "";
 }
 
-export function joinLiveClass(sectionId: string) {
-  return api<LiveJoinResult>(`/live/sections/${sectionId}/join`, { method: "POST", body: "{}" }, token());
+export function fetchLiveStatus(sectionId: string, provider?: LiveProvider) {
+  return api<LiveRoomStatus>(`/live/sections/${sectionId}${providerQuery(provider)}`, {}, token());
 }
 
-export function endLiveClass(sectionId: string) {
-  return api<{ ended: boolean }>(`/live/sections/${sectionId}/end`, { method: "POST", body: "{}" }, token());
+export function joinLiveClass(sectionId: string, provider?: LiveProvider) {
+  return api<LiveJoinResult>(`/live/sections/${sectionId}/join${providerQuery(provider)}`, { method: "POST", body: "{}" }, token());
 }
 
-export function fetchLiveRecordings(sectionId: string) {
-  return api<{ provider: LiveProvider; recordings: LiveRecording[] }>(`/live/sections/${sectionId}/recordings`, {}, token());
+export function endLiveClass(sectionId: string, provider?: LiveProvider) {
+  return api<{ ended: boolean }>(`/live/sections/${sectionId}/end${providerQuery(provider)}`, { method: "POST", body: "{}" }, token());
+}
+
+export function fetchLiveRecordings(sectionId: string, provider?: LiveProvider) {
+  return api<{ provider: LiveProvider; recordings: LiveRecording[] }>(`/live/sections/${sectionId}/recordings${providerQuery(provider)}`, {}, token());
 }

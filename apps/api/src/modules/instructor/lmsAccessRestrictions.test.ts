@@ -3,6 +3,8 @@ import {
   LMS_ACCESS_RESTRICTIONS_KEY,
   parseLmsAccessRestrictions,
   serializeLmsAccessRestrictions,
+  studentCanAccessLmsActivity,
+  studentCanAccessLmsFile,
   studentCanAccessLinkedAssignment,
   studentCanAccessLms,
 } from "./lmsAccessRestrictions.js";
@@ -62,5 +64,35 @@ describe("LMS access restrictions", () => {
     expect(studentCanAccessLinkedAssignment(overlay, "assignment-1", studentA)).toBe(true);
     expect(studentCanAccessLinkedAssignment(overlay, "assignment-1", studentB)).toBe(false);
     expect(studentCanAccessLinkedAssignment(overlay, "unlinked", studentB)).toBe(true);
+  });
+
+  it("blocks direct quiz and file access when the activity or topic excludes the student", () => {
+    const allowA = JSON.stringify({ match: "all", rules: [{ type: "student", studentIds: [studentA] }] });
+    const overlay = {
+      topicRestrictions: { "topic-1": allowA },
+      topicActivities: {
+        "topic-1": [
+          { id: "quiz-1", type: "QUIZ", settings: {} },
+          { id: "file-activity-1", type: "FILE", fileId: "file-1", settings: {} },
+        ],
+      },
+    };
+    expect(studentCanAccessLmsActivity(overlay, "quiz-1", studentA)).toBe(true);
+    expect(studentCanAccessLmsActivity(overlay, "quiz-1", studentB)).toBe(false);
+    expect(studentCanAccessLmsFile(overlay, "file-1", studentA)).toBe(true);
+    expect(studentCanAccessLmsFile(overlay, "file-1", studentB)).toBe(false);
+    expect(studentCanAccessLmsFile(overlay, "unknown-file", studentA)).toBe(false);
+  });
+
+  it("applies activity edits, group membership and hidden state to direct access", () => {
+    const groupOnly = JSON.stringify({ match: "all", rules: [{ type: "group", groupIds: ["group-a"] }] });
+    const overlay = {
+      groupMembers: { "group-a": [{ id: studentA }] },
+      topicActivities: { "topic-1": [{ id: "quiz-1", type: "QUIZ", settings: {} }] },
+      activityEdits: { "quiz-1": { settings: { [LMS_ACCESS_RESTRICTIONS_KEY]: groupOnly } } },
+    };
+    expect(studentCanAccessLmsActivity(overlay, "quiz-1", studentA)).toBe(true);
+    expect(studentCanAccessLmsActivity(overlay, "quiz-1", studentB)).toBe(false);
+    expect(studentCanAccessLmsActivity({ ...overlay, hiddenActivityIds: ["quiz-1"] }, "quiz-1", studentA)).toBe(false);
   });
 });

@@ -109,7 +109,7 @@ export function studyCoachAnswer(input: {
     suggestedActions: [
       { label: "Open courses", href: "/student/courses" },
       { label: "Open assignments", href: "/student/assignments" },
-      { label: "Ask Heritage", href: "/student/ask" },
+      { label: "Ask CampusOne", href: "/student/ask" },
     ],
     claims: [
       {

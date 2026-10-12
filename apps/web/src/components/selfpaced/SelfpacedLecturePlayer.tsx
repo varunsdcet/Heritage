@@ -162,7 +162,7 @@ export function SelfpacedLecturePlayer({ storyboard, onWatchPct }: Props) {
             src="/ai-draft/talkinghead-host.html?gender=female"
             allow="autoplay; fullscreen"
           />
-          <p className="sp-lecture__avatar-label">Heritage instructor</p>
+          <p className="sp-lecture__avatar-label">CampusOne instructor</p>
         </div>
       </div>
 

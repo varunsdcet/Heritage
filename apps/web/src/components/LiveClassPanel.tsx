@@ -7,6 +7,7 @@ import {
   fetchLiveStatus,
   liveLauncherHref,
   type LiveRecording,
+  type LiveProvider,
   type LiveRoomStatus,
 } from "@/lib/liveClass";
 import "./liveClass.css";
@@ -22,7 +23,7 @@ function formatWhen(iso: string | null) {
   });
 }
 
-export function LiveClassPanel({ sectionId, note }: { sectionId: string; note?: string }) {
+export function LiveClassPanel({ sectionId, provider, note }: { sectionId: string; provider?: LiveProvider; note?: string }) {
   const [status, setStatus] = useState<LiveRoomStatus | null>(null);
   const [recordings, setRecordings] = useState<LiveRecording[]>([]);
   const [error, setError] = useState("");
@@ -31,17 +32,17 @@ export function LiveClassPanel({ sectionId, note }: { sectionId: string; note?: 
 
   const refresh = useCallback(async () => {
     try {
-      const next = await fetchLiveStatus(sectionId);
+      const next = await fetchLiveStatus(sectionId, provider);
       setStatus(next);
       setError("");
       if (next.provider === "bigbluebutton") {
-        const recs = await fetchLiveRecordings(sectionId).catch(() => null);
+        const recs = await fetchLiveRecordings(sectionId, provider).catch(() => null);
         if (recs) setRecordings(recs.recordings);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load the live class.");
     }
-  }, [sectionId]);
+  }, [provider, sectionId]);
 
   useEffect(() => {
     void refresh();
@@ -50,7 +51,7 @@ export function LiveClassPanel({ sectionId, note }: { sectionId: string; note?: 
   }, [refresh]);
 
   function join() {
-    window.open(liveLauncherHref(sectionId), "_blank", "noopener,noreferrer");
+    window.open(liveLauncherHref(sectionId, provider), "_blank", "noopener,noreferrer");
     window.setTimeout(() => void refresh(), 8_000);
   }
 
@@ -59,7 +60,7 @@ export function LiveClassPanel({ sectionId, note }: { sectionId: string; note?: 
     setBusy(true);
     setMessage("");
     try {
-      const res = await endLiveClass(sectionId);
+      const res = await endLiveClass(sectionId, provider);
       setMessage(res.ended ? "Class ended for everyone." : "The class was not running.");
       await refresh();
     } catch (err) {

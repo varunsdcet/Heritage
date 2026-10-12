@@ -723,7 +723,7 @@ export function LoginPageSettings() {
             <div className="sx-login-preview" style={{ background: str(form.values?.background) || "#1f3a5f" }}>
               <span className="sx-login-preview__tag">{str(form.values?.backgroundImagery) === "None" ? "No background imagery" : `${str(form.values?.backgroundImagery)} imagery`}</span>
               <div className="sx-login-preview__box">
-                <strong>MyHeritage Login</strong>
+                <strong>CampusOne Login</strong>
                 <span className="sx-login-preview__field" />
                 <span className="sx-login-preview__field" />
                 <span className="sx-login-preview__btn">Sign In</span>

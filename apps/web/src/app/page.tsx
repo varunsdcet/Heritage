@@ -17,5 +17,5 @@ export default function HomePage() {
       router.replace("/admin");
     else router.replace("/student");
   }, [router]);
-  return <p style={{ padding: "2rem" }}>Opening MyHeritage…</p>;
+  return <p style={{ padding: "2rem" }}>Opening CampusOne…</p>;
 }

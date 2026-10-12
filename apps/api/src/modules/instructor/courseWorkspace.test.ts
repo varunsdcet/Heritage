@@ -128,6 +128,27 @@ describe("course workspace activities keep what the instructor entered", () => {
     expect(topicActivities()[0]).toMatchObject({ settings: { "Access restrictions": restrictions } });
   });
 
+  it("keeps an uploaded PDF attached to an assignment activity", async () => {
+    fn("heritageRecord", "findFirst").mockResolvedValue({
+      id: "file-1",
+      dataJson: JSON.stringify({ name: "assignment-brief.pdf", mime: "application/pdf", size: 2048 }),
+    });
+    await act("Add Activity", {
+      TopicId: "topic-1",
+      ActivityType: "ASSIGNMENT",
+      Name: "Final report",
+      FileId: "file-1",
+      "File submissions": "yes",
+    });
+    expect(topicActivities()[0]).toMatchObject({
+      type: "ASSIGNMENT",
+      fileId: "file-1",
+      fileName: "assignment-brief.pdf",
+      fileSize: 2048,
+      assignmentId: expect.any(String),
+    });
+  });
+
   it("saves and removes section access restrictions", async () => {
     const restrictions = JSON.stringify({ match: "all", rules: [{ type: "student", studentIds: [studentId] }] });
     await act("Save section", { TopicId: "topic-1", Title: "Week 1", Summary: "", AccessRestrictions: restrictions });
@@ -239,7 +260,18 @@ describe("workspace Grades tab", () => {
     );
 
     const screen = (await buildInstructorScreen(PATH, user)) as {
-      payload?: { courseDetail?: { lms?: { gradeBoard?: Record<string, unknown>; gradeEmpty?: string } } };
+      payload?: {
+        courseDetail?: {
+          lms?: {
+            gradeBoard?: Record<string, unknown>;
+            gradeEmpty?: string;
+            reporting?: {
+              logs: Array<{ source: string; participant: string }>;
+              participation: Array<{ studentId: string; submissions: number }>;
+            };
+          };
+        };
+      };
     };
     const lms = screen.payload?.courseDetail?.lms;
     expect(lms?.gradeBoard).toMatchObject({
@@ -248,5 +280,7 @@ describe("workspace Grades tab", () => {
       gradebookHref: `/instructor/gradebook?sectionId=${sectionId}`,
     });
     expect(lms?.gradeEmpty).toBeUndefined();
+    expect(lms?.reporting?.participation).toContainEqual(expect.objectContaining({ studentId, submissions: 1 }));
+    expect(lms?.reporting?.logs).toContainEqual(expect.objectContaining({ source: "Assignment", participant: "Ada Lovelace" }));
   });
 });

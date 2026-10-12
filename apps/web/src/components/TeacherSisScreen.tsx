@@ -691,7 +691,7 @@ function DashboardView({ config }: { config: TeacherScreenConfig }) {
               AI Draft
             </button>
             <button type="button" className="mh-ct-dash__control-chip" onClick={() => router.push("/instructor/ask")}>
-              Ask MyHeritage
+              Ask CampusOne
             </button>
           </div>
         </section>
@@ -2204,7 +2204,11 @@ function FormView({ config }: { config: TeacherScreenConfig }) {
     } else if (isAddProgram) {
       router.push(config.secondaryActionHref || "/instructor/f/t13-program-management");
     } else if (isAddFaculty) {
-      router.push(config.secondaryActionHref || "/instructor/f/t13-program-management");
+      if (!facultyId) {
+        window.location.assign(config.path);
+      } else {
+        router.push(config.secondaryActionHref || "/instructor/f/t13-program-management");
+      }
     } else if (isCourseConfig) {
       router.push(config.secondaryActionHref || "/instructor/f/t66-course-configurations");
     } else if (isAddProgramType) {

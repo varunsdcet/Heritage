@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import type { CourseLmsState, LmsAssignmentSettings, LmsQuizData } from "@/lib/teacherCatalog";
 import { api, loadSession } from "@/lib/api";
 import { useOptionalTeacherLive } from "@/lib/useTeacherSisLive";
-import { liveSectionId, openClassLink } from "@/lib/liveClass";
+import { liveClassRef, openClassLink } from "@/lib/liveClass";
 import { LiveClassPanel } from "@/components/LiveClassPanel";
 import { AiDraftVideoPlayer } from "@/components/ai-draft/AiDraftVideoPlayer";
 import type { AiDraftStoryboard } from "@/lib/aiDraftSamples";
@@ -380,61 +380,38 @@ export function LogsPanel({
   lms: CourseLmsState;
   title?: string;
 }) {
-  const activities = useMemo(() => {
-    const rows = ["All activities"];
-    for (const topic of lms.topics) {
-      rows.push(topic.title);
-      for (const act of topic.activities) rows.push(act.name);
-    }
-    return rows;
-  }, [lms.topics]);
-  const dates = useMemo(() => {
-    const items = ["All days", "Today"];
-    const start = new Date("2026-09-18T12:00:00");
-    for (let i = 0; i < 30; i += 1) {
-      const d = new Date(start);
-      d.setDate(start.getDate() - i);
-      items.push(
-        d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }),
-      );
-    }
-    return items;
-  }, []);
-  const [filters, setFilters] = useState({
-    course: "Social Service Work Fundamentals",
-    participants: "All participants",
-    date: "All days",
-    activities: "All activities",
-    actions: "All actions",
-    sources: "All sources",
-    events: "All events",
-    logType: "Standard log",
-  });
-  const [loaded, setLoaded] = useState(false);
+  const logs = lms.reporting?.logs || [];
+  const participants = useMemo(
+    () => ["All participants", ...new Set(logs.map((row) => row.participant))],
+    [logs],
+  );
+  const activities = useMemo(
+    () => ["All activities", ...new Set(logs.map((row) => row.activity))],
+    [logs],
+  );
+  const sources = useMemo(() => ["All sources", ...new Set(logs.map((row) => row.source))], [logs]);
+  const actions = useMemo(() => ["All actions", ...new Set(logs.map((row) => row.action))], [logs]);
+  const [filters, setFilters] = useState({ participants: "All participants", activities: "All activities", actions: "All actions", sources: "All sources" });
   const set = (key: keyof typeof filters, value: string) => setFilters((p) => ({ ...p, [key]: value }));
+  const rows = logs.filter(
+    (row) =>
+      (filters.participants === "All participants" || row.participant === filters.participants) &&
+      (filters.activities === "All activities" || row.activity === filters.activities) &&
+      (filters.actions === "All actions" || row.action === filters.actions) &&
+      (filters.sources === "All sources" || row.source === filters.sources),
+  );
   return (
     <section className="mh-teacher-card">
-      <h2>{title || "Logs"}</h2>
+      <div className="mh-lms-toolbar">
+        <h2>{title || "Logs"}</h2>
+        {lms.reporting?.generatedAt ? <span className="mh-teacher-muted">Updated {formatReportDate(lms.reporting.generatedAt)}</span> : null}
+      </div>
       <div className="mh-lms-logs">
-        <label>
-          <span>Course/context</span>
-          <select className="mh-teacher-field" value={filters.course} onChange={(e) => set("course", e.target.value)}>
-            <option>Social Service Work Fundamentals</option>
-          </select>
-        </label>
         <label>
           <span>Participants</span>
           <select className="mh-teacher-field" value={filters.participants} onChange={(e) => set("participants", e.target.value)}>
-            {(lms.logParticipants || ["All participants", "Monica Dahiya", "Guest user"]).map((p) => (
+            {participants.map((p) => (
               <option key={p}>{p}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <span>Date</span>
-          <select className="mh-teacher-field" value={filters.date} onChange={(e) => set("date", e.target.value)}>
-            {dates.map((d) => (
-              <option key={d}>{d}</option>
             ))}
           </select>
         </label>
@@ -449,7 +426,7 @@ export function LogsPanel({
         <label>
           <span>Actions</span>
           <select className="mh-teacher-field" value={filters.actions} onChange={(e) => set("actions", e.target.value)}>
-            {["All actions", "Create", "View", "Update", "Delete", "All changes"].map((a) => (
+            {actions.map((a) => (
               <option key={a}>{a}</option>
             ))}
           </select>
@@ -457,31 +434,69 @@ export function LogsPanel({
         <label>
           <span>Sources</span>
           <select className="mh-teacher-field" value={filters.sources} onChange={(e) => set("sources", e.target.value)}>
-            {["All sources", "CLI", "Restore", "Web", "Web service", "Other"].map((a) => (
+            {sources.map((a) => (
               <option key={a}>{a}</option>
             ))}
-          </select>
-        </label>
-        <label>
-          <span>Events</span>
-          <select className="mh-teacher-field" value={filters.events} onChange={(e) => set("events", e.target.value)}>
-            {["All events", "Teaching", "Participating", "Other"].map((a) => (
-              <option key={a}>{a}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <span>Log type</span>
-          <select className="mh-teacher-field" value={filters.logType} onChange={(e) => set("logType", e.target.value)}>
-            <option>Standard log</option>
-            <option>Legacy log</option>
           </select>
         </label>
       </div>
-      <button type="button" className="mh-teacher-btn" onClick={() => setLoaded(true)}>
-        Get these logs
-      </button>
-      {loaded ? <p className="mh-teacher-muted">No logs match the selected filters.</p> : null}
+      {rows.length ? (
+        <ReportTable
+          headings={["Time", "Participant", "Action", "Activity", "Source", "Detail"]}
+          rows={rows.map((row) => [formatReportDate(row.at), row.participant, row.action, row.activity, row.source, row.detail || "—"])}
+        />
+      ) : (
+        <p className="mh-teacher-muted">No saved course actions, submissions, quiz attempts, choice responses, or progress updates match these filters.</p>
+      )}
+    </section>
+  );
+}
+
+function formatReportDate(value?: string) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function ReportTable({ headings, rows }: { headings: string[]; rows: string[][] }) {
+  return (
+    <div className="mh-lms-review mh-lms-report-table">
+      <table>
+        <thead><tr>{headings.map((heading) => <th key={heading}>{heading}</th>)}</tr></thead>
+        <tbody>{rows.map((row, rowIndex) => <tr key={`${row[0]}-${rowIndex}`}>{row.map((cell, cellIndex) => <td key={`${cellIndex}-${cell}`}>{cell}</td>)}</tr>)}</tbody>
+      </table>
+    </div>
+  );
+}
+
+export function ActivityReportPanel({ lms }: { lms: CourseLmsState }) {
+  const rows = lms.reporting?.activities || [];
+  return (
+    <section className="mh-teacher-card">
+      <h2>Activity report</h2>
+      <p className="mh-teacher-muted">Counts come from saved assignment submissions, quiz attempts, choice responses, and completion records.</p>
+      {rows.length ? (
+        <ReportTable
+          headings={["Activity", "Type", "Completed", "Submissions", "Quiz attempts", "Choice responses", "Last activity"]}
+          rows={rows.map((row) => [row.name, row.type, String(row.completions), String(row.submissions), String(row.attempts), String(row.responses), formatReportDate(row.lastActivityAt)])}
+        />
+      ) : <p className="mh-teacher-muted">No course activities have been added yet.</p>}
+    </section>
+  );
+}
+
+export function CourseParticipationPanel({ lms }: { lms: CourseLmsState }) {
+  const rows = lms.reporting?.participation || [];
+  return (
+    <section className="mh-teacher-card">
+      <h2>Course participation</h2>
+      <p className="mh-teacher-muted">One row per enrolled student. The report updates after students submit or complete saved course work.</p>
+      {rows.length ? (
+        <ReportTable
+          headings={["Student", "Student #", "Status", "Completed", "Assignments", "Quiz attempts", "Choices", "Last activity"]}
+          rows={rows.map((row) => [row.name, row.studentNumber, row.status, String(row.completed), String(row.submissions), String(row.quizAttempts), String(row.choiceResponses), formatReportDate(row.lastActivityAt)])}
+        />
+      ) : <p className="mh-teacher-muted">No students are enrolled in this course offering.</p>}
     </section>
   );
 }
@@ -511,7 +526,8 @@ export function ReportNav({
   );
 }
 
-export function CompetencyBreakdownPanel({ onAdd }: { onAdd: () => void }) {
+export function CompetencyBreakdownPanel({ lms, onAdd }: { lms: CourseLmsState; onAdd: () => void }) {
+  const rows = lms.reporting?.competencies || [];
   return (
     <section className="mh-teacher-card">
       <div className="mh-lms-toolbar">
@@ -520,7 +536,15 @@ export function CompetencyBreakdownPanel({ onAdd }: { onAdd: () => void }) {
           Add competencies
         </button>
       </div>
-      <p className="mh-teacher-muted">No competencies found</p>
+      {rows.length ? (
+        <>
+          <p className="mh-teacher-muted">Completion is calculated from the saved course activity linked by the competency resource name.</p>
+          <ReportTable
+            headings={["Competency", "Resource", "Linked activities", "Participants", "Completed", "Progress"]}
+            rows={rows.map((row) => [row.name, row.resource, String(row.linkedActivities), String(row.participants), String(row.completed), `${row.progressPercent}%`])}
+          />
+        </>
+      ) : <p className="mh-teacher-muted">No competencies are attached to this course. Select Add competencies to create one.</p>}
     </section>
   );
 }
@@ -760,6 +784,7 @@ export function EditSectionPanel({
   const [name, setName] = useState(title);
   const [summary, setSummary] = useState("");
   const [restrictions, setRestrictions] = useState(accessRestrictions);
+  const [restrictionsValid, setRestrictionsValid] = useState(true);
   return (
     <section className="mh-teacher-card">
       <h2>Edit section</h2>
@@ -779,10 +804,10 @@ export function EditSectionPanel({
       </div>
       <details className="mh-lms-addform__sec">
         <summary>Restrict access</summary>
-        <LmsAccessRestrictionsEditor value={restrictions} roster={roster} groups={groups} onChange={setRestrictions} />
+        <LmsAccessRestrictionsEditor value={restrictions} roster={roster} groups={groups} onChange={setRestrictions} onValidityChange={setRestrictionsValid} />
       </details>
       <div className="mh-lms-toolbar">
-        <button type="button" className="mh-teacher-btn" onClick={() => onSave(name, summary, restrictions)}>
+        <button type="button" className="mh-teacher-btn" disabled={!name.trim() || !restrictionsValid} onClick={() => onSave(name, summary, restrictions)}>
           Save changes
         </button>
         <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary" onClick={onCancel}>
@@ -887,6 +912,80 @@ export function LmsAssignmentSummary({ assignment, description }: { assignment?:
         </tbody>
       </table>
     </div>
+  );
+}
+
+function choiceOptions(settings?: Record<string, string>) {
+  return Array.from({ length: 20 }, (_, index) => settings?.[`Option ${index + 1}`]?.trim() || "").filter(Boolean);
+}
+
+function LmsChoicePreview({ activity }: { activity: Pick<Activity, "body" | "description" | "settings"> }) {
+  const options = choiceOptions(activity.settings);
+  const multiple = /yes/i.test(activity.settings?.["Allow more than one choice to be selected"] || "");
+  const horizontal = /horizontal/i.test(activity.settings?.["Display mode for options"] || "");
+  return (
+    <div className="mh-lms-pagebody mh-lms-choice-preview">
+      <LessonBody body={activity.body} empty="Add a choice question in Edit settings." />
+      {activity.description ? <p style={{ whiteSpace: "pre-wrap" }}>{activity.description}</p> : null}
+      {options.length ? (
+        <div className={`mh-lms-choice-options${horizontal ? " is-horizontal" : ""}`}>
+          {options.map((option) => (
+            <label key={option} className="mh-lms-check">
+              <input type={multiple ? "checkbox" : "radio"} name="choice-preview" disabled />
+              <span>{option}</span>
+            </label>
+          ))}
+        </div>
+      ) : (
+        <p className="mh-lms-qform__error">No choice options have been added. Edit this activity and complete Option 1.</p>
+      )}
+      <p className="mh-teacher-muted">Student preview · responses are enabled in the student portal.</p>
+    </div>
+  );
+}
+
+const ACTIVITY_CONTENT_SETTING_KEYS = new Set([
+  "Name",
+  "Description",
+  "Page content",
+  "Book content",
+  "Choice question",
+  "Activity content",
+  "Additional files",
+  "Book file",
+  "Select files",
+  "Files",
+  "Package file",
+  "Access restrictions",
+]);
+
+const STUDENT_HIDDEN_SETTING = /^(availability|id number|group mode|tags|manage tags|course competencies|upon activity completion|send content change notification|display description on course page)$/i;
+
+/** Shows the values actually saved by an activity form instead of replacing them with an empty-page message. */
+export function LmsActivitySettings({
+  settings,
+  audience,
+}: {
+  settings?: Record<string, string>;
+  audience: "staff" | "student";
+}) {
+  const rows = Object.entries(settings || {}).filter(([key, value]) => {
+    if (!value?.trim() || ACTIVITY_CONTENT_SETTING_KEYS.has(key)) return false;
+    return audience === "staff" || !STUDENT_HIDDEN_SETTING.test(key);
+  });
+  if (!rows.length) return null;
+  return (
+    <details className="mh-lms-activity-data" open={audience === "staff"}>
+      <summary>Saved activity details</summary>
+      <dl className="mh-lms-activity-data__rows">
+        {rows.map(([key, value]) => (
+          <div key={key} className="mh-lms-activity-data__row">
+            <dt>{key}</dt>
+            <dd>{value === "yes" ? "Yes" : value}</dd>
+          </div>
+        ))}
+      </dl>
+    </details>
   );
 }
 
@@ -1077,11 +1176,12 @@ export function ResourceView({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [publishMsg, setPublishMsg] = useState("");
   const [publishing, setPublishing] = useState(false);
-  const liveSection = liveSectionId(activity.joinUrl) || (activity.joinUrl ? null : sectionId) || null;
+  const liveRoom = liveClassRef(activity.joinUrl) ||
+    (!activity.joinUrl && sectionId ? { sectionId, provider: undefined } : null);
 
   function openJoin() {
-    if (liveSection) {
-      openClassLink(`/live/${liveSection}`);
+    if (liveRoom) {
+      openClassLink(activity.joinUrl || `/live/${liveRoom.sectionId}`);
       return;
     }
     if (!openClassLink(activity.joinUrl)) window.alert("The online class room is not linked yet for this section.");
@@ -1107,6 +1207,7 @@ export function ResourceView({
           Audience: audience === "all" ? "All enrolled students" : "Selected students",
           NotifyStudentIds: audience === "selected" ? selectedIds.join(",") : "",
           JoinUrl: activity.joinUrl || "",
+          Provider: activity.settings?.Provider || "",
           SectionId: sectionId || "",
         }),
       );
@@ -1154,8 +1255,8 @@ export function ResourceView({
       </header>
       {type === "BIGBLUEBUTTON" ? (
         <div className="mh-lms-bbb">
-          {liveSection ? (
-            <LiveClassPanel sectionId={liveSection} />
+          {liveRoom ? (
+            <LiveClassPanel sectionId={liveRoom.sectionId} provider={liveRoom.provider} />
           ) : (
             <>
               <h3>Online Class Link</h3>
@@ -1242,6 +1343,12 @@ export function ResourceView({
       ) : type === "ASSIGNMENT" ? (
         <>
           <LmsAssignmentSummary assignment={activity.assignment} description={activity.description} />
+          {activity.fileId ? (
+            <div className="mh-lms-attachment-block">
+              <h3>Assignment attachment</h3>
+              <LmsFileCard activity={activity} sectionId={sectionId} audience="staff" />
+            </div>
+          ) : null}
           {activity.assignmentId && sectionId ? (
             <p>
               <a
@@ -1257,6 +1364,14 @@ export function ResourceView({
             </p>
           )}
         </>
+      ) : type === "BOOK" ? (
+        <div className="mh-lms-pagebody">
+          {activity.description ? <p style={{ whiteSpace: "pre-wrap" }}>{activity.description}</p> : null}
+          <LessonBody body={activity.body} empty={activity.fileId ? "" : "Add book content or upload a book file in Edit settings."} />
+          {activity.fileId ? <LmsFileCard activity={activity} sectionId={sectionId} audience="staff" /> : null}
+        </div>
+      ) : type === "CHOICE" ? (
+        <LmsChoicePreview activity={activity} />
       ) : (type === "FOLDER" || type === "FILE") && !activity.body ? (
         <LmsFileCard activity={activity} sectionId={sectionId} audience="staff" />
       ) : type === "QUIZ" && activity.quiz?.questions?.length ? (
@@ -1267,10 +1382,21 @@ export function ResourceView({
       ) : (
         <div className="mh-lms-pagebody">
           {activity.storyboard ? <AiDraftVideoPlayer key={activity.id} storyboard={activity.storyboard} /> : null}
-          <LessonBody body={activity.body} empty="No content has been added to this page yet. Use Edit to add it." />
+          {activity.description ? <p style={{ whiteSpace: "pre-wrap" }}>{activity.description}</p> : null}
+          {activity.body ? <LessonBody body={activity.body} empty="" /> : null}
+          {activity.fileId ? <LmsFileCard activity={activity} sectionId={sectionId} audience="staff" /> : null}
+          {!activity.storyboard && !activity.description && !activity.body && !activity.fileId ? (
+            <p className="mh-teacher-muted">No content has been added yet. Use Edit to add content, a description or a file.</p>
+          ) : null}
           {activity.modified ? <p className="mh-teacher-muted">Last modified: {activity.modified}</p> : null}
         </div>
       )}
+      {(type === "URL" || type === "BIGBLUEBUTTON") && activity.body ? (
+        <div className="mh-lms-pagebody">
+          <LessonBody body={activity.body} empty="" />
+        </div>
+      ) : null}
+      <LmsActivitySettings settings={activity.settings} audience="staff" />
       <button type="button" className="mh-teacher-link" onClick={onEdit}>
         Edit
       </button>
@@ -1397,6 +1523,7 @@ export function PageEditPanel({
   const [name, setName] = useState(activity.name);
   const [visibility, setVisibility] = useState(hidden ? "hide" : "show");
   const [restrictions, setRestrictions] = useState(activity.settings?.["Access restrictions"] || "");
+  const [restrictionsValid, setRestrictionsValid] = useState(true);
   const initialHtml = useMemo(() => {
     const body = activity.body || "";
     if (!body.trim() || /<[a-z][^>]*>/i.test(body)) return body;
@@ -1449,13 +1576,13 @@ export function PageEditPanel({
       </details>
       <details className="mh-lms-addform__sec">
         <summary>Restrict access</summary>
-        <LmsAccessRestrictionsEditor value={restrictions} roster={roster} groups={groups} onChange={setRestrictions} />
+        <LmsAccessRestrictionsEditor value={restrictions} roster={roster} groups={groups} onChange={setRestrictions} onValidityChange={setRestrictionsValid} />
       </details>
       <div className="mh-lms-toolbar">
         <button
           type="button"
           className="mh-teacher-btn"
-          disabled={live?.busy || !name.trim()}
+          disabled={live?.busy || !name.trim() || !restrictionsValid}
           onClick={() =>
             onSave({
               name: name.trim(),

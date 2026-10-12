@@ -8,7 +8,7 @@ export default function EnglishTestInstructionsPage() {
         <p className="sp-kicker">HCC ENGLISH TEST</p>
         <h1>Student instructions</h1>
         <div className="sp-lede">
-          <p>Enter your legal identity and current contact details exactly as they appear on your records. If you already have a Heritage Student ID, enter it twice so the registrar can safely link the profile.</p>
+          <p>Enter your legal identity and current contact details exactly as they appear on your records. If you already have a CampusOne Student ID, enter it twice so the registrar can safely link the profile.</p>
           <p>Saving this form registers your profile for review. It does not start a test, approve admission, or enrol you in a programme. The registrar will contact you with the scheduled test details and credentials.</p>
           <p>Use the institutions field only for organisations you authorize to receive the reviewed result.</p>
         </div>

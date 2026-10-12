@@ -113,7 +113,7 @@ export function ScreenScaffold({
       userName={userName}
       active={active}
       onNavigate={(item) => {
-        if (item === "Ask MyHeritage") {
+        if (item === "Ask CampusOne") {
           router.push(
             role === "student"
               ? "/student/ask"

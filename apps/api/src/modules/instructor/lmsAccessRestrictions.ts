@@ -85,6 +85,79 @@ export function studentCanAccessLms(
   return restrictions.match === "any" ? results.some(Boolean) : results.every(Boolean);
 }
 
+function matchingOverlayActivity(
+  overlay: Record<string, unknown> | null | undefined,
+  matches: (activity: Record<string, unknown>) => boolean,
+) {
+  if (!overlay) return null;
+  const deleted = new Set(Array.isArray(overlay.deletedActivityIds) ? (overlay.deletedActivityIds as string[]) : []);
+  const hidden = new Set(Array.isArray(overlay.hiddenActivityIds) ? (overlay.hiddenActivityIds as string[]) : []);
+  const edits = (overlay.activityEdits as Record<string, Record<string, unknown>> | undefined) || {};
+  const topicActivities = (overlay.topicActivities as Record<string, Array<Record<string, unknown>>> | undefined) || {};
+  const extraTopics = Array.isArray(overlay.extraTopics)
+    ? (overlay.extraTopics as Array<{ id?: unknown; activities?: unknown }>)
+    : [];
+  const candidates: Array<{ topicId: string; activity: Record<string, unknown> }> = [
+    ...Object.entries(topicActivities).flatMap(([topicId, activities]) =>
+      (activities || []).map((activity) => ({ topicId, activity })),
+    ),
+    ...extraTopics.flatMap((topic) =>
+      typeof topic.id === "string" && Array.isArray(topic.activities)
+        ? (topic.activities as Array<Record<string, unknown>>).map((activity) => ({ topicId: topic.id as string, activity }))
+        : [],
+    ),
+  ];
+  for (const candidate of candidates) {
+    const id = String(candidate.activity.id || "");
+    const activity = { ...candidate.activity, ...(edits[id] || {}) };
+    if (!matches(activity)) continue;
+    if (!id || deleted.has(id) || hidden.has(id) || activity.hidden === true) return null;
+    return { topicId: candidate.topicId, activity };
+  }
+  return null;
+}
+
+function studentCanAccessMatchedActivity(
+  overlay: Record<string, unknown>,
+  match: { topicId: string; activity: Record<string, unknown> },
+  studentId: string,
+  now?: Date,
+) {
+  const groupMembers = (overlay.groupMembers as Record<string, Array<{ id?: string }>> | undefined) || {};
+  const groupIds = Object.entries(groupMembers)
+    .filter(([, members]) => (members || []).some((member) => member.id === studentId))
+    .map(([groupId]) => groupId);
+  const context = { studentId, groupIds, now };
+  const topicRestrictions = ((overlay.topicRestrictions as Record<string, string> | undefined) || {})[match.topicId];
+  if (!studentCanAccessLms(topicRestrictions, context)) return false;
+  const settings = match.activity.settings && typeof match.activity.settings === "object"
+    ? (match.activity.settings as Record<string, unknown>)
+    : {};
+  return studentCanAccessLms(settings[LMS_ACCESS_RESTRICTIONS_KEY], context);
+}
+
+/** Checks visibility plus topic/activity restrictions before a direct student activity action. */
+export function studentCanAccessLmsActivity(
+  overlay: Record<string, unknown> | null | undefined,
+  activityId: string,
+  studentId: string,
+  now?: Date,
+) {
+  const match = matchingOverlayActivity(overlay, (activity) => String(activity.id || "") === activityId);
+  return Boolean(match && overlay && studentCanAccessMatchedActivity(overlay, match, studentId, now));
+}
+
+/** Course files are protected by the same rules as the FILE/FOLDER activity that exposes them. */
+export function studentCanAccessLmsFile(
+  overlay: Record<string, unknown> | null | undefined,
+  fileId: string,
+  studentId: string,
+  now?: Date,
+) {
+  const match = matchingOverlayActivity(overlay, (activity) => String(activity.fileId || "") === fileId);
+  return Boolean(match && overlay && studentCanAccessMatchedActivity(overlay, match, studentId, now));
+}
+
 /** Applies both the containing topic rule and the activity rule for a linked workspace assignment. */
 export function studentCanAccessLinkedAssignment(
   overlay: Record<string, unknown> | null | undefined,

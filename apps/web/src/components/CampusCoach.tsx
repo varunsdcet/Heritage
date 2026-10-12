@@ -185,7 +185,7 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
     }
     api<CoachHistoryResponse>("/ai/history", {}, session.accessToken)
       .then((payload) => setMessages(messagesFromHistory(payload.items)))
-      .catch((reason) => setError(reason instanceof Error ? reason.message : "Unable to load Ask Heritage history"))
+      .catch((reason) => setError(reason instanceof Error ? reason.message : "Unable to load Ask CampusOne history"))
       .finally(() => setHistoryLoading(false));
   }, []);
 
@@ -278,10 +278,10 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
         (reason instanceof Error && /failed to fetch|networkerror|load failed/i.test(reason.message));
       setError(
         offline
-          ? "You appear to be offline. Reconnect to ask Ask Heritage."
+          ? "You appear to be offline. Reconnect to ask Ask CampusOne."
           : reason instanceof Error
             ? reason.message
-            : "Ask Heritage could not answer this question",
+            : "Ask CampusOne could not answer this question",
       );
       setDraft((current) => current || trimmed);
     } finally {
@@ -309,7 +309,7 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
 
   const chat = (
       <div className="mh-ask-chat-page">
-      <section className="mh-ask-chat" aria-label="Ask Heritage chatbot">
+      <section className="mh-ask-chat" aria-label="Ask CampusOne chatbot">
         <header className="mh-ask-chat__head">
           <LogoMark size={32} />
           <div className="mh-ask-chat__head-copy">
@@ -317,8 +317,8 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
               {contextPath.includes("/study")
                 ? "Study with AI"
                 : role === "instructor"
-                  ? "Ask Heritage · Teaching Ops"
-                  : "Ask Heritage"}
+                  ? "Ask CampusOne · Teaching Ops"
+                  : "Ask CampusOne"}
             </h1>
             <span>
               {contextPath.includes("/study")
@@ -339,7 +339,7 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
           {empty ? (
             <div className="mh-ask-chat__welcome">
               <LogoMark size={44} />
-              <h2>{role === "instructor" ? "Teaching Operations Assistant" : "Ask Heritage"}</h2>
+              <h2>{role === "instructor" ? "Teaching Operations Assistant" : "Ask CampusOne"}</h2>
               <p>
                 {role === "instructor"
                   ? "Prepare classes, manage students, attendance and marks, create learning material, communicate, spot struggling students, and finish course admin — in natural language. Writes stay previews until you confirm on the live screen."
@@ -387,7 +387,7 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
             <article
               key={message.id}
               className={`mh-ask-chat__row is-${message.role}`}
-              aria-label={message.role === "user" ? "You" : "Ask Heritage"}
+              aria-label={message.role === "user" ? "You" : "Ask CampusOne"}
             >
               <div className="mh-ask-chat__bubble">
                 {message.createdAt ? (
@@ -449,7 +449,7 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
           ))}
 
           {loading ? (
-            <article className="mh-ask-chat__row is-assistant" aria-label="Ask Heritage is typing">
+            <article className="mh-ask-chat__row is-assistant" aria-label="Ask CampusOne is typing">
               <div className="mh-ask-chat__bubble mh-ask-chat__typing">
                 <span className="mh-ask-chat__dot" />
                 <span className="mh-ask-chat__dot" />
@@ -503,8 +503,8 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
                 minLength={1}
                 maxLength={2000}
                 rows={1}
-                placeholder="Message Ask Heritage…"
-                aria-label="Message Ask Heritage"
+                placeholder="Message Ask CampusOne…"
+                aria-label="Message Ask CampusOne"
                 disabled={loading}
                 autoFocus
                 className="mh-ask-chat__input"
@@ -515,7 +515,7 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
             </Button>
           </div>
           <p className="mh-ask-chat__hint">
-            Enter to send, Shift+Enter for a new line. Ask Heritage answers questions but will not change a grade,
+            Enter to send, Shift+Enter for a new line. Ask CampusOne answers questions but will not change a grade,
             application, enrolment, payment, or placement.
           </p>
         </form>
@@ -525,7 +525,7 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
 
   if (role === "student") {
     return (
-      <StudentSisShell title="Ask Heritage" subtitle="Grounded campus assistant" activeHref="/student/ask">
+      <StudentSisShell title="Ask CampusOne" subtitle="Grounded campus assistant" activeHref="/student/ask">
         {chat}
       </StudentSisShell>
     );
@@ -533,7 +533,7 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
 
   if (role === "instructor") {
     return (
-      <TeacherSisShell title="Ask Heritage" subtitle="Grounded campus assistant" activeHref="/instructor/ask">
+      <TeacherSisShell title="Ask CampusOne" subtitle="Grounded campus assistant" activeHref="/instructor/ask">
         {chat}
       </TeacherSisShell>
     );
@@ -541,7 +541,7 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
 
   if (role === "admin") {
     return (
-      <SuperFrame title="Ask Heritage" breadcrumbs={["Home", "Ask Heritage"]} activeHref="/admin/ai/ask">
+      <SuperFrame title="Ask CampusOne" breadcrumbs={["Home", "Ask CampusOne"]} activeHref="/admin/ai/ask">
         {chat}
       </SuperFrame>
     );
@@ -550,10 +550,10 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
   return (
     <ScreenScaffold
       role={role}
-      active="Ask MyHeritage"
-      title="Ask Heritage"
+      active="Ask CampusOne"
+      title="Ask CampusOne"
       subtitle="Campus AI assistant. Answers use only records available to your account."
-      breadcrumb={[role[0]!.toUpperCase() + role.slice(1), "Ask Heritage"]}
+      breadcrumb={[role[0]!.toUpperCase() + role.slice(1), "Ask CampusOne"]}
       hideChromeHeader
     >
       {chat}
@@ -563,7 +563,7 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
 
 export function CampusCoach(props: { role: ShellRole; contextPath: string }) {
   return (
-    <Suspense fallback={<p style={{ padding: 24 }}>Loading Ask Heritage…</p>}>
+    <Suspense fallback={<p style={{ padding: 24 }}>Loading Ask CampusOne…</p>}>
       <CampusCoachBody {...props} />
     </Suspense>
   );

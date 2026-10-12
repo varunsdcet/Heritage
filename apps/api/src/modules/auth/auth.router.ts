@@ -80,18 +80,18 @@ authRouter.post("/forgot-password", async (req, res, next) => {
 
     const webOrigin = (process.env.WEB_ORIGIN ?? "http://localhost:3000").split(",")[0]?.trim() || "http://localhost:3000";
     const resetUrl = `${webOrigin.replace(/\/$/, "")}/reset?token=${rawToken}`;
-    const title = "Reset your MyHeritage password";
+    const title = "Reset your Campus One password";
     const message = [
       `Hello ${account.person.givenName},`,
       "",
-      "We received a request to reset your MyHeritage campus password.",
+      "We received a request to reset your Campus One password.",
       "",
       `Reset link (valid 60 minutes):`,
       `  ${resetUrl}`,
       "",
       "If you did not request this, you can ignore this email.",
       "",
-      "— MyHeritage",
+      "— Campus One",
     ].join("\n");
 
     let mailed = false;

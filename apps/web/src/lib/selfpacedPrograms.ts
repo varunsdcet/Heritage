@@ -32,7 +32,7 @@ export const SELFPACED_PROGRAMS: SelfpacedProgram[] = [
     chapters: 12,
     priceCad: 100,
     image: "/brand/campus/learn.png",
-    features: ["12 applied modules", "Narrated video lectures and slides", "Capstone assessments and final presentation", "Verifiable Heritage certificate"],
+    features: ["12 applied modules", "Narrated video lectures and slides", "Capstone assessments and final presentation", "Verifiable CampusOne certificate"],
   },
   {
     id: "office-admin",

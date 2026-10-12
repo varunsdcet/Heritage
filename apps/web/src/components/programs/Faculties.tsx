@@ -176,7 +176,7 @@ export function FacultiesDirectory() {
 /* Add / Edit Faculty and Program Type (same simple page pattern)        */
 /* ------------------------------------------------------------------ */
 
-function SimplePage({ entity, mode, base, crumb, addTitle, editTitle, saveLabel, list }: { entity: string; mode: "create" | "edit"; base: string; crumb: string; addTitle: string; editTitle: string; saveLabel: string; list: string }) {
+function SimplePage({ entity, mode, base, crumb, addTitle, editTitle, saveLabel, list, refreshAfterCreate = false }: { entity: string; mode: "create" | "edit"; base: string; crumb: string; addTitle: string; editTitle: string; saveLabel: string; list: string; refreshAfterCreate?: boolean }) {
   const router = useRouter();
   const sp = useSearchParams();
   const id = mode === "edit" ? (sp?.get("id") ?? "") : null;
@@ -192,7 +192,14 @@ function SimplePage({ entity, mode, base, crumb, addTitle, editTitle, saveLabel,
           e.preventDefault();
           form
             .save()
-            .then((out) => router.push(`${list}?notice=${encodeURIComponent(out.message)}`))
+            .then((out) => {
+              if (mode === "create" && refreshAfterCreate) {
+                const cleanUrl = `${window.location.pathname}?notice=${encodeURIComponent(out.message)}`;
+                window.location.assign(cleanUrl);
+                return;
+              }
+              router.push(`${list}?notice=${encodeURIComponent(out.message)}`);
+            })
             .catch((err) => notice.fail(errMsg(err, "Save failed")));
         }}
       >
@@ -219,7 +226,7 @@ function SimplePage({ entity, mode, base, crumb, addTitle, editTitle, saveLabel,
 }
 
 export function FacultyForm({ mode }: { mode: "create" | "edit" }) {
-  return <SimplePage entity="faculties" mode={mode} base={FAC} list={FAC} crumb="Faculties & Programs" addTitle="Add Faculty" editTitle="Edit Faculty" saveLabel="Save Faculty" />;
+  return <SimplePage entity="faculties" mode={mode} base={FAC} list={FAC} crumb="Faculties & Programs" addTitle="Add Faculty" editTitle="Edit Faculty" saveLabel="Save Faculty" refreshAfterCreate />;
 }
 
 export function ProgramTypeForm({ mode }: { mode: "create" | "edit" }) {

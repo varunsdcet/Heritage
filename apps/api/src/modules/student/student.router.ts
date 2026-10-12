@@ -14,6 +14,7 @@ import {
 import { prisma } from "@myheritage/db";
 import { writeAuditAndOutbox } from "@myheritage/events";
 import { requireAuth, requireRoles, type AuthedRequest } from "../../middleware/auth.js";
+import { confirmFeeCheckout, createFeeCheckout } from "./finance.payments.js";
 import {
   createStudentServiceRequest,
   getOrCreateLabNotebook,
@@ -54,6 +55,7 @@ import {
   listMailbox,
   listStudentCalendars,
   replyMail,
+  submitStudentChoiceResponse,
   submitCourseEvaluation,
   updateMailboxSettings,
 } from "./wave3.service.js";
@@ -938,6 +940,22 @@ studentRouter.get("/finance", requireAuth, requireRoles("student"), async (req, 
   }
 });
 
+studentRouter.post("/finance/checkout", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    res.status(201).json(await createFeeCheckout((req as AuthedRequest).user, req.body ?? {}));
+  } catch (error) {
+    next(error);
+  }
+});
+
+studentRouter.post("/finance/checkout/confirm", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    res.json(await confirmFeeCheckout((req as AuthedRequest).user, req.body ?? {}));
+  } catch (error) {
+    next(error);
+  }
+});
+
 studentRouter.get("/calendars", requireAuth, requireRoles("student"), async (req, res, next) => {
   try {
     res.json(await listStudentCalendars((req as AuthedRequest).user));
@@ -960,6 +978,20 @@ studentRouter.post("/courses/:sectionId/quizzes/:activityId/attempts", requireAu
     const student = await requireStudent(user);
     const result = await submitQuizAttempt(user, student, String(req.params.sectionId), String(req.params.activityId), req.body);
     res.status(201).json(StudentQuizAttemptResponse.parse(result));
+  } catch (error) {
+    next(error);
+  }
+});
+
+studentRouter.post("/courses/:sectionId/choices/:activityId/responses", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    const result = await submitStudentChoiceResponse(
+      (req as AuthedRequest).user,
+      String(req.params.sectionId),
+      String(req.params.activityId),
+      req.body,
+    );
+    res.json(result);
   } catch (error) {
     next(error);
   }

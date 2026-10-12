@@ -13,7 +13,14 @@ const ENDS_WITH_CONNECTIVE = /\b(and|or|but|nor|of|to|the|a|an|with|for)$/i;
  * are merged with their neighbours so each part is a natural stretch of speech; `paragraph` is the index of the
  * line a part starts on.
  */
-export function splitScript(script: string): ScriptPart[] {
+export function splitScript(
+  script: string,
+  {
+    firstChars = FIRST_PART_CHARS,
+    maxChars = MAX_PART_CHARS,
+    smallParts = 1,
+  }: { firstChars?: number; maxChars?: number; smallParts?: number } = {},
+): ScriptPart[] {
   const lines = script
     .split(/\n\s*\n|\n(?=\s*\S)/)
     .map((p) => p.replace(/\s+/g, " ").trim())
@@ -28,7 +35,7 @@ export function splitScript(script: string): ScriptPart[] {
   const parts: ScriptPart[] = [];
   let buf = "";
   let start = 0;
-  const limit = () => (parts.length ? MAX_PART_CHARS : FIRST_PART_CHARS);
+  const limit = () => (parts.length < smallParts ? firstChars : maxChars);
   const flush = () => {
     if (buf) parts.push({ text: buf, paragraph: start });
     buf = "";

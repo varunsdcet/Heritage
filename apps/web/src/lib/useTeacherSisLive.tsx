@@ -156,7 +156,7 @@ export function mergeTeacherLive(
     if (chrome.hub) (base as TeacherScreenConfig).hub = chrome.hub;
     if (loading) {
       base.title = "Loading section…";
-      base.subtitle = "Loading live Heritage course data…";
+      base.subtitle = "Loading live CampusOne course data…";
     } else {
       base.subtitle = "Live data could not be loaded. Refresh to try again.";
     }

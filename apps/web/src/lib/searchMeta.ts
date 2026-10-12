@@ -26,9 +26,9 @@ export const FALLBACK_SEARCH_META = {
   ] as SearchOption[],
   campuses: [
     { label: "All Campuses", value: "" },
-    { label: "#110 Heritage College - Surrey", value: "#110 Heritage College - Surrey" },
-    { label: "Heritage Community College - Distance", value: "Heritage Community College - Distance" },
-    { label: "Heritage Community College - Victoria", value: "Heritage Community College - Victoria" },
+    { label: "#110 CampusOne - Surrey", value: "#110 Heritage College - Surrey" },
+    { label: "CampusOne - Distance", value: "Heritage Community College - Distance" },
+    { label: "CampusOne - Victoria", value: "Heritage Community College - Victoria" },
     { label: "Online", value: "Online" },
   ] as SearchOption[],
   deliveryMethods: [

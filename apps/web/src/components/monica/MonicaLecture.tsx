@@ -3,10 +3,37 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { splitScript } from "@/lib/monicaScript";
 
-type Narration = { audio: string; duration: number; words: string[]; wtimes: number[]; wdurations: number[] };
+type Narration = { audio: string; mime?: string; duration: number; words: string[]; wtimes: number[]; wdurations: number[] };
 
-const STORAGE_KEY = "monica-lecture-script";
-const TITLE_KEY = "monica-lecture-title";
+export type LectureTeacher = {
+  /** Shown as the page heading and used to namespace the saved script. */
+  name: string;
+  slug: string;
+  narrateUrl: string;
+  gender: "female" | "male";
+  voiceLabel: string;
+  /**
+   * For slow voices: prepare every part in order, this many at a time, as soon as the lecture opens, instead of only
+   * a couple ahead of the one being read.
+   */
+  prepareAll?: number;
+  /**
+   * Read the lecture as one continuous stream: short, even chunks (so synthesis stays ahead of playback), no pauses
+   * between chunks and no "part N of M" wording.
+   */
+  continuous?: boolean;
+};
+
+const CONTINUOUS_CHUNKS = { firstChars: 120, maxChars: 220, smallParts: 3 };
+
+export const MONICA: LectureTeacher = {
+  name: "Monica",
+  slug: "monica",
+  narrateUrl: "/api/monica/narrate",
+  gender: "female",
+  voiceLabel: "the HeyGen voice",
+};
+
 const PREFETCH = 2;
 /** Roughly 150 spoken words a minute. */
 const CHARS_PER_SEC = 14;
@@ -47,7 +74,10 @@ function clock(totalSec: number) {
   return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
 }
 
-export function MonicaLecture() {
+export function MonicaLecture({ teacher = MONICA }: { teacher?: LectureTeacher }) {
+  const STORAGE_KEY = `${teacher.slug}-lecture-script`;
+  const TITLE_KEY = `${teacher.slug}-lecture-title`;
+  const pronoun = teacher.gender === "male" ? "he" : "she";
   const [script, setScript] = useState("");
   const [title, setTitle] = useState("");
   const [mode, setMode] = useState<"edit" | "lecture">("edit");
@@ -64,7 +94,7 @@ export function MonicaLecture() {
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
-  const partRefs = useRef<Array<HTMLParagraphElement | null>>([]);
+  const partRefs = useRef<Array<HTMLElement | null>>([]);
   const cacheRef = useRef(new Map<number, Promise<Narration>>());
   const playingRef = useRef(false);
   const runRef = useRef(0);
@@ -84,7 +114,20 @@ export function MonicaLecture() {
     localStorage.setItem(TITLE_KEY, title);
   }, [title]);
 
-  const parts = useMemo(() => splitScript(script), [script]);
+  const parts = useMemo(
+    () => splitScript(script, teacher.continuous ? CONTINUOUS_CHUNKS : undefined),
+    [script, teacher.continuous],
+  );
+  /** Part indexes grouped by the script paragraph they belong to, for the continuous reading view. */
+  const paragraphs = useMemo(
+    () =>
+      parts.reduce<number[][]>((acc, p, i) => {
+        if (i > 0 && parts[i - 1].paragraph === p.paragraph) acc[acc.length - 1].push(i);
+        else acc.push([i]);
+        return acc;
+      }, []),
+    [parts],
+  );
   const words = useMemo(() => (script.trim() ? script.trim().split(/\s+/).length : 0), [script]);
   const estimate = (i: number) => durations[i] ?? parts[i].text.length / CHARS_PER_SEC / speed;
   const totalSec = parts.reduce((sum, _p, i) => sum + estimate(i), 0);
@@ -157,7 +200,7 @@ export function MonicaLecture() {
       const cache = cacheRef.current;
       let pending = cache.get(i);
       if (!pending) {
-        pending = fetch("/api/monica/narrate", {
+        pending = fetch(teacher.narrateUrl, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ text: parts[i].text, speed }),
@@ -172,8 +215,23 @@ export function MonicaLecture() {
       }
       return pending;
     },
-    [parts, speed],
+    [parts, speed, teacher.narrateUrl],
   );
+
+  useEffect(() => {
+    if (mode !== "lecture" || !teacher.prepareAll) return;
+    let cancelled = false;
+    let next = 0;
+    const worker = async () => {
+      while (!cancelled && next < parts.length) await narration(next++).catch(() => {});
+    };
+    for (let k = 0; k < teacher.prepareAll; k++) void worker();
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, narration, parts.length, teacher.prepareAll]);
+
+  const prepared = Object.keys(durations).length;
 
   const stop = useCallback((label = "Paused") => {
     playingRef.current = false;
@@ -202,7 +260,7 @@ export function MonicaLecture() {
         for (let k = 1; k <= PREFETCH && i + k < parts.length; k++) void narration(i + k).catch(() => {});
         let n: Narration;
         try {
-          if (!durations[i]) setStatus(`Preparing part ${i + 1} of ${parts.length}…`);
+          if (!durations[i]) setStatus(teacher.continuous ? "Preparing…" : `Preparing part ${i + 1} of ${parts.length}…`);
           n = await narration(i);
         } catch (err) {
           if (run !== runRef.current) return;
@@ -211,7 +269,9 @@ export function MonicaLecture() {
           return;
         }
         if (run !== runRef.current) return;
-        setStatus(`Reading part ${i + 1} of ${parts.length}${audioOnly ? " (voice only)" : ""}`);
+        setStatus(
+          `${teacher.continuous ? "Reading" : `Reading part ${i + 1} of ${parts.length}`}${audioOnly ? " (voice only)" : ""}`,
+        );
         const id = ++speakIdRef.current;
         await new Promise<void>((resolve) => {
           waitRef.current = { id, resolve };
@@ -225,7 +285,7 @@ export function MonicaLecture() {
             const a = audioRef.current ?? (audioRef.current = new Audio());
             a.onended = done;
             a.onerror = done;
-            a.src = `data:audio/mpeg;base64,${n.audio}`;
+            a.src = `data:${n.mime || "audio/mpeg"};base64,${n.audio}`;
             a.play().catch((err) => {
               if (run !== runRef.current) return;
               setError(`The browser blocked the sound (${err instanceof Error ? err.message : "autoplay"}) — press Play again`);
@@ -249,7 +309,8 @@ export function MonicaLecture() {
         });
         if (run !== runRef.current) return;
         const paragraphEnd = parts[i + 1]?.paragraph !== parts[i].paragraph;
-        await new Promise((r) => window.setTimeout(r, paragraphEnd ? 700 : 200));
+        const gap = teacher.continuous ? (paragraphEnd ? 250 : 0) : paragraphEnd ? 700 : 200;
+        if (gap) await new Promise((r) => window.setTimeout(r, gap));
       }
       if (run !== runRef.current) return;
       playingRef.current = false;
@@ -259,7 +320,7 @@ export function MonicaLecture() {
       setStatus("Lecture finished");
       post({ type: "th-idle" });
     },
-    [audioOnly, durations, narration, parts, stop],
+    [audioOnly, durations, narration, parts, stop, teacher.continuous],
   );
 
   const jump = (i: number) => {
@@ -295,8 +356,8 @@ export function MonicaLecture() {
     <main className="mh-monica">
       <header className="mh-monica__head">
         <div>
-          <p className="mh-monica__kicker">MyHeritage · Lecture reader</p>
-          <h1>{mode === "lecture" && title.trim() ? title : "Monica"}</h1>
+          <p className="mh-monica__kicker">CampusOne · Lecture reader</p>
+          <h1>{mode === "lecture" && title.trim() ? title : teacher.name}</h1>
         </div>
         {mode === "lecture" ? (
           <button
@@ -322,7 +383,7 @@ export function MonicaLecture() {
             <iframe
               ref={iframeRef}
               title="Teacher avatar"
-              src="/ai-draft/talkinghead-host.html?gender=female"
+              src={`/ai-draft/talkinghead-host.html?gender=${teacher.gender}`}
               allow="autoplay; fullscreen"
             />
           </div>
@@ -338,6 +399,9 @@ export function MonicaLecture() {
               </div>
               <p className="mh-monica__status" role="status">
                 {status} · {clock(elapsedSec)} / ~{clock(totalSec)}
+                {teacher.prepareAll && !teacher.continuous && prepared < parts.length
+                  ? ` · ${prepared} of ${parts.length} parts ready`
+                  : ""}
               </p>
               {error ? (
                 <p className="mh-monica__error" role="alert">
@@ -415,8 +479,8 @@ export function MonicaLecture() {
             </label>
             <div className="mh-monica__editor-foot">
               <span>
-                {words.toLocaleString()} words · about {clock(parts.reduce((s, p) => s + p.text.length / CHARS_PER_SEC, 0))} spoken ·{" "}
-                {parts.length} parts
+                {words.toLocaleString()} words · about {clock(parts.reduce((s, p) => s + p.text.length / CHARS_PER_SEC, 0))} spoken
+                {teacher.continuous ? "" : ` · ${parts.length} parts`}
               </span>
               <button
                 type="button"
@@ -428,13 +492,31 @@ export function MonicaLecture() {
               </button>
             </div>
             <p className="mh-monica__help">
-              The script is saved in this browser automatically. The teacher reads it in the HeyGen voice, a few parts ahead are
-              prepared while she speaks, and you can pause, go back or skip at any time.
+              The script is saved in this browser automatically. The teacher reads it in {teacher.voiceLabel},{" "}
+              {teacher.continuous ? "preparing what comes next" : "a few parts ahead are prepared"} while {pronoun} speaks, and
+              you can pause, go back or skip at any time.
             </p>
           </section>
         ) : (
           <section className="mh-monica__script" aria-label="Lecture script">
-            {parts.map((p, i) => (
+            {teacher.continuous
+              ? paragraphs.map((idxs) => (
+                  <p key={idxs[0]} className="mh-monica__flow">
+                    {idxs.map((i) => (
+                      <span
+                        key={i}
+                        ref={(el) => {
+                          partRefs.current[i] = el;
+                        }}
+                        className={`mh-monica__chunk${i === index ? " is-current" : ""}${i < index ? " is-done" : ""}`}
+                        onClick={() => jump(i)}
+                      >
+                        {parts[i].text}{" "}
+                      </span>
+                    ))}
+                  </p>
+                ))
+              : parts.map((p, i) => (
               <p
                 key={i}
                 ref={(el) => {

@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { GradebookResponse } from "@myheritage/contracts";
-import { TeacherSisShell } from "@/components/TeacherSisShell";
+import { CourseReviewShell } from "@/components/CourseReviewShell";
 import { api, loadSession, type Session } from "@/lib/api";
 
 const NIL = "00000000-0000-4000-8000-000000000000";
@@ -367,7 +367,6 @@ function InstructorGradebookInner() {
 
   if (!session) return null;
 
-  const userName = `${session.givenName} ${session.familyName}`.trim() || "Instructor";
   const activeSection = sections.find((s) => s.sectionId === sectionId);
   const dirtyCount = Object.values(dirty).filter(Boolean).length;
   const heading =
@@ -378,12 +377,10 @@ function InstructorGradebookInner() {
         : "Live section gradebook";
 
   return (
-    <TeacherSisShell
+    <CourseReviewShell
+      session={session}
       title="Gradebook"
       subtitle={heading}
-      activeHref="/instructor/gradebook"
-      userName={userName}
-      userRole="INSTRUCTOR"
     >
       <div className="mh-teacher-stack">
         <div className="mh-teacher-page-head">
@@ -659,6 +656,6 @@ function InstructorGradebookInner() {
           )}
         </section>
       </div>
-    </TeacherSisShell>
+    </CourseReviewShell>
   );
 }
