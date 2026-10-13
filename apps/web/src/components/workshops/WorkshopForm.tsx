@@ -504,6 +504,11 @@ export function WorkshopForm({ id }: { id?: string }) {
                   <Select value={st.gradingScheme} onChange={(v) => set("gradingScheme", v)} options={meta?.gradingSchemes ?? ["None / Not Applicable"]} />
                 </SaField>
               </div>
+              {meta && meta.gradingSchemes.length <= 1 ? (
+                <p className="mh-sa__sub">
+                  No active grading schemes are configured. <Link href="/admin/course-management/grading">Manage Grading Schemes</Link>
+                </p>
+              ) : null}
             </Section>
 
             <Section title="Workshop Content">

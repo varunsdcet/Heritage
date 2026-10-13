@@ -17,7 +17,7 @@ type SectionRow = {
   capacity?: number | null;
   waitlistEnabled?: boolean;
 };
-type UserRow = { email: string; roles: string[]; givenName: string; familyName: string };
+type StudentRow = { id: string; studentNumber: string; email: string; givenName: string; familyName: string; programName: string };
 type Quote = {
   label: string;
   termName: string;
@@ -28,6 +28,11 @@ type Quote = {
   seats: { capacity: number | null; waitlist: boolean; waitlistSize: number | null; enrolled: number; waitlisted: number };
 };
 type EnrolOut = { courseCode: string; status: "enrolled" | "waitlisted"; fee: { number: number; amount: number } | null; feeNote: string | null };
+type BulkOut = {
+  results: Array<EnrolOut & { studentId: string; studentName: string; studentNumber: string; status: "enrolled" | "waitlisted" | "existing" }>;
+  failures: Array<{ studentId: string; studentName?: string; studentNumber?: string; code: string; message: string }>;
+  summary: { requested: number; enrolled: number; waitlisted: number; existing: number; failed: number };
+};
 
 const money = (n: number) => n.toLocaleString("en-CA", { style: "currency", currency: "CAD" });
 
@@ -57,10 +62,11 @@ function Seats({ enrolled, capacity, waitlisted, waitlistEnabled }: { enrolled: 
 
 export function EnrolmentsView() {
   const [sections, setSections] = useState<SectionRow[]>([]);
-  const [students, setStudents] = useState<UserRow[]>([]);
+  const [students, setStudents] = useState<StudentRow[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [sectionId, setSectionId] = useState("");
-  const [studentEmail, setStudentEmail] = useState("");
+  const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
+  const [studentFilter, setStudentFilter] = useState("");
   const [postFee, setPostFee] = useState(true);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [filter, setFilter] = useState("");
@@ -77,19 +83,16 @@ export function EnrolmentsView() {
   useEffect(() => {
     const s = loadSession();
     if (!s) return;
-    Promise.all([loadSections(s.accessToken), api<{ items: UserRow[] }>("/admin/users", {}, s.accessToken)])
-      .then(([, users]) => setStudents(users.items.filter((u) => u.roles.includes("student"))))
+    Promise.all([loadSections(s.accessToken), api<{ items: StudentRow[] }>("/admin/enrolments/students", {}, s.accessToken)])
+      .then(([, students]) => setStudents(students.items))
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load sections and students"))
       .finally(() => setLoaded(true));
   }, []);
 
-  const email = studentEmail.trim();
-  const student = students.find((u) => u.email.toLowerCase() === email.toLowerCase());
-
   useEffect(() => {
     const s = loadSession();
     if (!s || !sectionId) return;
-    const params = new URLSearchParams({ sectionId, ...(student ? { studentEmail: student.email } : {}) });
+    const params = new URLSearchParams({ sectionId, ...(selectedStudentIds[0] ? { studentId: selectedStudentIds[0] } : {}) });
     let live = true;
     const t = setTimeout(() => {
       api<Quote>(`/admin/enrolments/quote?${params.toString()}`, {}, s.accessToken)
@@ -100,7 +103,7 @@ export function EnrolmentsView() {
       live = false;
       clearTimeout(t);
     };
-  }, [sectionId, student]);
+  }, [sectionId, selectedStudentIds]);
 
   const picked = sections.find((s) => s.sectionId === sectionId);
   const shown = useMemo(() => {
@@ -108,6 +111,28 @@ export function EnrolmentsView() {
     if (!q) return sections;
     return sections.filter((s) => `${s.code} ${s.courseCode} ${s.courseTitle} ${s.termName ?? ""}`.toLowerCase().includes(q));
   }, [sections, filter]);
+  const shownStudents = useMemo(() => {
+    const q = studentFilter.trim().toLowerCase();
+    if (!q) return students;
+    return students.filter((student) =>
+      `${student.givenName} ${student.familyName} ${student.email} ${student.studentNumber} ${student.programName}`.toLowerCase().includes(q),
+    );
+  }, [students, studentFilter]);
+  const selectedStudents = useMemo(() => {
+    const ids = new Set(selectedStudentIds);
+    return students.filter((student) => ids.has(student.id));
+  }, [students, selectedStudentIds]);
+
+  function toggleStudent(id: string) {
+    setSelectedStudentIds((current) => {
+      if (current.includes(id)) return current.filter((studentId) => studentId !== id);
+      if (current.length >= 100) {
+        setError("You can enrol up to 100 students at a time.");
+        return current;
+      }
+      return [...current, id];
+    });
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -117,13 +142,14 @@ export function EnrolmentsView() {
     setNote(null);
     setBusy(true);
     try {
-      const res = await api<EnrolOut>("/admin/enrolments", { method: "POST", body: JSON.stringify({ studentEmail: email, sectionId, postFee }) }, s.accessToken);
-      const who = student ? `${student.givenName} ${student.familyName}` : email;
-      const parts = [res.status === "waitlisted" ? `${who} is waitlisted for ${res.courseCode} (the section is full)` : `Enrolled ${who} into ${res.courseCode}`];
-      if (res.fee) parts.push(`course fee ${money(res.fee.amount)} posted as receivable #${res.fee.number}`);
-      else if (res.feeNote) parts.push(res.feeNote);
+      const res = await api<BulkOut>("/admin/enrolments/bulk", { method: "POST", body: JSON.stringify({ studentIds: selectedStudentIds, sectionId, postFee }) }, s.accessToken);
+      const parts = [`Processed ${res.summary.requested} student${res.summary.requested === 1 ? "" : "s"}: ${res.summary.enrolled} enrolled`];
+      if (res.summary.waitlisted) parts.push(`${res.summary.waitlisted} waitlisted`);
+      if (res.summary.existing) parts.push(`${res.summary.existing} already enrolled`);
+      if (res.summary.failed) parts.push(`${res.summary.failed} failed — ${res.failures.map((failure) => `${failure.studentName || failure.studentNumber || "Student"}: ${failure.message}`).join("; ")}`);
       setNote(parts.join(" · "));
-      setStudentEmail("");
+      setSelectedStudentIds([]);
+      setStudentFilter("");
       await loadSections(s.accessToken);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Enrol failed");
@@ -156,7 +182,7 @@ export function EnrolmentsView() {
       }
     >
       <p className="mh-sa__muted" style={{ margin: "-6px 0 16px" }}>
-        Put a student into a live section. Seats, waitlist and the course fee are checked before the enrolment is saved.
+        Put one or more students into a live section. Seats, waitlist and each student&apos;s course fee are checked before every enrolment is saved.
       </p>
       {error ? (
         <SaNotice tone="error" onClose={() => setError(null)}>
@@ -170,29 +196,43 @@ export function EnrolmentsView() {
       ) : null}
 
       <div className="en-layout">
-        <SaCard title="Enrol a student">
+        <SaCard title="Enrol students">
           <form onSubmit={onSubmit} className="mh-sa__form">
-            <SaField label="Student">
+            <SaField label={`Students (${selectedStudentIds.length} selected)`}>
               <input
                 className="mh-sa__input"
-                list="en-student-emails"
-                value={studentEmail}
-                placeholder="Type a name or email"
-                onChange={(e) => setStudentEmail(e.target.value)}
-                required
+                value={studentFilter}
+                placeholder="Search name, student number, email or program"
+                onChange={(e) => setStudentFilter(e.target.value)}
               />
-              <datalist id="en-student-emails">
-                {students.map((u) => (
-                  <option key={u.email} value={u.email}>
-                    {u.givenName} {u.familyName}
-                  </option>
-                ))}
-              </datalist>
-              {email ? (
-                <span className={`en-who${student ? "" : " is-unknown"}`}>
-                  {student ? `${student.givenName} ${student.familyName}` : "No student account with this email yet."}
-                </span>
+              <div className="en-student-actions">
+                <button type="button" className="mh-sa__btn mh-sa__btn--sm" onClick={() => setSelectedStudentIds((ids) => [...new Set([...ids, ...shownStudents.map((student) => student.id)])].slice(0, 100))} disabled={!shownStudents.length}>
+                  Select shown
+                </button>
+                <button type="button" className="mh-sa__btn mh-sa__btn--sm" onClick={() => setSelectedStudentIds([])} disabled={!selectedStudentIds.length}>
+                  Clear
+                </button>
+              </div>
+              {selectedStudents.length ? (
+                <div className="en-student-chips">
+                  {selectedStudents.map((student) => (
+                    <button type="button" key={student.id} className="en-student-chip" onClick={() => toggleStudent(student.id)} title="Remove student">
+                      {student.givenName} {student.familyName} · {student.studentNumber} ×
+                    </button>
+                  ))}
+                </div>
               ) : null}
+              <div className="en-student-list" role="group" aria-label="Select students">
+                {shownStudents.length ? shownStudents.map((student) => (
+                  <label key={student.id} className="en-student-option">
+                    <input type="checkbox" checked={selectedStudentIds.includes(student.id)} onChange={() => toggleStudent(student.id)} />
+                    <span>
+                      <strong>{student.givenName} {student.familyName}</strong>
+                      <small>{student.studentNumber} · {student.email}{student.programName ? ` · ${student.programName}` : ""}</small>
+                    </span>
+                  </label>
+                )) : <span className="mh-sa__muted">No students match this search.</span>}
+              </div>
             </SaField>
 
             <SaField label="Section">
@@ -224,7 +264,7 @@ export function EnrolmentsView() {
                 </div>
                 {full ? (
                   <span className={quote?.seats.waitlist ? "mh-sa__pill mh-sa__pill--warn" : "mh-sa__pill"} style={quote?.seats.waitlist ? undefined : { color: "var(--mh-danger)" }}>
-                    {quote?.seats.waitlist ? "Section full — the student will be waitlisted" : "Section full and waitlist is disabled"}
+                    {quote?.seats.waitlist ? "Section full — selected students will be waitlisted" : "Section full and waitlist is disabled"}
                   </span>
                 ) : null}
               </div>
@@ -234,13 +274,13 @@ export function EnrolmentsView() {
               <input type="checkbox" checked={postFee} onChange={(e) => setPostFee(e.target.checked)} style={{ marginTop: 3 }} />
               <span>
                 <strong>Post course fee</strong>
-                {quote ? <span className="mh-sa__sub" style={{ display: "block" }}>{feeText(quote)}</span> : null}
+                {quote ? <span className="mh-sa__sub" style={{ display: "block" }}>{selectedStudentIds.length > 1 ? "The correct domestic/international fee is calculated separately for each selected student." : feeText(quote)}</span> : null}
               </span>
             </label>
 
             <div className="mh-sa__actions">
-              <button type="submit" className="mh-sa__btn mh-sa__btn--primary" disabled={busy || !sectionId || blocked}>
-                {busy ? "Enrolling…" : full && quote?.seats.waitlist ? "Add to waitlist" : "Enrol student"}
+              <button type="submit" className="mh-sa__btn mh-sa__btn--primary" disabled={busy || !sectionId || !selectedStudentIds.length || blocked}>
+                {busy ? "Enrolling…" : full && quote?.seats.waitlist ? `Add ${selectedStudentIds.length} to waitlist` : `Enrol ${selectedStudentIds.length || ""} student${selectedStudentIds.length === 1 ? "" : "s"}`}
               </button>
             </div>
           </form>

@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { SuperFrame } from "@/components/superadmin/shared";
 import { ConfirmDelete } from "../location/shared";
 import { SC } from "./directory";
 import { Swatch, errMsg, invalidateMeta, json, str, sx, useCanEdit, useFlash, type Listing, type Row } from "./kit";
+import { buildStatusTree } from "./statusTree";
 
 const BASE = "/admin/sysconfig/student-statuses";
 
@@ -17,20 +18,29 @@ export function StudentStatuses() {
   const flash = useFlash(sp?.get("notice"));
   const { ok, fail } = flash;
   const [rows, setRows] = useState<Row[] | null>(null);
+  const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
   const [confirm, setConfirm] = useState<Row | null>(null);
   const writable = useCanEdit("studentStatuses");
   const load = useCallback(() => {
-    sx<Listing>("/e/studentStatuses")
+    sx<Listing>("/e/studentStatuses", { cache: "no-store" })
       .then((r) => setRows(r.items))
       .catch((e) => fail(errMsg(e, "Could not load student statuses")));
   }, [fail]);
   useEffect(load, [load]);
+  useEffect(() => {
+    const focusSearch = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+      }
+    };
+    window.addEventListener("keydown", focusSearch);
+    return () => window.removeEventListener("keydown", focusSearch);
+  }, []);
 
-  const tree = useMemo(() => {
-    const all = rows ?? [];
-    const top = all.filter((r) => !r.parent);
-    return top.map((p) => ({ row: p, children: all.filter((c) => c.parent === p.id) }));
-  }, [rows]);
+  const tree = useMemo(() => buildStatusTree(rows ?? [], query), [rows, query]);
 
   async function move(siblings: Row[], id: string, delta: number) {
     const ids = siblings.map((r) => r.id);
@@ -70,6 +80,7 @@ export function StudentStatuses() {
           {r.defaultStatus === "Yes" ? <span className="sx-badge sx-badge--blue">Default</span> : null}
         </span>
       </td>
+      <td>{child ? str(rows?.find((candidate) => candidate.id === r.parent)?.name) || "—" : <span className="mh-sa__muted">Top level</span>}</td>
       <td>{str(r.description) || <span className="mh-sa__muted">—</span>}</td>
       <td className="lx-actions">
         {writable ? (
@@ -110,12 +121,32 @@ export function StudentStatuses() {
           {!rows ? (
             <p className="mh-sa__muted">Loading…</p>
           ) : (
-            <div className="mh-sa__table-wrap">
-              <table className="mh-sa__table lx-table sx-tree">
+            <>
+              <form className="lx-filter sx-filter" role="search" onSubmit={(event) => event.preventDefault()}>
+                <label className="mh-sa__field">
+                  <span className="mh-sa__label">Search Student Statuses</span>
+                  <input
+                    ref={searchRef}
+                    className="mh-sa__input"
+                    type="search"
+                    placeholder="Search status name or description"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                  />
+                </label>
+                {query ? (
+                  <button type="button" className="mh-sa__btn" onClick={() => setQuery("")}>
+                    Clear
+                  </button>
+                ) : null}
+              </form>
+              <div className="mh-sa__table-wrap">
+                <table className="mh-sa__table lx-table sx-tree">
                 <thead>
                   <tr>
                     <th className="sx-handle-col" aria-label="Order" />
                     <th>Status Name</th>
+                    <th>Parent Status</th>
                     <th>Description</th>
                     <th className="lx-actions" aria-label="Actions" />
                   </tr>
@@ -132,16 +163,17 @@ export function StudentStatuses() {
                   ])}
                   {!tree.length ? (
                     <tr>
-                      <td colSpan={4} className="mh-sa__empty-cell">
-                        No student statuses have been created yet.
+                      <td colSpan={5} className="mh-sa__empty-cell">
+                        {query ? `No student statuses match “${query}”.` : "No student statuses have been created yet."}
                       </td>
                     </tr>
                   ) : null}
                 </tbody>
-              </table>
-            </div>
+                </table>
+              </div>
+            </>
           )}
-          <p className="lx-hint">Statuses are listed in the order shown to staff. Use the arrows to reorder a status within its parent. Renaming a status updates every student and configuration record that uses it.</p>
+          <p className="lx-hint"><strong>Add Sub-Status</strong> creates a child under the selected top-level status. After saving, it appears indented directly below its parent in this table and becomes available in Student Status selectors used by student profiles and workflows. Use the arrows to reorder a status within its parent. Renaming a status updates every student and configuration record that uses it.</p>
         </section>
         {confirm ? (
           <ConfirmDelete

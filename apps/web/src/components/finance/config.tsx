@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { SaModal } from "@/components/superadmin/shared";
 import { Directory, EntityFormPage, EntityModal, type DirectoryProps } from "../sysconfig/directory";
-import { invalidateMeta, str, sx, type Listing, type Row, type SysForm } from "../sysconfig/kit";
+import { invalidateMeta, str, sx, SysSections, type Listing, type Row, type SysForm } from "../sysconfig/kit";
 import { FIN, FM, errMsg, fmtDay, invalidateFinMeta, useFlash } from "./kit";
 
 type ConfigDef = {
@@ -185,6 +185,32 @@ export const CONFIG: Record<string, ConfigDef> = {
           ),
         },
         { label: "Disbursement Type", render: (r) => str(r.kind) },
+      ],
+    },
+  },
+  "promotion-allocations": {
+    entity: "promotionAllocations",
+    title: "Manage Promotion Allocations",
+    dir: {
+      noun: "promotion allocation",
+      createLabel: "Add Promotion Allocation",
+      createMode: "modal",
+      modalTitle: (r) => (r ? `Edit Promotion Allocation: ${str(r.name)}` : "Add Promotion Allocation"),
+      saveLabel: "Save Promotion Allocation",
+      empty: "No promotion allocation options have been added yet.",
+      filter: { placeholder: "Enter allocation name or description", keys: ["name", "description"] },
+      confirmLabel: "Delete Promotion Allocation",
+      columns: [
+        {
+          label: "Allocation Name",
+          render: (r) => (
+            <>
+              <strong>{str(r.name)}</strong>
+              {sub(str(r.description))}
+            </>
+          ),
+        },
+        { label: "Status", render: (r) => statusBadge(r.status) },
       ],
     },
   },
@@ -439,6 +465,18 @@ export function ConfigForm({ slug, mode }: { slug: string; mode: "create" | "edi
       createTitle={def.form.createTitle}
       editTitle={def.form.editTitle}
       saveLabel={def.form.saveLabel}
+      children={
+        slug === "plan-templates"
+          ? (form) => (
+              <>
+                <div className="mh-sa__notice fn-info">
+                  Payment Plan Fee options come from tuition / ledger types whose Fee Trigger is Payment Plan. <a href={`${FIN}/ledger-types/new?d.name=Payment%20Plan%20Fee&d.code=PLAN&d.trigger=Payment%20Plan`}>Add Payment Plan Fee</a>
+                </div>
+                <SysSections form={form} />
+              </>
+            )
+          : undefined
+      }
     />
   );
 }

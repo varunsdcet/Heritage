@@ -887,6 +887,7 @@ export function DisbursementsCredits() {
 type Awards = {
   items: Array<{ id: string; number: number; name: string; status: string; amount: number; allocated: number; remaining: number }>;
   eligible: Array<{ id: string; name: string; amount: number; eligibility: string }>;
+  configuredPromotions: number;
   options: { statuses: string[]; allocation: string[]; eligibility: string[] };
 };
 
@@ -909,7 +910,12 @@ export function PromotionsAwards() {
   };
   return (
     <>
-      {!data.eligible.length ? <p className="st-warning">This student is not eligible for any promotions or awards.</p> : null}
+      {!data.eligible.length ? (
+        <p className="st-warning">
+          {data.configuredPromotions ? "This student does not currently meet any promotion or award eligibility rules." : "No active promotions or awards are configured."}{" "}
+          <a href="/admin/financial/promotions/new">Add Promotion / Award</a>
+        </p>
+      ) : null}
       <Card
         actions={
           <Btn small tone="primary" onClick={() => setOpen(true)}>
@@ -936,7 +942,7 @@ export function PromotionsAwards() {
           onClose={() => setOpen(false)}
           footer={
             data.eligible.length ? (
-              <Btn tone="primary" disabled={busy} onClick={() => void save()}>
+              <Btn tone="primary" disabled={busy || !o.allocation.length} onClick={() => void save()}>
                 Save Promotion / Award
               </Btn>
             ) : (
@@ -946,9 +952,17 @@ export function PromotionsAwards() {
         >
           <ErrorLine>{saveError}</ErrorLine>
           {!data.eligible.length ? (
-            <p className="st-warning">This student is not eligible for any promotions or awards.</p>
+            <p className="st-warning">
+              {data.configuredPromotions ? "This student does not currently meet any promotion or award eligibility rules." : "No active promotions or awards are configured."}{" "}
+              <a href="/admin/financial/promotions/new">Add Promotion / Award</a>
+            </p>
           ) : (
             <Grid>
+              {!o.allocation.length ? (
+                <p className="st-warning">
+                  No active Promotion Allocation is configured. <a href="/admin/financial/promotion-allocations">Add Promotion Allocation</a>
+                </p>
+              ) : null}
               <F label="Promotion / Award" req>
                 <Sel
                   value={f.promotionId}
@@ -961,7 +975,10 @@ export function PromotionsAwards() {
                 <Sel value={f.status || o.statuses[0]!} onChange={(v) => setF((s) => ({ ...s, status: v }))} options={o.statuses} />
               </F>
               <F label="Promotion Allocation">
-                <Sel value={f.allocation || o.allocation[0]!} onChange={(v) => setF((s) => ({ ...s, allocation: v }))} options={o.allocation} />
+                <Sel value={f.allocation || o.allocation[0] || ""} onChange={(v) => setF((s) => ({ ...s, allocation: v }))} empty="— Select —" options={o.allocation} />
+                <span className="lx-hint">
+                  Options come from <a href="/admin/financial/promotion-allocations">Financial Management → Promotion Allocations</a>.
+                </span>
               </F>
               <F label="Promotion Eligibility">
                 <Sel value={f.eligibility || o.eligibility[0]!} onChange={(v) => setF((s) => ({ ...s, eligibility: v }))} options={o.eligibility} />

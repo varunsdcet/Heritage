@@ -958,8 +958,10 @@ textarea.mh-sa__input {
   position: relative;
   width: min(560px, 100%);
   max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   background: var(--mh-surface);
   border-radius: 16px;
   box-shadow: 0 24px 48px rgba(15, 23, 42, 0.25);
@@ -996,6 +998,7 @@ textarea.mh-sa__input {
   align-items: center;
   padding: 16px 20px;
   border-bottom: 1px solid var(--mh-border);
+  flex: 0 0 auto;
 }
 
 .mh-sa-modal__head h2 {
@@ -1015,7 +1018,12 @@ textarea.mh-sa__input {
 
 .mh-sa-modal__body {
   padding: 20px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
 }
 
 .mh-sa-modal__foot {
@@ -1024,6 +1032,26 @@ textarea.mh-sa__input {
   gap: 10px;
   padding: 14px 20px;
   border-top: 1px solid var(--mh-border);
+  flex: 0 0 auto;
+  background: var(--mh-surface);
+}
+
+@media (max-width: 640px), (max-height: 640px) {
+  .mh-sa-modal {
+    padding: 8px;
+  }
+
+  .mh-sa-modal__panel {
+    max-height: calc(100vh - 16px);
+    max-height: calc(100dvh - 16px);
+    border-radius: 12px;
+  }
+
+  .mh-sa-modal__head,
+  .mh-sa-modal__body,
+  .mh-sa-modal__foot {
+    padding: 12px;
+  }
 }
 
 /* Rich text editor */

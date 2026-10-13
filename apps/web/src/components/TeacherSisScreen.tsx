@@ -8705,7 +8705,7 @@ function ContentRepositoryView({ config }: { config: TeacherScreenConfig }) {
                   <button
                     type="button"
                     className="mh-teacher-repo-course"
-                    onClick={() => router.push(manageHref(course.id))}
+                    onClick={() => router.push(course.workspaceHref || manageHref(course.id))}
                   >
                     <strong>
                       {course.number} — {course.name}
@@ -8716,45 +8716,22 @@ function ContentRepositoryView({ config }: { config: TeacherScreenConfig }) {
                 <span>{course.status}</span>
                 <span>{course.courseTypes}</span>
                 <span className="mh-teacher-schemes-list__actions mh-teacher-repo-actions">
-                  <button type="button" className="mh-teacher-link" onClick={() => router.push(manageHref(course.id))}>
-                    MANAGE
-                  </button>
-                  <button type="button" className="mh-teacher-link" onClick={() => router.push(editHref(course.id))}>
-                    EDIT
-                  </button>
-                  <button
-                    type="button"
-                    className="mh-teacher-link mh-teacher-link--danger"
-                    disabled={live?.busy}
-                    onClick={() => void live?.runAction?.("Delete Content Course", course.id)}
-                  >
-                    DELETE
-                  </button>
-                  <button
-                    type="button"
-                    className="mh-teacher-link"
-                    disabled={live?.busy}
-                    onClick={() => void live?.runAction?.(`PUSH (${course.push})`, course.id)}
-                  >
-                    PUSH ({course.push})
-                  </button>
-                  <button
-                    type="button"
-                    className="mh-teacher-link"
-                    disabled={live?.busy}
-                    onClick={() => void live?.runAction?.(`PULL (${course.pull})`, course.id)}
-                  >
-                    PULL ({course.pull})
-                  </button>
-                  {typeof course.history === "number" ? (
-                    <button
-                      type="button"
-                      className="mh-teacher-link"
-                      disabled={live?.busy}
-                      onClick={() => void live?.runAction?.(`HISTORY (${course.history})`, course.id)}
-                    >
-                      HISTORY ({course.history})
+                  {course.workspaceHref ? (
+                    <button type="button" className="mh-teacher-link" onClick={() => router.push(course.workspaceHref!)}>
+                      USE &amp; EDIT COPY
                     </button>
+                  ) : null}
+                  {data.canManageMaster ? (
+                    <>
+                      <button type="button" className="mh-teacher-link" onClick={() => router.push(manageHref(course.id))}>MANAGE</button>
+                      <button type="button" className="mh-teacher-link" onClick={() => router.push(editHref(course.id))}>EDIT</button>
+                      <button type="button" className="mh-teacher-link mh-teacher-link--danger" disabled={live?.busy} onClick={() => void live?.runAction?.("Delete Content Course", course.id)}>DELETE</button>
+                      <button type="button" className="mh-teacher-link" disabled={live?.busy} onClick={() => void live?.runAction?.(`PUSH (${course.push})`, course.id)}>PUSH ({course.push})</button>
+                      <button type="button" className="mh-teacher-link" disabled={live?.busy} onClick={() => void live?.runAction?.(`PULL (${course.pull})`, course.id)}>PULL ({course.pull})</button>
+                      {typeof course.history === "number" ? (
+                        <button type="button" className="mh-teacher-link" disabled={live?.busy} onClick={() => void live?.runAction?.(`HISTORY (${course.history})`, course.id)}>HISTORY ({course.history})</button>
+                      ) : null}
+                    </>
                   ) : null}
                 </span>
               </div>

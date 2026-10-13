@@ -55,7 +55,7 @@ type Audience = {
   staff?: Person[];
 };
 
-const GROUP_LABEL: Record<string, string> = { instructors: "Instructors", classmates: "Classmates", students: "Students", staff: "Staff" };
+const GROUP_LABEL: Record<string, string> = { instructors: "Faculty", classmates: "Classmates", students: "Students", staff: "Staff" };
 
 type View =
   | "compose"
@@ -439,7 +439,7 @@ export function HccMailViews({
   const listTitle = view === "outbox" || view === "drafts" ? "To" : view === "deleted" ? "From / To" : "From";
   const dateTitle = view === "outbox" ? "Sent" : view === "drafts" ? "Saved" : view === "deleted" ? "Date" : "Received";
   const recipientLabel =
-    role === "admin" ? "Students, instructors & staff" : role === "instructor" ? "Students, colleagues & staff" : "Instructors, classmates & staff";
+    role === "admin" ? "Students, faculty & staff" : role === "instructor" ? "Students, faculty colleagues & staff" : "Faculty, classmates & staff";
   const customFolders = folders.filter((f) => f.kind === "custom");
 
   return shell({

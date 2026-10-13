@@ -2,7 +2,7 @@ import { Router } from "express";
 import { prisma } from "@myheritage/db";
 import { requireAuth, type AuthedRequest } from "../../middleware/auth.js";
 import { sessionJoinUrl } from "../../lib/liveClass.js";
-import { currentStudentId } from "../me/studentAlignment.js";
+import { personStudentIds } from "../me/studentAlignment.js";
 import { currentTerm } from "../../lib/currentTerm.js";
 
 export const calendarRouter: Router = Router();
@@ -21,15 +21,13 @@ calendarRouter.get("/me", requireAuth, async (req, res, next) => {
       });
       sectionIds = sections.map((s) => s.id);
     } else if (!roles.includes("admin") && !roles.includes("registrar")) {
-      const student = await prisma.student.findFirst({
-        where: { id: await currentStudentId(user.institutionId, user.personId), institutionId: user.institutionId },
-      });
-      if (student) {
+      const studentIds = (await personStudentIds(user.institutionId, user.personId)).map((student) => student.id);
+      if (studentIds.length) {
         const enrolments = await prisma.enrolment.findMany({
-          where: { institutionId: user.institutionId, studentId: student.id, status: "enrolled" },
+          where: { institutionId: user.institutionId, studentId: { in: studentIds }, status: "enrolled" },
           select: { sectionId: true },
         });
-        sectionIds = enrolments.map((e) => e.sectionId);
+        sectionIds = [...new Set(enrolments.map((e) => e.sectionId))];
       }
     } else {
       const sections = await prisma.section.findMany({

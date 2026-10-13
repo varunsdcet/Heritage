@@ -12,6 +12,8 @@ import {
 } from "../../lib/bigBlueButton.js";
 import { jitsiMeetUrl } from "../../lib/jitsiMeet.js";
 import { webPublicUrl } from "../../lib/liveClass.js";
+import { isFacultyAssigned } from "../instructor/sectionFaculty.js";
+import { applyAutomaticAttendance, livePresenceCount, recordLiveJoin } from "./liveAttendance.js";
 
 export const liveRouter: Router = Router();
 
@@ -31,7 +33,8 @@ async function resolveRoom(user: SessionClaims, sectionId: string) {
 
   let role: LiveRole | null = null;
   let completed = false;
-  if (section.instructorPersonId === user.personId) role = "moderator";
+  let studentId: string | null = null;
+  if (await isFacultyAssigned(user, section)) role = "moderator";
   else if (user.roles.includes("admin") || user.roles.includes("registrar")) role = "moderator";
   else {
     const enrolled = await prisma.enrolment.findFirst({
@@ -41,12 +44,13 @@ async function resolveRoom(user: SessionClaims, sectionId: string) {
         status: { in: ["enrolled", "completed"] },
         student: { personId: user.personId },
       },
-      select: { id: true, status: true },
+      select: { id: true, status: true, studentId: true },
       orderBy: { status: "desc" },
     });
     if (enrolled) {
       role = "viewer";
       completed = enrolled.status !== "enrolled";
+      studentId = enrolled.studentId;
     }
   }
   if (!role) throw httpError("You are not part of this class", "FORBIDDEN", 403);
@@ -64,6 +68,7 @@ async function resolveRoom(user: SessionClaims, sectionId: string) {
     role,
     completed,
     fullName,
+    studentId,
     meetingId: `heritage-${section.id}`,
     meetingName: `${section.course.code} ${section.code} — ${section.course.title}`,
   };
@@ -116,6 +121,14 @@ liveRouter.get("/sections/:sectionId", requireAuth, async (req, res, next) => {
     const room = await resolveRoom(user, String(req.params.sectionId));
     const { provider, cfg } = resolveProvider(req);
     const info = provider === "bigbluebutton" && cfg ? await meetingInfo(cfg, room.meetingId) : null;
+    await applyAutomaticAttendance(user.institutionId, room.section);
+    const totalEnrolled = await prisma.enrolment.count({
+      where: { institutionId: user.institutionId, sectionId: room.section.id, status: "enrolled" },
+    });
+    const currentlyAttending =
+      provider === "bigbluebutton" && info
+        ? Math.max(0, info.participantCount - info.moderatorCount)
+        : await livePresenceCount(user.institutionId, room.section.id);
     res.json({
       provider,
       sectionId: room.section.id,
@@ -126,6 +139,8 @@ liveRouter.get("/sections/:sectionId", requireAuth, async (req, res, next) => {
       canJoin: !room.completed,
       running: info?.running ?? null,
       participantCount: info?.participantCount ?? null,
+      totalEnrolled,
+      currentlyAttending,
       recording: info?.recording ?? null,
       startedAt: info?.startTime ? new Date(info.startTime).toISOString() : null,
     });
@@ -143,6 +158,9 @@ liveRouter.post("/sections/:sectionId/join", requireAuth, async (req, res, next)
     }
     const { provider, cfg } = resolveProvider(req);
     if (provider === "jitsi") {
+      if (room.role === "viewer" && room.studentId) {
+        await recordLiveJoin(user, { sectionId: room.section.id, studentId: room.studentId, provider });
+      }
       res.json({
         status: "ready",
         provider: "jitsi",
@@ -168,6 +186,9 @@ liveRouter.post("/sections/:sectionId/join", requireAuth, async (req, res, next)
         return;
       }
     }
+    if (room.role === "viewer" && room.studentId) {
+      await recordLiveJoin(user, { sectionId: room.section.id, studentId: room.studentId, provider });
+    }
     res.json({
       status: "ready",
       provider: "bigbluebutton",
@@ -180,6 +201,22 @@ liveRouter.post("/sections/:sectionId/join", requireAuth, async (req, res, next)
         userId: user.accountId,
       }),
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+liveRouter.post("/sections/:sectionId/presence", requireAuth, async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    const room = await resolveRoom(user, String(req.params.sectionId));
+    const { provider } = resolveProvider(req);
+    if (room.role !== "viewer" || !room.studentId || room.completed) {
+      throw httpError("Only an active enrolled student can report live attendance", "FORBIDDEN", 403);
+    }
+    await recordLiveJoin(user, { sectionId: room.section.id, studentId: room.studentId, provider });
+    await applyAutomaticAttendance(user.institutionId, room.section);
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }

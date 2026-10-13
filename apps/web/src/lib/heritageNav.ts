@@ -75,6 +75,7 @@ export const HERITAGE_DEDICATED: Record<string, string> = {
   F19: "/admin/financial/promotions",
   F20: "/admin/financial/funding-sources",
   F21: "/admin/financial/collection-agencies",
+  F22: "/admin/financial/promotion-allocations",
 };
 
 export function heritageHref(screen: string, query?: Record<string, string>) {
@@ -283,6 +284,7 @@ const ROOTS: Array<{ label: string; icon: string; gate?: ModuleGate; count?: str
           ["Manage Promotions", "F19"],
           ["Funding Sources", "F20"],
           ["Collection Agencies", "F21"],
+          ["Promotion Allocations", "F22"],
         ] as const
       ).map(([label, screen]) => ({ label, screen, section: "CONFIGURATIONS", dedicated: true })),
     ],

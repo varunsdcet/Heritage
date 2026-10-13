@@ -58,7 +58,6 @@ import {
   ACTION_STATUSES,
   ASSESSMENT_STATUSES,
   AUDIT_SECTIONS,
-  AWARD_ALLOCATION,
   AWARD_ELIGIBILITY,
   AWARD_STATUSES,
   BADGE_STATUSES,
@@ -115,7 +114,7 @@ export async function studentsMeta(user: SessionClaims) {
   const inst = user.institutionId;
   // Catalogues below read sysconfig entities that are seeded lazily on first use.
   await ensureSeed(user);
-  const [tree, pm, campuses, countries, advisors, agents, admission, flagTemplates, corrCategories, corrTypes, docTemplates, notifTemplates, documentTypes, workflows, badges, tests] = await Promise.all([
+  const [tree, pm, campuses, countries, advisors, agents, admission, flagTemplates, corrCategories, corrTypes, docTemplates, notifTemplates, documentTypes, workflows, badges, tests, promotionAllocations] = await Promise.all([
     statusTree(user),
     programCatalogue(inst),
     campusNames(inst),
@@ -132,6 +131,7 @@ export async function studentsMeta(user: SessionClaims) {
     entityRecords(inst, "workflows"),
     rows(inst, "CM:BADGE"),
     rows(inst, "CM:TEST"),
+    entityRecords(inst, "promotionAllocations"),
   ]);
   const name = (r: { data: Data }) => s(r.data.name);
   return {
@@ -196,7 +196,7 @@ export async function studentsMeta(user: SessionClaims) {
       refundTypes: REFUND_TYPES,
       invoiceItemTypes: INVOICE_ITEM_TYPES,
       awardStatuses: AWARD_STATUSES,
-      awardAllocation: AWARD_ALLOCATION,
+      awardAllocation: promotionAllocations.filter((r) => r.data.status !== "Inactive").map(name).filter(Boolean),
       awardEligibility: AWARD_ELIGIBILITY,
       planSync: PLAN_SYNC,
       planScheduleTypes: PLAN_SCHEDULE_TYPES,

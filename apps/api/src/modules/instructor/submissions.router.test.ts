@@ -28,6 +28,10 @@ const db = vi.hoisted(() => ({
 }));
 
 vi.mock("@myheritage/db", () => ({ prisma: db }));
+vi.mock("./sectionFaculty.js", () => ({
+  isFacultyAssigned: vi.fn(async (user: SessionClaims, section: { instructorPersonId: string }) =>
+    user.roles.includes("admin") || user.roles.includes("registrar") || section.instructorPersonId === user.personId),
+}));
 
 import { errorHandler } from "../../middleware/error-handler.js";
 import { submissionsRouter } from "./submissions.router.js";

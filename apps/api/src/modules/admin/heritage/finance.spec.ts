@@ -11,6 +11,7 @@ export type FinEntityKey =
   | "planTemplates"
   | "taxRates"
   | "disbursementTypes"
+  | "promotionAllocations"
   | "promotions"
   | "fundingSources"
   | "collectionAgencies"
@@ -221,6 +222,19 @@ export const FIN_ENTITIES: Record<FinEntityKey, EntityDef> = {
       f("name", "Type Name", "text", { required: true, lang: true }),
       f("description", "Type Description", "textarea"),
       { key: "kind", label: "Disbursement Type", kind: "radio", options: DISBURSEMENT_KINDS, dflt: DISBURSEMENT_KINDS[0], required: true },
+    ],
+  },
+  promotionAllocations: {
+    screen: "FIN:PROMOTION_ALLOCATION",
+    audit: "F22",
+    label: "Promotion allocation",
+    perm: "financialManagement",
+    search: ["name", "status", "description"],
+    unique: [{ key: "name", label: "Allocation Name", scope: "all" }],
+    fields: [
+      f("name", "Allocation Name", "text", { required: true, lang: true }),
+      sel("status", "Status", ACTIVE),
+      f("description", "Description", "textarea", { hint: "Explain when this allocation option should be selected." }),
     ],
   },
   promotions: {

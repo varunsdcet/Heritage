@@ -13,7 +13,7 @@ import {
   roomFromSessions,
   scheduleTextFromSessions,
 } from "./sectionSchedule.js";
-import { currentStudentId } from "../me/studentAlignment.js";
+import { personStudentIds } from "../me/studentAlignment.js";
 import { enrolmentMark } from "../academic/program-plan.service.js";
 
 export const coursesRouter: Router = Router();
@@ -86,18 +86,16 @@ coursesRouter.get("/me", requireAuth, async (req, res, next) => {
       return;
     }
 
-    const student = await prisma.student.findFirst({
-      where: { id: await currentStudentId(user.institutionId, user.personId), institutionId: user.institutionId },
-    });
-    if (!student) {
+    const studentIds = (await personStudentIds(user.institutionId, user.personId)).map((student) => student.id);
+    if (!studentIds.length) {
       res.json({ items: [] });
       return;
     }
 
-    const enrolments = await prisma.enrolment.findMany({
+    const allEnrolments = await prisma.enrolment.findMany({
       where: {
         institutionId: user.institutionId,
-        studentId: student.id,
+        studentId: { in: studentIds },
         status: { in: ["enrolled", "completed", "waitlisted"] },
       },
       include: {
@@ -116,6 +114,17 @@ coursesRouter.get("/me", requireAuth, async (req, res, next) => {
       },
       orderBy: { createdAt: "desc" },
     });
+    // One login can own several program profiles. Courses belong to the person-facing portal,
+    // so include every profile and collapse accidental duplicate enrolments for the same section.
+    const statusRank: Record<string, number> = { enrolled: 3, waitlisted: 2, completed: 1 };
+    const bySection = new Map<string, (typeof allEnrolments)[number]>();
+    for (const enrolment of allEnrolments) {
+      const previous = bySection.get(enrolment.sectionId);
+      if (!previous || (statusRank[enrolment.status] ?? 0) > (statusRank[previous.status] ?? 0)) {
+        bySection.set(enrolment.sectionId, enrolment);
+      }
+    }
+    const enrolments = [...bySection.values()];
 
     const instructorIds = [...new Set(enrolments.map((e) => e.section.instructorPersonId))];
     const instructors = await prisma.person.findMany({
@@ -126,7 +135,7 @@ coursesRouter.get("/me", requireAuth, async (req, res, next) => {
     const planItems = await prisma.programPlanItem.findMany({
       where: {
         institutionId: user.institutionId,
-        plan: { studentId: student.id, institutionId: user.institutionId },
+        plan: { studentId: { in: studentIds }, institutionId: user.institutionId },
         OR: [
           { sectionId: { in: enrolments.map((e) => e.sectionId) } },
           { courseCode: { in: [...new Set(enrolments.map((e) => e.section.course.code))] } },

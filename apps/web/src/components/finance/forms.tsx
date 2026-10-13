@@ -5,6 +5,7 @@ import {
   ActionModal,
   AgentPicker,
   Badge,
+  FIN,
   Field,
   Modal,
   Money,
@@ -522,14 +523,14 @@ export function DeleteDisbursementModal({ credit, onClose, onDone }: { credit: C
 
 type Eligible = { id: string; name: string; type: string; eligibility: string; amount: number; distribution: string };
 
-export function AwardModal({ onClose, onDone, studentId }: Base & { studentId?: string }) {
+export function AwardModal({ meta, onClose, onDone, studentId }: Base & { studentId?: string }) {
   const [who, setWho] = useState<Who>(null);
   const sid = studentId ?? who?.id ?? "";
   const [eligible, setEligible] = useState<Eligible[] | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [promotionId, setPromotionId] = useState("");
   const [status, setStatus] = useState("Active");
-  const [allocation, setAllocation] = useState("During enrolment only");
+  const [allocation, setAllocation] = useState(meta.promotionAllocations[0]?.name ?? "");
   const [eligibility, setEligibility] = useState("Manual");
   const [note, setNote] = useState("");
   useEffect(() => {
@@ -545,7 +546,7 @@ export function AwardModal({ onClose, onDone, studentId }: Base & { studentId?: 
     <ActionModal
       title="Add Promotion / Award"
       submitLabel="Save Promotion / Award"
-      disabled={!sid || !eligible?.length}
+      disabled={!sid || !eligible?.length || !allocation}
       onClose={onClose}
       onSubmit={async () => onDone((await fin<{ message: string }>(`/student/${sid}/awards`, json("POST", { promotionId, status, allocation, eligibility, note }))).message)}
     >
@@ -553,7 +554,12 @@ export function AwardModal({ onClose, onDone, studentId }: Base & { studentId?: 
       {loadErr ? <div className="mh-sa__notice mh-sa__notice--error">{loadErr}</div> : null}
       {sid && eligible ? (
         <>
-          {!eligible.length ? <div className="mh-sa__notice mh-sa__notice--warning fn-warning">Student is not eligible for any promotions or awards.</div> : null}
+          {!eligible.length ? (
+            <div className="mh-sa__notice mh-sa__notice--warning fn-warning">
+              {meta.promotions.some((p) => p.status === "Active") ? "This student does not currently meet any promotion or award eligibility rules." : "No active promotions or awards are configured."}{" "}
+              <a href={`${FIN}/promotions/new`}>Add Promotion / Award</a>
+            </div>
+          ) : null}
           <Field label="Promotion / Award" required hint={pick ? `${pick.type} · ${money(pick.amount)} · ${pick.distribution}` : undefined}>
             <Select value={promotionId} onChange={setPromotionId} options={eligible.map((e) => ({ id: e.id, name: e.name }))} placeholder="Select a Promotion / Award" />
           </Field>
@@ -561,7 +567,11 @@ export function AwardModal({ onClose, onDone, studentId }: Base & { studentId?: 
             <Select value={status} onChange={setStatus} options={["Active", "Inactive"]} />
           </Field>
           <Field label="Promotion Allocation">
-            <Select value={allocation} onChange={setAllocation} options={["During enrolment only"]} />
+            <Select value={allocation} onChange={setAllocation} options={meta.promotionAllocations.map((option) => option.name)} placeholder="Select a Promotion Allocation" />
+            <span className="lx-hint">
+              {meta.promotionAllocations.length ? "Options come from the Promotion Allocations master. " : "No active options. "}
+              <a href={`${FIN}/promotion-allocations`}>Manage Promotion Allocations</a>
+            </span>
           </Field>
           <Field label="Promotion Eligibility">
             <Select value={eligibility} onChange={setEligibility} options={["Manual", "Automated"]} />
@@ -1098,9 +1108,37 @@ export function DeleteFundModal({ fund, onClose, onDone }: { fund: FundRow; onCl
 /* Invoices                                                             */
 /* ------------------------------------------------------------------ */
 
-export function CreditNotesModal({ invoice, onClose }: { invoice: InvoiceRow; onClose: () => void }) {
+export function CreditNotesModal({ invoice, onClose, onDone, canAdd }: { invoice: InvoiceRow; onClose: () => void; onDone: Done; canAdd: boolean }) {
+  const [date, setDate] = useState(today());
+  const [amount, setAmount] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const addNote = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const out = await fin<{ message: string }>(`/invoices/${invoice.id}/credit-notes`, json("POST", { date, amount: num(amount), note }));
+      onDone(out.message);
+    } catch (e) {
+      setError(errMsg(e, "Could not add the credit note"));
+      setBusy(false);
+    }
+  };
   return (
-    <Modal title={`Credit Notes: Invoice #${invoice.number}`} onClose={onClose}>
+    <Modal
+      title={`Credit Notes: Invoice #${invoice.number}`}
+      onClose={onClose}
+      wide
+      footer={
+        canAdd && invoice.total > 0 ? (
+          <button type="button" className="mh-sa__btn mh-sa__btn--primary" disabled={busy || !amount || !note.trim()} onClick={() => void addNote()}>
+            {busy ? "Adding…" : "Add Credit Note"}
+          </button>
+        ) : undefined
+      }
+    >
+      {error ? <div className="mh-sa__notice mh-sa__notice--error">{error}</div> : null}
       {invoice.creditNotes.length ? (
         <table className="mh-sa__table fn-table">
           <thead>
@@ -1125,6 +1163,19 @@ export function CreditNotesModal({ invoice, onClose }: { invoice: InvoiceRow; on
       ) : (
         <p className="mh-sa__muted">No credit notes were found.</p>
       )}
+      {canAdd && invoice.total > 0 ? (
+        <div className="fn-grid fn-section">
+          <Field label="Credit Note Date" required>
+            <input className="mh-sa__input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </Field>
+          <Field label={`Amount (maximum ${money(invoice.total)})`} required>
+            <input className="mh-sa__input" type="number" min="0.01" max={invoice.total} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          </Field>
+          <Field label="Credit Note" required wide>
+            <textarea className="mh-sa__input" rows={3} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} />
+          </Field>
+        </div>
+      ) : canAdd ? <p className="mh-sa__muted">This invoice has no remaining balance to credit.</p> : null}
     </Modal>
   );
 }
@@ -1363,7 +1414,13 @@ export function InvoiceEditor({ meta, onClose, onDone, invoiceId, studentId, stu
             </Field>
           ) : (
             <Field label="Funding Source" required>
-              <Select value={sourceId} onChange={setSourceId} options={meta.fundingSources} placeholder="Select a Funding Source" disabled={Boolean(loaded)} />
+              {meta.fundingSources.length ? (
+                <Select value={sourceId} onChange={setSourceId} options={meta.fundingSources} placeholder="Select a Funding Source" disabled={Boolean(loaded)} />
+              ) : (
+                <div className="mh-sa__notice mh-sa__notice--warning fn-warning">
+                  No active funding sources are configured. <a href={`${FIN}/funding-sources/new`}>Add Funding Source</a>
+                </div>
+              )}
             </Field>
           )}
           <Field label="Due Date" required>
@@ -1454,7 +1511,7 @@ export function InvoiceEditor({ meta, onClose, onDone, invoiceId, studentId, stu
                 {!items.length ? (
                   <tr>
                     <td colSpan={5} className="mh-sa__empty-cell">
-                      No items yet. Use Add Item to build the invoice.
+                      No items yet. Select an unpaid fee or use Add Item to build the invoice.
                     </td>
                   </tr>
                 ) : null}
@@ -1464,6 +1521,7 @@ export function InvoiceEditor({ meta, onClose, onDone, invoiceId, studentId, stu
               <button type="button" className="mh-sa__btn mh-sa__btn--sm" onClick={() => setAdding(true)}>
                 Add Item
               </button>
+              {type === "Student" && sid ? <a className="mh-sa__btn mh-sa__btn--sm" href={`${FIN}/student?ctx=student:${encodeURIComponent(sid)}&tab=overview`}>Add Fee to Student</a> : null}
               <dl className="fn-totals">
                 <dt>Subtotal</dt>
                 <dd>{money(subtotal)}</dd>

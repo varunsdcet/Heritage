@@ -659,9 +659,7 @@ studentRouter.get("/courses/:sectionId/content", requireAuth, requireRoles("stud
   try {
     const user = (req as AuthedRequest).user;
     const sectionId = String(req.params.sectionId);
-    const student = await prisma.student.findFirst({
-      where: { id: await currentStudentId(user.institutionId, user.personId), institutionId: user.institutionId },
-    });
+    const student = await requireStudent(user, sectionId).catch(() => null);
     if (!student) {
       res.status(404).json({ error: { message: "Student record not found" } });
       return;
@@ -761,9 +759,7 @@ studentRouter.post("/courses/:sectionId/content/:itemId/complete", requireAuth, 
     const user = (req as AuthedRequest).user;
     const sectionId = String(req.params.sectionId);
     const itemId = decodeURIComponent(String(req.params.itemId));
-    const student = await prisma.student.findFirst({
-      where: { id: await currentStudentId(user.institutionId, user.personId), institutionId: user.institutionId },
-    });
+    const student = await requireStudent(user, sectionId).catch(() => null);
     if (!student) {
       res.status(404).json({ error: { message: "Student record not found" } });
       return;
@@ -975,7 +971,7 @@ studentRouter.get("/courses/:sectionId/lms", requireAuth, requireRoles("student"
 studentRouter.post("/courses/:sectionId/quizzes/:activityId/attempts", requireAuth, requireRoles("student"), async (req, res, next) => {
   try {
     const user = (req as AuthedRequest).user;
-    const student = await requireStudent(user);
+    const student = await requireStudent(user, String(req.params.sectionId));
     const result = await submitQuizAttempt(user, student, String(req.params.sectionId), String(req.params.activityId), req.body);
     res.status(201).json(StudentQuizAttemptResponse.parse(result));
   } catch (error) {

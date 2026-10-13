@@ -1,9 +1,10 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button, StatusPill } from "@myheritage/ui";
 import { AdminSisShell } from "@/components/AdminSisShell";
+import { profileHref } from "@/components/students/kit";
 import { api, loadSession, openAuthenticatedPdf, type Session } from "@/lib/api";
 
 type StudentLite = { id: string; studentNumber: string; name: string; programName: string; cohortId: string | null };
@@ -122,6 +123,7 @@ function useLites(session: Session | null) {
 }
 
 export function AdminCohortsView() {
+  const router = useRouter();
   const session = useAdminSession();
   const { students, programs } = useLites(session);
   const [items, setItems] = useState<Array<Record<string, unknown>>>([]);
@@ -139,6 +141,15 @@ export function AdminCohortsView() {
     endDate: "",
   });
   const [gen, setGen] = useState({ studentId: "", cohortId: "" });
+  const [generating, setGenerating] = useState(false);
+  const generatingRef = useRef(false);
+  const [generated, setGenerated] = useState<{
+    studentId: string;
+    studentLabel: string;
+    cohortLabel: string;
+    planId: string;
+    itemCount: number;
+  } | null>(null);
 
   const refresh = useCallback(async () => {
     if (!session) return;
@@ -171,17 +182,33 @@ export function AdminCohortsView() {
 
   async function onGenerate(e: FormEvent) {
     e.preventDefault();
-    if (!session) return;
+    if (!session || generatingRef.current) return;
+    generatingRef.current = true;
+    setGenerating(true);
     setError(null);
+    setNotice(null);
+    setGenerated(null);
     try {
       const res = await api<{ planId: string; itemCount: number }>("/admin/cohorts/generate-plan", {
         method: "POST",
         body: JSON.stringify(gen),
       }, session.accessToken);
+      const student = students.find((item) => item.id === gen.studentId);
+      const cohort = items.find((item) => String(item.id) === gen.cohortId);
+      setGenerated({
+        studentId: gen.studentId,
+        studentLabel: student ? `${student.studentNumber} — ${student.name}` : "Selected student",
+        cohortLabel: cohort ? `${String(cohort.code)} — ${String(cohort.label)}` : "Selected cohort",
+        planId: res.planId,
+        itemCount: res.itemCount,
+      });
       setNotice(`Program plan generated (${res.itemCount} courses).`);
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Generate failed");
+    } finally {
+      generatingRef.current = false;
+      setGenerating(false);
     }
   }
 
@@ -228,8 +255,26 @@ export function AdminCohortsView() {
               ))}
             </select>
           </Field>
-          <Button type="submit">Generate plan</Button>
+          <Button type="submit" disabled={generating || !gen.studentId || !gen.cohortId}>
+            {generating ? "Generating…" : "Generate plan"}
+          </Button>
         </form>
+        <div aria-live="polite">
+          {generating ? <p style={{ margin: 0, color: "var(--mh-text-muted)" }}>Generating the student program plan…</p> : null}
+          {generated ? (
+            <div style={{ border: "1px solid var(--mh-border)", borderRadius: 8, padding: 12, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <div>
+                <strong>Plan ready: {generated.studentLabel}</strong>
+                <div style={{ marginTop: 3, color: "var(--mh-text-muted)", fontSize: 13 }}>
+                  {generated.cohortLabel} · {generated.itemCount} courses
+                </div>
+              </div>
+              <Button type="button" onClick={() => router.push(profileHref(generated.studentId, "plan", "overview"))}>
+                Open program plan
+              </Button>
+            </div>
+          ) : null}
+        </div>
       </Card>
       <Card title={`Cohorts (${items.length})`}>
         <div style={{ display: "grid", gap: 8 }}>

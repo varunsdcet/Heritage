@@ -222,7 +222,7 @@ export function RunReportsList() {
                             {t.description ? <div className="mh-sa__muted rp-list__desc">{t.description}</div> : null}
                           </td>
                           <td className="rp-list__actions">
-                            <Link className="mh-sa__btn mh-sa__btn--sm mh-sa__btn--primary" href={`/admin/reporting/run/${t.id}`}>
+                            <Link className="mh-sa__btn mh-sa__btn--sm mh-sa__btn--primary rp-run-button" href={`/admin/reporting/run/${t.id}`}>
                               Run
                             </Link>
                             <Link className="mh-sa__btn mh-sa__btn--sm" href={`/admin/reporting/run/${t.id}?schedule=1`}>
@@ -566,7 +566,7 @@ export function RunReportScreen({ templateId }: { templateId: string }) {
                 </div>
               ) : null}
               <div className="mh-sa__actions">
-                <button type="button" className="mh-sa__btn mh-sa__btn--primary rp-upper" disabled={busy} onClick={() => void submit()}>
+                <button type="button" className="mh-sa__btn mh-sa__btn--primary rp-run-button rp-upper" disabled={busy} onClick={() => void submit()}>
                   {busy ? "Running…" : "Save / Run Report"}
                 </button>
               </div>
@@ -846,7 +846,7 @@ export function ScheduledReports() {
                         <span className={`mh-sa__pill${s.active ? " mh-sa__pill--ok" : ""}`}>{s.active ? "Active" : "Paused"}</span>
                       </td>
                       <td className="rp-nowrap">
-                        <button type="button" className="mh-sa__btn mh-sa__btn--sm" disabled={busy} onClick={() => void act(() => rp(`/schedules/${s.id}/run-now`, { method: "POST" }))}>
+                        <button type="button" className="mh-sa__btn mh-sa__btn--sm rp-run-button" disabled={busy} onClick={() => void act(() => rp(`/schedules/${s.id}/run-now`, { method: "POST" }))}>
                           Run Now
                         </button>{" "}
                         <button type="button" className="mh-sa__btn mh-sa__btn--sm" disabled={busy} onClick={() => void openEdit(s)}>
@@ -1054,7 +1054,7 @@ export function ManageReportTemplates() {
                           {t.active === "No" ? <span className="mh-sa__pill rp-inactive">Inactive</span> : null}
                         </td>
                         <td className="rp-list__actions">
-                          <button type="button" className="mh-sa__btn mh-sa__btn--sm mh-sa__btn--primary" disabled={t.active === "No"} onClick={() => router.push(`/admin/reporting/run/${t.id}`)}>
+                          <button type="button" className="mh-sa__btn mh-sa__btn--sm mh-sa__btn--primary rp-run-button" disabled={t.active === "No"} onClick={() => router.push(`/admin/reporting/run/${t.id}`)}>
                             Run
                           </button>
                           <button type="button" className="mh-sa__btn mh-sa__btn--sm" onClick={() => router.push(`/admin/reporting/templates/edit?id=${t.id}`)}>

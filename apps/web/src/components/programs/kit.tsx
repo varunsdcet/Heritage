@@ -149,7 +149,7 @@ export function missingRequired(fields: Field[], values: Data) {
 }
 
 export function optionsFor(f: Field, meta: Meta) {
-  return [...(f.dynExtra ?? []), ...(f.options ?? (f.dyn ? (meta.lists[f.dyn] ?? []) : []))];
+  return [...new Set([...(f.dynExtra ?? []), ...(f.options ?? (f.dyn ? (meta.lists[f.dyn] ?? []) : []))])];
 }
 
 export function refOptions(target: RefTarget, meta: Meta, refs?: Refs): Opt[] {

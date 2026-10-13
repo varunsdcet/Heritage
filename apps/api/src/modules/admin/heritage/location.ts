@@ -2,6 +2,7 @@ import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
 import { CAMPUSES, assertPermission, patchStudentMeta, studentMetaMap } from "../superAdmin.service.js";
 import { audit, refs } from "./service.js";
+import { courseRefLists } from "./courses.refs.js";
 
 /* ------------------------------------------------------------------ */
 /* Storage                                                              */
@@ -40,6 +41,11 @@ const parse = (json: string): Data => {
 };
 const s = (v: unknown) => (typeof v === "string" ? v : v === null || v === undefined ? "" : String(v));
 const lc = (v: unknown) => s(v).trim().toLowerCase();
+
+/** Prefer current Course Management records while retaining legacy C19 data as a fallback. */
+export function campusCourseCategories(managed?: string[], legacy?: string[]) {
+  return [...new Set((managed?.length ? managed : legacy) ?? [])].filter(Boolean);
+}
 
 async function list(inst: string, screen: string, contextKey?: string): Promise<Rec[]> {
   const rows = await prisma.heritageRecord.findMany({
@@ -742,8 +748,11 @@ async function ensureSeed(user: SessionClaims) {
 export async function locationMeta(user: SessionClaims) {
   await assertPermission(user, "locationManagement", "view");
   await ensureSeed(user);
-  const r = await refs(user);
-  const courses = await prisma.course.findMany({ where: { institutionId: user.institutionId }, orderBy: { code: "asc" }, select: { id: true, code: true, title: true } });
+  const [r, courseRefs, courses] = await Promise.all([
+    refs(user),
+    courseRefLists(user.institutionId),
+    prisma.course.findMany({ where: { institutionId: user.institutionId }, orderBy: { code: "asc" }, select: { id: true, code: true, title: true } }),
+  ]);
   const strip = (fields: Field[]) => fields.map((f) => ({ ...f, when: f.when ?? undefined }));
   return {
     entities: Object.fromEntries(Object.entries(ENTITIES).map(([k, e]) => [k, { label: e.label, fields: strip(e.fields) }])),
@@ -755,7 +764,7 @@ export async function locationMeta(user: SessionClaims) {
       countries: r.countries ?? [],
       programs: r.programs ?? [],
       pathways: r.pathways ?? [],
-      courseCategories: r.courseCategories ?? [],
+      courseCategories: campusCourseCategories(courseRefs.courseCategories, r.courseCategories),
     },
     courses: courses.map((c) => ({ id: c.id, label: `${c.code} — ${c.title}` })),
     weekdays: WEEKDAYS,

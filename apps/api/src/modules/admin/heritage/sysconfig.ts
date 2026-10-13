@@ -1068,6 +1068,26 @@ export async function saveSettings(user: SessionClaims, key: SettingsKey, body: 
   return { ok: true, message: `${t.label} saved` };
 }
 
+export async function settingsHistory(user: SessionClaims, key: SettingsKey) {
+  await assertPermission(user, "systemConfiguration", "view");
+  const t = SETTINGS[key];
+  const rows = await prisma.heritageAuditEntry.findMany({
+    where: { institutionId: user.institutionId, screenId: t.audit },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
+  return {
+    items: rows.map((row) => ({
+      id: row.id,
+      action: row.action,
+      actor: row.actorName || "System",
+      at: row.createdAt.toISOString(),
+      before: row.beforeJson ? parse(row.beforeJson) : null,
+      after: row.afterJson ? parse(row.afterJson) : null,
+    })),
+  };
+}
+
 /* ------------------------------------------------------------------ */
 /* Document template versions, copy and restore                         */
 /* ------------------------------------------------------------------ */
@@ -1181,8 +1201,30 @@ export async function accessLogs(user: SessionClaims, q: { from?: string; to?: s
   if (q.to && !DATE_RE.test(q.to)) throw httpError(400, "End Datestamp must be a valid date");
   if (q.from && q.to && q.to < q.from) throw httpError(400, "End Datestamp must be on or after the Start Datestamp");
   const needle = lc(q.user);
-  const items = (await list(user.institutionId, ACCESS_LOG_SCREEN))
-    .map((r) => ({ id: r.id, location: s(r.data.location), date: s(r.data.date) || r.createdAt.toISOString(), user: s(r.data.user), outcome: s(r.data.outcome) }))
+  const [scannerRows, configurationRows] = await Promise.all([
+    list(user.institutionId, ACCESS_LOG_SCREEN),
+    prisma.heritageAuditEntry.findMany({
+      where: { institutionId: user.institutionId, screenId: ENTITIES.accessOutcomes.audit },
+      orderBy: { createdAt: "desc" },
+      take: 200,
+    }),
+  ]);
+  const items = [
+    ...scannerRows.map((r) => ({ id: r.id, location: s(r.data.location), date: s(r.data.date) || r.createdAt.toISOString(), user: s(r.data.user), outcome: s(r.data.outcome), source: "Card reader / kiosk" })),
+    ...configurationRows.map((r) => {
+      const after = r.afterJson ? parse(r.afterJson) : {};
+      const before = r.beforeJson ? parse(r.beforeJson) : {};
+      const snapshot = Object.keys(after).length ? after : before;
+      return {
+        id: r.id,
+        location: s(snapshot.campus) || "All campuses",
+        date: r.createdAt.toISOString(),
+        user: r.actorName || "System",
+        outcome: s(snapshot.outcomeType) || r.action,
+        source: "Configuration change",
+      };
+    }),
+  ]
     .filter((r) => (!q.from || r.date.slice(0, 10) >= q.from) && (!q.to || r.date.slice(0, 10) <= q.to))
     .filter((r) => (!q.campus || r.location === q.campus) && (!q.outcome || r.outcome === q.outcome) && (!needle || r.user.toLowerCase().includes(needle)))
     .sort((x, y) => y.date.localeCompare(x.date));

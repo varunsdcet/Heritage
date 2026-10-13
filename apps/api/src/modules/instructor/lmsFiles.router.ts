@@ -6,6 +6,7 @@ import { requireAuth, type AuthedRequest } from "../../middleware/auth.js";
 import { bytesMatchMime, decodeBase64 } from "../../lib/fileSniff.js";
 import { studentCanAccessLmsFile } from "./lmsAccessRestrictions.js";
 import { loadSectionOverlay } from "./lmsQuiz.js";
+import { isFacultyAssigned } from "./sectionFaculty.js";
 
 /** Files attached to course activities (FILE / FOLDER). Stored per section; readable by the section's teacher, admins and its students. */
 export const lmsFilesRouter: Router = Router();
@@ -27,8 +28,7 @@ async function sectionAccess(user: SessionClaims, sectionId: string): Promise<Se
     select: { id: true, instructorPersonId: true },
   });
   if (!section) throw httpError("Course section not found", "NOT_FOUND", 404);
-  if (section.instructorPersonId === user.personId) return { mode: "manage" };
-  if (user.roles.includes("admin") || user.roles.includes("registrar")) return { mode: "manage" };
+  if (await isFacultyAssigned(user, section)) return { mode: "manage" };
   const enrolled = await prisma.enrolment.findFirst({
     where: {
       institutionId: user.institutionId,

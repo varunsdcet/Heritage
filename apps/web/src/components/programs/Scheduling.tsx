@@ -427,6 +427,7 @@ function CourseBlocks({ sessions, collapsed, onEdit, onDelete, showStatus }: { s
                   <thead>
                     <tr>
                       <th>#</th>
+                      <th>Batch</th>
                       <th>Location</th>
                       <th>Method</th>
                       <th>Instructor(s)</th>
@@ -452,6 +453,7 @@ function CourseBlocks({ sessions, collapsed, onEdit, onDelete, showStatus }: { s
                               </div>
                             ))}
                           </td>
+                          <td>{str(s.classPeriod) || "Morning"}</td>
                           <td>{s.location || "Not Set"}</td>
                           <td>{str(s.deliveryMethod) || "Not Set"}</td>
                           <td>{s.instructorNames.join(", ") || "—"}</td>
@@ -964,7 +966,8 @@ function Outline({ detail, reload, notice }: ManageProps) {
             <thead>
               <tr>
                 <th>Course</th>
-                <th>Instructors</th>
+                <th>Batch</th>
+                <th>Faculty</th>
                 <th>Room</th>
                 <th>Dates</th>
                 <th>Schedule</th>
@@ -986,6 +989,7 @@ function Outline({ detail, reload, notice }: ManageProps) {
                       </div>
                     ))}
                   </td>
+                  <td>{str(x.classPeriod) || "Morning"}</td>
                   <td>{x.instructorNames.join(", ") || "—"}</td>
                   <td>{x.location || "Not Set"}</td>
                   <td>{fmtRange(x.effectiveStart, x.effectiveEnd)}</td>
@@ -1143,8 +1147,8 @@ function ScheduleSettings({ id, onSaved }: { id: string; onSaved: () => void }) 
 /* ------------------------------------------------------------------ */
 
 const SESSION_GROUPS: Array<[string, string[]]> = [
-  ["Session Settings", ["linkSchedule", "sessionName", "sessionType", "campus", "classroom", "deliveryMethod", "maxEnrolments", "sameAsClassroom", "selfEnrolment", "feedIn"]],
-  ["Session Instruction & Accesses", ["instructors", "assistants", "guests"]],
+  ["Session Settings", ["linkSchedule", "sessionName", "classPeriod", "sessionType", "campus", "classroom", "deliveryMethod", "maxEnrolments", "sameAsClassroom", "selfEnrolment", "feedIn"]],
+  ["Session Faculty & Accesses", ["instructors", "assistants", "guests"]],
   ["Session Schedule", ["startDate", "endDate", "recalculate", "term", "scheduleType", "weekly"]],
   ["Grading Scheme", ["gradingScheme"]],
   ["Attendance / Participation", ["attendanceGrading", "scannerEnrolment"]],

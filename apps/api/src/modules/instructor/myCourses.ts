@@ -7,6 +7,7 @@ import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
 import { addDays, hmIn, institutionTimezone, ymdIn } from "../../lib/workshopPolicy.js";
 import { REPOSITORY_LIST_PATH, buildRepositoryCatalog, mergeRepositoryList } from "./courseContentScreens.js";
+import { facultySectionIds } from "./sectionFaculty.js";
 
 export const COURSE_STATUS_FILTERS = ["Active & Upcoming Courses", "Active Courses", "Upcoming Courses", "Completed Courses"] as const;
 export const GRADE_SUBMISSION_STATUSES = ["Submission Required", "Pending", "Approved"] as const;
@@ -153,10 +154,11 @@ const byCourse = (a: Offering, b: Offering) => a.code.localeCompare(b.code) || a
 async function myOfferings(user: SessionClaims, sectionIds?: string[]) {
   const { tz, today } = await clock(user.institutionId);
   const canManageAll = user.roles.includes("admin") || user.roles.includes("registrar");
+  const assignedIds = canManageAll ? null : await facultySectionIds(user, sectionIds);
   const rows = await prisma.section.findMany({
     where: {
       institutionId: user.institutionId,
-      ...(canManageAll ? {} : { instructorPersonId: user.personId }),
+      ...(canManageAll ? {} : { id: { in: [...assignedIds!] } }),
       ...(sectionIds ? { id: { in: sectionIds } } : {}),
     },
     include: {
@@ -408,7 +410,7 @@ async function managedRepositories(institutionId: string, courses: Map<string, {
     }
     const course = courses.get(s(d.course));
     if (!course) return [];
-    return [{ id: r.id, number: course.code, name: s(d.name) || course.title, lms: `Moodle · ${s(d.format) || "Topics"} format` }];
+    return [{ id: r.id, courseId: s(d.course), number: course.code, name: s(d.name) || course.title, lms: `Moodle · ${s(d.format) || "Topics"} format` }];
   });
 }
 
@@ -424,13 +426,19 @@ export async function myRepository(user: SessionClaims, q: { course?: string }) 
     overlay = null;
   }
   const mine = new Set(offerings.map((o) => lower(o.code)));
+  const offeringByCourse = new Map(offerings.map((o) => [o.courseId, o]));
+  const offeringByCode = new Map(offerings.map((o) => [lower(o.code), o]));
   const myCourses = new Map(offerings.map((o) => [o.courseId, { code: o.code, title: o.title }]));
   const needle = lower(s(q.course));
   const catalog = mergeRepositoryList(buildRepositoryCatalog(), overlay)
     .filter((c) => mine.has(lower(c.number)))
-    .map((c) => ({ id: c.id, number: c.number, name: c.name, lms: c.lms }));
+    .map((c) => ({ id: c.id, number: c.number, name: c.name, lms: c.lms, sectionId: offeringByCode.get(lower(c.number))?.id ?? "" }));
   const rows = [...(await managedRepositories(user.institutionId, myCourses)), ...catalog]
     .filter((c) => !needle || lower(c.number).includes(needle) || lower(c.name).includes(needle) || lower(`${c.number} ${c.name}`).includes(needle))
+    .map((row) => {
+      const sectionId = "sectionId" in row ? row.sectionId : offeringByCourse.get(row.courseId)?.id ?? "";
+      return { ...row, sectionId, workspaceHref: sectionId ? `/instructor/sections/${sectionId}` : "" };
+    })
     .sort((a, b) => a.number.localeCompare(b.number) || a.name.localeCompare(b.name));
   return { course: s(q.course), rows };
 }

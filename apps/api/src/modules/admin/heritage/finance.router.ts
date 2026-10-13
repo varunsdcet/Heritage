@@ -40,7 +40,7 @@ import {
   updateFund,
   updatePlan,
 } from "./finance.records.js";
-import { courseItems, courseOptions, createInvoice, deleteInvoice, generateDocument, getInvoice, invoicePdf, unpaidFees, updateInvoice } from "./finance.invoices.js";
+import { addCreditNote, courseItems, courseOptions, createInvoice, deleteInvoice, generateDocument, getInvoice, invoicePdf, unpaidFees, updateInvoice } from "./finance.invoices.js";
 import {
   financeMeta,
   listAdjustments,
@@ -115,6 +115,7 @@ r.post("/invoices", handle((u, req) => createInvoice(u, body(req)), 201));
 r.get("/invoices/:id", handle((u, req) => getInvoice(u, p(req, "id"))));
 r.get("/invoices/:id/pdf", pdf((u, req) => invoicePdf(u, p(req, "id"))));
 r.patch("/invoices/:id", handle((u, req) => updateInvoice(u, p(req, "id"), body(req))));
+r.post("/invoices/:id/credit-notes", handle((u, req) => addCreditNote(u, p(req, "id"), body(req)), 201));
 r.delete("/invoices/:id", handle((u, req) => deleteInvoice(u, p(req, "id"))));
 
 r.get("/disbursements", handle((u, req) => listDisbursements(u, req.query)));

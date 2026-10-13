@@ -264,7 +264,7 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
           id: response.interactionId,
           role: "assistant",
           text: response.answer,
-          createdAt: response.createdAt,
+          createdAt: response.createdAt || new Date().toISOString(),
           sources: response.sources,
           suggestedActions: response.suggestedActions,
           analysis: response.analysis,
@@ -510,7 +510,7 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
                 className="mh-ask-chat__input"
               />
             </label>
-            <Button type="submit" variant="ai" disabled={loading || !draft.trim()}>
+            <Button className="mh-ask-chat__send" type="submit" variant="ai" disabled={loading || !draft.trim()}>
               {loading ? "Sending…" : "Send"}
             </Button>
           </div>

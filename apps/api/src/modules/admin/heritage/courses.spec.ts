@@ -77,7 +77,6 @@ export const COURSES_COMPLETED = ["Any", "None", ...Array.from({ length: 20 }, (
 export const TERMS_COMPLETED = ["Any", ...Array.from({ length: 12 }, (_, i) => String(i + 1))] as const;
 export const QUESTION_TYPES = ["Multiple Choice", "Text Comments"] as const;
 export const ANSWER_DEFAULT = ["Not Default", "Default"] as const;
-export const REFERENCING = ["None"] as const;
 export const GRADES_VISIBILITY = ["Evaluation optional", "Evaluation mandatory for final grades release"] as const;
 export const CHANGE_STATUSES = ["Pending Review", "Approved", "Declined"] as const;
 export const CHANGE_TYPES = ["New Session / Offering", "Session / Offering Change", "Course Change"] as const;
@@ -163,6 +162,7 @@ export const EXAM_FIELDS: Field[] = [
 /** `meetings` (weekday + start / finish) is edited by the weekly timetable control on the session form. */
 export const SESSION_FIELDS: Field[] = [
   f("name", "Session Name", "text", { section: SS, hint: "Optional — a session code is generated when left blank." }),
+  sel("classPeriod", "Class / Batch Period", ["Morning", "Afternoon", "Evening", "Flexible"], { section: SS, dflt: "Morning" }),
   f("sessionType", "Session Type", "ref", { ref: "courseTypes", section: SS, placeholder: "-- Select Session Type --" }),
   f("campus", "Campus / Location", "ref", { ref: "campuses", required: true, section: SS }),
   f("classroom", "Classroom", "ref", { ref: "classrooms", section: SS, placeholder: "Not Set" }),
@@ -251,7 +251,11 @@ export const TEXTBOOK_COURSE_FIELDS: Field[] = [
 export const ANSWER_FIELDS: Field[] = [
   f("answer", "Answer", "text", { required: true, lang: true }),
   sel("dflt", "Default", ANSWER_DEFAULT),
-  sel("referencing", "Referencing", REFERENCING),
+  f("referencing", "Referencing", "ref", {
+    ref: "questions",
+    placeholder: "None",
+    hint: "Optionally reference another saved Question Bank question.",
+  }),
   f("score", "Score", "number", { min: -100, max: 100 }),
 ];
 

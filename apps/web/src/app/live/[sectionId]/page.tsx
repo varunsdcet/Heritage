@@ -3,11 +3,12 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { loadSession } from "@/lib/api";
-import { joinLiveClass, type LiveProvider } from "@/lib/liveClass";
+import { joinLiveClass, touchLivePresence, type LiveProvider } from "@/lib/liveClass";
 import { LiveClassPanel } from "@/components/LiveClassPanel";
 import "@/components/liveClass.css";
 
 const RETRY_MS = 10_000;
+const HEARTBEAT_MS = 30_000;
 
 function portalHome(roles: string[]) {
   if (roles.includes("admin") || roles.includes("registrar")) return "/admin";
@@ -24,7 +25,8 @@ function LiveLauncher() {
   const providerParam = searchParams.get("provider");
   const provider: LiveProvider | undefined =
     providerParam === "jitsi" || providerParam === "bigbluebutton" ? providerParam : undefined;
-  const [state, setState] = useState<"joining" | "waiting" | "error" | "left">(left ? "left" : "joining");
+  const [state, setState] = useState<"joining" | "waiting" | "room" | "error" | "left">(left ? "left" : "joining");
+  const [roomUrl, setRoomUrl] = useState("");
   const [title, setTitle] = useState("");
   const [error, setError] = useState("");
   const [home, setHome] = useState("/");
@@ -35,6 +37,11 @@ function LiveLauncher() {
       const res = await joinLiveClass(sectionId, provider);
       setTitle(res.meetingName);
       if (res.status === "ready") {
+        if (res.provider === "jitsi") {
+          setRoomUrl(res.url);
+          setState("room");
+          return;
+        }
         window.location.replace(res.url);
         return;
       }
@@ -75,6 +82,28 @@ function LiveLauncher() {
       if (timer.current) window.clearTimeout(timer.current);
     };
   }, [attempt, from, left, router, sectionId]);
+
+  useEffect(() => {
+    if (state !== "room") return;
+    const ping = () => void touchLivePresence(sectionId, "jitsi").catch(() => undefined);
+    ping();
+    const heartbeat = window.setInterval(ping, HEARTBEAT_MS);
+    return () => window.clearInterval(heartbeat);
+  }, [sectionId, state]);
+
+  if (state === "room" && roomUrl) {
+    return (
+      <main className="mh-live-room">
+        <iframe
+          src={roomUrl}
+          title={title || "Live class"}
+          allow="camera; microphone; fullscreen; display-capture; autoplay"
+          referrerPolicy="no-referrer"
+        />
+        <a className="mh-live-room__leave" href={`${home || "/"}`}>Leave class</a>
+      </main>
+    );
+  }
 
   return (
     <main className="mh-live-launch">

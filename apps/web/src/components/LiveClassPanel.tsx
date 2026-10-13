@@ -91,7 +91,7 @@ export function LiveClassPanel({ sectionId, provider, note }: { sectionId: strin
     : !bbb
     ? "Room ready"
     : running
-      ? `Live now · ${status.participantCount ?? 0} in the room`
+      ? `Live now · ${status.currentlyAttending} attending`
       : moderator
         ? "Not started"
         : "Waiting for your instructor";
@@ -118,6 +118,17 @@ export function LiveClassPanel({ sectionId, provider, note }: { sectionId: strin
               ? "Your class is open. Join to see your instructor's screen, chat and raise your hand."
               : "The room opens as soon as your instructor starts the class. You can click Join and wait there.")}
       </p>
+
+      <div className="mh-live__counts" aria-label="Live class student counts">
+        <div>
+          <strong>{status.totalEnrolled}</strong>
+          <span>Total enrolled students</span>
+        </div>
+        <div>
+          <strong>{status.currentlyAttending}</strong>
+          <span>Currently attending students</span>
+        </div>
+      </div>
 
       <div className="mh-live__actions">
         {canJoin ? (

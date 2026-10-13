@@ -12,6 +12,8 @@ export type LiveRoomStatus = {
   canJoin?: boolean;
   running: boolean | null;
   participantCount: number | null;
+  totalEnrolled: number;
+  currentlyAttending: number;
   recording: boolean | null;
   startedAt: string | null;
 };
@@ -90,6 +92,10 @@ export function fetchLiveStatus(sectionId: string, provider?: LiveProvider) {
 
 export function joinLiveClass(sectionId: string, provider?: LiveProvider) {
   return api<LiveJoinResult>(`/live/sections/${sectionId}/join${providerQuery(provider)}`, { method: "POST", body: "{}" }, token());
+}
+
+export function touchLivePresence(sectionId: string, provider?: LiveProvider) {
+  return api<{ ok: true }>(`/live/sections/${sectionId}/presence${providerQuery(provider)}`, { method: "POST", body: "{}" }, token());
 }
 
 export function endLiveClass(sectionId: string, provider?: LiveProvider) {

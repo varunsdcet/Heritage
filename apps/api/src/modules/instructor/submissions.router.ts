@@ -3,6 +3,7 @@ import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
 import type { AuthedRequest } from "../../middleware/auth.js";
 import { readSubmissionFile } from "../../lib/submissionFiles.js";
+import { isFacultyAssigned } from "./sectionFaculty.js";
 
 /** Student work for one section, readable only by the section's instructor or an admin/registrar. */
 export const submissionsRouter: Router = Router();
@@ -11,17 +12,13 @@ function httpError(message: string, code: string, status: number) {
   return Object.assign(new Error(message), { code, status });
 }
 
-function canManageAnySection(user: SessionClaims) {
-  return user.roles.includes("admin") || user.roles.includes("registrar");
-}
-
 async function sectionForReviewer(user: SessionClaims, sectionId: string) {
   const section = await prisma.section.findFirst({
     where: { id: sectionId, institutionId: user.institutionId },
     select: { id: true, instructorPersonId: true, course: { select: { code: true, title: true } } },
   });
   if (!section) throw httpError("Course section not found", "NOT_FOUND", 404);
-  if (section.instructorPersonId !== user.personId && !canManageAnySection(user)) {
+  if (!(await isFacultyAssigned(user, section))) {
     throw httpError("You do not teach this course section", "FORBIDDEN", 403);
   }
   return section;

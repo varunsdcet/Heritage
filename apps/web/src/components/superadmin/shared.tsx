@@ -2,6 +2,7 @@
 
 import "./superadmin.css";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { AdminSisShell } from "@/components/AdminSisShell";
 import { loadSession, type Session } from "@/lib/api";
@@ -112,6 +113,8 @@ export function SaModal({
   footer?: ReactNode;
   wide?: boolean;
 }) {
+  const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
+  useEffect(() => setPortalRoot(document.body), []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -119,7 +122,8 @@ export function SaModal({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
-  return (
+  if (!portalRoot) return null;
+  return createPortal(
     <div className="mh-sa-modal" role="dialog" aria-modal="true" aria-label={title}>
       <button type="button" className="mh-sa-modal__backdrop" aria-label="Close" onClick={onClose} />
       <div className={`mh-sa-modal__panel${wide ? " mh-sa-modal__panel--wide" : ""}`}>
@@ -132,7 +136,8 @@ export function SaModal({
         <div className="mh-sa-modal__body">{children}</div>
         {footer ? <footer className="mh-sa-modal__foot">{footer}</footer> : null}
       </div>
-    </div>
+    </div>,
+    portalRoot,
   );
 }
 

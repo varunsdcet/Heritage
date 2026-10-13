@@ -277,6 +277,11 @@ export async function createAward(user: SessionClaims, studentId: string, body: 
   if (!eligible.some((e) => e.id === p.id)) throw httpError(400, eligible.length ? `${c.st.name} is not eligible for "${nameOf(p)}".` : "Student is not eligible for any promotions or awards.");
   const status = s(body.status) || "Active";
   if (!(AWARD_STATUSES as readonly string[]).includes(status)) throw httpError(400, `Status "${status}" is not valid`);
+  const allocations = c.cfg.promotionAllocations.filter((a) => a.data.status !== "Inactive");
+  const requestedAllocation = s(body.allocation);
+  const allocationRecord = requestedAllocation ? allocations.find((a) => a.id === requestedAllocation || nameOf(a) === requestedAllocation) : allocations[0];
+  const allocation = allocationRecord ? nameOf(allocationRecord) : "";
+  if (!allocation) throw httpError(400, "Select an active Promotion Allocation");
   const amount = promotionAmount(c, p);
   const note = text(body.note);
   await assertPeriodOpen(user, c.cfg, c.st.campus, new Date(), "This award");
@@ -286,7 +291,7 @@ export async function createAward(user: SessionClaims, studentId: string, body: 
   const awardRow = await add(
     user,
     S.AWARD,
-    { number, promotionId: p.id, promotionName: nameOf(p), type: s(p.data.type), status, allocation: s(body.allocation) || "During enrolment only", eligibility: s(body.eligibility) || s(p.data.eligibility) || "Manual", note, amount, termId: await currentTermId(c.inst), program: c.st.program, creditId: "" },
+    { number, promotionId: p.id, promotionName: nameOf(p), type: s(p.data.type), status, allocation, eligibility: s(body.eligibility) || s(p.data.eligibility) || "Manual", note, amount, termId: await currentTermId(c.inst), program: c.st.program, creditId: "" },
     studentId,
   );
   const credit = await postCredit(c, {

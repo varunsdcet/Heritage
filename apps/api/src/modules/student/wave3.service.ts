@@ -201,7 +201,7 @@ function choiceFromSettings(settings: Record<string, string> | undefined, respon
 }
 
 export async function getStudentCourseLms(user: SessionClaims, sectionId: string) {
-  const student = await requireStudent(user);
+  const student = await requireStudent(user, sectionId);
   const enrolment = await prisma.enrolment.findFirst({
     where: {
       institutionId: user.institutionId,
@@ -392,7 +392,7 @@ export async function submitStudentChoiceResponse(
   activityId: string,
   body: unknown,
 ) {
-  const student = await requireStudent(user);
+  const student = await requireStudent(user, sectionId);
   const course = await getStudentCourseLms(user, sectionId);
   const activity = course.topics.flatMap((topic) => topic.activities).find((item) => item.id === activityId && item.type === "CHOICE");
   if (!activity?.choice) throw httpError("This choice is not available", "NOT_FOUND", 404);

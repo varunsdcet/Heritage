@@ -487,6 +487,19 @@ async function fileRef(inst: string, id: string) {
 
 type Item = Data & { id: string; createdAt: string; updatedAt: string };
 
+/** Converts the legacy literal `None` into the empty value used by reference dropdowns. */
+export function normalizeQuestionReferences<T extends Data>(item: T): T {
+  if (!Array.isArray(item.answers)) return item;
+  return {
+    ...item,
+    answers: item.answers.map((answer) => {
+      if (!answer || typeof answer !== "object" || Array.isArray(answer)) return answer;
+      const row = answer as Data;
+      return s(row.referencing).toLowerCase() === "none" ? { ...row, referencing: "" } : row;
+    }),
+  };
+}
+
 function entityOf(key: string): EntityKey {
   if (!Object.hasOwn(ENTITIES, key)) throw httpError(404, "Unknown Course Management list", "NOT_FOUND");
   return key as EntityKey;
@@ -574,7 +587,8 @@ async function decorate(user: SessionClaims, entity: EntityKey, items: Item[], l
   if (entity === "linkedCourses" || entity === "repository") return items.map((i) => ({ ...i, _course: lk.label("courses", i.course) || "Course no longer in catalogue" }));
   if (entity === "textbooks") return items.map((i) => ({ ...i, _courses: arr(i.courses).map((c) => lk.label("courses", (c as Data).course)).filter(Boolean) }));
   if (entity === "tests") return items.map((i) => ({ ...i, _scheme: lk.label("gradingSchemes", i.gradingScheme), _instructors: arr(i.instructors).map((id) => lk.label("users", id)).filter(Boolean) }));
-  if (entity === "evaluations" || entity === "questions") return items.map((i) => ({ ...i, _createdBy: who(i._createdBy), _updatedBy: who(i._updatedBy) }));
+  if (entity === "evaluations") return items.map((i) => ({ ...i, _createdBy: who(i._createdBy), _updatedBy: who(i._updatedBy) }));
+  if (entity === "questions") return items.map((i) => normalizeQuestionReferences({ ...i, _createdBy: who(i._createdBy), _updatedBy: who(i._updatedBy) }));
   return items;
 }
 
@@ -928,7 +942,7 @@ async function seed(user: SessionClaims) {
     const items: Data[] = [];
     for (const [question, type] of QUESTION_SEED) {
       const answers =
-        type === "Multiple Choice" ? LIKERT.map((answer, i) => ({ id: `a${i + 1}`, answer, dflt: "Not Default", referencing: "None", score: LIKERT.length - i })) : [];
+        type === "Multiple Choice" ? LIKERT.map((answer, i) => ({ id: `a${i + 1}`, answer, dflt: "Not Default", referencing: "", score: LIKERT.length - i })) : [];
       const q = await put(ENTITIES.questions.screen, { type, question, answers });
       items.push({ kind: "question", id: `q-${q.id.slice(0, 8)}`, questionId: q.id });
     }

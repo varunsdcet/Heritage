@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("@myheritage/db", () => ({ prisma: {} }));
 
 import { meetingsFromWeekly } from "./programs.sections.js";
+import { ENTITIES } from "./programs.spec.js";
 import { defaultRateCategory } from "./students.js";
 
 describe("program session timetable", () => {
@@ -12,6 +13,16 @@ describe("program session timetable", () => {
       { day: "Wednesday", start: "13:00", end: "15:00" },
     ]);
     expect(meetingsFromWeekly(null)).toEqual([]);
+  });
+
+  it("offers independent morning, afternoon and evening batch periods", () => {
+    const field = ENTITIES.sessions.fields.find((item) => item.key === "classPeriod");
+    expect(field?.options).toEqual(["Morning", "Afternoon", "Evening", "Flexible"]);
+  });
+
+  it("offers multi-faculty assignment while creating or editing a program", () => {
+    const field = ENTITIES.programs.fields.find((item) => item.key === "instructors");
+    expect(field).toMatchObject({ label: "Faculty Members (Multiple Select)", kind: "people", dflt: [], section: "Program Chair & Lead Accesses" });
   });
 });
 

@@ -284,6 +284,23 @@ export async function updateInvoice(user: SessionClaims, id: string, body: Data)
   return { message: warning ?? "Invoice saved successfully" };
 }
 
+export async function addCreditNote(user: SessionClaims, id: string, body: Data) {
+  await canFinance(user, "edit");
+  const r = await row(user.institutionId, S.INVOICE, id, "Invoice");
+  const current = await getInvoice(user, id);
+  const amount = amountOf(body.amount, "Credit Note Amount");
+  if (amount > current.total + EPS) throw httpError(400, `Credit Note Amount cannot exceed ${cad(Math.max(0, current.total))} (the invoice balance)`);
+  const note = text(body.note, 500);
+  if (!note) throw httpError(400, "Credit Note is required");
+  const date = day(dateAt(body.date ?? today(), "Credit Note Date"));
+  const notes = arr<Data>(r.data.creditNotes);
+  const number = Math.max(0, ...notes.map((n) => num(n.number))) + 1;
+  await save(user, r.id, { ...r.data, creditNotes: [...notes, { number, date, amount, note }] });
+  const sid = s(r.data.studentId);
+  if (sid) await finAudit(user, sid, "Invoice credit note added", `Invoice #${num(r.data.number)}`, { creditNote: `#${number}`, date, amount: cad(amount), note }, r.id);
+  return { message: `Credit note #${number} added successfully` };
+}
+
 export async function deleteInvoice(user: SessionClaims, id: string) {
   await canFinance(user, "edit");
   const r = await row(user.institutionId, S.INVOICE, id, "Invoice");

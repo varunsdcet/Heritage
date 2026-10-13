@@ -36,6 +36,7 @@ import {
   type WorkshopSettings,
 } from "../../../lib/workshopPolicy.js";
 import { CAMPUSES, STUDENT_PROGRAMS, STUDENT_STATUSES, assertPermission, listAccessLevels, studentMetaMap } from "../superAdmin.service.js";
+import { courseRefLists } from "./courses.refs.js";
 import { audit, refs } from "./service.js";
 
 /* ------------------------------------------------------------------ */
@@ -70,6 +71,10 @@ const parseArr = <T>(json: string | null | undefined): T[] => {
   }
 };
 const lower = (v: string) => v.toLowerCase();
+const uniq = (xs: string[]) => [...new Set(xs.filter(Boolean))];
+export function workshopGradingSchemes(managed?: string[], legacy?: string[]) {
+  return uniq([NO_GRADING, ...((managed?.length ? managed : legacy) ?? [])]);
+}
 const statusOf = (raw: string): EnrolmentStatus => {
   const v = lower(raw);
   if (v === "pending") return "pending";
@@ -239,16 +244,16 @@ function isAvailable(x: WorkshopSummary) {
 export async function workshopMeta(user: SessionClaims) {
   await assertPermission(user, "courseManagement", "view");
   const inst = user.institutionId;
-  const [categories, roles, staff, loc, r, levels, workshops] = await Promise.all([
+  const [categories, roles, staff, loc, r, courseRefs, levels, workshops] = await Promise.all([
     prisma.workshopCategory.findMany({ where: { institutionId: inst }, orderBy: { name: "asc" } }),
     prisma.workshopRole.findMany({ where: { institutionId: inst }, orderBy: { name: "asc" } }),
     staffList(inst),
     locationOptions(inst),
     refs(user),
+    courseRefLists(inst),
     listAccessLevels(inst),
     prisma.workshop.findMany({ where: { institutionId: inst }, orderBy: { title: "asc" }, select: { id: true, code: true, title: true } }),
   ]);
-  const uniq = (xs: string[]) => [...new Set(xs.filter(Boolean))];
   return {
     categories: categories.map((c) => ({ id: c.id, name: c.name, abbreviation: c.abbreviation })),
     roles: roles.map((x) => ({ id: x.id, name: x.name, status: x.status })),
@@ -256,7 +261,7 @@ export async function workshopMeta(user: SessionClaims) {
     campuses: loc.campuses,
     classrooms: loc.classrooms,
     workshops: workshops.map((w) => ({ id: w.id, label: `${w.title} (${w.code})` })),
-    gradingSchemes: uniq([NO_GRADING, ...(r.gradingSchemes ?? [])]),
+    gradingSchemes: workshopGradingSchemes(courseRefs.gradingSchemes, r.gradingSchemes),
     accessLevels: uniq([ALL_ACCESSES, ...levels.map((l) => l.name)]),
     studentStatuses: uniq([ALL_STATUSES, ...STUDENT_STATUSES]),
     programs: uniq([ALL_PROGRAMS, ...(r.programs ?? []), ...STUDENT_PROGRAMS.map((p) => p.name)]),
@@ -426,12 +431,13 @@ async function validate(user: SessionClaims, body: WorkshopBody, existingId: str
     for (let n = 2; taken.has(code); n++) code = `${base}-${n}`;
   }
 
-  const [staff, loc, roles, levels, r] = await Promise.all([
+  const [staff, loc, roles, levels, r, courseRefs] = await Promise.all([
     staffList(inst),
     locationOptions(inst),
     prisma.workshopRole.findMany({ where: { institutionId: inst } }),
     listAccessLevels(inst),
     refs(user),
+    courseRefLists(inst),
   ]);
 
   const adminStatus = pick(st.adminStatus, WORKSHOP_STATUSES, "Status", "Active");
@@ -511,7 +517,7 @@ async function validate(user: SessionClaims, body: WorkshopBody, existingId: str
   }
 
   const feeCollection = pick(st.feeCollection, FEE_COLLECTION, "Fee Collection", "Immediately");
-  const gradingSchemes = [NO_GRADING, ...(r.gradingSchemes ?? [])];
+  const gradingSchemes = workshopGradingSchemes(courseRefs.gradingSchemes, r.gradingSchemes);
   const gradingScheme = pick(st.gradingScheme, gradingSchemes, "Grading Scheme", NO_GRADING);
   const campusAccess = pick(st.campusAccess, [ALL_CAMPUSES, ...loc.campuses.map((c) => c.label)], "Campus Access", ALL_CAMPUSES);
   const accessLevels = pick(st.accessLevels, [ALL_ACCESSES, ...levels.map((l) => l.name)], "Access Level", ALL_ACCESSES);

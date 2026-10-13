@@ -687,6 +687,12 @@ export async function createEntity(user: SessionClaims, entity: EntityKey, body:
   const parentKey = parent?.id ?? "";
   let input: Data = body;
   if (entity === "sessions" && parent?.data._kind === "term") input = { ...body, term: parent.data.term };
+  if (entity === "sessions" && parent?.data._kind === "program" && !arr(body.instructors).map(s).filter(Boolean).length) {
+    const programId = s(parent.data.program);
+    const program = programId ? await find(inst, PM.program, programId, "Program") : null;
+    const instructors = program ? arr(program.data.instructors).map(s).filter(Boolean) : [];
+    if (instructors.length) input = { ...input, instructors };
+  }
   const data = await clean(def.fields, input, {}, ctxFor(inst, parentKey));
   await validateCross(inst, entity, data);
   const ctxKey = entity === "programs" ? s(data.faculty) : parentKey;
@@ -895,6 +901,7 @@ async function formatter(inst: string) {
     if (v === null || v === undefined || v === "") return "—";
     if (f.kind === "ref") return names.get(s(v)) ?? "(deleted)";
     if (f.kind === "person") return person.get(s(v)) ?? "(user removed)";
+    if (f.kind === "people") return arr(v).map((id) => person.get(s(id)) ?? "(user removed)").join(", ") || "—";
     if (f.kind === "bool") return v ? "Yes" : "No";
     if (f.kind === "multi") return arr(v).map(s).join(", ") || "—";
     if (f.kind === "rows") return `${arr(v).length} designation(s): ${arr(v).map((r) => s((r as Data).label)).join(", ")}`;

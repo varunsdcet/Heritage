@@ -15,6 +15,7 @@ import {
   reorderEntity,
   restoreTemplate,
   saveSettings,
+  settingsHistory,
   sysMeta,
   templateHistory,
   templateVersion,
@@ -60,6 +61,7 @@ sysconfigRouter.get("/files/:id", handle((req) => downloadFile(user(req), req.pa
 
 sysconfigRouter.get("/settings/:key", handle((req) => getSettings(user(req), settingsOf(req))));
 sysconfigRouter.put("/settings/:key", handle((req) => saveSettings(user(req), settingsOf(req), Body.parse(req.body))));
+sysconfigRouter.get("/settings/:key/history", handle((req) => settingsHistory(user(req), settingsOf(req))));
 
 sysconfigRouter.get("/access-logs", handle((req) => accessLogs(user(req), { from: q(req.query.from), to: q(req.query.to), campus: q(req.query.campus), user: q(req.query.user), outcome: q(req.query.outcome) })));
 

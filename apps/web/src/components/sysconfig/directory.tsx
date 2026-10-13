@@ -10,6 +10,7 @@ import {
   SysSections,
   applies,
   canEditIn,
+  defaultsFromEntries,
   errMsg,
   invalidateMeta,
   json,
@@ -465,7 +466,7 @@ export function EntityFormPage({
   const id = mode === "edit" ? (sp?.get("id") ?? "") : null;
   const parentId = sp?.get("parentId") ?? undefined;
   const flash = useFlash(null);
-  const defaults = useMemo(() => Object.fromEntries([...(sp?.entries() ?? [])].filter(([k]) => k.startsWith("d.")).map(([k, v]) => [k.slice(2), v])), [sp]);
+  const defaults = useMemo(() => defaultsFromEntries(sp?.entries() ?? []), [sp]);
   const form = useSysForm(entity, id, { parentId, defaults });
   const leaving = useRef(false);
   useLeaveGuard(form.dirty && !form.busy && !leaving.current);
@@ -546,14 +547,17 @@ export function SettingsBody({
   embedded,
   children,
   onSaved,
+  showHistory = false,
 }: {
   settingsKey: string;
   embedded?: boolean;
   children?: (form: SettingsForm) => ReactNode;
   onSaved?: (msg: string) => void;
+  showHistory?: boolean;
 }) {
   const form = useSettingsForm(settingsKey);
   const flash = useFlash(null);
+  const [historyRefresh, setHistoryRefresh] = useState(0);
   useLeaveGuard(form.dirty && !form.busy);
   const label = form.meta?.settings[settingsKey]?.save ?? "Save Settings";
   const writable = canEditIn(form.meta);
@@ -567,6 +571,7 @@ export function SettingsBody({
           .then((m) => {
             flash.ok(m);
             onSaved?.(m);
+            setHistoryRefresh((value) => value + 1);
             window.scrollTo({ top: 0, behavior: "smooth" });
           })
           .catch((err) => {
@@ -587,6 +592,39 @@ export function SettingsBody({
           </button>
         ) : null}
       </div>
+      {showHistory ? <SettingsHistory settingsKey={settingsKey} refresh={historyRefresh} /> : null}
     </form>
+  );
+}
+
+type SettingsHistoryItem = { id: string; action: string; actor: string; at: string };
+
+function SettingsHistory({ settingsKey, refresh }: { settingsKey: string; refresh: number }) {
+  const [items, setItems] = useState<SettingsHistoryItem[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    setError(null);
+    void sx<{ items: SettingsHistoryItem[] }>(`/settings/${settingsKey}/history`)
+      .then((out) => setItems(out.items))
+      .catch((reason) => setError(errMsg(reason, "Could not load change history")));
+  }, [settingsKey, refresh]);
+  return (
+    <section className="mh-sa__card sx-settings-history" aria-label="Settings change history">
+      <h3>Change History</h3>
+      {error ? <SaNotice tone="error">{error}</SaNotice> : null}
+      {!items ? (
+        <p className="mh-sa__muted">Loading history…</p>
+      ) : items.length ? (
+        <ul className="hx-audit">
+          {items.map((item) => (
+            <li key={item.id}>
+              <strong>{item.action}</strong> · {item.actor} · {new Date(item.at).toLocaleString()}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mh-sa__muted">No saved changes have been recorded yet.</p>
+      )}
+    </section>
   );
 }

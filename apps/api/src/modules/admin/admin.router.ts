@@ -78,6 +78,12 @@ const CreateEnrolment = z
   })
   .refine((b) => b.studentEmail || b.studentId, { message: "studentEmail or studentId is required", path: ["studentEmail"] });
 
+const CreateBulkEnrolment = z.object({
+  studentIds: z.array(z.string().uuid()).min(1, "Select at least one student").max(100),
+  sectionId: z.string().uuid(),
+  postFee: z.boolean().optional().default(false),
+});
+
 const CreateAssignment = z.object({
   sectionId: z.string().uuid(),
   title: z.string().trim().min(1).max(200),
@@ -574,6 +580,84 @@ adminRouter.get("/enrolments/quote", async (req, res, next) => {
     const studentId = String(req.query.studentId ?? "").trim();
     const student = studentEmail || studentId ? await enrolmentStudent(user.institutionId, { studentEmail, studentId }).catch(() => null) : null;
     res.json(await quoteSectionFee(user.institutionId, sectionId, student?.id ?? null));
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.get("/enrolments/students", async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    const students = await prisma.student.findMany({
+      where: { institutionId: user.institutionId },
+      include: { person: true },
+      orderBy: [{ person: { familyName: "asc" } }, { person: { givenName: "asc" } }, { studentNumber: "asc" }],
+    });
+    res.json({
+      items: students.map((student) => ({
+        id: student.id,
+        studentNumber: student.studentNumber,
+        givenName: student.person.givenName,
+        familyName: student.person.familyName,
+        email: student.person.email,
+        programName: student.programName,
+      })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.post("/enrolments/bulk", async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    const body = CreateBulkEnrolment.parse(req.body);
+    const studentIds = [...new Set(body.studentIds)];
+    const students = await prisma.student.findMany({
+      where: { institutionId: user.institutionId, id: { in: studentIds } },
+      include: { person: true },
+    });
+    const byId = new Map(students.map((student) => [student.id, student]));
+    const results: Array<Record<string, unknown>> = [];
+    const failures: Array<Record<string, unknown>> = [];
+    for (const studentId of studentIds) {
+      const student = byId.get(studentId);
+      if (!student) {
+        failures.push({ studentId, code: "NOT_FOUND", message: "Student profile not found" });
+        continue;
+      }
+      const studentName = `${student.person.givenName} ${student.person.familyName}`.trim();
+      try {
+        const result = await enrolInSection(user, {
+          studentId,
+          sectionId: body.sectionId,
+          postFee: body.postFee,
+          source: "admin.enrolments.bulk",
+          skipExisting: true,
+        });
+        results.push({ ...result, studentName, studentNumber: student.studentNumber });
+      } catch (err) {
+        const issue = err as { code?: string; message?: string };
+        failures.push({
+          studentId,
+          studentName,
+          studentNumber: student.studentNumber,
+          code: issue.code ?? "ENROL_FAILED",
+          message: issue.message ?? "Enrolment failed",
+        });
+      }
+    }
+    res.status(201).json({
+      results,
+      failures,
+      summary: {
+        requested: studentIds.length,
+        enrolled: results.filter((result) => result.status === "enrolled").length,
+        waitlisted: results.filter((result) => result.status === "waitlisted").length,
+        existing: results.filter((result) => result.status === "existing").length,
+        failed: failures.length,
+      },
+    });
   } catch (err) {
     next(err);
   }

@@ -271,7 +271,7 @@ export const invoiceColumns = (withStudent: boolean): Column<InvoiceRow>[] => [
 export function invoiceActions(r: InvoiceRow, h: Pick<H, "open" | "close" | "done" | "meta" | "edit">) {
   return (
     <>
-      <LinkBtn onClick={() => h.open(<CreditNotesModal invoice={r} onClose={h.close} />)}>NOTES({r.creditNotes.length})</LinkBtn>
+      <LinkBtn onClick={() => h.open(<CreditNotesModal invoice={r} onClose={h.close} onDone={h.done} canAdd={h.edit} />)}>NOTES({r.creditNotes.length})</LinkBtn>
       {h.edit ? (
         <>
           <LinkBtn onClick={() => h.open(<InvoiceEditor meta={h.meta} invoiceId={r.id} onClose={h.close} onDone={h.done} />)}>EDIT</LinkBtn>

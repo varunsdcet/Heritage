@@ -28,6 +28,7 @@ export type FinMeta = {
   ledgerTypes: Array<{ id: string; name: string; trigger: string; domestic: number; international: number; overridable: boolean }>;
   paymentMethods: Array<{ id: string; name: string; creditCard: boolean }>;
   disbursementTypes: Opt[];
+  promotionAllocations: Opt[];
   promotions: Array<{ id: string; name: string; type: string; status: string }>;
   fundingSources: Opt[];
   agents: Array<{ id: string; label: string; number: string; last: string }>;

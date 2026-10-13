@@ -53,6 +53,33 @@
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
+
+/* Keep report execution actions visible in every state and on every surface. */
+.rp .rp-run-button {
+  border-color: #1d4ed8;
+  background: #1d4ed8;
+  color: #fff;
+  -webkit-text-fill-color: #fff;
+  box-shadow: 0 2px 6px rgba(29, 78, 216, 0.28);
+}
+.rp .rp-run-button:hover:not(:disabled) {
+  border-color: #1e40af;
+  background: #1e40af;
+  color: #fff;
+  -webkit-text-fill-color: #fff;
+  box-shadow: 0 4px 12px rgba(29, 78, 216, 0.34);
+}
+.rp .rp-run-button:focus-visible {
+  outline: 3px solid rgba(59, 130, 246, 0.38);
+  outline-offset: 2px;
+}
+.rp .rp-run-button:disabled {
+  border-color: #64748b;
+  background: #64748b;
+  color: #fff;
+  -webkit-text-fill-color: #fff;
+  opacity: 1;
+}
 .rp-inactive {
   margin-left: 8px;
   font-size: 11px;

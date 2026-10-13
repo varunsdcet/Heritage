@@ -7,8 +7,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { SaModal, SaNotice } from "@/components/superadmin/shared";
 import { api, loadSession } from "@/lib/api";
 import { FileUpload, StatementEditor, errMsg, str } from "../location/shared";
+import { bodyOf, initialValues } from "./formValues";
 
 export { errMsg, str };
+export { bodyOf, defaultsFromEntries, initialValues } from "./formValues";
 
 /* ------------------------------------------------------------------ */
 /* Types & API                                                          */
@@ -136,7 +138,7 @@ export async function loadRefs(targets: string[]): Promise<Refs> {
   const out: Refs = {};
   await Promise.all(
     targets.map(async (t) => {
-      const r = await sx<Listing>(`/e/${t}`);
+      const r = await sx<Listing>(`/e/${t}`, { cache: "no-store" });
       out[t] = r.items.map((i) => ({ id: i.id, label: labelOf(i), tag: str(i.type || (i.parent ? "child" : "")) }));
     }),
   );
@@ -154,16 +156,6 @@ export function emptyOf(f: Field): unknown {
   if (LIST_KINDS.includes(f.kind)) return [];
   if (f.kind === "file") return null;
   return "";
-}
-
-export function initialValues(fields: Field[], base?: Data): Data {
-  const out: Data = {};
-  for (const f of fields) {
-    if (f.kind === "secret" || f.kind === "password") out[f.key] = "";
-    else out[f.key] = base && f.key in base ? base[f.key] : f.dflt !== undefined ? f.dflt : emptyOf(f);
-  }
-  if (base) for (const k of Object.keys(base)) if (k.startsWith("_has_")) out[k] = base[k];
-  return out;
 }
 
 export function applies(f: Field, values: Data) {
@@ -184,10 +176,6 @@ export function missingRequired(fields: Field[], values: Data) {
       return v === null || v === undefined || String(v).trim() === "";
     })
     .map((f) => f.label);
-}
-
-export function bodyOf(values: Data) {
-  return Object.fromEntries(Object.entries(values).filter(([k]) => !k.startsWith("_has_")));
 }
 
 export function sectionsOf(fields: Field[]) {
@@ -914,6 +902,8 @@ export function useSysForm(entity: string, id: string | null, opts: { parentId?:
   const [busy, setBusy] = useState(false);
   const snapshot = useRef("");
   const defaults = useRef(opts.defaults);
+  defaults.current = opts.defaults;
+  const defaultsKey = JSON.stringify(opts.defaults ?? {});
 
   useEffect(() => {
     if (!meta) return;
@@ -922,7 +912,7 @@ export function useSysForm(entity: string, id: string | null, opts: { parentId?:
       .catch(() => setRefs({}));
     if (id) {
       setValues(null);
-      void sx<Row>(`/e/${entity}/${id}`)
+      void sx<Row>(`/e/${entity}/${id}`, { cache: "no-store" })
         .then((r) => {
           const v = initialValues(fields, r);
           snapshot.current = JSON.stringify(v);
@@ -936,7 +926,7 @@ export function useSysForm(entity: string, id: string | null, opts: { parentId?:
       setRecord(null);
       setValues(v);
     }
-  }, [meta, id, entity, fields]);
+  }, [meta, id, entity, fields, defaultsKey]);
 
   const setValue = useCallback((k: string, v: unknown) => setValues((s) => (s ? { ...s, [k]: v } : s)), []);
 

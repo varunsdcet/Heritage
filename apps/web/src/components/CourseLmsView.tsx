@@ -839,6 +839,7 @@ export function CourseLmsView({ config }: Props) {
           for (const topic of lms.topics) next[topic.id] = true;
           setCollapsed(next);
         }}
+        onExpandAll={() => setCollapsed({})}
         onView={(activity) => go({ tab: "Course", action: "view-activity", aid: activity.id || activity.name })}
         onEditActivity={(activity) => go({ tab: "Course", action: "edit-activity", aid: activity.id || activity.name })}
         onEditSection={(topicId) => go({ tab: "Course", action: "edit-section", sid: topicId })}
@@ -961,6 +962,7 @@ function CourseContentPanel({
   collapsed,
   onToggle,
   onCollapseAll,
+  onExpandAll,
   onView,
   onEditActivity,
   onEditSection,
@@ -972,6 +974,7 @@ function CourseContentPanel({
   collapsed: Record<string, boolean>;
   onToggle: (id: string) => void;
   onCollapseAll: () => void;
+  onExpandAll: () => void;
   onView: (activity: { id?: string; type: string; name: string }) => void;
   onEditActivity: (activity: { id?: string; type: string; name: string }) => void;
   onEditSection: (topicId: string) => void;
@@ -985,12 +988,18 @@ function CourseContentPanel({
   const searchParams = useSearchParams();
   const [aiDraftTopicId, setAiDraftTopicId] = useState<string | null>(() => (searchParams.get("aiDraft") === "1" ? "" : null));
   const [aiCourseOpen, setAiCourseOpen] = useState(() => searchParams.get("aiCourse") === "1");
+  const allCollapsed = topics.length > 0 && topics.every((topic) => collapsed[topic.id]);
 
   return (
     <section className="mh-lms-course">
       <div className="mh-lms-course__toolbar">
-        <button type="button" className="mh-teacher-link" onClick={onCollapseAll}>
-          Collapse all
+        <button
+          type="button"
+          className="mh-teacher-link"
+          onClick={allCollapsed ? onExpandAll : onCollapseAll}
+          disabled={topics.length === 0}
+        >
+          {allCollapsed ? "Expand all" : "Collapse all"}
         </button>
         {editMode ? (
           <button

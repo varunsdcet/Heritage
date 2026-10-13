@@ -164,6 +164,7 @@ export const DEDICATED: Record<string, string> = {
   F19: "/admin/financial/promotions",
   F20: "/admin/financial/funding-sources",
   F21: "/admin/financial/collection-agencies",
+  F22: "/admin/financial/promotion-allocations",
   SF01: "/admin/financial/student?tab=overview",
   SF02: "/admin/financial/student?tab=overview",
   SF03: "/admin/financial/student?tab=transactions",

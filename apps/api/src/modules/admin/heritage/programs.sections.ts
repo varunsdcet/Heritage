@@ -119,6 +119,7 @@ export async function syncSessionSection(user: SessionClaims, rec: SessionRec, s
     ...defaults(SESSION_FIELDS),
     ...before,
     name: s(d.sessionName) || `${scheduleCode ? `${scheduleCode}-` : ""}${number}`,
+    classPeriod: s(d.classPeriod) || s(before.classPeriod) || "Morning",
     sessionType: r.typeIdFor(s(d.deliveryMethod)) || s(before.sessionType),
     deliveryMethod: s(d.deliveryMethod) === "Not Set" ? "" : s(d.deliveryMethod),
     campus,

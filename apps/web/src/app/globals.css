@@ -1271,6 +1271,49 @@ button.mh-admin-table__row {
   flex-shrink: 0;
 }
 
+/* Keep the account controls visible when the fixed sidebar leaves a narrow
+   desktop content area. Lower-priority shortcuts collapse before the profile. */
+@media (max-width: 1450px) and (min-width: 901px) {
+  .mh-sis__header {
+    padding-inline: 20px;
+    gap: 10px;
+  }
+
+  .mh-sis__header-actions {
+    gap: 10px;
+    flex-shrink: 0;
+  }
+
+  .mh-sis__header-actions > .mh-sis__search-wrap {
+    min-width: 130px;
+    width: clamp(130px, 14vw, 210px);
+  }
+
+  .mh-sis__search {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .mh-sis__header-actions > .mh-sis__logout-link,
+  .mh-sis__shortcuts {
+    display: none;
+  }
+
+  .mh-sis__profile {
+    flex-shrink: 0;
+  }
+}
+
+@media (max-width: 1180px) and (min-width: 901px) {
+  .mh-sis__copilot span {
+    display: none;
+  }
+
+  .mh-sis__copilot {
+    padding-inline: 9px;
+  }
+}
+
 .mh-sis__search {
   display: flex;
   align-items: center;
@@ -14555,6 +14598,12 @@ select.mh-teacher-field:focus {
 .mh-ask-chat__chip:hover:not(:disabled) {
   border-color: var(--mh-ai);
   background: var(--mh-ai-soft, rgba(76, 110, 245, 0.08));
+  color: #172554;
+}
+
+.mh-ask-chat__chip:hover:not(:disabled) *,
+.mh-ask-chat__chip:focus-visible:not(:disabled) * {
+  color: inherit !important;
 }
 
 .mh-ask-chat__chip:active:not(:disabled) {
@@ -14567,13 +14616,22 @@ select.mh-teacher-field:focus {
 }
 
 .mh-ask-chat__chip.is-primary {
-  border-color: var(--mh-ai);
-  background: var(--mh-ai);
-  color: var(--mh-surface);
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #ffffff !important;
 }
 
-.mh-ask-chat__chip.is-primary:hover:not(:disabled) {
-  filter: brightness(0.96);
+.mh-ask-chat__chip.is-primary:hover:not(:disabled),
+.mh-ask-chat__chip.is-primary:focus-visible:not(:disabled) {
+  border-color: #1e40af;
+  background: #1e40af;
+  color: #ffffff !important;
+  filter: none;
+}
+
+.mh-ask-chat__chip.is-primary:hover:not(:disabled) *,
+.mh-ask-chat__chip.is-primary:focus-visible:not(:disabled) * {
+  color: #ffffff !important;
 }
 
 .mh-ask-chat__row.is-user .mh-ask-chat__bubble {
@@ -14710,10 +14768,21 @@ select.mh-teacher-field:focus {
 }
 
 .mh-ask-chat__when {
-  display: block;
-  margin: 0 0 6px;
+  display: inline-flex;
+  width: fit-content;
+  margin: 0 0 8px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1e3a8a;
   font-size: 11px;
-  color: var(--mh-text-subtle);
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.mh-ask-chat__row.is-user .mh-ask-chat__when {
+  background: rgba(255, 255, 255, 0.28);
+  color: #ffffff;
 }
 
 .mh-ask-chat__composer-field {
@@ -14744,6 +14813,13 @@ select.mh-teacher-field:focus {
 
 .mh-ask-chat__input:disabled {
   opacity: 0.7;
+}
+
+.mh-ask-chat__send:hover:not(:disabled),
+.mh-ask-chat__send:focus-visible:not(:disabled) {
+  background: #1d4ed8 !important;
+  border-color: #1d4ed8 !important;
+  color: #ffffff !important;
 }
 
 .mh-ask-chat__hint {

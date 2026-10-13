@@ -49,7 +49,7 @@ import {
 import { ADVANCE_CREDIT } from "./finance.spec.js";
 import { auditTrail } from "./students.js";
 import { loadProfile, saveProfile } from "./students.core.js";
-import { AWARD_ALLOCATION, AWARD_ELIGIBILITY, AWARD_STATUSES, INVOICE_ITEM_TYPES, PLAN_FREQUENCIES, PLAN_SCHEDULE_TYPES, PLAN_SYNC, REFUND_TYPES, TAX_DOCUMENTS } from "./students.spec.js";
+import { AWARD_ELIGIBILITY, AWARD_STATUSES, INVOICE_ITEM_TYPES, PLAN_FREQUENCIES, PLAN_SCHEDULE_TYPES, PLAN_SYNC, REFUND_TYPES, TAX_DOCUMENTS } from "./students.spec.js";
 
 /** Ledger-entry routes are nested under a student; the entry must belong to that student. */
 export async function assertEntryOf(user: SessionClaims, studentId: string, entryId: string) {
@@ -378,7 +378,12 @@ export async function awards(user: SessionClaims, id: string) {
         return { id: r.id, number: num(r.data.number), name: s(r.data.name), status: s(r.data.status), allocation: s(r.data.allocation), eligibility: s(r.data.eligibility), note: s(r.data.note), amount: f?.amount ?? num(r.data.amount), allocated: f?.allocated ?? 0, remaining: f?.available ?? 0 };
       }),
     eligible: eligible.map((p) => ({ id: p.id, name: nameOf(p), amount: promotionAmount(c, p.data), eligibility: s(p.data.eligibility) || "Manual" })),
-    options: { statuses: AWARD_STATUSES, allocation: AWARD_ALLOCATION, eligibility: AWARD_ELIGIBILITY },
+    configuredPromotions: c.cfg.promotions.filter((p) => s(p.data.status) === "Active").length,
+    options: {
+      statuses: AWARD_STATUSES,
+      allocation: c.cfg.promotionAllocations.filter((a) => a.data.status !== "Inactive").map(nameOf).filter(Boolean),
+      eligibility: AWARD_ELIGIBILITY,
+    },
   };
 }
 
@@ -390,8 +395,11 @@ export async function addAward(user: SessionClaims, id: string, body: Data) {
   if (!promo) throw httpError(400, "Select a Promotion / Award the student is eligible for");
   const status = s(body.status) || AWARD_STATUSES[0];
   if (!(AWARD_STATUSES as readonly string[]).includes(status)) throw httpError(400, "Promotion / Award Status is not valid");
-  const allocation = s(body.allocation) || AWARD_ALLOCATION[0];
-  if (!(AWARD_ALLOCATION as readonly string[]).includes(allocation)) throw httpError(400, "Promotion Allocation is not valid");
+  const allocations = c.cfg.promotionAllocations.filter((a) => a.data.status !== "Inactive");
+  const requestedAllocation = s(body.allocation);
+  const allocationRecord = requestedAllocation ? allocations.find((a) => a.id === requestedAllocation || nameOf(a) === requestedAllocation) : allocations[0];
+  const allocation = allocationRecord ? nameOf(allocationRecord) : "";
+  if (!allocation) throw httpError(400, "Select an active Promotion Allocation");
   const eligibility = s(body.eligibility) || s(promo.data.eligibility) || AWARD_ELIGIBILITY[0];
   if (!(AWARD_ELIGIBILITY as readonly string[]).includes(eligibility)) throw httpError(400, "Promotion Eligibility is not valid");
   const amount = promotionAmount(c, promo.data);

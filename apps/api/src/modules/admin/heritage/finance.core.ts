@@ -162,7 +162,7 @@ export async function nextNumber(inst: string, kind: string): Promise<number> {
 export type Config = Record<FinEntityKey, Rec[]> & { byId: Map<string, Rec> };
 
 export async function loadConfig(inst: string): Promise<Config> {
-  const keys: FinEntityKey[] = ["lockouts", "ledgerTypes", "ledgerCategories", "paymentMethods", "rateCategories", "planTemplates", "taxRates", "disbursementTypes", "promotions", "fundingSources", "collectionAgencies", "agents"];
+  const keys: FinEntityKey[] = ["lockouts", "ledgerTypes", "ledgerCategories", "paymentMethods", "rateCategories", "planTemplates", "taxRates", "disbursementTypes", "promotionAllocations", "promotions", "fundingSources", "collectionAgencies", "agents"];
   const lists = await Promise.all(keys.map((k) => entityRecords(inst, k)));
   const out = Object.fromEntries(keys.map((k, i) => [k, lists[i]])) as Record<FinEntityKey, Rec[]>;
   const byId = new Map<string, Rec>();

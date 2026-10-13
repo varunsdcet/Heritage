@@ -92,6 +92,7 @@ export async function financeMeta(user: SessionClaims) {
       .sort((a, b) => a.name.localeCompare(b.name)),
     paymentMethods: cfg.paymentMethods.map((m) => ({ id: m.id, name: nameOf(m), creditCard: Boolean(m.data.creditCard) })).sort((a, b) => a.name.localeCompare(b.name)),
     disbursementTypes: list(cfg.disbursementTypes),
+    promotionAllocations: list(cfg.promotionAllocations.filter((a) => a.data.status !== "Inactive")),
     promotions: cfg.promotions.map((p) => ({ id: p.id, name: nameOf(p), type: s(p.data.type), status: s(p.data.status) })),
     fundingSources: cfg.fundingSources.filter((f) => f.data.status !== "Inactive").map((f) => ({ id: f.id, name: nameOf(f) })),
     agents: cfg.agents.map((a) => ({ id: a.id, label: agentLabel(a), number: s(a.data.agentNumber), last: s(a.data.lastName) })),

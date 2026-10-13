@@ -6,6 +6,7 @@ import { generateWithAi } from "../../lib/ask.js";
 import { assertPermission } from "../admin/superAdmin.service.js";
 import { S, s, settingsOf } from "../admin/heritage/courses.js";
 import { StoryboardSlide, normalizeStoryboard, sanitizeLessonHtml } from "./aiDraftContent.js";
+import { isFacultyAssigned } from "./sectionFaculty.js";
 
 export const AiDraftRequest = z.object({
   path: z.string().min(1),
@@ -55,7 +56,7 @@ export async function loadSectionForDraft(user: SessionClaims, path: string) {
   const staff = user.roles.includes("admin") || user.roles.includes("registrar");
   if (staff) {
     await assertPermission(user, "courseManagement", "edit");
-  } else if (section.instructorPersonId !== user.personId) {
+  } else if (!(await isFacultyAssigned(user, section))) {
     throw Object.assign(new Error("You do not teach this section"), { status: 403, code: "FORBIDDEN" });
   }
   return section;

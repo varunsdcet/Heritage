@@ -1835,6 +1835,8 @@ export type TeacherScreenConfig = {
     perPage?: string;
     perPageOptions?: Array<{ label: string; value: string }>;
     page?: string;
+    canManageMaster?: boolean;
+    _assignmentScopeResolved?: boolean;
     courses?: Array<{
       id: string;
       number: string;
@@ -1845,6 +1847,7 @@ export type TeacherScreenConfig = {
       push: number;
       pull: number;
       history?: number;
+      workspaceHref?: string;
     }>;
   };
   pendingGrades?: {

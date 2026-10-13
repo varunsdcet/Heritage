@@ -159,13 +159,18 @@ function AccessLogs({ onClose }: { onClose: () => void }) {
   const [f, setF] = useState({ from: "", to: "", campus: "", user: "", outcome: "" });
   const [rows, setRows] = useState<Row[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const search = () => {
+  const search = useCallback(() => {
     setErr(null);
     const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v));
     sx<Listing>(`/access-logs?${qs.toString()}`)
       .then((r) => setRows(r.items))
       .catch((e) => setErr(errMsg(e, "Search failed")));
-  };
+  }, [f]);
+  useEffect(() => {
+    search();
+    // Load the latest log immediately; filter changes are applied by Search Logs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   return (
     <SaModal
       title="Campus Access Logs"
@@ -227,6 +232,7 @@ function AccessLogs({ onClose }: { onClose: () => void }) {
               <th>Campus / Building</th>
               <th>User</th>
               <th>Outcome</th>
+              <th>Source</th>
             </tr>
           </thead>
           <tbody>
@@ -236,11 +242,12 @@ function AccessLogs({ onClose }: { onClose: () => void }) {
                 <td>{str(r.location)}</td>
                 <td>{str(r.user)}</td>
                 <td>{str(r.outcome)}</td>
+                <td>{str(r.source)}</td>
               </tr>
             ))}
             {!rows.length ? (
               <tr>
-                <td colSpan={4} className="mh-sa__empty-cell">
+                <td colSpan={5} className="mh-sa__empty-cell">
                   No access logs found for this search. Logs appear here once card readers or kiosks start reporting scans.
                 </td>
               </tr>
@@ -313,7 +320,7 @@ function TabBody({ tab }: { tab: Tab }) {
     case "password":
       return <SettingsBody settingsKey="password" embedded />;
     case "mfa":
-      return <SettingsBody settingsKey="mfa" embedded />;
+      return <SettingsBody settingsKey="mfa" embedded showHistory />;
     case "questions":
       return <SecurityQuestions />;
     case "access":

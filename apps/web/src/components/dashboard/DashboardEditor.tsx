@@ -19,6 +19,10 @@ import { RichTextEditor } from "./RichTextEditor";
 
 type Notice = { tone: "success" | "error"; text: string } | null;
 
+function facultyLabel(value: string) {
+  return value.replace(/\bInstructors?\b/gi, "Faculty");
+}
+
 function PencilIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -307,7 +311,7 @@ function BlockModal({
               <SaField label="Select Access Levels" hint="Hold CTRL (⌘ on Mac) + Click to select multiple">
                 <select className="mh-sa__input mh-dash-ed__multi" multiple value={v.accessLevels} onChange={(e) => set("accessLevels", selected(e))}>
                   {options.accessLevels.map((l) => (
-                    <option key={l}>{l}</option>
+                    <option key={l} value={l}>{facultyLabel(l)}</option>
                   ))}
                 </select>
               </SaField>

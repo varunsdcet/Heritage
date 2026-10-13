@@ -12,6 +12,7 @@ import { assertSeat } from "../admin/heritage/enrolment.js";
 import { DEFAULT_TZ } from "../courses/sectionSchedule.js";
 import { sectionOfferings, type Offering } from "../courses/sectionOffering.js";
 import { sectionTerm, UNASSIGNED_TERM } from "../../lib/sectionTerm.js";
+import { myRepository } from "./myCourses.js";
 import { buildAddProgramScreenForm } from "./addProgramForm.js";
 import { buildAddSessionScreenForm } from "./addSessionForm.js";
 import {
@@ -170,6 +171,7 @@ import { buildCourseApprovalReview, buildGradeCorrectionReview } from "./approva
 import { buildCourseBackups, buildCourseGroupsList, saveCourseGroup } from "./courseCatalogScreens.js";
 import { FLAG_PRIORITIES, FLAG_TYPES, updateInstructorFlag, validateFlagFields } from "./instructorFlags.js";
 import { markNotificationsRead, notificationPagination } from "../notifications/inbox.js";
+import { facultySectionIds } from "./sectionFaculty.js";
 
 export type InstructorLivePayload = Record<string, unknown>;
 
@@ -309,7 +311,8 @@ export async function assertInstructorSectionAccess(user: SessionClaims, path: s
     throw Object.assign(new Error("Course section not found"), { status: 404, code: "NOT_FOUND" });
   }
   if (user.roles.includes("admin") || user.roles.includes("registrar")) return;
-  if (sections.some((s) => s.instructorPersonId !== user.personId)) {
+  const assigned = await facultySectionIds(user, sections.map((section) => section.id));
+  if (sections.some((section) => !assigned.has(section.id))) {
     throw Object.assign(new Error("You do not teach this course section"), { status: 403, code: "FORBIDDEN" });
   }
 }
@@ -324,10 +327,18 @@ async function loadCtx(user: SessionClaims, path?: string): Promise<InstructorCt
   });
   const term = termsRaw[0] ?? null;
   const viewSectionId = adminSectionId(user, path);
+  const canManageAll = user.roles.includes("admin") || user.roles.includes("registrar");
+  const assignedIds = canManageAll ? null : await facultySectionIds(user);
   const sectionsRaw = await prisma.section.findMany({
     where: {
       institutionId: user.institutionId,
-      ...(viewSectionId ? { OR: [{ instructorPersonId: user.personId }, { id: viewSectionId }] } : { instructorPersonId: user.personId }),
+      ...(canManageAll
+        ? viewSectionId
+          ? { id: viewSectionId }
+          : { instructorPersonId: user.personId }
+        : viewSectionId
+          ? { id: { in: [...new Set([...assignedIds!, viewSectionId])] } }
+          : { id: { in: [...assignedIds!] } }),
     },
     include: {
       course: true,
@@ -4968,8 +4979,10 @@ function mergeOverlayRows(
     };
   }
 
-  const repo = next.contentRepository as { courses?: RepositoryCourseRecord[] } | undefined;
-  if (repo && Array.isArray(repo.courses)) {
+  const repo = next.contentRepository as
+    | { courses?: RepositoryCourseRecord[]; _assignmentScopeResolved?: boolean }
+    | undefined;
+  if (repo && Array.isArray(repo.courses) && !repo._assignmentScopeResolved) {
     const courses = mergeRepositoryList(repo.courses, overlay);
     next = {
       ...next,
@@ -6528,8 +6541,26 @@ async function buildAddTextbookScreen(ctx: InstructorCtx, path: string): Promise
 }
 
 async function buildContentRepositoryScreen(ctx: InstructorCtx): Promise<InstructorLivePayload> {
-  const overlay = await loadScreenOverlay(ctx.user.institutionId, REPOSITORY_LIST_PATH);
-  return buildContentRepositoryList(overlay);
+  const [overlay, assigned] = await Promise.all([
+    loadScreenOverlay(ctx.user.institutionId, REPOSITORY_LIST_PATH),
+    myRepository(ctx.user, {}),
+  ]);
+  const payload = buildContentRepositoryList(overlay);
+  const links = new Map(assigned.rows.map((row) => [row.number.trim().toLowerCase(), row.workspaceHref]));
+  const canManageMaster = ctx.user.roles.includes("admin") || ctx.user.roles.includes("registrar");
+  const courses = payload.contentRepository.courses
+    .map((course) => ({ ...course, workspaceHref: links.get(course.number.trim().toLowerCase()) || "" }))
+    .filter((course) => canManageMaster || Boolean(course.workspaceHref));
+  return {
+    ...payload,
+    contentRepository: {
+      ...payload.contentRepository,
+      resultsLabel: `Results: ${courses.length}`,
+      canManageMaster,
+      _assignmentScopeResolved: true,
+      courses,
+    },
+  };
 }
 
 async function buildCreateContentCourseScreen(ctx: InstructorCtx, path: string): Promise<InstructorLivePayload> {

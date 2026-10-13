@@ -38,6 +38,16 @@ registerSeed("fin-1", async (user: SessionClaims) => {
   if (await entityIsEmpty(inst, "agents")) for (const a of SEED_AGENTS) await seedRecord(user, "agents", a);
 });
 
+registerSeed("fin-promotion-allocations-1", async (user: SessionClaims) => {
+  if (await entityIsEmpty(user.institutionId, "promotionAllocations")) {
+    await seedRecord(user, "promotionAllocations", {
+      name: "During enrolment only",
+      status: "Active",
+      description: "Allocate the promotion while the student is enrolled.",
+    });
+  }
+});
+
 /** Records (of any Financial Management store) whose data matches. */
 async function usage(inst: string, screen: string, match: (d: Record<string, unknown>) => boolean) {
   return (await rows(inst, screen)).filter((r) => match(r.data)).length;
@@ -117,6 +127,20 @@ registerEntityHooks({
       if (n) throw conflict(`"${s(rec.data.name)}" is used by ${plural(n, "disbursement")} and cannot be deleted.`);
       const promos = (await entityRecords(user.institutionId, "promotions")).filter((p) => p.data.disbursementType === rec.id);
       if (promos.length) throw conflict(`"${s(rec.data.name)}" is the disbursement type of ${plural(promos.length, "promotion")} (${promos.map((p) => s(p.data.name)).join(", ")}).`);
+    },
+  },
+  promotionAllocations: {
+    validate: async (user, data, selfId) => {
+      if (!selfId) return;
+      const current = (await entityRecords(user.institutionId, "promotionAllocations")).find((r) => r.id === selfId);
+      const oldName = s(current?.data.name);
+      if (!oldName || oldName === s(data.name)) return;
+      const n = await usage(user.institutionId, S.AWARD, (d) => d.allocation === oldName);
+      if (n) throw conflict(`"${oldName}" is used by ${plural(n, "student award")} and cannot be renamed. Create a new option and set this one to Inactive instead.`);
+    },
+    beforeDelete: async (user, rec) => {
+      const n = await usage(user.institutionId, S.AWARD, (d) => d.allocation === rec.data.name);
+      if (n) throw conflict(`"${s(rec.data.name)}" is used by ${plural(n, "student award")} and cannot be deleted. Set it to Inactive instead.`);
     },
   },
   promotions: {

@@ -153,7 +153,7 @@ export function MyCourseRepository() {
   const sp = useSearchParams();
   const applied = sp?.get("course") ?? "";
   const [course, setCourse] = useState(applied);
-  const { data, error, setError } = useMc<{ course: string; rows: Array<{ id: string; number: string; name: string; lms: string }> }>(
+  const { data, error, setError } = useMc<{ course: string; rows: Array<{ id: string; number: string; name: string; lms: string; workspaceHref: string }> }>(
     `/repository${qs({ course: applied })}`,
     "Could not search the repository",
   );
@@ -185,11 +185,12 @@ export function MyCourseRepository() {
                 <tr>
                   <th>Course Name / Number</th>
                   <th>LMS</th>
+                  <th aria-label="Actions" />
                 </tr>
               </thead>
               <tbody>
                 {!data?.rows.length ? (
-                  <TableState cols={2} loading={!data} error={error} empty="No courses were found in the repository." />
+                  <TableState cols={3} loading={!data} error={error} empty="No courses were found in the repository." />
                 ) : (
                   data.rows.map((r) => (
                     <tr key={r.id}>
@@ -198,6 +199,13 @@ export function MyCourseRepository() {
                         <div className="mh-sa__sub">{r.number}</div>
                       </td>
                       <td>{r.lms}</td>
+                      <td className="ur-nowrap">
+                        {r.workspaceHref ? (
+                          <Link className="mh-sa__btn mh-sa__btn--sm" href={r.workspaceHref}>
+                            Use &amp; edit course copy
+                          </Link>
+                        ) : null}
+                      </td>
                     </tr>
                   ))
                 )}
