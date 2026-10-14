@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { prisma } from "@myheritage/db";
-import { hashPassword } from "@myheritage/auth";
+import { hashPassword, requireApproval } from "@myheritage/auth";
 import type { SessionClaims } from "@myheritage/contracts";
 import {
   LIFECYCLE_STATUSES,
@@ -172,6 +172,8 @@ import { buildCourseBackups, buildCourseGroupsList, saveCourseGroup } from "./co
 import { FLAG_PRIORITIES, FLAG_TYPES, updateInstructorFlag, validateFlagFields } from "./instructorFlags.js";
 import { markNotificationsRead, notificationPagination } from "../notifications/inbox.js";
 import { facultySectionIds } from "./sectionFaculty.js";
+import { generateWithAi } from "../../lib/ask.js";
+import { assertInstitutionAiAllowed } from "../ai/governance-policy.js";
 
 export type InstructorLivePayload = Record<string, unknown>;
 
@@ -280,7 +282,11 @@ function letterFromPct(p: number | null) {
 /** Course Management admins open any section's course workspace (View Course) through the instructor screens. */
 function adminSectionId(user: SessionClaims, path?: string) {
   if (!path || !(user.roles.includes("admin") || user.roles.includes("registrar"))) return null;
-  return /^\/instructor\/sections\/([0-9a-z-]{36})(?:[/?]|$)/i.exec(path)?.[1] ?? null;
+  const workspace = /^\/instructor\/sections\/([0-9a-z-]{36})(?:[/?]|$)/i.exec(path)?.[1];
+  if (workspace) return workspace;
+  const { query } = parseScreenQuery(path);
+  const requested = (query.get("sectionId") || query.get("view") || "").trim();
+  return SECTION_ID_RE.test(requested) ? requested : null;
 }
 
 const SECTION_ID_RE = /^[0-9a-z-]{36}$/i;
@@ -328,6 +334,7 @@ async function loadCtx(user: SessionClaims, path?: string): Promise<InstructorCt
   const term = termsRaw[0] ?? null;
   const viewSectionId = adminSectionId(user, path);
   const canManageAll = user.roles.includes("admin") || user.roles.includes("registrar");
+  const needsAdminSectionPicker = canManageAll && Boolean(path?.toLowerCase().includes("attendance"));
   const assignedIds = canManageAll ? null : await facultySectionIds(user);
   const sectionsRaw = await prisma.section.findMany({
     where: {
@@ -335,7 +342,9 @@ async function loadCtx(user: SessionClaims, path?: string): Promise<InstructorCt
       ...(canManageAll
         ? viewSectionId
           ? { id: viewSectionId }
-          : { instructorPersonId: user.personId }
+          : needsAdminSectionPicker
+            ? {}
+            : { instructorPersonId: user.personId }
         : viewSectionId
           ? { id: { in: [...new Set([...assignedIds!, viewSectionId])] } }
           : { id: { in: [...assignedIds!] } }),
@@ -388,11 +397,21 @@ async function loadCtx(user: SessionClaims, path?: string): Promise<InstructorCt
     ),
   );
   const ctxSectionIds = sectionsRaw.map((s) => s.id);
+  const today = ymdIn(new Date(), await institutionTimezone(user.institutionId));
+  const activeSectionIds = sectionsRaw
+    .filter((section) => {
+      const offeringEnd = offerings.get(section.id)?.endsOn;
+      const termEnd = section.term?.endsOn ? String(section.term.endsOn).slice(0, 10) : "";
+      return !(offeringEnd || termEnd) || (offeringEnd || termEnd) >= today;
+    })
+    .map((section) => section.id);
   const draftGradeCount = await prisma.gradeItem.count({
     where: {
       institutionId: user.institutionId,
       status: "draft",
-      assignment: { sectionId: { in: ctxSectionIds } },
+      score: { not: null },
+      enrolment: { status: "enrolled" },
+      assignment: { sectionId: { in: activeSectionIds } },
     },
   });
 
@@ -2618,18 +2637,17 @@ async function sendInstructorMessage(ctx: InstructorCtx, rowKey?: string) {
   }
   if (!body) throw Object.assign(new Error("Message body required"), { status: 400 });
 
-  let thread = threadId
-    ? await prisma.messageThread.findFirst({
-        where: { id: threadId, institutionId: ctx.user.institutionId },
-      })
-    : null;
-
-  if (!thread && ctx.threads[0]) {
-    thread = await prisma.messageThread.findFirst({
-      where: { id: ctx.threads[0].id, institutionId: ctx.user.institutionId },
+  if (!threadId) {
+    throw Object.assign(new Error("Choose a message thread before sending"), {
+      code: "VALIDATION_ERROR",
+      status: 400,
     });
   }
-  if (!thread) throw Object.assign(new Error("No message thread available"), { status: 400 });
+
+  const thread = await prisma.messageThread.findFirst({
+    where: { id: threadId, institutionId: ctx.user.institutionId },
+  });
+  if (!thread) throw Object.assign(new Error("Message thread not found"), { code: "NOT_FOUND", status: 404 });
 
   let participantIds: string[] = [];
   try {
@@ -3322,7 +3340,7 @@ function buildStatusFilter(ctx: InstructorCtx): InstructorLivePayload {
   };
 }
 
-function buildQuestionGenerator(ctx: InstructorCtx): InstructorLivePayload {
+function buildQuestionGenerator(ctx: InstructorCtx, overlay?: Record<string, unknown> | null): InstructorLivePayload {
   const sec = primarySection(ctx);
   const assignment = sec?.assignments[0];
   const topic = assignment?.title
@@ -3331,7 +3349,7 @@ function buildQuestionGenerator(ctx: InstructorCtx): InstructorLivePayload {
       ? `${sec.courseCode} · ${sec.courseTitle}`
       : "Course fundamentals";
   const courseLabel = sec ? `${sec.courseCode} ${sec.courseTitle}` : "your course";
-  const questions = [
+  const defaultQuestions = [
     {
       id: "q1",
       prompt: `Which statement best describes a core learning outcome for ${courseLabel}?`,
@@ -3385,6 +3403,8 @@ function buildQuestionGenerator(ctx: InstructorCtx): InstructorLivePayload {
       ],
     },
   ];
+  const stored = Array.isArray(overlay?.generatedQuestions) ? overlay.generatedQuestions : [];
+  const questions = stored.length ? stored : defaultQuestions;
   return {
     title: "AI Question Generator",
     subtitle: sec
@@ -3987,8 +4007,11 @@ function buildResources(ctx: InstructorCtx, path = ""): InstructorLivePayload {
   };
 }
 
-function buildVersionEditor(ctx: InstructorCtx): InstructorLivePayload {
+function buildVersionEditor(ctx: InstructorCtx, overlay?: Record<string, unknown> | null): InstructorLivePayload {
   const sec = primarySection(ctx);
+  const draft = overlay?.versionDraft && typeof overlay.versionDraft === "object"
+    ? overlay.versionDraft as { title?: string; body?: string; status?: string; savedAt?: string }
+    : null;
   const modules = (sec?.assignments ?? []).map((a, i) => ({
     id: a.id,
     label: `Module ${i + 1} — ${a.title}`,
@@ -3998,16 +4021,17 @@ function buildVersionEditor(ctx: InstructorCtx): InstructorLivePayload {
     title: "Course Version Editor",
     subtitle: sec ? `Edit ${sec.courseCode} outline` : "Outline editor",
     primaryAction: "Submit for Approval",
+    secondaryAction: "Save Draft",
     versionEditor: {
       course: sec ? `${sec.courseCode} · ${sec.courseTitle}` : "Untitled course",
       version: "v1.0-live",
-      notice: "Live outline generated from assigned assessments. Submit changes for registrar approval.",
+      notice: draft?.status === "pending" ? "Change request submitted for registrar approval." : "Live outline generated from assigned assessments. Submit changes for registrar approval.",
       outline: modules.length
         ? modules
         : [{ id: "outline-1", label: "Module 1 — Getting started", children: ["Add assessments to build outline"] }],
       editor: {
-        title: sec?.courseTitle ?? "Course outline",
-        body: `Instructor ${ctx.displayName} · ${sec?.enrolmentCount ?? 0} enrolled · ${sec?.assignments.length ?? 0} assessments`,
+        title: draft?.title || sec?.courseTitle || "Course outline",
+        body: draft?.body || `Instructor ${ctx.displayName} · ${sec?.enrolmentCount ?? 0} enrolled · ${sec?.assignments.length ?? 0} assessments`,
         wordCount: `${Math.max(40, (sec?.assignments.length ?? 0) * 120)} words`,
       },
       versions: [
@@ -4161,16 +4185,16 @@ async function routePayload(
     return buildAddBadgeFormPayload(ctx.user.institutionId);
   }
   if (p.includes("t69") || p.includes("add-course-type")) {
-    return buildAddCourseTypeForm(path);
+    return buildAddCourseTypeForm(path, await loadScreenOverlay(ctx.user.institutionId, COURSE_TYPES_LIST_PATH));
   }
   if (p.includes("t68") || p.includes("add-course-group")) {
     return buildAddCourseGroupForm();
   }
   if (p.includes("t67") || (p.includes("course-type") && !p.includes("add-course-type"))) {
-    return buildCourseTypesList();
+    return buildCourseTypesList(await loadScreenOverlay(ctx.user.institutionId, COURSE_TYPES_LIST_PATH));
   }
   if (p.includes("t26") || p.includes("version-editor")) {
-    return buildVersionEditor(ctx);
+    return buildVersionEditor(ctx, overlay);
   }
   if (p.includes("t32") || p.includes("file-manager") || p.includes("resource-file")) {
     return buildResources(ctx, path);
@@ -4233,7 +4257,7 @@ async function routePayload(
   }
   // Studio archetypes before the generic `studio` course-list catch-all
   if (p.includes("in-15") || p.includes("question-generator")) {
-    return buildQuestionGenerator(ctx);
+    return buildQuestionGenerator(ctx, overlay);
   }
   if (p.includes("in-16") || p.includes("rubric-generator")) {
     return buildRubricGenerator(ctx);
@@ -4535,6 +4559,7 @@ export async function buildInstructorScreen(
   }
   const workshopCounts = await workshopNavCounts(user);
   const statusCounts = await loadStudentStatusCounts(user);
+  const dashboardSections = ctx.sections.filter((section) => sectionTermStatus(ctx, section) !== "Completed");
   return {
     path: requestedPath,
     live: true as const,
@@ -4543,7 +4568,8 @@ export async function buildInstructorScreen(
       displayName: ctx.displayName,
       email: ctx.person.email,
       studentCount: statusCounts.total || ctx.studentCount,
-      sectionCount: ctx.sections.length,
+      sectionCount: dashboardSections.length,
+      courseCount: new Set(dashboardSections.map((section) => section.courseId)).size,
       draftGradeCount: ctx.draftGradeCount,
       unreadNotifications: ctx.notifications.filter((n) => !n.readAt).length,
       workshopCounts,
@@ -4559,18 +4585,20 @@ export async function buildInstructorBootstrap(user: SessionClaims) {
   const ctx = await loadCtx(user);
   const workshopCounts = await workshopNavCounts(user);
   const statusCounts = await loadStudentStatusCounts(user);
+  const dashboardSections = ctx.sections.filter((section) => sectionTermStatus(ctx, section) !== "Completed");
   return {
     displayName: ctx.displayName,
     email: ctx.person.email,
     studentCount: statusCounts.total || ctx.studentCount,
-    sectionCount: ctx.sections.length,
+    sectionCount: dashboardSections.length,
+    courseCount: new Set(dashboardSections.map((section) => section.courseId)).size,
     draftGradeCount: ctx.draftGradeCount,
     unreadNotifications: ctx.notifications.filter((n) => !n.readAt).length,
     workshopCounts,
     statusCounts: statusCounts.byLabel,
     flagCount: statusCounts.flagCount,
     alertCount: await instructorAlertCount(user, ctx.sections),
-    sections: ctx.sections.map((s) => ({
+    sections: dashboardSections.map((s) => ({
       sectionId: s.id,
       code: s.courseCode,
       title: s.courseTitle,
@@ -6435,8 +6463,21 @@ const DEFAULT_COURSE_TYPES = [
   { id: "ctype-lecture", name: "Lecture", abbreviation: "LEC", active: true },
   { id: "ctype-online", name: "Online", abbreviation: "ON", active: true },
 ] as const;
+type CourseTypeRecord = { id: string; name: string; abbreviation: string; active: boolean; learningStyle: string; asynchronous: boolean };
 
-function buildCourseTypesList(): InstructorLivePayload {
+function mergedCourseTypes(overlay?: Record<string, unknown> | null): CourseTypeRecord[] {
+  const edits = overlay?.courseTypeEdits && typeof overlay.courseTypeEdits === "object" ? overlay.courseTypeEdits as Record<string, Partial<CourseTypeRecord>> : {};
+  const deleted = new Set(Array.isArray(overlay?.deletedCourseTypeIds) ? overlay.deletedCourseTypeIds as string[] : []);
+  const defaults = DEFAULT_COURSE_TYPES.map((row) => ({ ...row, learningStyle: "Face to Face", asynchronous: false, ...(edits[row.id] || {}) }));
+  const extras = Array.isArray(overlay?.extraCourseTypes) ? overlay.extraCourseTypes as CourseTypeRecord[] : [];
+  const order = Array.isArray(overlay?.courseTypeOrder) ? overlay.courseTypeOrder as string[] : [];
+  return [...defaults, ...extras].filter((row) => !deleted.has(row.id)).sort((a, b) => {
+    const ai = order.indexOf(a.id); const bi = order.indexOf(b.id);
+    return (ai < 0 ? 9999 : ai) - (bi < 0 ? 9999 : bi) || a.name.localeCompare(b.name);
+  });
+}
+
+function buildCourseTypesList(overlay?: Record<string, unknown> | null): InstructorLivePayload {
   return {
     title: "Manage Course Types",
     subtitle: "Course types and groups",
@@ -6444,7 +6485,7 @@ function buildCourseTypesList(): InstructorLivePayload {
     primaryActionHref: "/instructor/f/t69-add-course-type",
     courseTypes: {
       searchPlaceholder: "Enter Search Filter Here",
-      types: DEFAULT_COURSE_TYPES.map((t) => ({ ...t })),
+      types: mergedCourseTypes(overlay),
     },
   };
 }
@@ -6471,11 +6512,11 @@ function buildAddCourseGroupForm(): InstructorLivePayload {
   };
 }
 
-function buildAddCourseTypeForm(path: string): InstructorLivePayload {
+function buildAddCourseTypeForm(path: string, overlay?: Record<string, unknown> | null): InstructorLivePayload {
   const typeId = path.match(/[?&]typeId=([^&]+)/)?.[1]
     ? decodeURIComponent(path.match(/[?&]typeId=([^&]+)/)![1]!)
     : "";
-  const existing = DEFAULT_COURSE_TYPES.find((t) => t.id === typeId);
+  const existing = mergedCourseTypes(overlay).find((t) => t.id === typeId);
   return {
     title: existing ? "Edit Course Type" : "Add Course Type",
     subtitle: existing ? "Edit course type" : "Add a course type",
@@ -6501,7 +6542,7 @@ function buildAddCourseTypeForm(path: string): InstructorLivePayload {
             },
             {
               label: "Learning Style",
-              value: "Face to Face",
+              value: existing?.learningStyle ?? "Face to Face",
               type: "select",
               options: [
                 { label: "Face to Face", value: "Face to Face" },
@@ -6511,7 +6552,7 @@ function buildAddCourseTypeForm(path: string): InstructorLivePayload {
             },
             {
               label: "Asynchronous",
-              value: "No",
+              value: existing?.asynchronous ? "Yes" : "No",
               type: "select",
               options: [
                 { label: "No", value: "No" },
@@ -6836,6 +6877,8 @@ type AssessmentBuilderFields = {
   weight?: string;
   openDate?: string;
   dueDate?: string;
+  durationMinutes?: number;
+  questions?: Array<{ id?: string; prompt?: string; options?: string[]; correct?: number }>;
   rubricRows?: Array<{ criterion: string; excellent: string; good: string; poor: string }>;
 };
 
@@ -6886,6 +6929,12 @@ function buildAssessmentBuilder(
   const type = (draft?.type || "Written Exam").trim();
   const weightNum = parseWeightPercent(draft?.weight || "20%");
   const weight = `${weightNum}%`;
+  const durationMinutes = Number.isFinite(Number(draft?.durationMinutes))
+    ? Math.max(1, Math.min(480, Math.round(Number(draft?.durationMinutes))))
+    : 60;
+  const questions = Array.isArray(draft?.questions) && draft.questions.length
+    ? draft.questions
+    : [{ id: randomUUID(), prompt: "", options: ["", ""], correct: 0 }];
   const rubricRows =
     Array.isArray(draft?.rubricRows) && draft!.rubricRows!.length
       ? draft!.rubricRows!
@@ -6919,6 +6968,8 @@ function buildAssessmentBuilder(
       weight,
       openDate: open.toISOString().slice(0, 10),
       dueDate: due.toISOString().slice(0, 10),
+      durationMinutes,
+      questions,
       types: ["Written Exam", "Quiz", "Project", "Lab Practical", "Oral Exam"],
       rubricHeaders: ["Criterion", "Excellent (5pts)", "Good (4pts)", "Poor (2pts)"],
       rubricRows,
@@ -6993,6 +7044,23 @@ async function createOrSaveAssessment(
             poor: "Needs work",
           },
         ];
+  const durationMinutes = Number.isFinite(Number(fields.durationMinutes))
+    ? Math.max(1, Math.min(480, Math.round(Number(fields.durationMinutes))))
+    : 60;
+  const questions = (Array.isArray(fields.questions) ? fields.questions : []).map((question) => ({
+    id: (question.id || randomUUID()).trim(),
+    prompt: (question.prompt || "").trim(),
+    options: (Array.isArray(question.options) ? question.options : []).map((option) => option.trim()),
+    correct: Number(question.correct),
+  })).filter((question) => question.id && question.prompt && question.options.length >= 2 && question.options.every(Boolean)
+    && Number.isInteger(question.correct) && question.correct >= 0 && question.correct < question.options.length);
+
+  if (publish && type === "Quiz" && !questions.length) {
+    throw Object.assign(new Error("Add at least one complete quiz question with two answer choices before publishing."), {
+      status: 400,
+      code: "ASSESSMENT_QUESTIONS_REQUIRED",
+    });
+  }
 
   const draftPayload: AssessmentBuilderFields = {
     sectionId: sec.id,
@@ -7001,6 +7069,8 @@ async function createOrSaveAssessment(
     weight: `${weightPercent}%`,
     openDate: ymdIn(opensAt, tz),
     dueDate: closesAt.toISOString().slice(0, 10),
+    durationMinutes,
+    questions,
     rubricRows,
   };
 
@@ -7055,6 +7125,23 @@ async function createOrSaveAssessment(
     },
   });
 
+  const timedAssessment = type === "Quiz"
+    ? await prisma.assessment.create({
+        data: {
+          id: randomUUID(),
+          institutionId: ctx.user.institutionId,
+          sectionId: sec.id,
+          title,
+          opensAt,
+          closesAt,
+          durationMinutes,
+          maxAttempts: 1,
+          status: "published",
+          questionsJson: JSON.stringify(questions),
+        },
+      })
+    : null;
+
   for (const e of sec.enrolments.filter((x) => x.status === "enrolled")) {
     await prisma.gradeItem.create({
       data: {
@@ -7077,6 +7164,7 @@ async function createOrSaveAssessment(
     type,
     weightPercent,
     assignmentId: assignment.id,
+    assessmentId: timedAssessment?.id ?? null,
     rubricId: rubric.id,
     sectionId: sec.id,
     sectionCode: sec.code,
@@ -7144,22 +7232,23 @@ async function publishDraftGrades(ctx: InstructorCtx) {
   }
   let approvals = 0;
   for (const [sectionId, gradeItemIds] of bySection) {
-    await prisma.gradeItem.updateMany({
-      where: { id: { in: gradeItemIds }, institutionId: ctx.user.institutionId, status: "draft" },
-      data: { status: "pending_publish" },
-    });
-    await prisma.approvalRequest.create({
-      data: {
-        id: randomUUID(),
+    const studentIds = [...new Set(drafts.filter((grade) => gradeItemIds.includes(grade.id)).map((grade) => grade.studentId))];
+    await prisma.$transaction(async (tx) => {
+      await tx.gradeItem.updateMany({
+        where: { id: { in: gradeItemIds }, institutionId: ctx.user.institutionId, status: "draft" },
+        data: { status: "pending_publish" },
+      });
+      await requireApproval({
         institutionId: ctx.user.institutionId,
-        type: "grade_publish",
-        subjectRef: sectionId,
-        proposedDiffJson: JSON.stringify({ gradeItemIds }),
+        type: "grade.publish",
+        subjectRef: `section:${sectionId}`,
+        proposedDiff: { gradeItemIds, studentIds },
         requestedBy: ctx.user.accountId,
-        requiredApproverRolesJson: JSON.stringify(["registrar", "admin"]),
+        requiredApproverRoles: ["registrar", "admin"],
         requiredCount: 1,
-        status: "pending",
-      },
+        source: "instructor.grade-publish",
+        tx,
+      });
     });
     approvals += 1;
   }
@@ -7599,6 +7688,7 @@ async function createStudentProfile(ctx: InstructorCtx, fields: Record<string, s
 export async function runInstructorAction(user: SessionClaims, input: ActionInput) {
   const action = input.action.trim();
   const lower = action.toLowerCase();
+  assertInstructorMasterDataBoundary(user, input.path, lower);
   await assertInstructorSectionAccess(user, input.path, input.rowKey);
   const ctx = await loadCtx(user, input.path);
   const path = studioWorkspacePath(input.path, ctx);
@@ -7609,8 +7699,70 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
   try {
     const isAssessmentBuilderPath =
       path.includes("t19") || path.includes("create-edit-assessment");
+    const isVersionEditorPath = path.includes("t26") || path.includes("version-editor");
+    const isQuestionGeneratorPath = path.includes("in-15") || path.includes("question-generator");
     const isProgramSettingsPath = path.includes("t83") || path.includes("program-settings");
-    if (isProgramSettingsPath) {
+    if (isQuestionGeneratorPath && lower === "generate questions") {
+      await assertInstitutionAiAllowed(user.institutionId, user.roles);
+      const sec = primarySection(ctx);
+      if (!sec) throw Object.assign(new Error("Open a teaching section before generating questions"), { code: "NO_SECTION", status: 400 });
+      const fields = parseActionFields(input.rowKey) || {};
+      const topic = (fields.Topic || fields.topic || `${sec.courseCode} course outcomes`).trim().slice(0, 200);
+      const generated = await generateWithAi(
+        "Create five rigorous university multiple-choice questions. Return JSON only as {\"questions\":[{\"prompt\":string,\"options\":[string,string,string,string],\"correct\":number}]}. Do not invent institutional policy.",
+        `Course: ${sec.courseCode} — ${sec.courseTitle}\nTopic: ${topic}`,
+        90_000,
+        { json: true },
+      );
+      let raw: unknown;
+      try { raw = JSON.parse(generated.answer.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "")); }
+      catch { throw Object.assign(new Error("AI returned invalid question data"), { code: "AI_BAD_OUTPUT", status: 502 }); }
+      const rows = Array.isArray((raw as { questions?: unknown[] }).questions) ? (raw as { questions: unknown[] }).questions : [];
+      const questions = rows.map((row, index) => {
+        const item = row as { prompt?: unknown; options?: unknown; correct?: unknown };
+        const options = Array.isArray(item.options) ? item.options.map(String).map((v) => v.trim()).filter(Boolean).slice(0, 6) : [];
+        const correct = Number(item.correct);
+        if (!String(item.prompt || "").trim() || options.length < 2 || !Number.isInteger(correct) || correct < 0 || correct >= options.length) return null;
+        return { id: `ai-${Date.now().toString(36)}-${index}`, prompt: String(item.prompt).trim(), options: options.map((text, i) => ({ key: String.fromCharCode(65 + i), text, correct: i === correct })) };
+      }).filter(Boolean);
+      if (!questions.length) throw Object.assign(new Error("AI returned no usable questions"), { code: "AI_BAD_OUTPUT", status: 502 });
+      await patchScreenOverlay(user.institutionId, path, (prev) => ({ ...prev, generatedQuestions: questions, generatedTopic: topic }));
+      message = `Generated ${questions.length} question(s) with ${generated.model}`;
+      result = { count: questions.length, model: generated.model };
+    } else if (isQuestionGeneratorPath && lower === "add to question bank") {
+      let parsed: { questions?: unknown[] } = {};
+      try { parsed = JSON.parse(input.rowKey || "{}"); } catch { /* validated below */ }
+      const questions = Array.isArray(parsed.questions) ? parsed.questions : [];
+      if (!questions.length) throw Object.assign(new Error("Select at least one question"), { code: "VALIDATION_ERROR", status: 400 });
+      await patchScreenOverlay(user.institutionId, "/instructor/question-bank", (prev) => ({
+        ...prev,
+        questions: [...(Array.isArray(prev.questions) ? prev.questions : []), ...questions].slice(-500),
+      }));
+      message = `${questions.length} question(s) added to the question bank`;
+      result = { count: questions.length };
+    } else if (isVersionEditorPath && (lower === "save draft" || lower === "submit for approval")) {
+      const fields = parseActionFields(input.rowKey) || {};
+      const title = (fields.Title || fields.title || "Course outline").trim();
+      const body = (fields.Body || fields.body || "").trim();
+      if (!body) throw Object.assign(new Error("Course version content is required"), { code: "VALIDATION_ERROR", status: 400 });
+      const status = lower === "save draft" ? "draft" : "pending";
+      const versionDraft = { title, body, status, savedAt: new Date().toISOString(), requestedBy: user.accountId };
+      await patchScreenOverlay(user.institutionId, path, (prev) => ({ ...prev, versionDraft }));
+      if (status === "pending") {
+        await requireApproval({
+          institutionId: user.institutionId,
+          type: "course.version.change",
+          subjectRef: path,
+          proposedDiff: versionDraft,
+          requestedBy: user.accountId,
+          requiredApproverRoles: ["registrar", "admin"],
+          requiredCount: 1,
+          source: "instructor.course-version",
+        });
+      }
+      message = status === "draft" ? "Course version draft saved" : "Course version submitted for approval";
+      result = versionDraft;
+    } else if (isProgramSettingsPath) {
       const handled = applyProgramSettingsPatch(action, input.rowKey, path);
       if (handled) {
         await patchScreenOverlay(user.institutionId, PROGRAM_SETTINGS_PATH, handled.patch);
@@ -7669,10 +7821,95 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
       const { count } = await markNotificationsRead(user, ids);
       message = count ? `${count} notification(s) marked as read` : "No unread notifications";
       result = { marked: count };
+    } else if (lower === "schedule lecture") {
+      const fields = parseActionFields(input.rowKey) || {};
+      const startsAt = (fields.StartsAt || fields["Open date/time"] || "").trim();
+      if (!startsAt || Number.isNaN(new Date(startsAt).getTime())) {
+        throw Object.assign(new Error("Choose a valid lecture date and time"), { code: "VALIDATION_ERROR", status: 400 });
+      }
+      const published = await publishOnlineClassSession(ctx, path, fields);
+      message = `Lecture scheduled · ${published.title} · ${published.notified} student(s) notified`;
+      result = published;
+    } else if (lower === "create grading item") {
+      const fields = parseActionFields(input.rowKey) || {};
+      const sec = resolveSectionFromPath(ctx, path);
+      if (!sec) throw Object.assign(new Error("Open a course section first"), { code: "NO_SECTION", status: 400 });
+      const title = (fields.Name || "").trim();
+      const maxScore = Number(fields.OutOf || 100);
+      const weightPercent = Number(String(fields.Weight || "10").replace("%", ""));
+      if (!title || !Number.isFinite(maxScore) || maxScore <= 0 || !Number.isFinite(weightPercent) || weightPercent <= 0 || weightPercent > 100) {
+        throw Object.assign(new Error("Enter a name, positive maximum score, and weight from 1 to 100"), { code: "VALIDATION_ERROR", status: 400 });
+      }
+      const assignment = await prisma.$transaction(async (tx) => {
+        const created = await tx.assignment.create({ data: { id: randomUUID(), institutionId: user.institutionId, sectionId: sec.id, title, maxScore, weightPercent } });
+        const enrolled = sec.enrolments.filter((item) => item.status === "enrolled");
+        if (enrolled.length) await tx.gradeItem.createMany({ data: enrolled.map((item) => ({ id: randomUUID(), institutionId: user.institutionId, assignmentId: created.id, studentId: item.studentId, enrolmentId: item.id, maxScore, status: "draft" })) });
+        return created;
+      });
+      message = `Grading item created · ${title}`;
+      result = { assignmentId: assignment.id };
+    } else if (lower === "confirm post") {
+      result = await publishDraftGrades(ctx);
+      message = `Marks submitted for approval · ${String(result.approvals || 0)} section(s)`;
+    } else if (lower === "export grades") {
+      const sec = resolveSectionFromPath(ctx, path);
+      if (!sec) throw Object.assign(new Error("Open a course section first"), { code: "NO_SECTION", status: 400 });
+      const header = ["Student number", "Student", ...sec.assignments.map((item) => item.title)];
+      const rows = sec.enrolments.map((enrolment) => [
+        enrolment.studentNumber,
+        enrolment.studentName,
+        ...sec.assignments.map((assignment) => {
+          const grade = ctx.grades.find((item) => item.assignmentTitle === assignment.title && item.studentId === enrolment.studentId && item.sectionCode === sec.code);
+          return grade?.score == null ? "" : String(grade.score);
+        }),
+      ]);
+      const csv = [header, ...rows].map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(",")).join("\n");
+      message = `Grade export ready · ${sec.courseCode}`;
+      result = { download: { filename: `${sec.courseCode}-${sec.code}-grades.csv`, mime: "text/csv", content: csv } };
     } else if (lower === "save course group") {
       const group = await saveCourseGroup(user.institutionId, parseActionFields(input.rowKey) || {});
       message = `Course group saved · ${group.name}`;
       result = { ...group, href: "/instructor/f/t59-course-groups-types" };
+    } else if (lower === "save course type") {
+      const fields = parseActionFields(input.rowKey) || {};
+      const name = (fields["Course Type Name"] || fields.Name || "").trim();
+      const abbreviation = (fields.Abbreviation || "").trim().toUpperCase();
+      if (!name) throw Object.assign(new Error("Course Type Name is required"), { code: "VALIDATION_ERROR", status: 400 });
+      const existingId = (fields.__typeId || fields.typeId || parseScreenQuery(path).query.get("typeId") || "").trim();
+      const id = existingId || `ctype-${Date.now().toString(36)}`;
+      const row: CourseTypeRecord = {
+        id, name, abbreviation,
+        active: !/inactive/i.test(fields["Active / Inactive"] || "Active"),
+        learningStyle: fields["Learning Style"] || "Face to Face",
+        asynchronous: /^(yes|true|1)$/i.test(fields.Asynchronous || "No"),
+      };
+      await patchScreenOverlay(user.institutionId, COURSE_TYPES_LIST_PATH, (prev) => {
+        const extras = Array.isArray(prev.extraCourseTypes) ? [...prev.extraCourseTypes as CourseTypeRecord[]] : [];
+        const edits = prev.courseTypeEdits && typeof prev.courseTypeEdits === "object" ? { ...prev.courseTypeEdits as Record<string, Partial<CourseTypeRecord>> } : {};
+        const index = extras.findIndex((item) => item.id === id);
+        if (index >= 0) extras[index] = row;
+        else if (DEFAULT_COURSE_TYPES.some((item) => item.id === id)) edits[id] = row;
+        else extras.push(row);
+        return { ...prev, extraCourseTypes: extras, courseTypeEdits: edits };
+      });
+      message = `Course type saved · ${name}`;
+      result = { ...row, href: COURSE_TYPES_LIST_PATH };
+    } else if (lower === "delete course type") {
+      const id = (input.rowKey || "").trim();
+      if (!id) throw Object.assign(new Error("Course type id is required"), { code: "VALIDATION_ERROR", status: 400 });
+      await patchScreenOverlay(user.institutionId, COURSE_TYPES_LIST_PATH, (prev) => ({
+        ...prev,
+        deletedCourseTypeIds: [...new Set([...(Array.isArray(prev.deletedCourseTypeIds) ? prev.deletedCourseTypeIds as string[] : []), id])],
+        extraCourseTypes: (Array.isArray(prev.extraCourseTypes) ? prev.extraCourseTypes as CourseTypeRecord[] : []).filter((item) => item.id !== id),
+      }));
+      message = "Course type deleted";
+      result = { id };
+    } else if (lower === "reorder course types") {
+      let order: string[] = [];
+      try { const value = JSON.parse(input.rowKey || "[]"); if (Array.isArray(value)) order = value.filter((id): id is string => typeof id === "string"); } catch { /* empty order */ }
+      await patchScreenOverlay(user.institutionId, COURSE_TYPES_LIST_PATH, (prev) => ({ ...prev, courseTypeOrder: order }));
+      message = "Course types reordered";
+      result = { order };
     } else if (lower === "dismiss flag" || lower === "delete flag") {
       result = await updateInstructorFlag(user, input.rowKey || "", lower === "delete flag" ? "delete" : "dismiss");
       message = lower === "delete flag" ? "Flag deleted" : "Flag dismissed";
@@ -9545,14 +9782,15 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
       message = `Created · ${action}`;
       result = { cells };
     } else {
-      // Generic ack for remaining chrome CTAs (Save Changes, preferences, uploads, AI, etc.)
-      message = `Recorded · ${action}`;
-      result = { ack: true };
+      throw Object.assign(new Error(`Action is not supported: ${action}`), {
+        code: "ACTION_NOT_SUPPORTED",
+        status: 422,
+      });
     }
   } catch (err) {
-    const e = err as Error & { status?: number };
-    message = e.message || "Action failed";
-    result = { error: true };
+    const e = err as Error & { status?: number; code?: string };
+    if (e.status) throw e;
+    throw Object.assign(e, { status: 500, code: e.code || "INSTRUCTOR_ACTION_FAILED" });
   }
 
   await appendInstructorActivity(user.institutionId, path, {
@@ -9585,4 +9823,34 @@ export async function runInstructorAction(user: SessionClaims, input: ActionInpu
     message,
     result,
   };
+}
+
+export function assertInstructorMasterDataBoundary(user: SessionClaims, path: string, action: string) {
+  if (user.roles.includes("admin") || user.roles.includes("registrar")) return;
+
+  const normalizedPath = path.toLowerCase();
+  const isStudentProvisioning =
+    (normalizedPath.includes("t43") || normalizedPath.includes("create-student-profile")) &&
+    /\b(save|create)\b/.test(action);
+  const isProgramMaster =
+    /(program-settings|program-types|add-program|create-program|t50|t73|t83)/.test(normalizedPath) &&
+    /\b(save|create|add|delete|remove|reorder)\b/.test(action);
+  const isTermMaster =
+    /(term-management|add-term|create-term|manage-terms|t74)/.test(normalizedPath) &&
+    /\b(save|create|add|delete|remove)\b/.test(action);
+  const isCourseOrSectionMaster =
+    /(add-course|course-admin|courses-sessions|course-configuration|course-groups-types|t54|t55|t59|t77)/.test(
+      normalizedPath,
+    ) && /\b(save|create|add|delete|remove)\b/.test(action);
+  const isBadgeDefinition =
+    /(add-badge|badge-management|t70)/.test(normalizedPath) &&
+    /\b(save|create|add|delete|remove)\b/.test(action) &&
+    action !== "award course badge";
+
+  if (isStudentProvisioning || isProgramMaster || isTermMaster || isCourseOrSectionMaster || isBadgeDefinition) {
+    throw Object.assign(
+      new Error("This master-data action is restricted to administrators and registrars"),
+      { code: "FORBIDDEN", status: 403 },
+    );
+  }
 }

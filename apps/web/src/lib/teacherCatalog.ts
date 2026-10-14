@@ -1617,6 +1617,8 @@ export type TeacherScreenConfig = {
     weight: string;
     openDate?: string;
     dueDate?: string;
+    durationMinutes?: number;
+    questions?: Array<{ id?: string; prompt?: string; options?: string[]; correct?: number }>;
     types?: string[];
     rubricHeaders: string[];
     rubricRows: Array<{ criterion: string; excellent: string; good: string; poor: string }>;
@@ -4634,8 +4636,8 @@ export const TEACHER_SCREENS: Record<string, TeacherScreenConfig> = {
     primaryAction: "New Workshop Enrolment",
     primaryActionHref: "/instructor/f/t42-new-workshop-enrollment",
     workshops: {
-      tabs: ["My Workshops (0)", "Available Workshops (0)", "Completed Workshops (0)"],
-      activeTab: "My Workshops (0)",
+      tabs: ["My Workshops", "Available Workshops", "Completed Workshops"],
+      activeTab: "My Workshops",
       credits: "",
       cards: [],
       registrations: [],

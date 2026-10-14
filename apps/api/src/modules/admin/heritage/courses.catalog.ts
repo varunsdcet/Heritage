@@ -58,6 +58,21 @@ export const meetingsOf = (st: Data | undefined): Meeting[] =>
     .filter((m) => WEEKDAYS.includes(m.day as (typeof WEEKDAYS)[number]))
     .sort((a, b) => WEEKDAYS.indexOf(a.day as (typeof WEEKDAYS)[number]) - WEEKDAYS.indexOf(b.day as (typeof WEEKDAYS)[number]));
 
+/**
+ * Session settings use account ids, while Section keeps the primary teacher as
+ * a person id. Normalise legacy person ids and fall back to the Section teacher
+ * when older settings do not contain an instructors array.
+ */
+export function sessionInstructorAccountIds(stored: unknown, instructorPersonId: string, lk: Pick<Lookups, "users" | "accountOfPerson">) {
+  const accountIds = new Set(lk.users.map((user) => user.id));
+  const saved = arr(stored)
+    .map(s)
+    .map((id) => (accountIds.has(id) ? id : lk.accountOfPerson.get(id) ?? ""))
+    .filter(Boolean);
+  const fallback = lk.accountOfPerson.get(instructorPersonId);
+  return [...new Set(saved.length ? saved : fallback ? [fallback] : [])];
+}
+
 async function courseOr404(inst: string, id: string) {
   const c = await prisma.course.findFirst({ where: { id, institutionId: inst } });
   if (!c) throw httpError(404, "Course not found", "NOT_FOUND");
@@ -311,7 +326,7 @@ export async function loadSections(inst: string, where: Record<string, unknown>)
 
 export function sessionRow(x: LoadedSection, st: Data | undefined, lk: Lookups) {
   const w = sessionWindow(x.term, st);
-  const instructorIds = arr(st?.instructors).map(s);
+  const instructorIds = sessionInstructorAccountIds(st?.instructors, x.instructorPersonId, lk);
   const names = instructorIds.length ? instructorIds.map((id) => lk.label("users", id)).filter(Boolean) : [lk.accountOfPerson.get(x.instructorPersonId)].filter(Boolean).map((id) => lk.label("users", id));
   const capacity = st && st.maxEnrolments !== null && st.maxEnrolments !== undefined ? num(st.maxEnrolments) : null;
   const term = sectionTerm(x.term, { startsOn: w.start, endsOn: w.end }, lk.terms);
@@ -364,7 +379,7 @@ export async function getSession(user: SessionClaims, id: string) {
   const st = (await settingsOf(inst, S.session, [id])).get(id)?.data;
   const lk = await lookups(user);
   const w = sessionWindow(x.term, st);
-  const instructors = st ? arr(st.instructors) : [lk.accountOfPerson.get(x.instructorPersonId)].filter(Boolean);
+  const instructors = sessionInstructorAccountIds(st?.instructors, x.instructorPersonId, lk);
   const gradingScheme = s(st?.gradingScheme) || (await defaultGradingScheme(inst, x.courseId, lk));
   const term = sectionTerm(x.term, { startsOn: w.start, endsOn: w.end }, lk.terms);
   const termId = term?.id ?? "";
@@ -401,10 +416,10 @@ export async function defaultGradingScheme(inst: string, courseId: string, lk: L
 
 const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 
-export async function nextSectionCode(inst: string, courseId: string, courseCode: string, start: string) {
+export async function nextSectionCode(inst: string, termId: string, courseCode: string, start: string) {
   const prefix = courseCode.replace(/[^A-Za-z]/g, "").toUpperCase() || "SEC";
   const base = `${prefix}${MONTHS[Number(start.slice(5, 7)) - 1] ?? ""}${start.slice(2, 4)}`;
-  const taken = new Set((await prisma.section.findMany({ where: { institutionId: inst, courseId }, select: { code: true } })).map((x) => x.code));
+  const taken = new Set((await prisma.section.findMany({ where: { institutionId: inst, termId }, select: { code: true } })).map((x) => x.code));
   for (let n = 1; n < 1000; n++) {
     const code = `${base}-${String(n).padStart(2, "0")}`;
     if (!taken.has(code)) return code;
@@ -500,7 +515,7 @@ async function saveSessionNow(user: SessionClaims, courseId: string, id: string 
   const instructorPersonId = (instructors[0] && lk.personOf.get(instructors[0])) || "";
   const section = existing
     ? await prisma.section.update({ where: { id: existing.id }, data: { termId: term.id, instructorPersonId, rowVersion: { increment: 1 } } })
-    : await prisma.section.create({ data: { institutionId: inst, courseId, termId: term.id, code: await nextSectionCode(inst, courseId, course.code, s(data.startDate)), instructorPersonId } });
+    : await prisma.section.create({ data: { institutionId: inst, courseId, termId: term.id, code: await nextSectionCode(inst, term.id, course.code, s(data.startDate)), instructorPersonId } });
   const saved = { ...data, meetings };
   await saveSettings(user, S.session, section.id, saved);
   const meetingsSync = await syncSectionClassSessions(inst, section.id);

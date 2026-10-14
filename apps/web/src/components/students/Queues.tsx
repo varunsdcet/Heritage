@@ -66,10 +66,12 @@ function useApplied<T extends Record<string, string>>(initial: T) {
 
 export function AcademicAlerts() {
   const { meta } = useStudentsMeta();
+  const notice = useNotice();
   const f = useApplied({ campus: "", student: "", status: "Active", resolved: "No" });
-  const { data, error } = useLoad<{ items: Array<{ id: string; student: StudentCell; description: string; status: string; resolved: string; date: string }> }>(`/queues/alerts${qs(f.applied)}`);
+  const { data, error, reload } = useLoad<{ canDecide: boolean; items: Array<{ id: string; student: StudentCell; description: string; status: string; resolved: string; date: string }> }>(`/queues/alerts${qs(f.applied)}`);
   return (
     <Queue title="Academic Alerts" nav="alerts">
+      {notice.node}
       <Card>
         <Filters submit="Search Alerts" onSubmit={f.apply}>
           <F label="Campus Filter">
@@ -91,7 +93,7 @@ export function AcademicAlerts() {
         {data && !data.items.length ? (
           <Empty>No academic alerts were found.</Empty>
         ) : (
-          <Table head={["Student", "Description", "Status", "Resolved", "Date"]}>
+          <Table head={["Student", "Description", "Status", "Resolved", "Date", "Action"]}>
             {(data?.items ?? []).map((a) => (
               <tr key={a.id}>
                 <td>
@@ -101,11 +103,11 @@ export function AcademicAlerts() {
                 <td>{a.status}</td>
                 <td>{a.resolved}</td>
                 <td>{fmtStamp(a.date)}</td>
+                <td>{data?.canDecide && a.resolved !== "Yes" ? <Btn onClick={async () => { try { await send(`/queues/alerts/${encodeURIComponent(a.id)}/resolve`, "POST"); notice.ok("Academic alert resolved."); reload(); } catch (e) { notice.fail(errMsg(e, "Could not resolve alert")); } }}>Resolve</Btn> : "—"}</td>
               </tr>
             ))}
           </Table>
         )}
-        {data?.items.length ? <SourceNotice>The academic alert review / resolve form was not captured from the original system.</SourceNotice> : null}
       </Card>
     </Queue>
   );
@@ -669,15 +671,26 @@ export function GradeReview() {
 /* ------------------------------------------------------------------ */
 
 export function TranscriptChanges() {
-  const { data, error } = useLoad<{ items: Array<{ id: string; student: StudentCell; description: string; date: string }> }>(`/queues/transcript-changes`);
+  const notice = useNotice();
+  const { data, error, reload } = useLoad<{ canDecide: boolean; items: Array<{ id: string; student: StudentCell; description: string; date: string }> }>(`/queues/transcript-changes`);
+  const decide = async (id: string, decision: "approve" | "reject") => {
+    try {
+      await send(`/queues/transcript-changes/${encodeURIComponent(id)}/decide`, "POST", { decision });
+      notice.ok(`Transcript change ${decision === "approve" ? "approved" : "rejected"}.`);
+      reload();
+    } catch (e) {
+      notice.fail(errMsg(e, "Could not decide transcript change"));
+    }
+  };
   return (
     <Queue title="Pending Transcript Changes" nav="transcript-changes">
+      {notice.node}
       <ErrorLine>{error}</ErrorLine>
       {data && !data.items.length ? (
         <p className="st-warning">Currently no transcript changes are pending.</p>
       ) : (
         <Card>
-          <Table head={["Student", "Change", "Date"]}>
+          <Table head={["Student", "Change", "Date", "Action"]}>
             {(data?.items ?? []).map((c) => (
               <tr key={c.id}>
                 <td>
@@ -685,10 +698,10 @@ export function TranscriptChanges() {
                 </td>
                 <td>{c.description}</td>
                 <td>{fmtStamp(c.date)}</td>
+                <td>{data?.canDecide ? <span style={{ display: "flex", gap: 6 }}><Btn onClick={() => void decide(c.id, "approve")}>Approve</Btn><Btn onClick={() => void decide(c.id, "reject")}>Reject</Btn></span> : "—"}</td>
               </tr>
             ))}
           </Table>
-          <SourceNotice>The transcript change approve / reject controls were not captured from the original system.</SourceNotice>
         </Card>
       )}
     </Queue>

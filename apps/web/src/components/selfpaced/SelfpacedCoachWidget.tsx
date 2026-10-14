@@ -6,6 +6,7 @@ import type { SelfpacedActivity } from "@/lib/selfpacedCurriculum";
 import { bumpCoachMessage, openChapterCount, type CoachMode } from "@/lib/selfpacedEngine";
 import { loadEnrollments, loadSelfpacedUser } from "@/lib/selfpacedAuth";
 import { getSelfpacedProgram } from "@/lib/selfpacedPrograms";
+import { loadSession } from "@/lib/api";
 
 type Msg = { role: "user" | "coach"; text: string };
 
@@ -82,9 +83,11 @@ export function SelfpacedCoachWidget({
     setInput("");
     setBusy(true);
     try {
+      const accessToken = loadSession()?.accessToken;
+      if (!accessToken) throw new Error("Sign in to use the course coach.");
       const res = await fetch("/api/selfpaced/coach/ask", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", authorization: `Bearer ${accessToken}` },
         body: JSON.stringify({
           question: q,
           slug: slug || enrolledScope[0]?.slug,

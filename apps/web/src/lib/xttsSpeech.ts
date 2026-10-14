@@ -2,7 +2,12 @@ export type XttsWord = { word: string; start: number; end: number };
 export type XttsSpeech = { audio: Buffer; words: XttsWord[]; duration: number };
 
 /** XTTS_URL may list several servers, comma-separated; each request goes to the one with the fewest in flight. */
+export function xttsLicenseAccepted() {
+  return /^(?:1|true|yes)$/i.test(process.env.XTTS_LICENSE_ACCEPTED || "");
+}
+
 export function xttsConfig() {
+  if (!xttsLicenseAccepted()) return null;
   const urls = (process.env.XTTS_URL || "")
     .split(",")
     .map((u) => u.trim().replace(/\/+$/, ""))

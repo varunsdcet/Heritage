@@ -21,6 +21,7 @@ const tx = vi.hoisted(() => ({
   aiInteraction: { create: vi.fn() },
   auditEvent: { create: vi.fn() },
   eventOutbox: { create: vi.fn() },
+  sisScreenState: { upsert: vi.fn() },
 }));
 
 const progressFixture = vi.hoisted(() => ({
@@ -69,6 +70,8 @@ const db = vi.hoisted(() => ({
   idempotencyKey: { findUnique: vi.fn() },
   aiInteraction: { count: vi.fn(), findMany: vi.fn() },
   student: { findFirst: vi.fn(), findMany: vi.fn() },
+  assessmentAttempt: { findFirst: vi.fn() },
+  sisScreenState: { findUnique: vi.fn() },
   $transaction: vi.fn(),
 }));
 
@@ -139,8 +142,11 @@ beforeEach(() => {
   ]);
   db.student.findFirst.mockResolvedValue({
     id: "10000000-0000-4000-8000-000000000001",
+    personId: claims.personId,
     programVersionId: "pv-1",
   });
+  db.assessmentAttempt.findFirst.mockResolvedValue(null);
+  db.sisScreenState.findUnique.mockResolvedValue(null);
   progress.computeDegreeProgress.mockResolvedValue(progressFixture);
   progress.impactIfDropCourse.mockResolvedValue({
     baseline: progressFixture,
@@ -236,7 +242,10 @@ describe("Campus Coach", () => {
 
     expect(response.status).toBe(403);
     expect(coachService.buildCoachFacts).not.toHaveBeenCalled();
-    expect(db.$transaction).not.toHaveBeenCalled();
+    expect(db.$transaction).toHaveBeenCalledOnce();
+    expect(tx.aiInteraction.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ resultStatus: "failed", status: "failed" }),
+    });
   });
 });
 

@@ -14,6 +14,7 @@ import {
   agentLabel,
   amountOf,
   arr,
+  assertPeriodOpen,
   cad,
   canFinance,
   dateAt,
@@ -42,8 +43,9 @@ import {
   type Row,
   type StudentInfo,
 } from "./finance.core.js";
-import { defaultFee, institutionName, postFee, removeFee, studentCtx, type StudentCtx } from "./finance.ledger.js";
+import { defaultFee, institutionName, postFee, studentCtx, type StudentCtx } from "./finance.ledger.js";
 import { studentAgentId } from "./finance.records.js";
+import { withStudentMoneyLock } from "./studentLock.js";
 
 export const INVOICE_TYPES = ["Student", "Agent", "Funding Source"] as const;
 export const INVOICE_TEMPLATES = ["Invoice Template", "Invoice Template - New"] as const;
@@ -249,12 +251,19 @@ async function finishInvoice(user: SessionClaims, cfg: Config, r: Row, body: Dat
 }
 
 export async function createInvoice(user: SessionClaims, body: Data) {
+  const studentId = s(body.studentId);
+  if (studentId) return withStudentMoneyLock(user.institutionId, studentId, () => createInvoiceLocked(user, body));
+  return createInvoiceLocked(user, body);
+}
+
+async function createInvoiceLocked(user: SessionClaims, body: Data) {
   await canFinance(user, "edit");
   const cfg = await loadConfig(user.institutionId);
   const d = await invoiceInput(user, cfg, body, null);
   const number = await nextNumber(user.institutionId, "invoice");
   if (d.type === "Student") {
     const c = await studentCtx(user, d.studentId, "edit");
+    await assertPeriodOpen(user, c.cfg, c.st.campus, new Date(), "This invoice");
     await postLines(c, d.items, d.termId || null, number, dateAt(d.dueDate, "Due Date"));
   }
   const r = await add(user, S.INVOICE, { ...d, number, creditNotes: [] }, d.studentId);
@@ -270,6 +279,7 @@ export async function updateInvoice(user: SessionClaims, id: string, body: Data)
   const d = await invoiceInput(user, cfg, { ...body, type: r.data.type, studentId: r.data.studentId, agentId: body.agentId ?? r.data.agentId, fundingSourceId: body.fundingSourceId ?? r.data.fundingSourceId }, r.data);
   if (d.type === "Student") {
     const c = await studentCtx(user, d.studentId, "edit");
+    await assertPeriodOpen(user, c.cfg, c.st.campus, new Date(), "This invoice update");
     const prev = new Map(arr<Item>(r.data.items).map((i) => [i.id, i]));
     for (const i of d.items) {
       const old = prev.get(i.id);
@@ -293,12 +303,23 @@ export async function addCreditNote(user: SessionClaims, id: string, body: Data)
   const note = text(body.note, 500);
   if (!note) throw httpError(400, "Credit Note is required");
   const date = day(dateAt(body.date ?? today(), "Credit Note Date"));
-  const notes = arr<Data>(r.data.creditNotes);
-  const number = Math.max(0, ...notes.map((n) => num(n.number))) + 1;
-  await save(user, r.id, { ...r.data, creditNotes: [...notes, { number, date, amount, note }] });
   const sid = s(r.data.studentId);
-  if (sid) await finAudit(user, sid, "Invoice credit note added", `Invoice #${num(r.data.number)}`, { creditNote: `#${number}`, date, amount: cad(amount), note }, r.id);
-  return { message: `Credit note #${number} added successfully` };
+  if (!sid) throw httpError(409, "Credit notes require a student invoice", "CONFLICT");
+  const { createAdjustment } = await import("./finance.records.js");
+  const adjustment = await createAdjustment(user, {
+    studentId: sid,
+    direction: "Decrease balance (credit)",
+    amount,
+    reason: `Invoice #${num(r.data.number)} credit note: ${note}`,
+    invoiceId: r.id,
+    creditNoteDate: date,
+    creditNoteText: note,
+  });
+  return {
+    pendingApproval: true,
+    adjustmentId: adjustment.id,
+    message: `Credit note submitted as Financial Adjustment #${adjustment.number}. Another user must approve it before the invoice and ledger change.`,
+  };
 }
 
 export async function deleteInvoice(user: SessionClaims, id: string) {
@@ -313,7 +334,13 @@ export async function deleteInvoice(user: SessionClaims, id: string) {
     if (paid.length) {
       throw httpError(409, `Fee${paid.length === 1 ? "" : "s"} ${paid.map((ch) => `#${ch.number}`).join(", ")} on this invoice already have payments. Refund them before deleting the invoice.`, "CONFLICT");
     }
-    for (const ch of posted) await removeFee(user, ch.id);
+    if (posted.length) {
+      throw httpError(
+        409,
+        `This invoice has posted receivables (${posted.map((ch) => `#${ch.number}`).join(", ")}). Request their removal and obtain second-user approval before deleting the invoice.`,
+        "CONFLICT",
+      );
+    }
   }
   await drop(user, [r.id]);
   if (s(r.data.studentId)) await finAudit(user, s(r.data.studentId), "Invoice deleted", `Invoice #${num(r.data.number)}`, { due: s(r.data.dueDate) }, r.id);

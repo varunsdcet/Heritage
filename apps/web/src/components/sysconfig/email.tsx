@@ -105,7 +105,7 @@ function TabBody({ tab }: { tab: Tab }) {
           modalTitle={(r) => (r ? "Edit Whitelisted E-mail Address" : "Add E-mail Address to Whitelist")}
           saveLabel="Save E-mail Address"
           empty="No e-mail addresses have been whitelisted yet."
-          filter={{ placeholder: "Search whitelisted e-mail addresses", label: "Search Whitelist", keys: ["email"], submitLabel: "Search" }}
+          filter={{ placeholder: "Search whitelisted e-mail addresses", label: "Search Whitelist", keys: ["email"], submitLabel: "Search", live: true }}
           columns={[
             { label: "E-mail Address", render: (r) => <strong>{str(r.email)}</strong> },
             { label: "Added", render: (r) => fmtDate(str(r.updatedAt)) },
@@ -142,7 +142,7 @@ function TabBody({ tab }: { tab: Tab }) {
           noun="bounce / complaint"
           createMode="none"
           empty="No bounces or complaints have been reported."
-          filter={{ placeholder: "Enter E-mail Address", label: "E-mail Address", keys: ["email", "context"], submitLabel: "Search" }}
+          filter={{ placeholder: "Enter E-mail Address", label: "E-mail Address", keys: ["email"], submitLabel: "Search", live: true }}
           selects={[{ key: "type", label: "Type", all: "All Types", options: () => ["Bounced", "Complaint"], match: (r, v) => r.type === v }]}
           pageSize={25}
           canEdit={() => false}

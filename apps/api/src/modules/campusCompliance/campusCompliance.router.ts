@@ -142,6 +142,7 @@ campusComplianceRouter.post("/sessions/:id/join", requireAuth, async (req, res, 
       classSessionId: z.string().uuid().parse(req.params.id),
       accountId: user.accountId,
       personId: user.personId,
+      roles: user.roles,
       userAgent: String(req.header("user-agent") ?? ""),
     });
     res.json({

@@ -618,7 +618,7 @@ function DashboardView({ config }: { config: TeacherScreenConfig }) {
 
   const studentCount = live?.bootstrap?.studentCount ?? 0;
   const sectionCount = live?.bootstrap?.sectionCount ?? sections.length;
-  const courseCount = new Set(sections.map((s) => s.code)).size || sections.length;
+  const courseCount = live?.bootstrap?.courseCount ?? (new Set(sections.map((s) => s.code)).size || sections.length);
   const draftGradeCount = live?.bootstrap?.draftGradeCount ?? gradeSubs.length;
   const instructorName = d?.name || live?.bootstrap?.displayName || "Instructor";
   const instructorMeta = d?.meta || live?.bootstrap?.email || "";
@@ -898,7 +898,7 @@ function DashboardView({ config }: { config: TeacherScreenConfig }) {
         </div>
         <details className="mh-ct-dash__acc">
           <summary>Shared Files</summary>
-          <p className="mh-teacher-muted">No shared files yet.</p>
+          <button type="button" className="mh-hcc-link" onClick={() => router.push("/instructor/f/t60-course-resources-management")}>Manage shared files</button>
         </details>
         <details className="mh-ct-dash__acc" open={Boolean(gradeSubs.length || alerts.length)}>
           <summary>To-do</summary>
@@ -1620,10 +1620,14 @@ function AnnouncementsView({ config }: { config: TeacherScreenConfig }) {
 
 function VersionEditorView({ config }: { config: TeacherScreenConfig }) {
   const v = config.versionEditor;
+  const live = useOptionalTeacherLive();
+  const [title, setTitle] = useState(v?.editor.title ?? "");
+  const [body, setBody] = useState(v?.editor.body ?? "");
+  useEffect(() => { if (v) { setTitle(v.editor.title); setBody(v.editor.body); } }, [v]);
   if (!v) return null;
   return (
     <div className="mh-teacher-studio-editor" data-figma-id={config.figmaId}>
-      <PageHead config={config} badge={v.version} />
+      <PageHead config={config} badge={v.version} hideActions />
       <div className="mh-teacher-banner">{v.notice}</div>
       <div className="mh-teacher-split">
         <aside className="mh-teacher-card">
@@ -1640,9 +1644,13 @@ function VersionEditorView({ config }: { config: TeacherScreenConfig }) {
           ))}
         </aside>
         <section className="mh-teacher-card">
-          <h2>{v.editor.title}</h2>
-          <p>{v.editor.body}</p>
+          <label style={{ display: "grid", gap: 6 }}><span>Version title</span><input className="mh-teacher-field" value={title} onChange={(e) => setTitle(e.target.value)} /></label>
+          <label style={{ display: "grid", gap: 6, marginTop: 12 }}><span>Change content</span><textarea className="mh-teacher-field" rows={10} value={body} onChange={(e) => setBody(e.target.value)} /></label>
           <span className="mh-teacher-muted">{v.editor.wordCount}</span>
+          <div className="mh-teacher-actions" style={{ marginTop: 12 }}>
+            <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary" disabled={live?.busy} onClick={() => void live?.runAction?.("Save Draft", JSON.stringify({ Title: title, Body: body }))}>Save Draft</button>
+            <button type="button" className="mh-teacher-btn" disabled={live?.busy} onClick={() => void live?.runAction?.("Submit for Approval", JSON.stringify({ Title: title, Body: body }))}>Submit for Approval</button>
+          </div>
           <h3>Versions</h3>
           <div className="mh-teacher-list">
             {v.versions.map((x) => (
@@ -3166,6 +3174,9 @@ function LecturesView({ config }: { config: TeacherScreenConfig }) {
   const l = config.lectures;
   const router = useRouter();
   const live = useOptionalTeacherLive();
+  const [scheduling, setScheduling] = useState(false);
+  const [title, setTitle] = useState("");
+  const [startsAt, setStartsAt] = useState("");
   if (!l) {
     return (
       <div className="mh-teacher-stack" data-figma-id={config.figmaId}>
@@ -3179,7 +3190,29 @@ function LecturesView({ config }: { config: TeacherScreenConfig }) {
   const sessions = Array.isArray(l.sessions) ? l.sessions : [];
   return (
     <div className="mh-teacher-stack" data-figma-id={config.figmaId}>
-      <PageHead config={config} />
+      <PageHead config={config} hideActions />
+      <div className="mh-teacher-actions">
+        <button type="button" className="mh-teacher-btn" onClick={() => setScheduling((open) => !open)}>
+          {scheduling ? "Cancel" : "Schedule Lecture"}
+        </button>
+      </div>
+      {scheduling ? (
+        <section className="mh-teacher-card" style={{ display: "grid", gap: 12, maxWidth: 560 }}>
+          <label style={{ display: "grid", gap: 6 }}><span>Lecture title</span><input className="mh-teacher-field" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Weekly lecture" /></label>
+          <label style={{ display: "grid", gap: 6 }}><span>Date and time</span><input className="mh-teacher-field" type="datetime-local" required value={startsAt} onChange={(e) => setStartsAt(e.target.value)} /></label>
+          <button
+            type="button"
+            className="mh-teacher-btn"
+            disabled={live?.busy || !startsAt}
+            onClick={async () => {
+              const ok = await live?.runAction?.("Schedule Lecture", JSON.stringify({ Title: title, StartsAt: new Date(startsAt).toISOString() }));
+              if (ok) setScheduling(false);
+            }}
+          >
+            {live?.busy ? "Scheduling…" : "Schedule and notify students"}
+          </button>
+        </section>
+      ) : null}
       <p className="mh-teacher-muted">{l.course}</p>
       {sessions.length === 0 ? (
         <p className="mh-teacher-muted">No lecture sessions scheduled yet.</p>
@@ -3776,14 +3809,14 @@ function QuestionGeneratorView({ config }: { config: TeacherScreenConfig }) {
             <span>Generate Count</span>
             <strong className="mh-teacher-outcomes__id">{data.count}</strong>
           </div>
-          <ActionBtn label="Generate Questions" />
+          <ActionBtn label="Generate Questions" rowKey={JSON.stringify({ Topic: data.topic })} />
         </aside>
         <section className="mh-teacher-card">
           <div className="mh-teacher-card__head">
             <h2>Generated Output</h2>
             <div className="mh-teacher-actions">
               <span className="mh-teacher-muted">{selected.length} selected</span>
-              <ActionBtn label="Add to Question Bank" href={config.secondaryActionHref} tone="secondary" />
+              <ActionBtn label="Add to Question Bank" rowKey={JSON.stringify({ questions: data.questions.filter((q) => selected.includes(q.id)) })} tone="secondary" />
             </div>
           </div>
           <div className="mh-teacher-questions__list">
@@ -4796,7 +4829,7 @@ function WorkshopsView({ config }: { config: TeacherScreenConfig }) {
   const w = config.workshops;
   const live = useOptionalTeacherLive();
   if (!w) return null;
-  const tabs = w.tabs ?? ["My Workshops (0)"];
+  const tabs = w.tabs ?? ["My Workshops"];
   const cards = w.cards ?? [];
   function tabHref(tab: string) {
     if (/available/i.test(tab)) return "/instructor/f/t11-workshops?list=available";
@@ -5928,6 +5961,10 @@ function AssessmentBuilderView({ config }: { config: TeacherScreenConfig }) {
   const [weight, setWeight] = useState(data?.weight ?? "20%");
   const [openDate, setOpenDate] = useState(data?.openDate ?? "");
   const [dueDate, setDueDate] = useState(data?.dueDate ?? "");
+  const [durationMinutes, setDurationMinutes] = useState(data?.durationMinutes ?? 60);
+  const [questions, setQuestions] = useState(
+    () => data?.questions ?? [{ id: "question-1", prompt: "", options: ["", ""], correct: 0 }],
+  );
   const [rubricRows, setRubricRows] = useState(
     () => data?.rubricRows ?? [{ criterion: "", excellent: "", good: "", poor: "" }],
   );
@@ -5940,6 +5977,8 @@ function AssessmentBuilderView({ config }: { config: TeacherScreenConfig }) {
     setWeight(data.weight);
     setOpenDate(data.openDate ?? "");
     setDueDate(data.dueDate ?? "");
+    setDurationMinutes(data.durationMinutes ?? 60);
+    setQuestions(data.questions?.length ? data.questions : [{ id: "question-1", prompt: "", options: ["", ""], correct: 0 }]);
     setRubricRows(data.rubricRows.length ? data.rubricRows : [{ criterion: "", excellent: "", good: "", poor: "" }]);
   }, [data]);
 
@@ -5971,6 +6010,8 @@ function AssessmentBuilderView({ config }: { config: TeacherScreenConfig }) {
     weight: weightLabel,
     openDate,
     dueDate,
+    durationMinutes,
+    questions,
     rubricRows,
   });
 
@@ -6059,6 +6100,58 @@ function AssessmentBuilderView({ config }: { config: TeacherScreenConfig }) {
             </label>
           </div>
         </section>
+
+        {type === "Quiz" ? (
+          <section className="mh-teacher-card mh-teacher-assess__card">
+            <div className="mh-teacher-assess__card-head">
+              <h3>Timed Quiz Questions</h3>
+              <button
+                type="button"
+                className="mh-teacher-assess__add-criterion"
+                onClick={() => setQuestions((rows) => [...rows, { id: crypto.randomUUID(), prompt: "", options: ["", ""], correct: 0 }])}
+              >
+                ADD QUESTION
+              </button>
+            </div>
+            <label className="mh-teacher-assess__field">
+              <span>Duration (minutes)</span>
+              <input className="mh-teacher-field" type="number" min={1} max={480} value={durationMinutes} onChange={(e) => setDurationMinutes(Number(e.target.value))} />
+            </label>
+            <div className="mh-teacher-stack">
+              {questions.map((question, questionIndex) => (
+                <div key={question.id ?? `question-${questionIndex}`} className="mh-teacher-section">
+                  <label className="mh-teacher-assess__field">
+                    <span>Question {questionIndex + 1}</span>
+                    <input
+                      className="mh-teacher-field"
+                      value={question.prompt ?? ""}
+                      onChange={(e) => setQuestions((rows) => rows.map((row, i) => i === questionIndex ? { ...row, prompt: e.target.value } : row))}
+                      placeholder="Enter the question"
+                    />
+                  </label>
+                  {(question.options ?? ["", ""]).map((option, optionIndex) => (
+                    <label key={`${question.id}-${optionIndex}`} className="mh-teacher-assess__field">
+                      <span>
+                        <input
+                          type="radio"
+                          name={`correct-${question.id}`}
+                          checked={(question.correct ?? 0) === optionIndex}
+                          onChange={() => setQuestions((rows) => rows.map((row, i) => i === questionIndex ? { ...row, correct: optionIndex } : row))}
+                        /> Correct answer {optionIndex + 1}
+                      </span>
+                      <input
+                        className="mh-teacher-field"
+                        value={option}
+                        onChange={(e) => setQuestions((rows) => rows.map((row, i) => i === questionIndex ? { ...row, options: (row.options ?? ["", ""]).map((value, j) => j === optionIndex ? e.target.value : value) } : row))}
+                        placeholder={`Answer choice ${optionIndex + 1}`}
+                      />
+                    </label>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         <section className="mh-teacher-card mh-teacher-assess__card">
           <div className="mh-teacher-assess__card-head">

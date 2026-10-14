@@ -1,4 +1,19 @@
-export const openApiDocument = {
+type OpenApiOperation = {
+  summary: string;
+  security?: Array<{ bearer: never[] }>;
+  "x-idempotent"?: boolean;
+  "x-concurrency"?: string;
+  "x-generated"?: boolean;
+};
+
+type OpenApiPath = Partial<Record<"get" | "post" | "put" | "patch" | "delete" | "options" | "head", OpenApiOperation>>;
+
+export const openApiDocument: {
+  openapi: string;
+  info: { title: string; version: string };
+  paths: Record<string, OpenApiPath>;
+  components: { securitySchemes: { bearer: { type: string; scheme: string } } };
+} = {
   openapi: "3.0.3",
   info: { title: "MyHeritage API", version: "0.1.0" },
   paths: {
@@ -91,5 +106,71 @@ export const openApiDocument = {
     securitySchemes: { bearer: { type: "http", scheme: "bearer" } },
   },
 };
+
+function joinPath(base: string, route: string) {
+  const value = `${base}/${route}`.replace(/\/+/g, "/").replace(/\/$/, "") || "/";
+  return value
+    .replace(/:([A-Za-z0-9_]+)/g, "{$1}")
+    .replace(/\(\?:[^)]+\)/g, "{value}")
+    .replace(/\*/g, "{wildcard}");
+}
+
+/** Express does not retain the literal mount path, only this compiled regexp. */
+function mountPath(layer: { regexp?: RegExp }) {
+  const regexp = layer.regexp as (RegExp & { fast_slash?: boolean }) | undefined;
+  if (!regexp || regexp.fast_slash) return "";
+  const source = regexp.source;
+  const fixed = source.match(/^\^\\\/(.+?)\\\/\?\(\?=\\\/\|\$\)$/)?.[1];
+  if (!fixed || fixed.includes("(")) return "";
+  return `/${fixed.replace(/\\\//g, "/").replace(/\\([.-])/g, "$1")}`;
+}
+
+type ExpressLayer = {
+  route?: { path: string | string[]; methods: Record<string, boolean> };
+  regexp?: RegExp;
+  handle?: { stack?: ExpressLayer[] };
+};
+
+function documentStack(stack: ExpressLayer[], base = "") {
+  for (const layer of stack) {
+    if (layer.route) {
+      const paths = Array.isArray(layer.route.path) ? layer.route.path : [layer.route.path];
+      for (const route of paths) {
+        if (typeof route !== "string") continue;
+        const path = joinPath(base, route);
+        const item = (openApiDocument.paths[path] ??= {});
+        for (const method of Object.keys(layer.route.methods)) {
+          if (!(["get", "post", "put", "patch", "delete", "options", "head"] as const).includes(method as never)) continue;
+          const verb = method as keyof OpenApiPath;
+          item[verb] ??= {
+            summary: `${method.toUpperCase()} ${path}`,
+            security: [{ bearer: [] }],
+            "x-generated": true,
+          };
+        }
+      }
+      continue;
+    }
+    if (layer.handle?.stack) documentStack(layer.handle.stack, joinPath(base, mountPath(layer)));
+  }
+}
+
+/** Adds every mounted Express route to the public contract while preserving hand-written descriptions. */
+export function documentExpressApp(app: { _router?: { stack?: ExpressLayer[] } }) {
+  documentStack(app._router?.stack ?? []);
+  for (const publicPath of ["/health", "/api/openapi.json", "/api/docs"]) {
+    const operation = openApiDocument.paths[publicPath]?.get;
+    if (operation) operation.security = [];
+  }
+  for (const path of Object.keys(openApiDocument.paths)) {
+    if (path.startsWith("/public/") || path === "/auth/login" || path === "/auth/forgot-password" || path === "/auth/reset-password") {
+      for (const operation of Object.values(openApiDocument.paths[path] ?? {})) if (operation) operation.security = [];
+    }
+  }
+  for (const publicPath of ["/selfpaced/programs", "/selfpaced/programs/{slug}", "/selfpaced/register"]) {
+    for (const operation of Object.values(openApiDocument.paths[publicPath] ?? {})) if (operation) operation.security = [];
+  }
+  return openApiDocument;
+}
 
 export const REGISTERED_ROUTES = Object.keys(openApiDocument.paths);

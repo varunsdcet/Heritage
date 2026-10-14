@@ -18,6 +18,18 @@ function unique(codes: string[]) {
 
 type Standing = { credits: number; status: "satisfied" | "in_progress" };
 
+export function projectedTermFromCalendar(
+  terms: Array<{ name: string; startsOn: string; endsOn: string }>,
+  termsNeeded: number,
+  today = new Date().toISOString().slice(0, 10),
+) {
+  const available = terms
+    .filter((term) => term.endsOn.slice(0, 10) >= today)
+    .sort((a, b) => a.startsOn.localeCompare(b.startsOn) || a.endsOn.localeCompare(b.endsOn));
+  if (!available.length) return null;
+  return available[Math.max(termsNeeded, 1) - 1]?.name ?? null;
+}
+
 /**
  * Per course code: satisfied only by a final, passing mark that earns credit (the Final Marks / transcript rule);
  * in progress while an enrolment has no final mark yet. Failed and withdrawn attempts count for nothing.
@@ -68,6 +80,11 @@ export async function computeDegreeProgress(input: ProgressOptions): Promise<Deg
   const history = await getCourseHistory(input.institutionId, student.id);
   const enrolments = history.all.filter((r) => r.status === "enrolled" || r.status === "completed");
   const completedByCourse = courseStanding(transcriptCourses(history, version.program.name), drop, fail);
+  const failedCourseCodes = unique(
+    transcriptCourses(history, version.program.name)
+      .filter((row) => row.final && !passingLetter(row.letter))
+      .map((row) => row.courseCode),
+  ).filter((code) => completedByCourse.get(code)?.status !== "satisfied");
   const transfers = await prisma.transferCredit.findMany({
     where: { institutionId: input.institutionId, studentId: student.id, status: "accepted" },
     include: { course: true },
@@ -180,8 +197,12 @@ export async function computeDegreeProgress(input: ProgressOptions): Promise<Deg
   }
 
   const termsNeeded = Math.max(1, Math.ceil(remainingRequirements.filter((r) => r.status !== "in_progress").length / 3));
-  const projectedCompletionTerm =
-    remainingCredits <= 0 ? "Fall 2026" : termsNeeded <= 1 ? "Winter 2027" : termsNeeded <= 2 ? "Summer 2027" : "Fall 2027";
+  const terms = await prisma.term.findMany({
+    where: { institutionId: input.institutionId },
+    select: { name: true, startsOn: true, endsOn: true },
+  });
+  const projectedCompletionTerm = projectedTermFromCalendar(terms, remainingCredits <= 0 ? 1 : termsNeeded);
+  if (!projectedCompletionTerm) warnings.push("No published academic term covers the projected completion window.");
 
   const suggestedOptions: string[] = [];
   for (const req of remainingRequirements.filter((r) => r.status === "missing").slice(0, 3)) {
@@ -234,7 +255,7 @@ export async function computeDegreeProgress(input: ProgressOptions): Promise<Deg
   if (prerequisiteConflicts.length) {
     claims.push({
       kind: "uncertainty",
-      text: "Course offering terms beyond the published Fall 2026 schedule are not confirmed in this analysis.",
+      text: "Course offering terms beyond the currently published academic calendar are not confirmed in this analysis.",
       evidenceIds: [],
     });
   }
@@ -251,6 +272,7 @@ export async function computeDegreeProgress(input: ProgressOptions): Promise<Deg
     satisfiedRequirements,
     prerequisiteConflicts,
     prerequisiteGraph,
+    failedCourseCodes,
     projectedCompletionTerm,
     warnings,
     suggestedOptions,

@@ -19,7 +19,7 @@ export function parseApproverRoles(json: string): RoleName[] {
   }
 }
 
-const GRADE_APPROVAL_TYPES = new Set(["grade_publish", "grade.publish"]);
+const GRADE_APPROVAL_TYPES = new Set(["grade_publish", "grade.publish", "grade.correct"]);
 
 export function approvalRequestedEventName(type: string) {
   return GRADE_APPROVAL_TYPES.has(type) ? "GradeItem.publishRequested" : "ApprovalRequest.requested";

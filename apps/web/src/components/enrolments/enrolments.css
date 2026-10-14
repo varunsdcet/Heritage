@@ -141,6 +141,31 @@
   background: #eef4ff;
 }
 
+.en-row-actions,
+.en-roster-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+}
+
+.en-row-actions {
+  justify-content: flex-end;
+  min-width: 120px;
+}
+
+.en-roster-course {
+  margin: -4px 0 14px;
+}
+
+.en-roster-tabs {
+  margin-bottom: 14px;
+}
+
+.en-roster-table td {
+  vertical-align: middle;
+}
+
 .en-toolbar {
   display: flex;
   gap: 10px;

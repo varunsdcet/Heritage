@@ -15,12 +15,41 @@ import {
 } from "./sectionSchedule.js";
 import { personStudentIds } from "../me/studentAlignment.js";
 import { enrolmentMark } from "../academic/program-plan.service.js";
+import { facultySectionIds } from "../instructor/sectionFaculty.js";
 
 export const coursesRouter: Router = Router();
 
 async function offeredTerms(institutionId: string, sections: Array<{ id: string; term: TermRef }>) {
   const [offerings, terms] = await Promise.all([sectionOfferings(institutionId, sections.map((s) => s.id)), institutionTerms(institutionId)]);
   return (s: { id: string; term: TermRef }) => sectionTerm(s.term, { startsOn: offerings.get(s.id)?.startsOn, endsOn: offerings.get(s.id)?.endsOn }, terms);
+}
+
+/**
+ * Shared instructor course selectors (gradebook, submissions, and older course views) must use the
+ * same assignment rules as the main My Courses screen. A newly-created section is useful before its
+ * first enrolment, and additional faculty are stored in session settings rather than Section's lead
+ * instructor field.
+ */
+export async function instructorCourseItems(user: AuthedRequest["user"]) {
+  const assignedIds = await facultySectionIds(user);
+  const sections = await prisma.section.findMany({
+    where: { institutionId: user.institutionId, id: { in: [...assignedIds] } },
+    include: {
+      course: true,
+      term: true,
+      _count: { select: { enrolments: { where: { status: "enrolled" } } } },
+    },
+  });
+  const termOf = await offeredTerms(user.institutionId, sections);
+  return sections.map((section) => ({
+    sectionId: section.id,
+    code: section.course.code,
+    title: section.course.title,
+    credits: section.course.credits,
+    termCode: termOf(section)?.code ?? "",
+    enrolmentCount: section._count.enrolments,
+    status: "teaching",
+  }));
 }
 
 coursesRouter.get("/me", requireAuth, async (req, res, next) => {
@@ -61,27 +90,8 @@ coursesRouter.get("/me", requireAuth, async (req, res, next) => {
     }
 
     if (roles.includes("instructor")) {
-      const sections = await prisma.section.findMany({
-        where: { institutionId: user.institutionId, instructorPersonId: user.personId },
-        include: {
-          course: true,
-          term: true,
-          _count: { select: { enrolments: { where: { status: "enrolled" } } } },
-        },
-      });
-      // Only sections with enrolled students (hide empty shells).
-      const withStudents = sections.filter((s) => s._count.enrolments > 0);
-      const termOf = await offeredTerms(user.institutionId, withStudents);
       res.json({
-        items: withStudents.map((s) => ({
-          sectionId: s.id,
-          code: s.course.code,
-          title: s.course.title,
-          credits: s.course.credits,
-          termCode: termOf(s)?.code ?? "",
-          enrolmentCount: s._count.enrolments,
-          status: "teaching",
-        })),
+        items: await instructorCourseItems(user),
       });
       return;
     }

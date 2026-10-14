@@ -1,7 +1,7 @@
 # Heritage Manual QA Test Plan
 
-Version: 1.0
-Prepared: 2026-09-15
+Version: 1.1
+Updated: 2026-10-14
 Execution sheet (100 cases): [`manual-test-cases.csv`](./manual-test-cases.csv)
 
 Automated critical-journey runner: [`../../tools/qa/full-journey.mjs`](../../tools/qa/full-journey.mjs)
@@ -40,23 +40,19 @@ Each test has one of these support labels:
 
 | Component | Local value |
 |---|---|
-| Web | `http://localhost:3100` |
-| API | `http://localhost:4100` |
-| API documentation | `http://localhost:4100/api/docs` |
-| Database | `heritage_codex_local` |
+| Web | `http://localhost:3000` unless overridden |
+| API | `http://localhost:4000` unless overridden |
+| API documentation | `http://localhost:4000/api/docs` |
+| Production web | `https://appslure.app` |
+| Production API | Same origin via `/__api` |
+| Database | Dedicated disposable QA database only |
 | Worker | Outbox relay process running locally |
 
 The port values above describe the current local session. Testers should replace them with the target environment values when testing another deployment.
 
-### Seed accounts
+### QA accounts
 
-| Role | Email | Password |
-|---|---|---|
-| Student | `marcus.vance@heritage.edu` | `Heritage!2026` |
-| Instructor | `vance.instructor@heritage.edu` | `Heritage!2026` |
-| Admin/registrar | `admin@heritage.edu` | `Heritage!2026` |
-
-Never use these credentials in a production environment.
+Use administrator-issued, least-privilege QA accounts. Do not commit shared passwords, bearer tokens, reset links, or MFA recovery codes to test plans or evidence.
 
 ## 4. Test-data rules
 
@@ -66,8 +62,8 @@ Never use these credentials in a production environment.
    - instructor: `qa.instructor+<RUN_ID>@heritage.edu`;
    - course code: `QA<HHMM>`;
    - section code: `<COURSE>-01`.
-3. Do not reseed a shared or production database. The seed script deletes existing data.
-4. Deletion is not implemented. Test records must remain in the dedicated QA database or be removed only by resetting that disposable database.
+3. Do not reseed a shared or production database. Destructive seed mode requires the explicit `SEED_ALLOW_WIPE=yes-wipe-everything` acknowledgement and is only for a disposable database.
+4. Use recoverable archive/delete flows where implemented. Remove test records only through the product workflow or by resetting a disposable QA database.
 5. Never upload real personal, financial, medical, immigration, or government-ID data. Use synthetic fixtures only.
 
 Suggested synthetic files for future upload testing:

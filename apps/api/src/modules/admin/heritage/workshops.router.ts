@@ -8,6 +8,7 @@ import {
   availableWorkshops,
   completedWorkshops,
   createEnrolment,
+  createEnrolments,
   deleteCategory,
   deleteEnrolment,
   deleteRole,
@@ -106,6 +107,7 @@ const RoleBody = z.object({
   competencies: z.array(z.string().max(200)).max(100).optional(),
 });
 const EnrolBody = z.object({ studentId: text(60), workshopId: text(60), roleId: text(60), note: text(2000) });
+const BulkEnrolBody = z.object({ studentIds: z.array(z.string().uuid()).min(1).max(50), workshopId: text(60), roleId: text(60), note: text(2000) });
 const StatusBody = z.object({ status: z.enum(["pending", "approved", "declined", "dropped"]), note: text(2000) });
 const AttendanceBody = z.object({
   date: text(10),
@@ -118,6 +120,7 @@ workshopsRouter.get("/students", handle((req) => searchStudents(user(req), Strin
 
 workshopsRouter.get("/enrolments", handle((req) => listEnrolments(user(req), EnrolmentQuery.parse(req.query))));
 workshopsRouter.post("/enrolments", handle((req) => createEnrolment(user(req), EnrolBody.parse(req.body)), 201));
+workshopsRouter.post("/enrolments/bulk", handle((req) => createEnrolments(user(req), BulkEnrolBody.parse(req.body))));
 workshopsRouter.post(
   "/enrolments/:id/status",
   handle((req) => {

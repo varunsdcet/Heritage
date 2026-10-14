@@ -32,6 +32,7 @@ const prisma = vi.hoisted(() => {
   return new Proxy({} as Record<string, unknown>, {
     get(_t, key: string) {
       if (key === "then") return undefined;
+      if (key === "$transaction") return async (run: unknown) => typeof run === "function" ? (run as (tx: unknown) => unknown)(prisma) : Promise.all(run as Promise<unknown>[]);
       return modelProxy(key);
     },
   });

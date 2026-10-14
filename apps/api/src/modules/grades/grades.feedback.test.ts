@@ -22,7 +22,8 @@ const db = vi.hoisted(() => ({
   gradeItem: { findFirst: vi.fn() },
   assignment: { findFirst: vi.fn() },
   enrolment: { findFirst: vi.fn() },
-  section: { findFirst: vi.fn() },
+  heritageRecord: { findFirst: vi.fn(), findMany: vi.fn() },
+  section: { findFirst: vi.fn(), findMany: vi.fn() },
   submission: { findMany: vi.fn() },
   $transaction: vi.fn(),
 }));
@@ -74,7 +75,16 @@ afterAll(async () => {
 beforeEach(() => {
   vi.clearAllMocks();
   openApprovals.ids = new Set();
-  db.gradeItem.findFirst.mockResolvedValue({ id: gradeId, status: "draft", rowVersion: 3, maxScore: 100 });
+  db.gradeItem.findFirst.mockResolvedValue({
+    id: gradeId,
+    status: "draft",
+    rowVersion: 3,
+    maxScore: 100,
+    assignment: { sectionId, section: { courseId: "course-1" } },
+  });
+  db.heritageRecord.findMany.mockResolvedValue([]);
+  db.heritageRecord.findFirst.mockResolvedValue(null);
+  db.section.findMany.mockResolvedValue([{ id: sectionId }]);
   db.$transaction.mockImplementation(async (work: (client: typeof tx) => Promise<unknown>) => work(tx));
   tx.gradeItem.update.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ id: gradeId, ...data }));
   tx.gradeItem.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ id: gradeId, ...data }));
@@ -109,7 +119,12 @@ describe("grading feedback", () => {
   });
 
   it("stores feedback on a newly created grade", async () => {
-    db.assignment.findFirst.mockResolvedValue({ id: assignmentId, sectionId, maxScore: 100 });
+    db.assignment.findFirst.mockResolvedValue({
+      id: assignmentId,
+      sectionId,
+      maxScore: 100,
+      section: { courseId: "course-1" },
+    });
     db.enrolment.findFirst.mockResolvedValue({ id: "e1" });
     db.gradeItem.findFirst.mockResolvedValue(null);
     const response = await fetch(`${baseUrl}/grades`, {

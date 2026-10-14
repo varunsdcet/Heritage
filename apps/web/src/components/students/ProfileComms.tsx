@@ -22,6 +22,7 @@ import {
   SourceNotice,
   Table,
   Txt,
+  downloadBase64,
   fmtDate,
   fmtStamp,
   qs,
@@ -44,23 +45,41 @@ const enc = encodeURIComponent;
 /* ------------------------------------------------------------------ */
 
 export function GenerateDocument() {
-  const { meta } = useProfile();
+  const { id, meta, notice } = useProfile();
   const [choice, setChoice] = useState("");
+  const [inputs, setInputs] = useState<Record<string, string>>({});
+  const { busy, error, run } = useSubmit();
   const letters = meta.documentTemplates.filter((t) => t.documentType !== "Invoice / Receipt");
-  const options = letters.length ? letters.map((t) => ({ value: t.id, label: t.name })) : meta.capturedDocumentGroups.map((g) => ({ value: g, label: g }));
+  const options = letters.map((t) => ({ value: t.id, label: t.name }));
+  const selected = letters.find((template) => template.id === choice);
+  const generate = async () => {
+    const out = await run(
+      () => send<{ filename: string; mime: string; base64: string }>(`/${enc(id)}/documents/generate`, "POST", { templateId: choice, inputs }),
+      "Could not generate document",
+    );
+    if (!out) return;
+    downloadBase64(out.filename, out.mime, out.base64, true);
+    notice.ok("Document generated.");
+  };
   return (
     <Card title="Generate Document">
+      <ErrorLine>{error}</ErrorLine>
       <Grid>
         <F label="Document Type">
-          <Sel value={choice} onChange={setChoice} empty="— Select Document —" options={options} />
+          <Sel value={choice} onChange={(value) => { setChoice(value); setInputs({}); }} empty="— Select Document —" options={options} />
         </F>
+        {selected?.inputs.map((key) => (
+          <F key={key} label={key.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase())} req>
+            <Txt value={inputs[key] ?? ""} onChange={(value) => setInputs((current) => ({ ...current, [key]: value }))} />
+          </F>
+        ))}
       </Grid>
-      {!letters.length ? <p className="pm-note mh-sa__muted">No document templates are configured yet; the list shows the template groups captured from the original system. Configure templates under System Configuration › Document Templates.</p> : null}
-      {choice ? (
-        <div style={{ marginTop: 12 }}>
-          <SourceNotice>The inputs and generated output for each document template were not captured from the original system, so no common generation form has been assumed for &quot;{options.find((o) => o.value === choice)?.label}&quot;.</SourceNotice>
-        </div>
-      ) : null}
+      {!letters.length ? <p className="pm-note mh-sa__muted">No document templates are configured. Add one under System Configuration › Document Templates.</p> : null}
+      <div className="st-filters__actions" style={{ marginTop: 12 }}>
+        <Btn tone="primary" disabled={!choice || busy} onClick={() => void generate()}>
+          {busy ? "Generating…" : "Generate PDF"}
+        </Btn>
+      </div>
     </Card>
   );
 }

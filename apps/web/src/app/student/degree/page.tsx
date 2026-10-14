@@ -18,7 +18,6 @@ function StudentDegreeBody() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [userName, setUserName] = useState("Student");
-  const [failedCodes, setFailedCodes] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const session = loadSession();
@@ -31,12 +30,6 @@ function StudentDegreeBody() {
       return;
     }
     setUserName(`${session.givenName} ${session.familyName}`.trim() || "Student");
-    api<Record<"main" | "practicum" | "makeup", Array<{ courseCode: string; status: string }> | undefined>>("/student/program-plan", {}, session.accessToken)
-      .then((plan) => {
-        const items = [...(plan.main ?? []), ...(plan.practicum ?? []), ...(plan.makeup ?? [])];
-        setFailedCodes(new Set(items.filter((i) => i.status === "failed").map((i) => i.courseCode.toUpperCase())));
-      })
-      .catch(() => undefined);
     api<DegreeProgressResponse>("/student/degree-progress", {}, session.accessToken)
       .then(async (data) => {
         setLoading(false);
@@ -236,7 +229,7 @@ function StudentDegreeBody() {
               <h2>Open requirements</h2>
               <div style={{ display: "grid", gap: 10 }}>
                 {view.remainingRequirements.map((req) => {
-                  const failed = req.status === "missing" && failedCodes.has(req.code.toUpperCase());
+                  const failed = req.status === "missing" && view.failedCourseCodes.includes(req.code.toUpperCase());
                   return (
                     <div key={req.id} style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                       <div>

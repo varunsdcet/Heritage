@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const db = vi.hoisted(() => ({ studentBadge: { findFirst: vi.fn(), updateMany: vi.fn() } }));
-const core = vi.hoisted(() => ({ canStudents: vi.fn(), stuAudit: vi.fn() }));
+const core = vi.hoisted(() => ({ canStudents: vi.fn(), assertStudentCampusAccess: vi.fn(), stuAudit: vi.fn() }));
 
 vi.mock("@myheritage/db", () => ({ prisma: db }));
 vi.mock("./students.core.js", () => ({
@@ -24,6 +24,7 @@ const badge = { id: "b-1", institutionId: "inst-1", studentId: "s-1", title: "De
 beforeEach(() => {
   vi.clearAllMocks();
   core.canStudents.mockResolvedValue(undefined);
+  core.assertStudentCampusAccess.mockResolvedValue(undefined);
   db.studentBadge.findFirst.mockResolvedValue(badge);
   db.studentBadge.updateMany.mockResolvedValue({ count: 1 });
 });

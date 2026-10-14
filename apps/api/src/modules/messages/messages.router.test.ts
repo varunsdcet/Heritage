@@ -31,6 +31,7 @@ const db = vi.hoisted(() => ({
 }));
 
 vi.mock("@myheritage/db", () => ({ prisma: db }));
+vi.mock("../admin/superAdmin.service.js", () => ({ assertPermission: vi.fn().mockResolvedValue({}) }));
 vi.mock("../../middleware/auth.js", () => ({
   requireAuth(req: Request, _res: Response, next: NextFunction) {
     Object.assign(req, { user: testClaims, correlationId: "message-test-correlation" });

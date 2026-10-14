@@ -29,12 +29,14 @@ import { requireApproval } from "@myheritage/auth";
 import { prisma } from "@myheritage/db";
 import { writeAuditAndOutbox } from "@myheritage/events";
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import { sessionJoinUrl } from "../../lib/liveClass.js";
 import {
   SEAT_STATUSES,
   feeFor,
   institutionTimezone,
   postWorkshopFee,
+  waiveWorkshopFee,
   storedStatus,
   studentMayRegister,
   workshopPhase,
@@ -43,11 +45,49 @@ import {
   type StudentAccess,
 } from "../../lib/workshopPolicy.js";
 import { studentMetaMap } from "../admin/superAdmin.service.js";
-import { currentStudentId } from "../me/studentAlignment.js";
+import { studentStatusPolicy } from "../admin/heritage/students.core.js";
+import { promoteWaitlisted } from "../admin/heritage/enrolment.js";
+import { assertNoActiveStudentHold, currentStudentId } from "../me/studentAlignment.js";
 import { studentPaymentsEnabled } from "./finance.payments.js";
 
 function httpError(message: string, code: string, status: number) {
   return Object.assign(new Error(message), { code, status });
+}
+
+function dataOf(raw: string | null | undefined) {
+  try {
+    const value = JSON.parse(raw || "{}");
+    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+async function withdrawalPolicy(institutionId: string, studentId: string) {
+  const profile = await prisma.heritageRecord.findFirst({
+    where: { institutionId, screenId: "STU:PROFILE", contextKey: studentId, singletonKey: "profile", deletedAt: null },
+    select: { dataJson: true },
+  });
+  const programId = String(dataOf(profile?.dataJson).programId || "");
+  if (!programId) return "Always requires approval";
+  const program = await prisma.heritageRecord.findFirst({
+    where: { id: programId, institutionId, screenId: "PM:PROGRAM", deletedAt: null },
+    select: { dataJson: true },
+  });
+  return String(dataOf(program?.dataJson).dropPenalties || "Always requires approval");
+}
+
+const AssessmentQuestion = z.object({
+  id: z.string().min(1).max(80),
+  prompt: z.string().min(1).max(2000),
+  options: z.array(z.string().min(1).max(1000)).min(2).max(10),
+  correct: z.number().int().nonnegative(),
+});
+const AssessmentAnswers = z.object({ answers: z.record(z.string(), z.number().int().nonnegative()) });
+
+function assessmentQuestions(json: string) {
+  const parsed = z.array(AssessmentQuestion).safeParse(JSON.parse(json || "[]"));
+  return parsed.success ? parsed.data.filter((question) => question.correct < question.options.length) : [];
 }
 
 export async function requireStudent(user: SessionClaims, sectionId?: string) {
@@ -132,6 +172,8 @@ export async function startAssessmentAttempt(
     include: { attempts: { where: { studentId: student.id } }, section: true },
   });
   if (!assessment) throw httpError("Assessment not found", "NOT_FOUND", 404);
+  const questions = assessmentQuestions(assessment.questionsJson);
+  if (!questions.length) throw httpError("This assessment has no published questions yet", "ASSESSMENT_NOT_READY", 409);
   const enrolled = await prisma.enrolment.findFirst({
     where: {
       institutionId: user.institutionId,
@@ -151,6 +193,7 @@ export async function startAssessmentAttempt(
       attemptId: open.id,
       expiresAt: open.expiresAt.toISOString(),
       assessmentAttemptOpen: true,
+      questions: questions.map(({ correct: _correct, ...question }) => question),
     });
   }
   if (assessment.attempts.length >= assessment.maxAttempts) {
@@ -184,12 +227,14 @@ export async function startAssessmentAttempt(
     attemptId: attempt.id,
     expiresAt: attempt.expiresAt.toISOString(),
     assessmentAttemptOpen: true,
+    questions: questions.map(({ correct: _correct, ...question }) => question),
   });
 }
 
 export async function submitAssessmentAttempt(
   user: SessionClaims,
   attemptId: string,
+  body: unknown,
   correlationId: string,
 ) {
   const student = await requireStudent(user);
@@ -198,13 +243,33 @@ export async function submitAssessmentAttempt(
   });
   if (!attempt) throw httpError("Attempt not found", "NOT_FOUND", 404);
   if (attempt.status !== "open") throw httpError("Attempt is not open", "CONFLICT", 409);
+  const assessment = await prisma.assessment.findFirst({ where: { id: attempt.assessmentId, institutionId: user.institutionId } });
+  if (!assessment) throw httpError("Assessment not found", "NOT_FOUND", 404);
+  const questions = assessmentQuestions(assessment.questionsJson);
+  if (!questions.length) throw httpError("This assessment has no published questions", "ASSESSMENT_NOT_READY", 409);
+  const input = AssessmentAnswers.parse(body);
+  const missing = questions.find((question) => input.answers[question.id] === undefined);
+  const invalid = questions.find((question) => {
+    const answer = input.answers[question.id];
+    return answer !== undefined && (answer < 0 || answer >= question.options.length);
+  });
+  if (missing || invalid) throw httpError("Answer every question with a valid choice before submitting", "ASSESSMENT_ANSWERS_INVALID", 400);
   const submittedAt = new Date();
+  if (submittedAt > attempt.expiresAt) {
+    await prisma.assessmentAttempt.update({ where: { id: attempt.id }, data: { status: "expired", submittedAt, rowVersion: { increment: 1 } } });
+    throw httpError("The timed attempt has expired", "ASSESSMENT_EXPIRED", 409);
+  }
+  const score = questions.filter((question) => input.answers[question.id] === question.correct).length;
+  const maxScore = questions.length;
   const updated = await prisma.$transaction(async (tx) => {
     const row = await tx.assessmentAttempt.update({
       where: { id: attempt.id },
       data: {
-        status: submittedAt > attempt.expiresAt ? "expired" : "submitted",
+        status: "submitted",
         submittedAt,
+        answersJson: JSON.stringify(input.answers),
+        score,
+        maxScore,
         rowVersion: { increment: 1 },
       },
     });
@@ -214,7 +279,7 @@ export async function submitAssessmentAttempt(
       eventName: "AssessmentAttempt.submitted",
       purpose: "assessment",
       before: attempt,
-      after: row,
+      after: { ...row, answers: input.answers, score, maxScore },
       source: "student.assessments.submit",
       correlationId,
     });
@@ -227,6 +292,8 @@ export async function submitAssessmentAttempt(
     attemptId: updated.id,
     status: "submitted",
     submittedAt: updated.submittedAt!.toISOString(),
+    score,
+    maxScore,
   });
 }
 
@@ -388,10 +455,17 @@ export async function upsertLabNotebook(
 
 export async function listStudentServiceRequests(user: SessionClaims) {
   const student = await requireStudent(user);
-  const rows = await prisma.serviceRequest.findMany({
-    where: { institutionId: user.institutionId, studentId: student.id },
-    orderBy: { createdAt: "desc" },
-  });
+  const [rows, activeEnrolments] = await Promise.all([
+    prisma.serviceRequest.findMany({
+      where: { institutionId: user.institutionId, studentId: student.id },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.enrolment.findMany({
+      where: { institutionId: user.institutionId, studentId: student.id, status: "enrolled" },
+      include: { section: { include: { course: true, term: true } } },
+      orderBy: { createdAt: "desc" },
+    }),
+  ]);
   return StudentServiceRequestsResponse.parse({
     requests: rows.map((r) => ({
       id: r.id,
@@ -401,6 +475,10 @@ export async function listStudentServiceRequests(user: SessionClaims) {
       status: r.status,
       approvalRequestId: r.approvalRequestId,
       createdAt: r.createdAt.toISOString(),
+    })),
+    withdrawalOptions: activeEnrolments.map((e) => ({
+      sectionId: e.sectionId,
+      label: `${e.section.course.code} ${e.section.code} — ${e.section.course.title} (${e.section.term.name})`,
     })),
   });
 }
@@ -412,10 +490,37 @@ export async function createStudentServiceRequest(
 ) {
   const student = await requireStudent(user);
   const input = CreateStudentServiceRequest.parse(body);
+  await assertNoActiveStudentHold(user.institutionId, student.id, "Submitting a student request");
+  let withdrawalEnrolment: { id: string; sectionId: string; rowVersion: number } | null = null;
+  let immediateWithdrawal = false;
+  if (input.type === "course_withdrawal") {
+    if (!input.sectionId) throw httpError("Choose the enrolled course section to withdraw from", "VALIDATION_ERROR", 400);
+    const enrolment = await prisma.enrolment.findFirst({
+      where: { institutionId: user.institutionId, studentId: student.id, sectionId: input.sectionId, status: "enrolled" },
+      select: { id: true, sectionId: true, rowVersion: true },
+    });
+    if (!enrolment) throw httpError("The selected course section is not an active enrolment", "VALIDATION_ERROR", 400);
+    withdrawalEnrolment = enrolment;
+    const policy = await withdrawalPolicy(user.institutionId, student.id);
+    if (policy === "Instant approval for all penalties") immediateWithdrawal = true;
+    if (policy === "Instant approval for non-penalty tuition adjustments") {
+      const chargeCount = await prisma.financeLedgerEntry.count({
+        where: {
+          institutionId: user.institutionId,
+          studentId: student.id,
+          sectionId: enrolment.sectionId,
+          kind: "charge",
+          amountCad: { gt: 0 },
+          status: { notIn: ["waived", "reversed", "cancelled"] },
+        },
+      });
+      immediateWithdrawal = chargeCount === 0;
+    }
+  }
   const needsApproval =
     input.type === "official_transcript" ||
     input.type === "enrollment_verification" ||
-    input.type === "course_withdrawal" ||
+    (input.type === "course_withdrawal" && !immediateWithdrawal) ||
     input.type === "course_change" ||
     input.type === "transcript_request" ||
     input.type === "academic_appeal" ||
@@ -423,13 +528,13 @@ export async function createStudentServiceRequest(
 
   const created = await prisma.$transaction(async (tx) => {
     let approvalRequestId: string | null = null;
-    let status: "open" | "pending_approval" = "open";
+    let status: "open" | "pending_approval" | "resolved" = immediateWithdrawal ? "resolved" : "open";
     if (needsApproval) {
       const approval = await requireApproval({
         institutionId: user.institutionId,
         type: `service_request.${input.type}`,
         subjectRef: `student:${student.id}`,
-        proposedDiff: { type: input.type, subject: input.subject, details: input.details },
+        proposedDiff: { type: input.type, subject: input.subject, details: input.details, ...(input.sectionId ? { sectionId: input.sectionId } : {}) },
         requestedBy: user.accountId,
         requiredApproverRoles: ["admin", "registrar"],
         requiredCount: 1,
@@ -450,6 +555,13 @@ export async function createStudentServiceRequest(
         approvalRequestId,
       },
     });
+    if (immediateWithdrawal && withdrawalEnrolment) {
+      const claimed = await tx.enrolment.updateMany({
+        where: { id: withdrawalEnrolment.id, status: "enrolled", rowVersion: withdrawalEnrolment.rowVersion },
+        data: { status: "withdrawn", rowVersion: { increment: 1 } },
+      });
+      if (claimed.count !== 1) throw httpError("The enrolment changed while withdrawing; reload and try again", "CONFLICT", 409);
+    }
     await writeAuditAndOutbox(tx, {
       institutionId: user.institutionId,
       actorId: user.accountId,
@@ -462,6 +574,7 @@ export async function createStudentServiceRequest(
     });
     return row;
   });
+  if (immediateWithdrawal && withdrawalEnrolment) await promoteWaitlisted(user, withdrawalEnrolment.sectionId);
 
   return StudentServiceRequestsResponse.parse({
     requests: [
@@ -475,21 +588,30 @@ export async function createStudentServiceRequest(
         createdAt: created.createdAt.toISOString(),
       },
     ],
+    withdrawalOptions: [],
   });
 }
 
-async function personDisplayName(personId: string) {
-  const person = await prisma.person.findUnique({ where: { id: personId } });
-  return `${person?.givenName ?? ""} ${person?.familyName ?? ""}`.trim();
+export async function cancelStudentServiceRequest(user: SessionClaims, requestId: string, correlationId: string) {
+  const student = await requireStudent(user);
+  const request = await prisma.serviceRequest.findFirst({ where: { id: requestId, institutionId: user.institutionId, studentId: student.id } });
+  if (!request) throw httpError("Service request not found", "NOT_FOUND", 404);
+  if (!new Set(["open", "pending_approval"]).has(request.status)) throw httpError("Only an open request can be cancelled", "CONFLICT", 409);
+  await prisma.$transaction(async (tx) => {
+    const claimed = await tx.serviceRequest.updateMany({ where: { id: request.id, status: request.status }, data: { status: "cancelled", rowVersion: { increment: 1 } } });
+    if (claimed.count !== 1) throw httpError("The request changed while it was being cancelled", "CONFLICT", 409);
+    if (request.approvalRequestId) await tx.approvalRequest.updateMany({ where: { id: request.approvalRequestId, institutionId: user.institutionId, status: "pending" }, data: { status: "cancelled", rowVersion: { increment: 1 } } });
+    await writeAuditAndOutbox(tx, { institutionId: user.institutionId, actorId: user.accountId, eventName: "ServiceRequest.cancelled", purpose: "student_services", before: { id: request.id, status: request.status }, after: { id: request.id, status: "cancelled" }, source: "student.services.cancel", correlationId: correlationId || randomUUID() });
+  });
+  return listStudentServiceRequests(user);
 }
 
 export async function listStudentPracticum(user: SessionClaims) {
   const student = await requireStudent(user);
-  const name = await personDisplayName(user.personId);
   const placements = await prisma.placement.findMany({
     where: {
       institutionId: user.institutionId,
-      OR: [{ studentId: student.id }, ...(name ? [{ studentName: name }] : [])],
+      studentId: student.id,
     },
     include: { hours: { orderBy: { createdAt: "desc" } }, employerOrg: true },
     orderBy: { createdAt: "desc" },
@@ -515,22 +637,15 @@ export async function listStudentPracticum(user: SessionClaims) {
 export async function logPracticumHours(user: SessionClaims, body: unknown, correlationId: string) {
   const student = await requireStudent(user);
   const input = LogPracticumHoursRequest.parse(body);
-  const name = await personDisplayName(user.personId);
   const owned = await prisma.placement.findFirst({
     where: {
       id: input.placementId,
       institutionId: user.institutionId,
-      OR: [{ studentId: student.id }, ...(name ? [{ studentName: name }] : [])],
+      studentId: student.id,
     },
   });
   if (!owned) throw httpError("Placement not found", "NOT_FOUND", 404);
   const entry = await prisma.$transaction(async (tx) => {
-    if (!owned.studentId) {
-      await tx.placement.update({
-        where: { id: owned.id },
-        data: { studentId: student.id },
-      });
-    }
     const row = await tx.hoursEntry.create({
       data: {
         institutionId: user.institutionId,
@@ -562,11 +677,12 @@ export async function logPracticumHours(user: SessionClaims, body: unknown, corr
 
 export async function listStudentFinance(user: SessionClaims, financialTermId?: string | null) {
   const student = await requireStudent(user);
-  const allEntries = await prisma.financeLedgerEntry.findMany({
+  const storedEntries = await prisma.financeLedgerEntry.findMany({
     where: { institutionId: user.institutionId, studentId: student.id },
     include: { financialTerm: true },
     orderBy: { postedAt: "desc" },
   });
+  const allEntries = storedEntries.map((entry) => ({ ...entry, amountCad: Number(entry.amountCad) }));
   // Only terms the student was actually charged / paid in, so an institution-wide term never appears as a filter.
   const terms = [...new Map(allEntries.flatMap((e) => (e.financialTerm ? [[e.financialTerm.id, e.financialTerm] as const] : []))).values()].sort(
     (a, b) => b.startsOn.localeCompare(a.startsOn),
@@ -590,13 +706,39 @@ export async function listStudentFinance(user: SessionClaims, financialTermId?: 
   const counted = entries.filter(isCounted);
   const selectedTerm = terms.find((t) => t.id === selectedId) ?? null;
   const charges = counted.filter(raisesBalance);
-  const totalChargesCad = charges.reduce((sum, e) => sum + e.amountCad, 0);
-  const totalPaymentsCad = counted.filter(lowersBalance).reduce((sum, e) => sum + e.amountCad, 0);
-  const gstRatePercent = 0;
-  const pstRatePercent = 0;
-  const gstCad = Math.round(totalChargesCad * (gstRatePercent / 100) * 100) / 100;
-  const pstCad = Math.round(totalChargesCad * (pstRatePercent / 100) * 100) / 100;
-  const balanceCad = Math.round((totalChargesCad + gstCad + pstCad - totalPaymentsCad) * 100) / 100;
+  const chargeIds = charges.filter((entry) => entry.kind === "charge").map((entry) => entry.id);
+  const metaRows = chargeIds.length
+    ? await prisma.heritageRecord.findMany({
+        where: { institutionId: user.institutionId, screenId: "FIN:META", singletonKey: { in: chargeIds }, deletedAt: null },
+        select: { singletonKey: true, dataJson: true },
+      })
+    : [];
+  const feeMeta = new Map(metaRows.flatMap((row) => row.singletonKey ? [[row.singletonKey, dataOf(row.dataJson)] as const] : []));
+  const taxSummary = (name: "GST" | "PST") => {
+    let amount = 0;
+    let taxable = 0;
+    for (const charge of charges) {
+      if (charge.kind !== "charge") continue;
+      const meta = feeMeta.get(charge.id);
+      const lines = Array.isArray(meta?.taxes) ? meta.taxes as Array<Record<string, unknown>> : [];
+      const matching = lines.filter((line) => String(line.name || "").trim().toUpperCase().startsWith(name));
+      if (!matching.length) continue;
+      amount += matching.reduce((sum, line) => sum + Number(line.amount || 0), 0);
+      taxable += Number(meta?.subtotal ?? charge.amountCad);
+    }
+    const rounded = Math.round(amount * 100) / 100;
+    return { amount: rounded, rate: taxable > 0 ? Math.round((rounded / taxable) * 10_000) / 100 : 0 };
+  };
+  const gst = taxSummary("GST");
+  const pst = taxSummary("PST");
+  const grossChargesCad = charges.reduce((sum, e) => sum + Number(e.amountCad), 0);
+  const totalChargesCad = Math.round((grossChargesCad - gst.amount - pst.amount) * 100) / 100;
+  const totalPaymentsCad = counted.filter(lowersBalance).reduce((sum, e) => sum + Number(e.amountCad), 0);
+  const gstRatePercent = gst.rate;
+  const pstRatePercent = pst.rate;
+  const gstCad = gst.amount;
+  const pstCad = pst.amount;
+  const balanceCad = Math.round((grossChargesCad - totalPaymentsCad) * 100) / 100;
 
   const mapEntry = (e: (typeof entries)[number]) => ({
     id: e.id,
@@ -634,7 +776,11 @@ export async function listStudentFinance(user: SessionClaims, financialTermId?: 
     statement: {
       termCode: selectedTerm?.code ?? "All terms",
       termName: selectedTerm?.name ?? "All terms",
-      charges: charges.map((c) => ({ id: c.id, label: c.kind === "refund" ? `Refund: ${c.label}` : c.label, amountCad: c.amountCad })),
+      charges: charges.map((c) => ({
+        id: c.id,
+        label: c.kind === "refund" ? `Refund: ${c.label}` : c.label,
+        amountCad: c.kind === "charge" ? Number(feeMeta.get(c.id)?.subtotal ?? c.amountCad) : Number(c.amountCad),
+      })),
       totalChargesCad,
       gstRatePercent,
       gstCad,
@@ -788,11 +934,22 @@ export async function toPortalRowsFromAttendance(user: SessionClaims) {
 }
 
 export async function toPortalRowsFromLectures(user: SessionClaims, kind: "lecture" | "lab") {
-  const data = await listStudentSessions(user, kind);
+  const [data, account] = await Promise.all([
+    listStudentSessions(user, kind),
+    prisma.account.findFirst({ where: { id: user.accountId, institutionId: user.institutionId }, select: { timezone: true } }),
+  ]);
+  const timezone = account?.timezone || "America/Vancouver";
   return data.lectures.map((l) => ({
     primary: l.title,
     secondary: `${l.courseCode} · ${l.location ?? l.deliveryMode}`,
-    meta: l.startsAt.slice(0, 16).replace("T", " "),
+    meta: new Date(l.startsAt).toLocaleString("en-CA", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
     href: kind === "lab" ? "/student/labs" : `/student/f/st-11-lecture-detail?sessionId=${l.id}`,
   }));
 }
@@ -929,7 +1086,10 @@ export async function listStudentWorkshops(user: SessionClaims) {
   return StudentWorkshopsResponse.parse({
     available: mapped.filter((w) => w.registrationStatus === "none" && open.has(w.id)),
     mine: mapped.filter((w) => w.registrationStatus === "registered"),
-    completed: mapped.filter((w) => w.registrationStatus === "completed" || w.status === "completed"),
+    // A completed workshop belongs in the student's history only when that
+    // student actually completed it. The workshop's global lifecycle status
+    // must not leak unrelated workshops into every student's Completed tab.
+    completed: mapped.filter((w) => w.registrationStatus === "completed"),
   });
 }
 
@@ -938,22 +1098,29 @@ export async function registerStudentWorkshop(user: SessionClaims, body: unknown
   const input = RegisterWorkshopRequest.parse(body);
   const workshop = await prisma.workshop.findFirst({
     where: { id: input.workshopId, institutionId: user.institutionId },
-    include: { registrations: true },
   });
   if (!workshop) throw httpError("Workshop not found", "NOT_FOUND", 404);
   const tz = await institutionTimezone(user.institutionId);
   const settings = workshopSettings(workshop, tz);
   const { access, residency } = await workshopAccess(user.institutionId, student);
+  const statusPolicy = await studentStatusPolicy(user.institutionId, access.status);
+  if (statusPolicy && !statusPolicy.enablesRegistration) throw httpError(`Student status "${statusPolicy.name}" does not allow registration`, "STUDENT_STATUS_BLOCKS_REGISTRATION", 409);
   const blocked = studentMayRegister(workshop, settings, access, new Date(), tz);
   if (blocked) throw httpError(blocked, "VALIDATION_ERROR", 400);
-  const existing = workshop.registrations.find((r) => r.studentId === student.id);
-  if (existing) return listStudentWorkshops(user);
-  const active = workshop.registrations.filter((r) => SEAT_STATUSES.includes(r.status)).length;
-  if (active >= workshop.capacity) throw httpError("Workshop is full", "CONFLICT", 409);
   const status = settings.approval === "Automatic Approval" ? "approved" : "pending";
   const postFee = settings.feeCollection === "Immediately" || (settings.feeCollection === "Upon Approval" && status === "approved");
 
   await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`workshop-seats:${workshop.id}`}))`;
+    const existing = await tx.workshopRegistration.findFirst({
+      where: { institutionId: user.institutionId, workshopId: workshop.id, studentId: student.id },
+      select: { id: true },
+    });
+    if (existing) return;
+    const active = await tx.workshopRegistration.count({
+      where: { workshopId: workshop.id, status: { in: [...SEAT_STATUSES] } },
+    });
+    if (active >= workshop.capacity) throw httpError("Workshop is full", "CONFLICT", 409);
     const reg = await tx.workshopRegistration.create({
       data: {
         institutionId: user.institutionId,
@@ -981,6 +1148,23 @@ export async function registerStudentWorkshop(user: SessionClaims, body: unknown
       source: "student.workshops.register",
       correlationId,
     });
+  });
+  return listStudentWorkshops(user);
+}
+
+export async function cancelStudentWorkshop(user: SessionClaims, workshopId: string, correlationId: string) {
+  const student = await requireStudent(user);
+  const registration = await prisma.workshopRegistration.findFirst({
+    where: { institutionId: user.institutionId, workshopId, studentId: student.id, status: { in: ["pending", "approved", "registered"] } },
+    include: { workshop: true },
+  });
+  if (!registration) throw httpError("Active workshop registration not found", "NOT_FOUND", 404);
+  if (registration.workshop.startsAt.getTime() <= Date.now()) throw httpError("A workshop cannot be cancelled after it starts", "CONFLICT", 409);
+  await prisma.$transaction(async (tx) => {
+    const claimed = await tx.workshopRegistration.updateMany({ where: { id: registration.id, status: registration.status }, data: { status: "cancelled", rowVersion: { increment: 1 } } });
+    if (claimed.count !== 1) throw httpError("The registration changed while it was being cancelled", "CONFLICT", 409);
+    await waiveWorkshopFee(tx, user.institutionId, registration.id, "Waived after student cancelled workshop registration");
+    await writeAuditAndOutbox(tx, { institutionId: user.institutionId, actorId: user.accountId, eventName: "WorkshopRegistration.cancelled", purpose: "student_services", before: { id: registration.id, status: registration.status }, after: { id: registration.id, status: "cancelled" }, source: "student.workshops.cancel", correlationId: correlationId || randomUUID() });
   });
   return listStudentWorkshops(user);
 }
@@ -1048,6 +1232,20 @@ export async function createLeaveOfAbsence(user: SessionClaims, body: unknown, c
   return listLeaveOfAbsence(user);
 }
 
+export async function cancelLeaveOfAbsence(user: SessionClaims, requestId: string, correlationId: string) {
+  const student = await requireStudent(user);
+  const request = await prisma.leaveOfAbsenceRequest.findFirst({ where: { id: requestId, institutionId: user.institutionId, studentId: student.id } });
+  if (!request) throw httpError("Leave request not found", "NOT_FOUND", 404);
+  if (request.status !== "pending") throw httpError("Only a pending leave request can be cancelled", "CONFLICT", 409);
+  await prisma.$transaction(async (tx) => {
+    const claimed = await tx.leaveOfAbsenceRequest.updateMany({ where: { id: request.id, status: "pending" }, data: { status: "cancelled", rowVersion: { increment: 1 } } });
+    if (claimed.count !== 1) throw httpError("The leave request changed while it was being cancelled", "CONFLICT", 409);
+    if (request.approvalRequestId) await tx.approvalRequest.updateMany({ where: { id: request.approvalRequestId, institutionId: user.institutionId, status: "pending" }, data: { status: "cancelled", rowVersion: { increment: 1 } } });
+    await writeAuditAndOutbox(tx, { institutionId: user.institutionId, actorId: user.accountId, eventName: "LeaveOfAbsence.cancelled", purpose: "student_services", before: { id: request.id, status: request.status }, after: { id: request.id, status: "cancelled" }, source: "student.leave.cancel", correlationId: correlationId || randomUUID() });
+  });
+  return listLeaveOfAbsence(user);
+}
+
 export async function listRequiredTasks(user: SessionClaims) {
   const student = await requireStudent(user);
   const rows = await prisma.requiredTask.findMany({
@@ -1076,19 +1274,23 @@ export async function completeRequiredTask(user: SessionClaims, taskId: string, 
     where: { id: taskId, institutionId: user.institutionId, studentId: student.id },
   });
   if (!task) throw httpError("Task not found", "NOT_FOUND", 404);
-  await prisma.requiredTask.update({
-    where: { id: task.id },
-    data: { status: "completed", completedAt: new Date() },
-  });
-  await writeAuditAndOutbox(prisma, {
-    institutionId: user.institutionId,
-    actorId: user.accountId,
-    eventName: "RequiredTask.completed",
-    purpose: "student_services",
-    before: { status: task.status },
-    after: { status: "completed" },
-    source: "student.tasks.complete",
-    correlationId: correlationId || randomUUID(),
+  if (task.status !== "pending") throw httpError("Only a pending task can be completed", "CONFLICT", 409);
+  await prisma.$transaction(async (tx) => {
+    const claimed = await tx.requiredTask.updateMany({
+      where: { id: task.id, status: "pending" },
+      data: { status: "completed", completedAt: new Date() },
+    });
+    if (claimed.count !== 1) throw httpError("The task status changed. Reload and try again.", "CONFLICT", 409);
+    await writeAuditAndOutbox(tx, {
+      institutionId: user.institutionId,
+      actorId: user.accountId,
+      eventName: "RequiredTask.completed",
+      purpose: "student_services",
+      before: { status: task.status },
+      after: { status: "completed", taskId: task.id },
+      source: "student.tasks.complete",
+      correlationId: correlationId || randomUUID(),
+    });
   });
   return listRequiredTasks(user);
 }

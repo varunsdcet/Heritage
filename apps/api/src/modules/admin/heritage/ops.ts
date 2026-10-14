@@ -145,8 +145,19 @@ const BASE_TABLES: Partial<Record<EntityKey, Adapter>> = {
     async update(_inst, id, d) {
       await prisma.employerOrg.update({ where: { id }, data: { name: s(d.name), siteName: s(d.siteName), contactEmail: s(d.contactEmail) || null, ...bump } });
     },
-    async remove(_inst, id) {
-      await prisma.employerOrg.delete({ where: { id } });
+    async remove(inst, id) {
+      const employer = await prisma.employerOrg.findFirst({
+        where: { id, institutionId: inst },
+        include: { _count: { select: { placements: true, agreements: true } } },
+      });
+      if (!employer) throw httpError(404, "Employer not found");
+      if (employer._count.placements || employer._count.agreements) {
+        throw httpError(
+          409,
+          `Cannot delete ${employer.name}: it has ${employer._count.placements} placement(s) and ${employer._count.agreements} agreement(s). Archive or reassign those records first.`,
+        );
+      }
+      await prisma.employerOrg.delete({ where: { id: employer.id } });
     },
   },
   opportunities: {

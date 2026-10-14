@@ -485,12 +485,12 @@ export function Correspondence() {
   const [confirm, setConfirm] = useState<{ entity: "correspondenceCategories" | "correspondenceTypes"; row: Row } | null>(null);
   const writable = useCanEdit("correspondenceTypes");
   const load = useCallback(() => {
-    Promise.all([sx<Listing>("/e/correspondenceCategories"), sx<Listing>("/e/correspondenceTypes")])
-      .then(([c, t]) => {
-        setCats(c.items);
-        setTypes(t.items);
-      })
-      .catch((e) => fail(errMsg(e, "Could not load correspondence types")));
+    void sx<Listing>("/e/correspondenceCategories")
+      .then((c) => setCats(c.items))
+      .catch((e) => { setCats([]); fail(errMsg(e, "Could not load correspondence categories")); });
+    void sx<Listing>("/e/correspondenceTypes")
+      .then((t) => setTypes(t.items))
+      .catch((e) => { setTypes([]); fail(errMsg(e, "Could not load correspondence types")); });
   }, [fail]);
   useEffect(load, [load]);
   const groups = useMemo(() => {

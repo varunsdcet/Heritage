@@ -1,5 +1,4 @@
 import Stripe from "stripe";
-import { createHmac } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getSelfpacedProgram } from "@/lib/selfpacedPrograms";
 import { STRIPE_SECRET_KEY, useHostedStripeCheckout } from "@/lib/selfpacedStripe";
@@ -13,7 +12,6 @@ type VerifyBody = {
   slug?: string;
   demo?: boolean;
   free?: boolean;
-  accountId?: string;
 };
 
 async function resolveProgram(slug: string) {
@@ -75,9 +73,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!body.accountId) return NextResponse.json({ verified: false, error: "Signed-in account is missing." }, { status: 400 });
-    const timestamp = Date.now();
-    const proof = createHmac("sha256", STRIPE_SECRET_KEY).update(`${body.accountId}.${program.slug}.${session.id}.${timestamp}`).digest("hex");
     return NextResponse.json({
       verified: true,
       mode: "stripe_hosted",
@@ -86,8 +81,6 @@ export async function POST(req: NextRequest) {
       programSlug: program.slug,
       amountCad: program.priceCad,
       customerEmail: session.customer_details?.email || null,
-      timestamp,
-      proof,
     });
   } catch (err) {
     console.error("selfpaced checkout verification", err);

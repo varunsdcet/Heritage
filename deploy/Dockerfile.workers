@@ -18,9 +18,10 @@ COPY tools ./tools
 
 RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @myheritage/db build
+RUN pnpm --filter @myheritage/workers build
 
 FROM base AS runner
 ENV NODE_ENV=production
 COPY --from=build /app /app
 WORKDIR /app
-CMD ["pnpm", "--filter", "@myheritage/workers", "exec", "tsx", "src/main.ts"]
+CMD ["pnpm", "--filter", "@myheritage/workers", "start"]

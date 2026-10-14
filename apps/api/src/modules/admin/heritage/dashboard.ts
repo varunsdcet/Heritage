@@ -195,9 +195,25 @@ async function loadBlocks(inst: string) {
   return rows.map(toBlock).sort((x, y) => x.order - y.order);
 }
 
+async function assertDashboardEdit(user: SessionClaims) {
+  await assertPermission(user, "systemConfiguration", "edit");
+  const [policy, access] = await Promise.all([
+    prisma.heritageRecord.findFirst({
+      where: { institutionId: user.institutionId, screenId: "SYS:SETTINGS", contextKey: "", singletonKey: "dashboard", deletedAt: null },
+      select: { dataJson: true },
+    }),
+    effectiveAccess(user.institutionId, user.accountId),
+  ]);
+  const configured = policy ? parse(policy.dataJson).managementAccess : [];
+  const accountIds = Array.isArray(configured) ? configured.map(String).filter(Boolean) : [];
+  if (accountIds.length && !access.superAdmin && !accountIds.includes(user.accountId)) {
+    throw httpError(403, "Dashboard page management access is not assigned to this account", "FORBIDDEN");
+  }
+}
+
 async function canEditDashboard(user: SessionClaims) {
   try {
-    await assertPermission(user, "systemConfiguration", "edit");
+    await assertDashboardEdit(user);
     return true;
   } catch {
     return false;
@@ -261,7 +277,7 @@ export const SettingsBody = z.object({
 });
 
 export async function saveSettings(user: SessionClaims, body: z.infer<typeof SettingsBody>) {
-  await assertPermission(user, "systemConfiguration", "edit");
+  await assertDashboardEdit(user);
   await ensureSeed(user);
   const { row, settings: before } = await loadSettings(user.institutionId);
   const next: DashboardSettings = { title: body.title, layout: body.layout };
@@ -338,7 +354,7 @@ async function assertUniqueName(inst: string, name: string, self?: string) {
 }
 
 export async function createBlock(user: SessionClaims, body: BlockInput) {
-  await assertPermission(user, "systemConfiguration", "edit");
+  await assertDashboardEdit(user);
   await ensureSeed(user);
   const inst = user.institutionId;
   await assertUniqueName(inst, body.name);
@@ -353,7 +369,7 @@ export async function createBlock(user: SessionClaims, body: BlockInput) {
 }
 
 export async function updateBlock(user: SessionClaims, id: string, body: BlockInput) {
-  await assertPermission(user, "systemConfiguration", "edit");
+  await assertDashboardEdit(user);
   const inst = user.institutionId;
   const row = await findBlock(inst, id);
   await assertUniqueName(inst, body.name, id);
@@ -368,7 +384,7 @@ export async function updateBlock(user: SessionClaims, id: string, body: BlockIn
 }
 
 export async function deleteBlock(user: SessionClaims, id: string) {
-  await assertPermission(user, "systemConfiguration", "edit");
+  await assertDashboardEdit(user);
   const row = await findBlock(user.institutionId, id);
   await prisma.heritageRecord.update({ where: { id }, data: { deletedAt: new Date(), status: "deleted", updatedById: user.accountId } });
   const name = str(parse(row.dataJson).name);
@@ -377,7 +393,7 @@ export async function deleteBlock(user: SessionClaims, id: string) {
 }
 
 export async function reorderBlocks(user: SessionClaims, ids: string[]) {
-  await assertPermission(user, "systemConfiguration", "edit");
+  await assertDashboardEdit(user);
   const inst = user.institutionId;
   const rows = await prisma.heritageRecord.findMany({ where: { institutionId: inst, screenId: BLOCK_SCREEN, deletedAt: null, singletonKey: null } });
   const known = new Set(rows.map((r) => r.id));

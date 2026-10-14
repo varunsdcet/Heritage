@@ -76,6 +76,7 @@ export const HERITAGE_DEDICATED: Record<string, string> = {
   F20: "/admin/financial/funding-sources",
   F21: "/admin/financial/collection-agencies",
   F22: "/admin/financial/promotion-allocations",
+  F23: "/admin/financial/agents",
 };
 
 export function heritageHref(screen: string, query?: Record<string, string>) {
@@ -135,6 +136,7 @@ type Entry = {
   dedicated?: boolean;
   href?: string;
   count?: string;
+  gate?: ModuleGate;
 };
 
 const req = (label: string, type: string): Entry => ({ label, screen: "R01", href: requestsHref(type), count: `requests:${type}` });
@@ -224,7 +226,7 @@ const ROOTS: Array<{ label: string; icon: string; gate?: ModuleGate; count?: str
       st("File not Logged (Offshore student)"),
       st("Prospective Student (Marketing team)"),
       sm("Browse All Students", "S01", "browse", "students:all"),
-      sm("Create Student Profile", "S02", "create"),
+      { ...sm("Create Student Profile", "S02", "create"), gate: { modules: ["studentRecords"], edit: true } },
       sm("Academic Alerts", "S23", "alerts", "queue:alerts"),
       sm("Student Flags", "S24", "flags", "queue:flags"),
       sm("Student Assessments", "S25", "assessments", "queue:assessments"),
@@ -285,6 +287,7 @@ const ROOTS: Array<{ label: string; icon: string; gate?: ModuleGate; count?: str
           ["Funding Sources", "F20"],
           ["Collection Agencies", "F21"],
           ["Promotion Allocations", "F22"],
+          ["Agents", "F23"],
         ] as const
       ).map(([label, screen]) => ({ label, screen, section: "CONFIGURATIONS", dedicated: true })),
     ],
@@ -385,7 +388,7 @@ const ROOTS: Array<{ label: string; icon: string; gate?: ModuleGate; count?: str
     icon: "users",
     gate: { modules: ["userManagement"] },
     entries: [
-      { label: "Create New User", screen: "U01", dedicated: true },
+      { label: "Create New User", screen: "U01", dedicated: true, gate: { modules: ["userManagement"], edit: true } },
       { label: "User Directory & Profiles", screen: "U02", dedicated: true },
       { label: "Access Levels", screen: "U03", dedicated: true },
     ],
@@ -417,6 +420,7 @@ const ROOTS: Array<{ label: string; icon: string; gate?: ModuleGate; count?: str
           ["Manage Sections / Intranets", "SC15"],
         ] as const
       ).map(([label, screen]) => ({ label, screen, section: "COMMUNICATION & CONTENT", dedicated: true })),
+      { label: "Mail Policy", screen: "SC21", section: "COMMUNICATION & CONTENT", href: "/admin/mail-policy" },
       ...(
         [
           ["Global Settings", "SC17"],
@@ -439,6 +443,7 @@ export const HERITAGE_SIDEBAR: AdminNavItem[] = ROOTS.map((root) => {
     ...(e.section ? { section: e.section } : {}),
     ...(e.indent ? { indent: true } : {}),
     ...(e.count ? { count: e.count } : {}),
+    ...(e.gate ? { gate: e.gate } : {}),
   }));
   return {
     label: root.label,

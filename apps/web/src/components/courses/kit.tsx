@@ -255,7 +255,12 @@ export function PeoplePicker({ value, onChange, options, label, placeholder }: {
   const name = (id: string) => options.find((o) => o.id === id)?.label ?? "(user removed)";
   const hits = useMemo(() => {
     const n = q.trim().toLowerCase();
-    return n ? options.filter((o) => !ids.includes(o.id) && o.label.toLowerCase().includes(n)).slice(0, 8) : [];
+    const available = options.filter((o) => !ids.includes(o.id));
+    if (!n) return available.slice(0, 20);
+    return available
+      .filter((o) => o.label.toLowerCase().includes(n))
+      .sort((a, b) => Number(!a.label.toLowerCase().startsWith(n)) - Number(!b.label.toLowerCase().startsWith(n)) || a.label.localeCompare(b.label))
+      .slice(0, 100);
   }, [q, options, ids]);
   const pick = (id: string) => {
     onChange([...ids, id]);

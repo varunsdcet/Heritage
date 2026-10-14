@@ -114,16 +114,34 @@ export async function sectionOfferings(inst: string, sectionIds: string[]): Prom
 const addDays = (iso: string, n: number) => new Date(Date.parse(`${iso}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 
 /** Every meeting between the offering's start and end dates (institution wall clock → UTC instants). */
-export function plannedMeetings(o: Pick<Offering, "startsOn" | "endsOn" | "meetings">, fallbackEnd: string | null, tz: string) {
+export function plannedMeetings(
+  o: Pick<Offering, "startsOn" | "endsOn" | "meetings">,
+  fallbackEnd: string | null,
+  tz: string,
+  excludedDates: ReadonlySet<string> = new Set(),
+) {
   if (!o.startsOn || !o.meetings.length) return [];
   const end = o.endsOn || (fallbackEnd && fallbackEnd >= o.startsOn ? fallbackEnd : addDays(o.startsOn, OPEN_ENDED_WEEKS * 7 - 1));
   const byDay = new Map(o.meetings.map((m) => [m.day, m] as const));
   const out: Array<{ startsAt: Date; endsAt: Date }> = [];
   for (let d = o.startsOn; d <= end && out.length < MAX_MEETINGS; d = addDays(d, 1)) {
     const m = byDay.get(WEEKDAYS[new Date(`${d}T12:00:00Z`).getUTCDay()]!);
-    if (m) out.push({ startsAt: zonedToUtc(d, m.start, tz), endsAt: zonedToUtc(d, m.end, tz) });
+    if (m && !excludedDates.has(d)) out.push({ startsAt: zonedToUtc(d, m.start, tz), endsAt: zonedToUtc(d, m.end, tz) });
   }
   return out;
+}
+
+export function holidayDates(rows: Array<{ dataJson: string }>) {
+  const dates = new Set<string>();
+  for (const row of rows) {
+    const data = parse(row.dataJson);
+    const start = s(data.date);
+    if (!DATE_RE.test(start)) continue;
+    const requestedEnd = data.singleDay === false ? s(data.endDate) : start;
+    const end = DATE_RE.test(requestedEnd) && requestedEnd >= start ? requestedEnd : start;
+    for (let date = start; date <= end; date = addDays(date, 1)) dates.add(date);
+  }
+  return dates;
 }
 
 export const generatedTitle = (courseCode: string, sectionCode: string) => `${courseCode} ${sectionCode} class`;
@@ -137,9 +155,15 @@ export async function syncSectionClassSessions(inst: string, sectionId: string) 
   const section = await prisma.section.findFirst({ where: { id: sectionId, institutionId: inst }, include: { course: true, term: true } });
   if (!section) return { created: 0, removed: 0 };
   const offering = (await sectionOfferings(inst, [sectionId])).get(sectionId);
-  const institution = await prisma.institution.findFirst({ where: { institutionId: inst }, select: { timezone: true } });
+  const [institution, holidayRows] = await Promise.all([
+    prisma.institution.findFirst({ where: { institutionId: inst }, select: { timezone: true } }),
+    prisma.heritageRecord.findMany({
+      where: { institutionId: inst, screenId: "SYS:HOLIDAY", deletedAt: null, singletonKey: null },
+      select: { dataJson: true },
+    }),
+  ]);
   const tz = institution?.timezone || "America/Vancouver";
-  const planned = offering ? plannedMeetings(offering, section.term.endsOn, tz) : [];
+  const planned = offering ? plannedMeetings(offering, section.term.endsOn, tz, holidayDates(holidayRows)) : [];
   const title = generatedTitle(section.course.code, section.code);
   const existing = await prisma.classSession.findMany({
     where: { institutionId: inst, sectionId },

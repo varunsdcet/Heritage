@@ -10,45 +10,16 @@ import { AskHeritageFab } from "@/components/AskHeritageFab";
 import { logout } from "@/lib/api";
 import { useNavCounts } from "@/lib/navCounts";
 import { MY_COURSES_LABEL, useMyCoursesNav, withMyCourses } from "@/lib/myCoursesNav";
-import { version as APP_VERSION } from "../../package.json";
+import packageMetadata from "../../package.json";
+
+const APP_VERSION = packageMetadata.version;
 
 const SIDEBAR_KEY = "mh.sis.sidebar";
 
 const SEARCH_PALETTE = [
   {
-    title: "Students",
-    items: [
-      {
-        label: "Sarah Mitchell",
-        detail: "Bachelor of Nursing (BSN)",
-        badge: "Active",
-        badgeTone: "active" as const,
-        href: "/admin/student-management/browse",
-      },
-      {
-        label: "Sarah Mitchelson",
-        detail: "Computer Science (AS)",
-        badge: "Active",
-        badgeTone: "active" as const,
-        href: "/admin/student-management/browse",
-      },
-    ],
-  },
-  {
-    title: "Applications",
-    items: [
-      {
-        label: "Sarah Mitchell",
-        detail: "Application #APP-4521 — Bachelor of Nursing",
-        badge: "In Review",
-        badgeTone: "review" as const,
-        href: "/admin/ops/admissions/applications",
-      },
-    ],
-  },
-  {
-    title: "Courses",
-    empty: "No matching courses found",
+    title: "Student search",
+    empty: "Press Enter to search live student records.",
     items: [] as Array<{
       label: string;
       detail: string;

@@ -6,7 +6,7 @@ import type { SessionClaims } from "@myheritage/contracts";
 import { SAFE_LINK_MESSAGE, isSafeLink } from "../../lib/safeLink.js";
 import { assertSeat } from "./heritage/enrolment.js";
 import { getCourseHistory, planItemRows } from "../academic/program-plan.service.js";
-import { S as FIN_SCREENS } from "./heritage/finance.core.js";
+import { assertPeriodOpen, deallocate, S as FIN_SCREENS } from "./heritage/finance.core.js";
 import { createAdjustment } from "./heritage/finance.records.js";
 import { studentCtx } from "./heritage/finance.ledger.js";
 import { withStudentMoneyLock } from "./heritage/studentLock.js";
@@ -91,6 +91,7 @@ export const RetakeBody = z.object({
   creditAwarded: z.boolean().default(false),
   continuous: z.boolean().default(false),
   addMakeupPlanItem: z.boolean().default(true),
+  feeCad: z.number().positive().max(100_000),
 });
 
 export const MailPolicyBody = z.object({
@@ -109,8 +110,9 @@ async function audit(
   after: unknown,
   source: string,
   correlationId?: string,
+  tx?: Tx,
 ) {
-  await writeAuditAndOutbox(prisma, {
+  const input = {
     institutionId: user.institutionId,
     actorId: user.accountId,
     eventName,
@@ -119,7 +121,9 @@ async function audit(
     after,
     source,
     correlationId: correlationId || randomUUID(),
-  });
+  };
+  if (tx) return writeAuditAndOutbox(tx, input);
+  return prisma.$transaction((db) => writeAuditAndOutbox(db, input));
 }
 
 export async function listCohorts(institutionId: string) {
@@ -209,6 +213,12 @@ export async function generateProgramPlan(user: SessionClaims, body: z.infer<typ
     where: { id: body.cohortId, institutionId: user.institutionId },
   });
   if (!cohort) throw httpError("Cohort not found", "NOT_FOUND", 404);
+  if (!student.programVersionId || !student.programVersion) {
+    throw httpError("Assign a program version before generating a program plan", "PROGRAM_VERSION_REQUIRED", 409);
+  }
+  if (student.programVersion.programId !== cohort.programId) {
+    throw httpError("The selected cohort belongs to a different program", "COHORT_PROGRAM_MISMATCH", 409);
+  }
 
   const requirements =
     student.programVersion?.requirements ??
@@ -217,28 +227,15 @@ export async function generateProgramPlan(user: SessionClaims, body: z.infer<typ
       orderBy: { sortOrder: "asc" },
     }));
 
-  const courses =
-    requirements.length > 0
-      ? requirements.map((r, i) => ({
+  if (!requirements.length) {
+    throw httpError("The assigned program version has no degree requirements", "PROGRAM_REQUIREMENTS_REQUIRED", 409);
+  }
+  const courses = requirements.map((r, i) => ({
           courseId: r.courseId,
           courseCode: r.courseCode,
           title: r.title,
           credits: r.credits,
           sortOrder: r.sortOrder ?? i,
-          category: "main" as const,
-        }))
-      : (
-          await prisma.course.findMany({
-            where: { institutionId: user.institutionId },
-            orderBy: { code: "asc" },
-            take: 12,
-          })
-        ).map((c, i) => ({
-          courseId: c.id,
-          courseCode: c.code,
-          title: c.title,
-          credits: c.credits,
-          sortOrder: i,
           category: "main" as const,
         }));
   const history = await getCourseHistory(user.institutionId, student.id);
@@ -308,7 +305,7 @@ export async function listLedger(institutionId: string, studentId?: string) {
       studentName: `${r.student.person.givenName} ${r.student.person.familyName}`,
       studentNumber: r.student.studentNumber,
       label: r.label,
-      amountCad: r.amountCad,
+      amountCad: Number(r.amountCad),
       kind: r.kind,
       status: r.status,
       source: r.source,
@@ -322,33 +319,41 @@ export async function listLedger(institutionId: string, studentId?: string) {
   };
 }
 
-export async function postLedgerEntry(user: SessionClaims, body: z.infer<typeof LedgerPostBody>) {
+export function postLedgerEntry(user: SessionClaims, body: z.infer<typeof LedgerPostBody>) {
+  return withStudentMoneyLock(user.institutionId, body.studentId, () => postLedgerEntryLocked(user, body));
+}
+
+async function postLedgerEntryLocked(user: SessionClaims, body: z.infer<typeof LedgerPostBody>) {
   const student = await prisma.student.findFirst({
     where: { id: body.studentId, institutionId: user.institutionId },
   });
   if (!student) throw httpError("Student not found", "NOT_FOUND", 404);
+  const finance = await studentCtx(user, student.id, "edit");
+  await assertPeriodOpen(user, finance.cfg, finance.st.campus, new Date(), "This ledger entry");
   if (body.financialTermId) {
     const term = await prisma.financialTerm.findFirst({
       where: { id: body.financialTermId, institutionId: user.institutionId },
     });
     if (!term) throw httpError("Financial term not found", "NOT_FOUND", 404);
   }
-  const entry = await prisma.financeLedgerEntry.create({
-    data: {
-      institutionId: user.institutionId,
-      studentId: body.studentId,
-      label: body.label,
-      amountCad: body.amountCad,
-      kind: body.kind,
-      status: body.kind === "payment" ? "paid" : "open",
-      source: body.source ?? "manual_post",
-      note: body.note ?? null,
-      dueAt: body.dueAt ? new Date(body.dueAt) : null,
-      financialTermId: body.financialTermId ?? null,
-    },
+  return prisma.$transaction(async (tx) => {
+    const entry = await tx.financeLedgerEntry.create({
+      data: {
+        institutionId: user.institutionId,
+        studentId: body.studentId,
+        label: body.label,
+        amountCad: body.amountCad.toFixed(2),
+        kind: body.kind,
+        status: body.kind === "payment" ? "paid" : "open",
+        source: body.source ?? "manual_post",
+        note: body.note ?? null,
+        dueAt: body.dueAt ? new Date(body.dueAt) : null,
+        financialTermId: body.financialTermId ?? null,
+      },
+    });
+    await audit(user, "FinanceLedger.posted", "finance_ar", null, entry, "admin.finance.post", undefined, tx);
+    return entry;
   });
-  await audit(user, "FinanceLedger.posted", "finance_ar", null, entry, "admin.finance.post");
-  return entry;
 }
 
 export async function adjustLedgerEntry(user: SessionClaims, body: z.infer<typeof LedgerAdjustBody>) {
@@ -377,27 +382,34 @@ export async function adjustLedgerEntry(user: SessionClaims, body: z.infer<typeo
   }
   if (entry.kind === "charge") return requestChargeWriteOff(user, entry, body);
 
-  // Waiving the original already removes its effect on the balance; the reversal row is a void memo for the audit trail.
-  const reversal = await prisma.$transaction(async (tx) => {
-    const updated = await claim(tx, "waived", body.note ?? "Reversed");
-    const created = await tx.financeLedgerEntry.create({
-      data: {
-        institutionId: user.institutionId,
-        studentId: entry.studentId,
-        label: `Reversal: ${entry.label}`,
-        amountCad: -Math.abs(entry.amountCad),
-        kind: entry.kind === "charge" ? "credit" : "charge",
-        status: "void",
-        source: "reversal",
-        note: body.note ?? null,
-        financialTermId: entry.financialTermId,
-        reversedFromId: entry.id,
-      },
+  return withStudentMoneyLock(user.institutionId, entry.studentId, async () => {
+    // Release every allocation first so reversing a payment/credit cannot leave charges looking paid.
+    const finance = await studentCtx(user, entry.studentId, "edit");
+    await assertPeriodOpen(user, finance.cfg, finance.st.campus, new Date(), "This reversal");
+    await deallocate(user, finance.book, { fundId: entry.id });
+
+    // Waiving the original removes its balance effect; the reversal row is a void memo for the audit trail.
+    const reversal = await prisma.$transaction(async (tx) => {
+      const updated = await claim(tx, "waived", body.note ?? "Reversed");
+      const created = await tx.financeLedgerEntry.create({
+        data: {
+          institutionId: user.institutionId,
+          studentId: entry.studentId,
+          label: `Reversal: ${entry.label}`,
+          amountCad: (-Math.abs(Number(entry.amountCad))).toFixed(2),
+          kind: "charge",
+          status: "void",
+          source: "reversal",
+          note: body.note ?? null,
+          financialTermId: entry.financialTermId,
+          reversedFromId: entry.id,
+        },
+      });
+      await audit(user, "FinanceLedger.reversed", "finance_ar", entry, { updated, created }, "admin.finance.adjust", undefined, tx);
+      return { updated, created };
     });
-    return { updated, created };
+    return reversal;
   });
-  await audit(user, "FinanceLedger.reversed", "finance_ar", entry, reversal, "admin.finance.adjust");
-  return reversal;
 }
 
 /**
@@ -406,7 +418,7 @@ export async function adjustLedgerEntry(user: SessionClaims, body: z.infer<typeo
  */
 async function requestChargeWriteOff(
   user: SessionClaims,
-  entry: { id: string; studentId: string; label: string; amountCad: number },
+  entry: { id: string; studentId: string; label: string; amountCad: unknown },
   body: z.infer<typeof LedgerAdjustBody>,
 ) {
   // Same lock as adjustment review, so parallel requests see each other's adjustment before creating one.
@@ -420,7 +432,7 @@ async function requestChargeWriteOff(
       .find((d) => d.ledgerEntryId === entry.id && (d.status === "Pending" || d.status === "Approved / Complete"));
     if (prior?.status === "Pending") throw httpError(`Adjustment #${prior.number} for this charge is already waiting for approval`, "CONFLICT", 409);
     if (prior) throw httpError(`Adjustment #${prior.number} already wrote off this charge`, "CONFLICT", 409);
-    let amount = Math.abs(entry.amountCad);
+    let amount = Math.abs(Number(entry.amountCad));
     if (body.action === "waive") {
       const ctx = await studentCtx(user, entry.studentId, "edit");
       amount = ctx.book.charges.find((c) => c.id === entry.id)?.owing ?? amount;
@@ -509,25 +521,32 @@ export async function generateT2202(user: SessionClaims, body: z.infer<typeof Ge
   });
   if (!student) throw httpError("Student not found", "NOT_FOUND", 404);
 
-  const charges = await prisma.financeLedgerEntry.findMany({
+  const finance = await studentCtx(user, student.id, "view");
+  const yearPrefix = String(body.taxYear);
+  const eligibleTuitionCad = Number(
+    finance.book.charges
+      .filter((charge) => charge.tuition && !charge.hidden && charge.postedAt.toISOString().startsWith(yearPrefix))
+      .reduce((total, charge) => total + Math.max(0, charge.paid), 0)
+      .toFixed(2),
+  );
+  const enrolments = await prisma.enrolment.findMany({
     where: {
       institutionId: user.institutionId,
       studentId: student.id,
-      kind: "charge",
-      status: { not: "waived" },
-      postedAt: {
-        gte: new Date(`${body.taxYear}-01-01T00:00:00.000Z`),
-        lt: new Date(`${body.taxYear + 1}-01-01T00:00:00.000Z`),
-      },
+      status: { in: ["enrolled", "completed"] },
     },
+    include: { section: { include: { term: true } } },
   });
-  const eligibleTuitionCad = Number(
-    charges.reduce((n, c) => n + Math.max(0, c.amountCad), 0).toFixed(2),
-  );
-  const months = new Set(
-    charges.map((c) => c.postedAt.getUTCMonth() + 1),
-  );
-  const enrolmentMonths = Math.max(1, months.size || 1);
+  const months = new Set<number>();
+  for (const enrolment of enrolments) {
+    const term = enrolment.section.term;
+    for (let month = 1; month <= 12; month++) {
+      const start = `${yearPrefix}-${String(month).padStart(2, "0")}-01`;
+      const end = `${yearPrefix}-${String(month).padStart(2, "0")}-31`;
+      if (term.startsOn <= end && term.endsOn >= start) months.add(month);
+    }
+  }
+  const enrolmentMonths = months.size;
 
   const existing = await prisma.taxDocument.findFirst({
     where: {
@@ -772,6 +791,7 @@ export async function listRetakes(institutionId: string) {
 export async function createRetake(user: SessionClaims, body: z.infer<typeof RetakeBody>) {
   const student = await prisma.student.findFirst({
     where: { id: body.studentId, institutionId: user.institutionId },
+    include: { person: { include: { accounts: { where: { status: "active" }, select: { id: true } } } } },
   });
   if (!student) throw httpError("Student not found", "NOT_FOUND", 404);
   const section = await prisma.section.findFirst({
@@ -812,6 +832,32 @@ export async function createRetake(user: SessionClaims, body: z.infer<typeof Ret
         originalEnrolmentId,
       },
     });
+    await tx.financeLedgerEntry.create({
+      data: {
+        institutionId: user.institutionId,
+        studentId: student.id,
+        label: `Retake fee — ${section.course.code}`,
+        amountCad: body.feeCad,
+        kind: "charge",
+        status: "open",
+        source: "retake_enrolment",
+        note: `Attempt ${attemptNumber} · ${section.code}`,
+        courseId: section.courseId,
+        sectionId: section.id,
+      },
+    });
+    for (const account of student.person.accounts) {
+      await tx.notification.create({
+        data: {
+          institutionId: user.institutionId,
+          recipientAccountId: account.id,
+          channel: "in_app",
+          title: "Retake enrolment created",
+          body: `${section.course.code} ${section.code} · attempt ${attemptNumber}. A CAD ${body.feeCad.toFixed(2)} retake fee was posted.`,
+          templateKey: "enrolment.retake.created",
+        },
+      });
+    }
 
     if (body.addMakeupPlanItem) {
       const plan = await tx.programPlan.findFirst({
@@ -839,16 +885,20 @@ export async function createRetake(user: SessionClaims, body: z.infer<typeof Ret
   });
 
   await audit(user, "Enrolment.retakeCreated", "registrar_retake", null, enrolment, "admin.retakes");
-  return { ...enrolment, attemptNumber };
+  return { ...enrolment, attemptNumber, feeCad: body.feeCad };
 }
 
 export async function getMailPolicy(institutionId: string) {
-  let row = await prisma.institutionMailPolicy.findUnique({ where: { institutionId } });
-  if (!row) {
-    row = await prisma.institutionMailPolicy.create({
-      data: { institutionId },
-    });
-  }
+  const row = await prisma.institutionMailPolicy.findUnique({ where: { institutionId } });
+  if (!row) return {
+    id: null,
+    institutionId,
+    allowStudentForwarding: false,
+    allowSmsForwarding: false,
+    requireRegistrarAudit: true,
+    maxForwardAddressLength: 254,
+    note: null,
+  };
   return {
     id: row.id,
     institutionId: row.institutionId,

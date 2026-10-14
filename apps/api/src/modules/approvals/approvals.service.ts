@@ -75,8 +75,15 @@ export async function applyApprovedRequest(institutionId: string, approvalId: st
     institutionId,
     actorId,
     applyFn: async (diff, tx) => {
-      const payload = diff as { gradeItemIds?: string[]; type?: string };
-      if (Array.isArray(payload.gradeItemIds) && payload.gradeItemIds.length) {
+      const payload = diff as { gradeItemIds?: string[]; type?: string; sectionId?: string; correction?: { gradeItemId: string; score: number; letter: string; feedback?: string | null; reason: string; expectedRowVersion: number } };
+      if (approvalRow?.type === "grade.correct" && payload.correction) {
+        const correction = payload.correction;
+        const claimed = await tx.gradeItem.updateMany({
+          where: { id: correction.gradeItemId, institutionId, status: "published", rowVersion: correction.expectedRowVersion },
+          data: { score: correction.score, letter: correction.letter, feedback: correction.feedback, publishedAt: new Date(), rowVersion: { increment: 1 } },
+        });
+        if (claimed.count !== 1) throw Object.assign(new Error("The published grade changed before this correction was applied"), { code: "CONFLICT", status: 409 });
+      } else if (Array.isArray(payload.gradeItemIds) && payload.gradeItemIds.length) {
         await tx.gradeItem.updateMany({
           where: { id: { in: payload.gradeItemIds }, institutionId },
           data: { status: "published", publishedAt: new Date() },
@@ -84,6 +91,66 @@ export async function applyApprovedRequest(institutionId: string, approvalId: st
       }
       if (approvalRow?.type === "student_profile_change" && approvalRow.subjectRef) {
         await applyStudentProfileChange(institutionId, approvalRow.subjectRef, payload as Record<string, unknown>, tx);
+      }
+      if (approvalRow?.type === "service_request.course_withdrawal") {
+        if (!payload.sectionId) throw Object.assign(new Error("The withdrawal approval does not identify a course section"), { code: "CONFLICT", status: 409 });
+        const request = await tx.serviceRequest.findFirst({ where: { institutionId, approvalRequestId: approvalId, type: "course_withdrawal" } });
+        if (!request) throw Object.assign(new Error("Course withdrawal request not found"), { code: "NOT_FOUND", status: 404 });
+        const withdrawn = await tx.enrolment.updateMany({
+          where: { institutionId, studentId: request.studentId, sectionId: payload.sectionId, status: "enrolled" },
+          data: { status: "withdrawn", rowVersion: { increment: 1 } },
+        });
+        if (withdrawn.count !== 1) {
+          throw Object.assign(new Error("The selected course is no longer an active enrolment"), { code: "CONFLICT", status: 409 });
+        }
+        const charges = await tx.financeLedgerEntry.findMany({
+          where: { institutionId, studentId: request.studentId, sectionId: payload.sectionId, kind: "charge", status: "open" },
+        });
+        const allocationRows = await tx.heritageRecord.findMany({
+          where: { institutionId, screenId: "FIN:ALLOC", contextKey: request.studentId, deletedAt: null },
+          select: { dataJson: true },
+        });
+        const paidByCharge = new Map<string, number>();
+        for (const row of allocationRows) {
+          try {
+            const allocation = JSON.parse(row.dataJson) as { chargeId?: string; amount?: number };
+            if (allocation.chargeId) paidByCharge.set(allocation.chargeId, (paidByCharge.get(allocation.chargeId) ?? 0) + Number(allocation.amount ?? 0));
+          } catch {
+            // Invalid legacy allocation rows are ignored; ledger validation on
+            // adjustment review remains the final guard.
+          }
+        }
+        for (const charge of charges) {
+          const owing = Math.round(Math.max(0, Number(charge.amountCad) - (paidByCharge.get(charge.id) ?? 0)) * 100) / 100;
+          if (owing < 0.005) continue;
+          const sequence = await tx.heritageRecord.upsert({
+            where: { institutionId_screenId_contextKey_singletonKey: { institutionId, screenId: "FIN:SEQ", contextKey: "", singletonKey: "adjustment" } },
+            create: { institutionId, screenId: "FIN:SEQ", contextKey: "", singletonKey: "adjustment", dataJson: "{}", createdById: actorId ?? approvalRow.requestedBy, updatedById: actorId ?? approvalRow.requestedBy },
+            update: { rowVersion: { increment: 1 }, updatedById: actorId ?? approvalRow.requestedBy },
+          });
+          await tx.heritageRecord.create({
+            data: {
+              institutionId,
+              screenId: "FIN:ADJUSTMENT",
+              contextKey: request.studentId,
+              dataJson: JSON.stringify({
+                number: 1000 + sequence.rowVersion,
+                direction: "Decrease balance (credit)",
+                amount: owing,
+                reason: `Course withdrawal fee review for section ${payload.sectionId}`,
+                status: "Pending",
+                requestedBy: approvalRow.requestedBy,
+                requestedAt: new Date().toISOString(),
+                ledgerEntryId: charge.id,
+                ledgerAction: "waive",
+                withdrawalRequestId: request.id,
+                sectionId: payload.sectionId,
+              }),
+              createdById: actorId ?? approvalRow.requestedBy,
+              updatedById: actorId ?? approvalRow.requestedBy,
+            },
+          });
+        }
       }
       await tx.serviceRequest.updateMany({
         where: { institutionId, approvalRequestId: approvalId },

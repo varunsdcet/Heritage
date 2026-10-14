@@ -98,7 +98,7 @@ superAdminRouter.get("/students/options", viewStudents, handle((user) => student
 superAdminRouter.get(
   "/students/search",
   viewStudents,
-  handle((user, req) => searchStudents(user.institutionId, StudentSearchQuery.parse(req.query))),
+  handle((user, req) => searchStudents(user, StudentSearchQuery.parse(req.query))),
 );
 
 superAdminRouter.get(

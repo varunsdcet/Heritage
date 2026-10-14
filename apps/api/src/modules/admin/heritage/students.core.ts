@@ -5,14 +5,36 @@ import type { SessionClaims } from "@myheritage/contracts";
 import { CAMPUSES, STUDENT_PROGRAMS, assertPermission, patchStudentMeta, studentMetaMap } from "../superAdmin.service.js";
 import { audit } from "./service.js";
 import { ensureSeed, entityRecords, type Rec } from "./sysconfig.js";
-import { add, arr, getSingle, httpError, nextNumber, putSingle, rows, s, type Data, type Db, type Row } from "./finance.core.js";
+import { add, arr, getSingle, httpError, nextNumber, putSingle, rows, s, studentsInfo, type Data, type Db, type Row, type StudentInfo } from "./finance.core.js";
 import { STATUS_TREE, STU, auditScreen, type AuditSection } from "./students.spec.js";
 import { bytesMatchMime, decodeBase64 } from "../../../lib/fileSniff.js";
 
 export { add, arr, drop, getSingle, httpError, putSingle, row, rows, s, save, day, today, DATE_RE, type Data, type Db, type Row } from "./finance.core.js";
 
 export async function canStudents(user: SessionClaims, level: "view" | "edit") {
-  await assertPermission(user, "studentRecords", level);
+  return assertPermission(user, "studentRecords", level);
+}
+
+/** Enforces the user's regional campus scope before any student record is read or changed. */
+export async function assertStudentCampusAccess(user: SessionClaims, studentId: string) {
+  const access = await assertPermission(user, "studentRecords", "view");
+  if (access.superAdmin || access.campuses.length === CAMPUSES.length) return;
+  const meta = await studentMetaMap(user.institutionId);
+  const campus = s(meta[studentId]?.campus);
+  if (!campus || !access.campuses.includes(campus)) {
+    throw httpError(403, "This student is outside your assigned campus scope", "FORBIDDEN");
+  }
+}
+
+/** Returns student display facts after applying the same campus boundary used by student routes. */
+export async function scopedStudentsInfo(user: SessionClaims, ids?: string[]): Promise<Map<string, StudentInfo>> {
+  const access = await canStudents(user, "view");
+  const info = await studentsInfo(user.institutionId, ids);
+  if (access.superAdmin || access.campuses.length === CAMPUSES.length) return info;
+  for (const [studentId, student] of info) {
+    if (!student.campus || !access.campuses.includes(student.campus)) info.delete(studentId);
+  }
+  return info;
 }
 
 export const text = (v: unknown, max = 2000) => s(v).trim().slice(0, max);
@@ -61,6 +83,30 @@ export async function statusTree(user: SessionClaims): Promise<StatusNode[]> {
 }
 
 export const flatStatuses = (tree: StatusNode[]) => tree.flatMap((n) => [n.name, ...n.children]);
+
+export type StudentStatusPolicy = {
+  name: string;
+  generateNumber: boolean;
+  grantsAdmission: boolean;
+  enablesRegistration: boolean;
+  locksPlan: boolean;
+  createLogin: boolean;
+  transferIn: string;
+  leaveOfAbsence: boolean;
+  withdrawn: boolean;
+  completes: boolean;
+};
+
+/** Resolves the saved status flags used by mutations; a child inherits omitted settings from its parent. */
+export async function studentStatusPolicy(inst: string, status: string): Promise<StudentStatusPolicy | null> {
+  const rows = await entityRecords(inst, "studentStatuses");
+  const row = rows.find((candidate) => s(candidate.data.name) === status);
+  if (!row) return null;
+  const parent = row.data.parent ? rows.find((candidate) => candidate.id === s(row.data.parent)) : null;
+  const value = (key: string) => row.data[key] ?? parent?.data[key];
+  const yes = (key: string) => value(key) === true || s(value(key)).toLowerCase() === "yes" || s(value(key)).toLowerCase() === "enabled";
+  return { name: status, generateNumber: yes("generateNumber"), grantsAdmission: yes("grantsAdmission"), enablesRegistration: yes("enablesRegistration"), locksPlan: yes("locksPlan"), createLogin: yes("createLogin"), transferIn: s(value("transferIn")) || "Not Applicable", leaveOfAbsence: yes("leaveOfAbsence"), withdrawn: yes("withdrawn"), completes: yes("completes") };
+}
 
 export async function programCatalogue(inst: string) {
   const [programs, schedules, pathways, terms] = await Promise.all([rows(inst, "PM:PROGRAM"), rows(inst, "PM:SCHEDULE"), rows(inst, "PM:PATHWAY"), rows(inst, "PM:TERM")]);

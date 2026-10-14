@@ -14,7 +14,10 @@ const db = vi.hoisted(() => ({
 }));
 
 vi.mock("@myheritage/db", () => ({ prisma: db }));
-vi.mock("@myheritage/auth", () => ({ hashPassword: vi.fn(async () => "hashed-password") }));
+vi.mock("@myheritage/auth", () => ({
+  hashPassword: vi.fn(async () => "hashed-password"),
+  validateInstitutionPassword: vi.fn(async () => undefined),
+}));
 vi.mock("@myheritage/events", () => ({ writeAuditAndOutbox: vi.fn() }));
 
 import { registerSelfpacedLearner } from "./catalogue.service.js";
@@ -34,7 +37,7 @@ describe("self-paced learner registration", () => {
   it("creates a student login without creating an admission application", async () => {
     const result = await registerSelfpacedLearner({ name: "Alex Morgan", email: "ALEX@example.com", password: "secure-pass-123" });
 
-    expect(result).toMatchObject({ created: true, email: "alex@example.com" });
+    expect(result).toEqual({ accepted: true, email: "alex@example.com" });
     expect(tx.person.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ institutionId: "inst-1", givenName: "Alex", familyName: "Morgan", email: "alex@example.com" }),
     });
@@ -46,12 +49,9 @@ describe("self-paced learner registration", () => {
     });
   });
 
-  it("does not replace an existing Heritage account", async () => {
+  it("returns the same public response without replacing an existing Heritage account", async () => {
     db.account.findFirst.mockResolvedValue({ id: "existing-account" });
-    await expect(registerSelfpacedLearner({ name: "Alex Morgan", email: "alex@example.com", password: "secure-pass-123" })).rejects.toMatchObject({
-      status: 409,
-      code: "ACCOUNT_EXISTS",
-    });
+    await expect(registerSelfpacedLearner({ name: "Alex Morgan", email: "alex@example.com", password: "secure-pass-123" })).resolves.toEqual({ accepted: true, email: "alex@example.com" });
     expect(db.$transaction).not.toHaveBeenCalled();
   });
 });

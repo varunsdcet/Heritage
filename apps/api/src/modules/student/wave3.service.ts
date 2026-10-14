@@ -614,6 +614,15 @@ export async function composeMail(user: SessionClaims, body: unknown, correlatio
   if (!asDraft && !recipientIds.length) throw httpError("At least one recipient required", "VALIDATION_ERROR", 400);
   const deliverIds = [...new Set([...recipientIds, ...(parsed.data.ccAccountIds ?? []), ...(parsed.data.bccAccountIds ?? [])].filter((id) => id !== user.accountId))];
 
+  const audience = await listAudienceAccounts(user);
+  const allowedRecipientIds = new Set(
+    [...audience.instructors, ...audience.classmates, ...audience.staff].map((item) => item.accountId),
+  );
+  const forbidden = deliverIds.find((id) => !allowedRecipientIds.has(id));
+  if (forbidden) {
+    throw httpError("Recipient is outside your permitted course or staff audience", "FORBIDDEN", 403);
+  }
+
   for (const accountId of deliverIds) {
     const account = await prisma.account.findFirst({
       where: { id: accountId, institutionId: user.institutionId },
@@ -854,9 +863,10 @@ export async function updateMailboxSettings(user: SessionClaims, body: unknown) 
   }
 
   await ensureMailboxSettings(user.institutionId, user.accountId);
-  const row = await prisma.mailboxSettings.update({
-    where: { accountId: user.accountId },
-    data: {
+  const row = await prisma.$transaction(async (tx) => {
+    const updated = await tx.mailboxSettings.update({
+      where: { accountId: user.accountId },
+      data: {
       ...(parsed.data.forwardingEnabled !== undefined
         ? { forwardingEnabled: parsed.data.forwardingEnabled }
         : {}),
@@ -879,30 +889,32 @@ export async function updateMailboxSettings(user: SessionClaims, body: unknown) 
       ...(parsed.data.autoResponderBody !== undefined
         ? { autoResponderBody: parsed.data.autoResponderBody }
         : {}),
-    },
-  });
-
-  if (
-    policy.requireRegistrarAudit &&
-    (parsed.data.forwardingEnabled !== undefined ||
-      parsed.data.forwardingAddress !== undefined ||
-      parsed.data.smsForwardingEnabled !== undefined)
-  ) {
-    await writeAuditAndOutbox(prisma, {
-      institutionId: user.institutionId,
-      actorId: user.accountId,
-      eventName: "MailboxSettings.forwardingChanged",
-      purpose: "mail_policy_audit",
-      before: null,
-      after: {
-        forwardingEnabled: row.forwardingEnabled,
-        forwardingAddress: row.forwardingAddress,
-        smsForwardingEnabled: row.smsForwardingEnabled,
       },
-      source: "student.mail.settings",
-      correlationId: randomUUID(),
     });
-  }
+
+    if (
+      policy.requireRegistrarAudit &&
+      (parsed.data.forwardingEnabled !== undefined ||
+        parsed.data.forwardingAddress !== undefined ||
+        parsed.data.smsForwardingEnabled !== undefined)
+    ) {
+      await writeAuditAndOutbox(tx, {
+        institutionId: user.institutionId,
+        actorId: user.accountId,
+        eventName: "MailboxSettings.forwardingChanged",
+        purpose: "mail_policy_audit",
+        before: null,
+        after: {
+          forwardingEnabled: updated.forwardingEnabled,
+          forwardingAddress: updated.forwardingAddress,
+          smsForwardingEnabled: updated.smsForwardingEnabled,
+        },
+        source: "student.mail.settings",
+        correlationId: randomUUID(),
+      });
+    }
+    return updated;
+  });
 
   return MailboxSettingsView.parse({
     emailAddress: (await prisma.account.findFirst({ where: { id: user.accountId } }))?.email,
@@ -992,7 +1004,7 @@ export async function listAudienceAccounts(user: SessionClaims) {
   for (const a of accounts) {
     const r = parseRoles(a.rolesJson);
     const name = `${a.person.givenName} ${a.person.familyName}`.trim();
-    if (r.includes("admin") || r.includes("registrar")) staff.set(a.id, { accountId: a.id, name, group: "staff" });
+    if ((r.includes("admin") || r.includes("registrar")) && !user.roles.includes("student")) staff.set(a.id, { accountId: a.id, name, group: "staff" });
     else if (r.includes("instructor") && !user.roles.includes("student")) instructors.set(a.id, { accountId: a.id, name, group: "instructors" });
     else if (r.includes("student") && isStaffUser) classmates.set(a.id, { accountId: a.id, name, group: "students" });
   }
@@ -1020,6 +1032,9 @@ export function threadRecipients(participantIds: string[], senderId: string | un
   const to = participantIds.filter((id) => id !== senderId && !copied.has(id));
   return to.length ? to : senderId ? [senderId] : [];
 }
+
+export const visibleBccRecipients = (bccIds: string[], originalSenderId: string | undefined, viewerAccountId: string) =>
+  originalSenderId === viewerAccountId ? bccIds : [];
 
 export async function getMailThread(user: SessionClaims, threadId: string) {
   const placement = await prisma.mailThreadPlacement.findFirst({
@@ -1049,8 +1064,10 @@ export async function getMailThread(user: SessionClaims, threadId: string) {
   } catch {
     /* ignore */
   }
+  const originalSenderId = placement.thread.messages[0]?.senderAccountId;
+  const visibleBccIds = visibleBccRecipients(bccIds, originalSenderId, user.accountId);
   const people = await prisma.account.findMany({
-    where: { id: { in: [...new Set([...participantIds, ...ccIds, ...bccIds])] } },
+    where: { id: { in: [...new Set([...participantIds, ...ccIds, ...visibleBccIds])] } },
     include: { person: true },
   });
   const nameOf = (id: string) => {
@@ -1073,7 +1090,7 @@ export async function getMailThread(user: SessionClaims, threadId: string) {
     })(),
     to: threadRecipients(participantIds, placement.thread.messages[0]?.senderAccountId, ccIds, bccIds).map((id) => ({ accountId: id, name: nameOf(id), email: emailOf(id) })),
     cc: ccIds.map((id) => ({ accountId: id, name: nameOf(id), email: emailOf(id) })),
-    bcc: bccIds.map((id) => ({ accountId: id, name: nameOf(id), email: emailOf(id) })),
+    bcc: visibleBccIds.map((id) => ({ accountId: id, name: nameOf(id), email: emailOf(id) })),
     messages: placement.thread.messages.map((m) => ({
       id: m.id,
       from: m.senderAccountId === user.accountId ? "me" : "them",

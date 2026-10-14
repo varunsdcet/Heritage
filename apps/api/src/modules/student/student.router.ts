@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { Router } from "express";
+import { Router, type NextFunction, type Request, type Response } from "express";
 import {
   MAX_STUDENT_FILE_BYTES,
   StudentAssignmentSummary,
@@ -17,6 +17,7 @@ import { requireAuth, requireRoles, type AuthedRequest } from "../../middleware/
 import { confirmFeeCheckout, createFeeCheckout } from "./finance.payments.js";
 import {
   createStudentServiceRequest,
+  cancelStudentServiceRequest,
   getOrCreateLabNotebook,
   getStudentLecture,
   listStudentAssessments,
@@ -29,9 +30,11 @@ import {
   listStudentSessions,
   listStudentWorkshops,
   registerStudentWorkshop,
+  cancelStudentWorkshop,
   requireStudent,
   listLeaveOfAbsence,
   createLeaveOfAbsence,
+  cancelLeaveOfAbsence,
   listRequiredTasks,
   completeRequiredTask,
   listTaxDocuments,
@@ -67,8 +70,27 @@ import { readSubmissionFile, submissionStorageRoot } from "../../lib/submissionF
 import { currentStudentId } from "../me/studentAlignment.js";
 import { submitQuizAttempt } from "../instructor/lmsQuiz.js";
 import { studentCanAccessLinkedAssignment } from "../instructor/lmsAccessRestrictions.js";
+import { assertPermission, type PermissionModuleKey } from "../admin/superAdmin.service.js";
 
 export const studentRouter: Router = Router();
+
+const STUDENT_ACCESS_PATHS: Array<[RegExp, PermissionModuleKey]> = [
+  [/^\/(finance|tax-documents)(\/|$)/, "financialManagement"],
+  [/^\/(documents|credentials|extracurricular|required-tasks)(\/|$)/, "studentRecords"],
+  [/^\/(services|leave-of-absence)(\/|$)/, "userRequests"],
+];
+
+studentRouter.use(async (req, res, next) => {
+  const hit = STUDENT_ACCESS_PATHS.find(([pattern]) => pattern.test(req.path));
+  if (!hit) return next();
+  return requireAuth(req, res, (authError?: unknown) => {
+    if (authError) return next(authError);
+    return requireRoles("student")(req, res, async (roleError?: unknown) => {
+      if (roleError) return next(roleError);
+      try { await assertPermission((req as AuthedRequest).user, hit[1], req.method === "GET" ? "view" : "edit"); next(); } catch (error) { next(error); }
+    });
+  });
+});
 
 const mimeByExtension: Record<string, string> = {
   ".pdf": "application/pdf",
@@ -711,6 +733,17 @@ studentRouter.get("/courses/:sectionId/content", requireAuth, requireRoles("stud
         accessOverlayInvalid = true;
       }
     }
+    const deletedActivityIds = new Set(Array.isArray(accessOverlay?.deletedActivityIds) ? accessOverlay.deletedActivityIds as string[] : []);
+    const hiddenActivityIds = new Set(Array.isArray(accessOverlay?.hiddenActivityIds) ? accessOverlay.hiddenActivityIds as string[] : []);
+    const topicActivities = accessOverlay?.topicActivities && typeof accessOverlay.topicActivities === "object"
+      ? Object.values(accessOverlay.topicActivities as Record<string, unknown[]>).flat()
+      : [];
+    const extraActivities = Array.isArray(accessOverlay?.extraTopics)
+      ? (accessOverlay.extraTopics as Array<{ activities?: unknown[] }>).flatMap((topic) => Array.isArray(topic.activities) ? topic.activities : [])
+      : [];
+    const overlayActivities = [...topicActivities, ...extraActivities]
+      .filter((value): value is Record<string, unknown> => Boolean(value) && typeof value === "object")
+      .filter((activity) => typeof activity.id === "string" && !deletedActivityIds.has(activity.id) && !hiddenActivityIds.has(activity.id) && activity.hidden !== true);
     const items = [
       ...enrolment.section.classSessions.map((session) => {
         const isLab = session.sessionKind === "lab";
@@ -738,6 +771,15 @@ studentRouter.get("/courses/:sectionId/content", requireAuth, requireRoles("stud
         joinUrl: null as string | null,
         completed: completed.has(`assignment:${assignment.id}`),
         })),
+      ...overlayActivities.map((activity) => ({
+        id: `activity:${String(activity.id)}`,
+        kind: "resource" as const,
+        title: String(activity.name || activity.title || "Course activity"),
+        detail: String(activity.type || "Activity"),
+        href: `/student/courses/${sectionId}?aid=${encodeURIComponent(String(activity.id))}`,
+        joinUrl: null as string | null,
+        completed: completed.has(`activity:${String(activity.id)}`),
+      })),
     ];
     const done = items.filter((i) => i.completed).length;
     res.json({
@@ -779,25 +821,23 @@ studentRouter.post("/courses/:sectionId/content/:itemId/complete", requireAuth, 
     const completed = new Set(prev.completed ?? []);
     completed.add(itemId);
     const payload = { completed: [...completed], updatedAt: new Date().toISOString() };
-    await prisma.sisScreenState.upsert({
-      where: { institutionId_path: { institutionId: user.institutionId, path: progressPath } },
-      create: {
+    await prisma.$transaction(async (tx) => {
+      await tx.sisScreenState.upsert({
+        where: { institutionId_path: { institutionId: user.institutionId, path: progressPath } },
+        create: { institutionId: user.institutionId, path: progressPath, payloadJson: JSON.stringify(payload) },
+        update: { payloadJson: JSON.stringify(payload) },
+      });
+      await writeAuditAndOutbox(tx, {
         institutionId: user.institutionId,
-        path: progressPath,
-        payloadJson: JSON.stringify(payload),
-      },
-      update: { payloadJson: JSON.stringify(payload) },
-    });
-    await writeAuditAndOutbox(prisma, {
-      institutionId: user.institutionId,
-      actorId: user.accountId,
-      eventName: "StudentContent.completed",
-      purpose: "course_consumption",
-      before: { sectionId, completed: prev.completed ?? [] },
-      after: { sectionId, itemId, completed: [...completed] },
-      source: "student.content",
-      correlationId: randomUUID(),
-      outboxPayload: { sectionId, itemId },
+        actorId: user.accountId,
+        eventName: "StudentContent.completed",
+        purpose: "course_consumption",
+        before: { sectionId, completed: prev.completed ?? [] },
+        after: { sectionId, itemId, completed: [...completed] },
+        source: "student.content",
+        correlationId: randomUUID(),
+        outboxPayload: { sectionId, itemId },
+      });
     });
     res.json({ ok: true, sectionId, itemId, completed: [...completed] });
   } catch (error) {
@@ -828,7 +868,7 @@ studentRouter.post("/assessments/attempts/:id/submit", requireAuth, requireRoles
   try {
     const user = (req as AuthedRequest).user;
     res.json(
-      await submitAssessmentAttempt(user, String(req.params.id), (req as AuthedRequest).correlationId),
+      await submitAssessmentAttempt(user, String(req.params.id), req.body, (req as AuthedRequest).correlationId),
     );
   } catch (error) {
     next(error);
@@ -910,6 +950,10 @@ studentRouter.post("/services", requireAuth, requireRoles("student"), async (req
   }
 });
 
+studentRouter.post("/services/:id/cancel", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try { const user = (req as AuthedRequest).user; res.json(await cancelStudentServiceRequest(user, String(req.params.id), (req as AuthedRequest).correlationId)); } catch (error) { next(error); }
+});
+
 studentRouter.get("/practicum", requireAuth, requireRoles("student"), async (req, res, next) => {
   try {
     res.json(await listStudentPracticum((req as AuthedRequest).user));
@@ -952,6 +996,19 @@ studentRouter.post("/finance/checkout/confirm", requireAuth, requireRoles("stude
   }
 });
 
+studentRouter.get("/finance/receipts/:entryId", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    const student = await getStudent(user);
+    const { receipt } = await import("../admin/heritage/students.finance.js");
+    const { sendPdf } = await import("../../lib/taxPdf.js");
+    const document = await receipt(user, student.id, String(req.params.entryId));
+    sendPdf(res, document.pdf, document.filename);
+  } catch (error) {
+    next(error);
+  }
+});
+
 studentRouter.get("/calendars", requireAuth, requireRoles("student"), async (req, res, next) => {
   try {
     res.json(await listStudentCalendars((req as AuthedRequest).user));
@@ -972,7 +1029,14 @@ studentRouter.post("/courses/:sectionId/quizzes/:activityId/attempts", requireAu
   try {
     const user = (req as AuthedRequest).user;
     const student = await requireStudent(user, String(req.params.sectionId));
-    const result = await submitQuizAttempt(user, student, String(req.params.sectionId), String(req.params.activityId), req.body);
+    const result = await submitQuizAttempt(
+      user,
+      student,
+      String(req.params.sectionId),
+      String(req.params.activityId),
+      req.body,
+      (req as AuthedRequest).correlationId,
+    );
     res.status(201).json(StudentQuizAttemptResponse.parse(result));
   } catch (error) {
     next(error);
@@ -1012,7 +1076,17 @@ studentRouter.post("/evaluations/:id/submit", requireAuth, requireRoles("student
   }
 });
 
-studentRouter.get("/mail", requireAuth, requireRoles("student"), async (req, res, next) => {
+const requireStudentMailAccess = async (req: Request, _res: Response, next: NextFunction) => {
+  try {
+    const { assertPermission } = await import("../admin/superAdmin.service.js");
+    await assertPermission((req as AuthedRequest).user, "emailMessaging", req.method === "GET" ? "view" : "edit");
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
+studentRouter.get("/mail", requireAuth, requireRoles("student"), requireStudentMailAccess, async (req, res, next) => {
   try {
     const folderId = typeof req.query.folderId === "string" ? req.query.folderId : null;
     res.json(await listMailbox((req as AuthedRequest).user, folderId));
@@ -1021,7 +1095,7 @@ studentRouter.get("/mail", requireAuth, requireRoles("student"), async (req, res
   }
 });
 
-studentRouter.post("/mail/folders", requireAuth, requireRoles("student"), async (req, res, next) => {
+studentRouter.post("/mail/folders", requireAuth, requireRoles("student"), requireStudentMailAccess, async (req, res, next) => {
   try {
     res.status(201).json(await createCustomMailFolder((req as AuthedRequest).user, req.body));
   } catch (error) {
@@ -1029,7 +1103,7 @@ studentRouter.post("/mail/folders", requireAuth, requireRoles("student"), async 
   }
 });
 
-studentRouter.post("/mail/compose", requireAuth, requireRoles("student"), async (req, res, next) => {
+studentRouter.post("/mail/compose", requireAuth, requireRoles("student"), requireStudentMailAccess, async (req, res, next) => {
   try {
     const user = (req as AuthedRequest).user;
     res.status(201).json(await composeMail(user, req.body, (req as AuthedRequest).correlationId));
@@ -1038,7 +1112,7 @@ studentRouter.post("/mail/compose", requireAuth, requireRoles("student"), async 
   }
 });
 
-studentRouter.post("/mail/threads/:threadId/reply", requireAuth, requireRoles("student"), async (req, res, next) => {
+studentRouter.post("/mail/threads/:threadId/reply", requireAuth, requireRoles("student"), requireStudentMailAccess, async (req, res, next) => {
   try {
     const user = (req as AuthedRequest).user;
     const threadId = String(req.params.threadId || "");
@@ -1048,7 +1122,7 @@ studentRouter.post("/mail/threads/:threadId/reply", requireAuth, requireRoles("s
   }
 });
 
-studentRouter.get("/mail/settings", requireAuth, requireRoles("student"), async (req, res, next) => {
+studentRouter.get("/mail/settings", requireAuth, requireRoles("student"), requireStudentMailAccess, async (req, res, next) => {
   try {
     res.json({ settings: await getMailboxSettings((req as AuthedRequest).user) });
   } catch (error) {
@@ -1056,7 +1130,7 @@ studentRouter.get("/mail/settings", requireAuth, requireRoles("student"), async 
   }
 });
 
-studentRouter.patch("/mail/settings", requireAuth, requireRoles("student"), async (req, res, next) => {
+studentRouter.patch("/mail/settings", requireAuth, requireRoles("student"), requireStudentMailAccess, async (req, res, next) => {
   try {
     res.json({ settings: await updateMailboxSettings((req as AuthedRequest).user, req.body) });
   } catch (error) {
@@ -1064,7 +1138,7 @@ studentRouter.patch("/mail/settings", requireAuth, requireRoles("student"), asyn
   }
 });
 
-studentRouter.get("/mail/audience", requireAuth, requireRoles("student"), async (req, res, next) => {
+studentRouter.get("/mail/audience", requireAuth, requireRoles("student"), requireStudentMailAccess, async (req, res, next) => {
   try {
     res.json(await listAudienceAccounts((req as AuthedRequest).user));
   } catch (error) {
@@ -1105,6 +1179,10 @@ studentRouter.post("/workshops/register", requireAuth, requireRoles("student"), 
   }
 });
 
+studentRouter.post("/workshops/:id/cancel", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try { const user = (req as AuthedRequest).user; res.json(await cancelStudentWorkshop(user, String(req.params.id), (req as AuthedRequest).correlationId)); } catch (error) { next(error); }
+});
+
 studentRouter.get("/leave-of-absence", requireAuth, requireRoles("student"), async (req, res, next) => {
   try {
     res.json(await listLeaveOfAbsence((req as AuthedRequest).user));
@@ -1120,6 +1198,10 @@ studentRouter.post("/leave-of-absence", requireAuth, requireRoles("student"), as
   } catch (error) {
     next(error);
   }
+});
+
+studentRouter.post("/leave-of-absence/:id/cancel", requireAuth, requireRoles("student"), async (req, res, next) => {
+  try { const user = (req as AuthedRequest).user; res.json(await cancelLeaveOfAbsence(user, String(req.params.id), (req as AuthedRequest).correlationId)); } catch (error) { next(error); }
 });
 
 studentRouter.get("/required-tasks", requireAuth, requireRoles("student"), async (req, res, next) => {

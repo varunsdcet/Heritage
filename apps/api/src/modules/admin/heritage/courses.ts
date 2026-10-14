@@ -155,10 +155,15 @@ export type Lookups = {
   campusId: (v: unknown) => string;
 };
 
+/** Accounts that can be assigned to teach or support a course session. */
+export function isCourseStaffAccount(rolesJson: string) {
+  return /instructor|faculty|teacher|admin|registrar|advisor|staff/i.test(rolesJson);
+}
+
 export async function staffAccounts(inst: string) {
   const accounts = await prisma.account.findMany({ where: { institutionId: inst, status: "active" }, include: { person: true } });
   return accounts
-    .filter((a) => /instructor|admin|registrar|advisor|staff/.test(a.rolesJson))
+    .filter((a) => isCourseStaffAccount(a.rolesJson))
     .map((a) => ({ id: a.id, personId: a.personId, name: `${a.person.givenName} ${a.person.familyName}`.trim() || a.email }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }

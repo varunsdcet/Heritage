@@ -27,7 +27,7 @@ source <(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$ENV_FILE" | sed 's/\r$//')
 set +a
 
 PG_USER="${POSTGRES_USER:-heritage}"
-PG_PASS="${POSTGRES_PASSWORD:-HeritagePg!2026}"
+PG_PASS="${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env.production}"
 PG_DB="${POSTGRES_DB:-heritage}"
 MIGRATE_URL="postgresql://${PG_USER}:${PG_PASS}@postgres:5432/${PG_DB}"
 

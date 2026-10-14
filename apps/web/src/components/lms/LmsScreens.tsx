@@ -1444,7 +1444,7 @@ export function PermissionsPanel({ onBack }: { onBack: () => void }) {
           <option value="">Choose...</option>
           {roles.map((r) => (
             <option key={r} value={r}>
-              {r} (0)
+              {r}
             </option>
           ))}
         </select>

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { heygenConfig, heygenSpeech, rateLimited } from "@/lib/heygenSpeech";
+import { requireWebApiSession } from "@/lib/serverRouteAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -7,6 +8,8 @@ export const dynamic = "force-dynamic";
 const MAX_CHARS = 3000;
 
 export async function POST(req: NextRequest) {
+  const session = await requireWebApiSession(req, ["instructor", "admin", "registrar"]);
+  if (session instanceof NextResponse) return session;
   const heygen = heygenConfig();
   if (!heygen) {
     return NextResponse.json({ error: "Narration voice is not configured on the server." }, { status: 503 });

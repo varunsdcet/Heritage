@@ -269,6 +269,20 @@ export async function eligiblePromotions(c: StudentCtx) {
   return out;
 }
 
+/** Applies every currently eligible automated promotion exactly through the
+ * normal award path, so use limits, allocations and audit records are shared
+ * with manually-created awards. */
+export async function applyAutomatedPromotions(user: SessionClaims, studentId: string) {
+  const c = await studentCtx(user, studentId, "edit");
+  const eligible = (await eligiblePromotions(c)).filter((promotion) => promotion.eligibility === "Automated");
+  const applied: string[] = [];
+  for (const promotion of eligible) {
+    const result = await createAward(user, studentId, { promotionId: promotion.id, status: "Active", eligibility: "Automated", note: "Applied automatically after an eligible fee was posted" });
+    applied.push(result.id);
+  }
+  return applied;
+}
+
 export async function createAward(user: SessionClaims, studentId: string, body: Data) {
   const c = await studentCtx(user, studentId, "edit");
   const p = c.cfg.promotions.find((x) => x.id === s(body.promotionId));
@@ -373,6 +387,13 @@ export async function createAdjustment(user: SessionClaims, body: Data) {
       requestedBy: user.accountId,
       requestedAt: new Date().toISOString(),
       ...(ledgerEntryId ? { ledgerEntryId, ...(ledgerAction ? { ledgerAction } : {}) } : {}),
+      ...(s(body.invoiceId)
+        ? {
+            invoiceId: s(body.invoiceId),
+            creditNoteDate: s(body.creditNoteDate),
+            creditNoteText: text(body.creditNoteText, 500),
+          }
+        : {}),
     },
     c.st.id,
   );
@@ -406,8 +427,38 @@ async function reviewAdjustmentLocked(user: SessionClaims, id: string, body: Dat
         throw httpError(409, `The charge this adjustment writes off is no longer open for ${cad(amount)}. Decline this adjustment instead.`, "CONFLICT");
       }
     }
+    const invoiceId = s(r.data.invoiceId);
+    let invoice: Row | null = null;
+    let invoiceChargeIds: string[] = [];
+    if (invoiceId) {
+      invoice = await row(user.institutionId, S.INVOICE, invoiceId, "Invoice");
+      if (invoice.contextKey !== c.st.id) throw httpError(409, "The invoice does not belong to this student", "CONFLICT");
+      invoiceChargeIds = arr<Data>(invoice.data.items).map((item) => s(item.refId || item.chargeId)).filter(Boolean);
+      const outstanding = r2(c.book.charges.filter((ch) => invoiceChargeIds.includes(ch.id) && !ch.hidden).reduce((sum, ch) => sum + ch.owing, 0));
+      if (amount > outstanding + EPS) {
+        throw httpError(409, `The invoice now has only ${cad(outstanding)} outstanding. Decline this adjustment and submit a new credit note.`, "CONFLICT");
+      }
+    }
     if (r.data.direction === "Increase balance (debit)") entryId = (await postFee(c, { type: undefined, label: "Financial Adjustment", unit: amount, quantity: 1, termId: null, note: s(r.data.reason), extra: { adjustmentId: r.id } })).id;
-    else entryId = (await postCredit(c, { typeName: "Financial Adjustment", typeId: "", amount, note: s(r.data.reason), extra: { adjustmentId: r.id }, ...(chargeId ? { chargeIds: [chargeId] } : {}) })).id;
+    else entryId = (await postCredit(c, { typeName: invoice ? "Invoice Credit Note" : "Financial Adjustment", typeId: "", amount, note: s(r.data.reason), extra: { adjustmentId: r.id, ...(invoice ? { invoiceId: invoice.id } : {}) }, ...(chargeId ? { chargeIds: [chargeId] } : invoiceChargeIds.length ? { chargeIds: invoiceChargeIds } : {}) })).id;
+    if (invoice) {
+      const notes = arr<Data>(invoice.data.creditNotes);
+      const number = Math.max(0, ...notes.map((n) => num(n.number))) + 1;
+      await save(user, invoice.id, {
+        ...invoice.data,
+        creditNotes: [
+          ...notes,
+          {
+            number,
+            date: s(r.data.creditNoteDate) || today(),
+            amount,
+            note: s(r.data.creditNoteText) || s(r.data.reason),
+            adjustmentId: r.id,
+            ledgerEntryId: entryId,
+          },
+        ],
+      });
+    }
   }
   await save(user, r.id, { ...r.data, status: decision, reviewedBy: user.accountId, reviewedAt: new Date().toISOString(), reviewNote: text(body.note), entryId });
   await finAudit(user, c.st.id, decision === "Declined" ? "Adjustment declined" : "Adjustment approved", `Adjustment #${num(r.data.number)}`, { direction: s(r.data.direction), amount: cad(amount), note: text(body.note) }, r.id);
@@ -444,23 +495,26 @@ export function planDebt(d: Data, book: Book) {
 
 export function planSchedule(d: Data, debt: number) {
   let list: Array<{ date: string; amount: number }> = [];
+  const downPayment = r2(Math.min(debt, Math.max(0, num(d.downPaymentCad))));
+  const financed = r2(Math.max(0, debt - downPayment));
   if (d.scheduleType === "Manual / Advanced Instalments") {
     list = arr<Data>(d.instalments).map((i) => ({ date: s(i.date), amount: r2(num(i.amount)) })).sort((a, b) => a.date.localeCompare(b.date));
   } else {
     const each = num(d.instalmentAmount);
-    if (each > EPS && debt > EPS) {
-      let left = debt;
+    if (each > EPS && financed > EPS) {
+      let left = financed;
       for (let k = 0; left > EPS && k < 240; k++) {
         const amt = r2(Math.min(each, left));
-        list.push({ date: addFrequency(s(d.startDate), s(d.frequency), k), amount: amt });
+        list.push({ date: addFrequency(s(d.startDate), s(d.frequency), downPayment > EPS ? k + 1 : k), amount: amt });
         left = r2(left - amt);
       }
     }
   }
+  if (downPayment > EPS) list.unshift({ date: s(d.startDate), amount: downPayment });
   let interest = 0;
   if (d.applyInterest && list.length) {
     const days = Math.max(0, (Date.parse(list[list.length - 1]!.date) - Date.parse(s(d.startDate))) / 86_400_000);
-    interest = r2((debt * num(d.interestRate)) / 100 * (days / 365));
+    interest = r2((financed * num(d.interestRate)) / 100 * (days / 365));
     if (interest > EPS) list[list.length - 1] = { ...list[list.length - 1]!, amount: r2(list[list.length - 1]!.amount + interest) };
   }
   return { list, interest };
@@ -509,6 +563,7 @@ export function planView(r: Row, book: Book) {
     instalments: list,
     interest,
     interestRate: num(d.interestRate),
+    downPaymentCad: num(d.downPaymentCad),
     debt,
     paid,
     remaining,
@@ -522,7 +577,13 @@ export function planView(r: Row, book: Book) {
   };
 }
 
-async function planInput(c: StudentCtx, body: Data, prev: Data | null) {
+function downPaymentAmount(option: string, debt: number, instalment: number) {
+  if (option === "First Instalment Amount") return r2(Math.min(debt, instalment));
+  const percent = /^(\d+(?:\.\d+)?)%$/.exec(option);
+  return percent ? r2(Math.min(debt, debt * Number(percent[1]) / 100)) : 0;
+}
+
+async function planInput(c: StudentCtx, body: Data, prev: Data | null, template?: Rec) {
   const startDate = body.startDate === undefined && prev ? s(prev.startDate) : day(dateAt(body.startDate, "Start Date"));
   const syncBalance = s(body.syncBalance) || "Disabled";
   if (!(SYNC_OPTIONS as readonly string[]).includes(syncBalance)) throw httpError(400, `Synchronize Balance "${syncBalance}" is not valid`);
@@ -552,12 +613,15 @@ async function planInput(c: StudentCtx, body: Data, prev: Data | null) {
     d.frequency = s(body.frequency);
     if (!PLAN_FREQUENCIES.includes(s(d.frequency))) throw httpError(400, "Instalment Frequency is required");
     d.instalmentAmount = amountOf(body.instalmentAmount, "Instalment Amount");
-    if (Math.ceil(debt / num(d.instalmentAmount)) > 240) throw httpError(400, "The instalment amount is too small (more than 240 instalments)");
+    d.downPaymentCad = downPaymentAmount(s(template?.data.downPayment), debt, num(d.instalmentAmount));
+    if (Math.ceil((debt - num(d.downPaymentCad)) / num(d.instalmentAmount)) > 240) throw httpError(400, "The instalment amount is too small (more than 240 instalments)");
   } else {
+    d.downPaymentCad = downPaymentAmount(s(template?.data.downPayment), debt, 0);
     const list = arr<Data>(body.instalments).map((i, k) => ({ date: day(dateAt(i.date, `Instalment ${k + 1} date`)), amount: amountOf(i.amount, `Instalment ${k + 1} amount`) }));
     if (!list.length) throw httpError(400, "Add at least one instalment");
     const sum = r2(list.reduce((a, i) => a + i.amount, 0));
-    if (Math.abs(sum - debt) > 0.01) throw httpError(400, `Instalments add up to ${cad(sum)} but the debt is ${cad(debt)}`);
+    const financed = r2(debt - num(d.downPaymentCad));
+    if (Math.abs(sum - financed) > 0.01) throw httpError(400, `Instalments add up to ${cad(sum)} but the financed balance after the ${cad(num(d.downPaymentCad))} down payment is ${cad(financed)}`);
     if (list.some((i) => i.date < startDate)) throw httpError(400, "Instalment dates cannot be before the start date");
     d.instalments = list;
   }
@@ -566,12 +630,15 @@ async function planInput(c: StudentCtx, body: Data, prev: Data | null) {
 
 export async function createPlan(user: SessionClaims, studentId: string, body: Data) {
   const c = await studentCtx(user, studentId, "edit");
-  const d = await planInput(c, body, null);
-  const number = await nextNumber(c.inst, "plan");
   const tpl = c.cfg.planTemplates.find((t) => t.id === s(body.templateId));
+  const d = await planInput(c, body, null, tpl);
+  const number = await nextNumber(c.inst, "plan");
   const r = await add(user, S.PLAN, { ...d, number, templateId: tpl?.id ?? "" }, studentId);
   const feeType = tpl && s(tpl.data.planFee) !== "No Fee" ? c.cfg.ledgerTypes.find((t) => nameOf(t) === s(tpl.data.planFee)) : undefined;
-  if (feeType) await postFee(c, { type: feeType, unit: num(feeType.data[/international/i.test(c.st.rateCategory) ? "international" : "domestic"]), quantity: 1, termId: s(d.termId) || null, note: `Payment plan #${number} fee`, extra: { planId: r.id } });
+  if (feeType) {
+    const setupFee = await postFee(c, { type: feeType, unit: num(feeType.data[/international/i.test(c.st.rateCategory) ? "international" : "domestic"]), quantity: 1, termId: s(d.termId) || null, note: `Payment plan #${number} fee`, extra: { planId: r.id } });
+    await save(user, r.id, { ...r.data, setupFeeEntryId: setupFee.id });
+  }
   const v = planView({ ...r, data: { ...d, number } }, c.book);
   await finAudit(user, studentId, "Payment plan created", `Payment plan #${number}`, { debt: cad(v.debt), schedule: v.instalmentsLabel, start: v.startDate, instalments: v.instalments.length, interest: cad(v.interest), notes: s(d.notes) }, r.id);
   return { id: r.id, message: "Payment plan created successfully" };
@@ -581,7 +648,8 @@ export async function updatePlan(user: SessionClaims, id: string, body: Data) {
   await canFinance(user, "edit");
   const r = await row(user.institutionId, S.PLAN, id, "Payment plan");
   const c = await studentCtx(user, r.contextKey, "edit");
-  const d = await planInput(c, body, r.data);
+  const tpl = c.cfg.planTemplates.find((template) => template.id === s(body.templateId || r.data.templateId));
+  const d = await planInput(c, body, r.data, tpl);
   await save(user, r.id, { ...r.data, ...d });
   await finAudit(user, c.st.id, "Payment plan updated", `Payment plan #${num(r.data.number)}`, { debt: cad(num(d.debt)), start: s(d.startDate), schedule: s(d.scheduleType), notes: s(d.notes) }, r.id);
   return { message: "Payment plan updated successfully" };
@@ -590,9 +658,26 @@ export async function updatePlan(user: SessionClaims, id: string, body: Data) {
 export async function deletePlan(user: SessionClaims, id: string) {
   await canFinance(user, "edit");
   const r = await row(user.institutionId, S.PLAN, id, "Payment plan");
+  const c = await studentCtx(user, r.contextKey, "edit");
+  const setupFee = c.book.charges.find((charge) => charge.id === s(r.data.setupFeeEntryId) || charge.meta.planId === r.id);
+  let adjustmentId: string | null = null;
+  if (setupFee && !setupFee.hidden) {
+    if (setupFee.paid > EPS) throw httpError(409, `Payment plan #${num(r.data.number)} has a setup fee with ${cad(setupFee.paid)} paid. Refund the payment before deleting the plan.`, "CONFLICT");
+    if (setupFee.owing > EPS) {
+      const adjustment = await createAdjustment(user, {
+        studentId: r.contextKey,
+        direction: "Decrease balance (credit)",
+        amount: setupFee.owing,
+        reason: `Payment plan #${num(r.data.number)} setup fee cleanup`,
+        ledgerEntryId: setupFee.id,
+        ledgerAction: "waive",
+      });
+      adjustmentId = adjustment.id;
+    }
+  }
   await drop(user, [r.id]);
-  await finAudit(user, r.contextKey, "Payment plan deleted", `Payment plan #${num(r.data.number)}`, { debt: cad(num(r.data.debt)) }, r.id);
-  return { message: "Payment plan deleted successfully" };
+  await finAudit(user, r.contextKey, "Payment plan deleted", `Payment plan #${num(r.data.number)}`, { debt: cad(num(r.data.debt)), setupFeeAdjustmentId: adjustmentId }, r.id);
+  return { message: adjustmentId ? "Payment plan deleted; its setup fee reversal was sent for approval" : "Payment plan deleted successfully", adjustmentId };
 }
 
 /* ------------------------------------------------------------------ */

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { AiGovernanceSnapshot } from "@myheritage/contracts";
-import { Banner, StatusPill } from "@myheritage/ui";
+import { Banner, Button, StatusPill } from "@myheritage/ui";
 import { api, loadSession } from "@/lib/api";
 import { ScreenScaffold } from "@/components/ScreenScaffold";
 
@@ -11,6 +11,37 @@ export default function AdminAiGovernancePage() {
   const router = useRouter();
   const [data, setData] = useState<AiGovernanceSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  async function savePolicies() {
+    const session = loadSession();
+    if (!session || !data) return;
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await api("/ai/governance", {
+        method: "PUT",
+        body: JSON.stringify({
+          studentAiAllowed: data.policies.studentAiAllowed,
+          instructorAiAllowed: data.policies.instructorAiAllowed,
+          adminAiAllowed: data.policies.adminAiAllowed,
+          gradingAssistanceAllowed: data.policies.gradingAssistanceAllowed,
+          maxRequestsPerHour: data.policies.maxRequestsPerHour,
+        }),
+      }, session.accessToken);
+      setNotice("AI governance policy saved and enforced.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to save AI governance");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function setPolicy<K extends keyof AiGovernanceSnapshot["policies"]>(key: K, value: AiGovernanceSnapshot["policies"][K]) {
+    setData((current) => current ? { ...current, policies: { ...current.policies, [key]: value } } : current);
+  }
 
   useEffect(() => {
     const session = loadSession();
@@ -37,6 +68,7 @@ export default function AdminAiGovernancePage() {
     >
       <div className="mh-student-stack">
         {error ? <Banner tone="danger">{error}</Banner> : null}
+        {notice ? <Banner tone="success">{notice}</Banner> : null}
         {!data ? (
           <p>Loading AI governance…</p>
         ) : (
@@ -67,15 +99,25 @@ export default function AdminAiGovernancePage() {
             </section>
             <section className="mh-sis-dash__card" style={{ marginTop: 20 }}>
               <h2>Policies</h2>
-              <ul>
-                <li>Student AI: {data.policies.studentAiAllowed ? "allowed" : "blocked"}</li>
-                <li>Instructor AI: {data.policies.instructorAiAllowed ? "allowed" : "blocked"}</li>
-                <li>Grading assistance: {data.policies.gradingAssistanceAllowed ? "allowed" : "blocked"}</li>
-                <li>
+              <div style={{ display: "grid", gap: 10, maxWidth: 520 }}>
+                {([
+                  ["studentAiAllowed", "Student AI"],
+                  ["instructorAiAllowed", "Instructor AI"],
+                  ["adminAiAllowed", "Admin AI"],
+                  ["gradingAssistanceAllowed", "Grading assistance"],
+                ] as const).map(([key, label]) => (
+                  <label key={key}><input type="checkbox" checked={data.policies[key]} onChange={(e) => setPolicy(key, e.target.checked)} /> {label}</label>
+                ))}
+                <label style={{ display: "grid", gap: 4 }}>
+                  <span>Maximum requests per user / hour</span>
+                  <input type="number" min={1} max={10000} value={data.policies.maxRequestsPerHour} onChange={(e) => setPolicy("maxRequestsPerHour", Number(e.target.value))} />
+                </label>
+                <p style={{ margin: 0 }}>
                   Study mode default: {data.policies.mode} (full answers:{" "}
                   {data.policies.fullAnswerGenerationAllowed ? "yes" : "no"})
-                </li>
-              </ul>
+                </p>
+                <Button type="button" disabled={saving} onClick={() => void savePolicies()}>{saving ? "Saving…" : "Save governance"}</Button>
+              </div>
             </section>
             <section className="mh-sis-dash__card" style={{ marginTop: 20 }}>
               <h2>Usage (last 24h)</h2>

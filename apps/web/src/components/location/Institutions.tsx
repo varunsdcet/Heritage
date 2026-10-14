@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { SaModal, SaNotice, SuperFrame } from "@/components/superadmin/shared";
@@ -24,14 +24,27 @@ export function ManageInstitutions() {
   const [perPage, setPerPage] = useState(25);
   const [data, setData] = useState<Listing | null>(null);
   const [confirm, setConfirm] = useState<Row | null>(null);
+  const requestId = useRef(0);
 
   const load = useCallback(() => {
-    const qs = new URLSearchParams({ q: applied, page: String(page), perPage: String(perPage) }).toString();
-    lx<Listing>(`/institutions?${qs}`)
-      .then(setData)
-      .catch((e) => fail(errMsg(e, "Could not load institutions")));
+    const currentRequest = ++requestId.current;
+    const qs = new URLSearchParams({ name: applied, page: String(page), perPage: String(perPage) }).toString();
+    lx<Listing>(`/institutions?${qs}`, { cache: "no-store" })
+      .then((next) => {
+        if (currentRequest === requestId.current) setData(next);
+      })
+      .catch((e) => {
+        if (currentRequest === requestId.current) fail(errMsg(e, "Could not load institutions"));
+      });
   }, [applied, page, perPage, fail]);
   useEffect(load, [load]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setPage(1);
+      setApplied(q.trim());
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [q]);
 
   return (
     <SuperFrame

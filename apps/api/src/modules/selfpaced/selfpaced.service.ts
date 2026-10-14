@@ -46,6 +46,13 @@ export async function issueSelfpacedCertificate(user: SessionClaims, input: unkn
   const outstanding = expected.filter((id) => !done.has(id));
   if (outstanding.length) throw fail(409, "COURSE_INCOMPLETE", `Finish every activity before the certificate is issued (${outstanding.length} remaining)`);
 
+  const enrolmentPath = `selfpaced:enrolment:${user.accountId}:${slug}`;
+  const enrolment = await prisma.sisScreenState.findUnique({
+    where: { institutionId_path: { institutionId: user.institutionId, path: enrolmentPath } },
+    select: { id: true },
+  });
+  if (!enrolment) throw fail(403, "ENROLMENT_REQUIRED", "You must be enrolled in this self-paced course before a certificate can be issued.");
+
   const student = await prisma.student.findFirst({
     where: { institutionId: user.institutionId, personId: user.personId },
     select: { id: true, person: { select: { givenName: true, preferredName: true, familyName: true } } },

@@ -37,9 +37,10 @@ export function gradePointsOrNull(letter: string): number | null {
   return gradePoints(letter);
 }
 
-/** A final letter passes (and earns credit) unless it is an F or carries zero grade points; the credits / degree rule. */
+/** Only an earned passing grade may award credit. Incomplete, in-progress, withdrawn and blank marks never pass. */
 export function passingLetter(letter: string) {
-  return letter !== "F" && gradePointsOrNull(letter) !== 0;
+  const normalized = letter.trim().toUpperCase();
+  return normalized === "P" || (normalized !== "F" && (gradePointsOrNull(normalized) ?? 0) > 0);
 }
 
 const day = (v: string | null | undefined) => (v ?? "").slice(0, 10);

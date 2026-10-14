@@ -28,6 +28,7 @@ function LiveLauncher() {
   const [state, setState] = useState<"joining" | "waiting" | "room" | "error" | "left">(left ? "left" : "joining");
   const [roomUrl, setRoomUrl] = useState("");
   const [title, setTitle] = useState("");
+  const [roomRole, setRoomRole] = useState<"moderator" | "viewer" | null>(null);
   const [error, setError] = useState("");
   const [home, setHome] = useState("/");
   const timer = useRef<number | null>(null);
@@ -36,6 +37,7 @@ function LiveLauncher() {
     try {
       const res = await joinLiveClass(sectionId, provider);
       setTitle(res.meetingName);
+      setRoomRole(res.role);
       if (res.status === "ready") {
         if (res.provider === "jitsi") {
           setRoomUrl(res.url);
@@ -84,12 +86,12 @@ function LiveLauncher() {
   }, [attempt, from, left, router, sectionId]);
 
   useEffect(() => {
-    if (state !== "room") return;
+    if (state !== "room" || roomRole !== "viewer") return;
     const ping = () => void touchLivePresence(sectionId, "jitsi").catch(() => undefined);
     ping();
     const heartbeat = window.setInterval(ping, HEARTBEAT_MS);
     return () => window.clearInterval(heartbeat);
-  }, [sectionId, state]);
+  }, [roomRole, sectionId, state]);
 
   if (state === "room" && roomUrl) {
     return (

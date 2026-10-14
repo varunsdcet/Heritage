@@ -1,12 +1,12 @@
 # Campus Coach functional specification
 
-Status: Phase 1 implementation baseline
+Status: implemented read-only/action-preview contract (updated 2026-10-14)
 
 Roles: student, instructor, admin, registrar, applicant, employer
 
 ## Purpose
 
-Campus Coach implements the shared Ask Heritage capability described by the campus OS map. Phase 1 provides useful, deterministic, grounded answers from live records. It does not represent catalogue text as model output and does not execute consequential actions.
+Campus Coach implements the shared Ask CampusOne capability described by the campus OS map. It provides grounded answers from authorized live records, persists account-scoped history, accepts supported text attachments, and keeps consequential actions behind an explicit preview/confirmation workflow.
 
 ## Invariants
 
@@ -18,7 +18,7 @@ Campus Coach implements the shared Ask Heritage capability described by the camp
 - Applicant and employer context is limited to their account-scoped portal records until dedicated domain models exist.
 - Admin and registrar context may contain institution aggregates, not secrets or raw credentials.
 - Questions containing likely government identifiers or credential secrets are rejected before storage.
-- Phase 1 answers are `read_only`. They may link to an existing workflow but cannot mutate another domain.
+- Direct answers are `read_only`. Suggested mutations are previews and cannot bypass the destination workflow's authorization, validation, approval, or audit rules.
 - Each successful request is idempotent and persists one interaction, audit event, and outbox event in one transaction.
 - History is visible only to the originating account within its institution.
 
@@ -86,7 +86,7 @@ When a question is outside the available context, the Coach states the limitatio
 - Maximum 20 successful interactions per account in a rolling minute.
 - Reject likely SIN, SSN, passport-number, password, access-token, or private-key content.
 - Do not write rejected prompt content to interaction, audit, or outbox storage.
-- Persist provider as `campus_grounding_v1` for Phase 1 so UI and audit screens do not imply an external model was used.
+- Persist the actual provider/model metadata selected by the service. Deterministic fallback responses must identify the fallback provider and must not imply that an external model ran.
 
 ## Instructor Teaching Operations Assistant
 

@@ -24,6 +24,11 @@ describe("program session timetable", () => {
     const field = ENTITIES.programs.fields.find((item) => item.key === "instructors");
     expect(field).toMatchObject({ label: "Faculty Members (Multiple Select)", kind: "people", dflt: [], section: "Program Chair & Lead Accesses" });
   });
+
+  it("offers multi-faculty assignment while creating or editing a section", () => {
+    const field = ENTITIES.sessions.fields.find((item) => item.key === "instructors");
+    expect(field).toMatchObject({ label: "Faculty Members (Multiple Select)", kind: "people", dflt: [], section: "Session Instruction & Accesses" });
+  });
 });
 
 describe("rate category default", () => {

@@ -30,6 +30,7 @@ type SubmissionsResponse = {
       status: string;
       submittedAt: string | null;
       textBody: string | null;
+      reviewHistory: Array<{ action?: string; reason?: string; extensionUntil?: string; penaltyPercent?: number; actedAt?: string }>;
       files: SubmissionFile[];
     };
     grade: null | { score: number | null; maxScore: number; status: string; feedback: string | null };
@@ -115,6 +116,33 @@ function InstructorSubmissionsInner() {
       await fetchSubmissionFile(`/instructor/submission-files/${encodeURIComponent(fileId)}`, mode);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not open the file");
+    }
+  }
+
+  async function submissionAction(submissionId: string, action: "return" | "unsubmit" | "grant_extension" | "apply_penalty") {
+    if (!session) return;
+    const reason = window.prompt(action === "return" ? "Reason for returning this submission" : "Reason for this change");
+    if (!reason?.trim()) return;
+    const body: Record<string, unknown> = { action, reason: reason.trim() };
+    if (action === "grant_extension") {
+      const until = window.prompt("Extension deadline (YYYY-MM-DD HH:mm)");
+      if (!until) return;
+      const date = new Date(until);
+      if (Number.isNaN(date.getTime())) return setError("Enter a valid extension date and time.");
+      body.extensionUntil = date.toISOString();
+    }
+    if (action === "apply_penalty") {
+      const penalty = Number(window.prompt("Penalty percentage (0–100)", "10"));
+      if (!Number.isFinite(penalty) || penalty < 0 || penalty > 100) return setError("Enter a penalty from 0 to 100.");
+      body.penaltyPercent = penalty;
+    }
+    setError(null);
+    try {
+      await api(`/instructor/submissions/${encodeURIComponent(submissionId)}/action`, { method: "POST", body: JSON.stringify(body) }, session.accessToken);
+      const qs = assignmentId ? `?assignmentId=${encodeURIComponent(assignmentId)}` : "";
+      setData(await api<SubmissionsResponse>(`/instructor/sections/${encodeURIComponent(sectionId)}/submissions${qs}`, {}, session.accessToken));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Submission action failed");
     }
   }
 
@@ -243,11 +271,25 @@ function InstructorSubmissionsInner() {
                           <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>{sub.textBody}</p>
                         </details>
                       ) : null}
+                      {sub?.reviewHistory?.length ? (
+                        <details>
+                          <summary>Review actions ({sub.reviewHistory.length})</summary>
+                          <ul>{sub.reviewHistory.map((item, index) => <li key={`${item.actedAt || "review"}-${index}`}>{String(item.action || "action").replaceAll("_", " ")}{item.penaltyPercent != null ? ` · ${item.penaltyPercent}%` : ""}{item.extensionUntil ? ` · until ${formatWhen(item.extensionUntil)}` : ""} · {item.reason || "No reason"}</li>)}</ul>
+                        </details>
+                      ) : null}
                       {row.grade?.feedback ? (
                         <details>
                           <summary>Your feedback</summary>
                           <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>{row.grade.feedback}</p>
                         </details>
+                      ) : null}
+                      {sub ? (
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary" onClick={() => void submissionAction(sub.id, "return")}>Return</button>
+                          <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary" onClick={() => void submissionAction(sub.id, "grant_extension")}>Grant extension</button>
+                          <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary" onClick={() => void submissionAction(sub.id, "apply_penalty")}>Apply penalty</button>
+                          <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary" onClick={() => void submissionAction(sub.id, "unsubmit")}>Unsubmit</button>
+                        </div>
                       ) : null}
                     </div>
                     <span

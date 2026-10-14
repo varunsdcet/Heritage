@@ -113,27 +113,45 @@ describe("assessment builder", () => {
     });
     expect(fn("assessment", "create")).not.toHaveBeenCalled();
     expect(out.result).toMatchObject({ sectionId: sectionB });
-    expect(out.result).not.toHaveProperty("assessmentId");
+    expect(out.result).toHaveProperty("assessmentId", null);
+  });
+
+  it("publishes timed quiz questions with the answer key", async () => {
+    const questions = [{ id: "q1", prompt: "Two plus two?", options: ["3", "4"], correct: 1 }];
+    const out = (await publish({ sectionId: sectionA, title: "Quiz 1", type: "Quiz", durationMinutes: 25, questions })) as {
+      result?: Record<string, unknown>;
+    };
+    expect(fn("assessment", "create")).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        sectionId: sectionA,
+        title: "Quiz 1",
+        durationMinutes: 25,
+        questionsJson: JSON.stringify(questions),
+      }),
+    });
+    expect(out.result?.assessmentId).toEqual(expect.any(String));
   });
 
   it("refuses a second assessment with the same title in the same section", async () => {
     fn("assignment", "findFirst").mockResolvedValue({ id: "existing" });
-    const out = (await publish({ sectionId: sectionB, title: "Midterm" })) as { message?: string };
+    await expect(publish({ sectionId: sectionB, title: "Midterm" })).rejects.toMatchObject({
+      status: 409,
+      code: "DUPLICATE",
+      message: expect.stringMatching(/already has an assessment named "Midterm"/),
+    });
     expect(fn("assignment", "findFirst")).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ sectionId: sectionB, title: { equals: "Midterm", mode: "insensitive" } }) }),
     );
     expect(fn("assignment", "create")).not.toHaveBeenCalled();
     expect(fn("rubric", "create")).not.toHaveBeenCalled();
-    expect(out.message ?? "").toMatch(/already has an assessment named "Midterm"/);
   });
 
   it("refuses a section the instructor does not teach", async () => {
-    const out = (await publish({ sectionId: "70000000-0000-4000-8000-0000000000ff", title: "X" })) as {
-      message?: string;
-      result?: { error?: boolean };
-    };
+    await expect(publish({ sectionId: "70000000-0000-4000-8000-0000000000ff", title: "X" })).rejects.toMatchObject({
+      status: 403,
+      message: expect.stringMatching(/do not teach this course section/i),
+    });
     expect(fn("assignment", "create")).not.toHaveBeenCalled();
-    expect(out.message ?? "").toMatch(/do not teach this course section|not found|access/i);
   });
 
   it("offers every taught section in the builder", async () => {

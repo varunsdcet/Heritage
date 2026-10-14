@@ -560,6 +560,7 @@ export function StudentCourseDetailPremiumView({ sectionId }: { sectionId: strin
   });
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [answers, setAnswers] = useState<Record<string, number>>({});
+  const [flaggedQuestions, setFlaggedQuestions] = useState<Record<string, boolean>>({});
   const [quizSubmitting, setQuizSubmitting] = useState(false);
   const [quizError, setQuizError] = useState("");
   const [choiceSelections, setChoiceSelections] = useState<Record<string, string[]>>({});
@@ -648,6 +649,17 @@ export function StudentCourseDetailPremiumView({ sectionId }: { sectionId: strin
   }
 
   function openActivity(aid: string, quizAttempt = false) {
+    const activity = allActivities.find((item) => item.id === aid);
+    if (activity && !quizAttempt && !["QUIZ", "ASSIGNMENT", "CHOICE"].includes(activity.type)) {
+      const session = loadSession();
+      if (session?.accessToken) {
+        void api(
+          `/student/courses/${sectionId}/content/${encodeURIComponent(`activity:${aid}`)}/complete`,
+          { method: "POST", body: "{}" },
+          session.accessToken,
+        ).then(() => courses.refresh()).catch(() => undefined);
+      }
+    }
     const params = new URLSearchParams(search.toString());
     params.delete("tab");
     params.set("aid", aid);
@@ -897,8 +909,13 @@ export function StudentCourseDetailPremiumView({ sectionId }: { sectionId: strin
                           {answers[q.id] != null ? "Answer saved" : "Not yet answered"}
                         </span>
                         <span>Marked out of {q.mark || "1.00"}</span>
-                        <button type="button" className="mh-student-quiz-flag">
-                          Flag question
+                        <button
+                          type="button"
+                          className="mh-student-quiz-flag"
+                          aria-pressed={Boolean(flaggedQuestions[q.id])}
+                          onClick={() => setFlaggedQuestions((current) => ({ ...current, [q.id]: !current[q.id] }))}
+                        >
+                          {flaggedQuestions[q.id] ? "Unflag question" : "Flag question"}
                         </button>
                       </aside>
                       <div className="mh-student-quiz-q__prompt">

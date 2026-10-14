@@ -709,7 +709,7 @@ export async function composeFromDomain(user: SessionClaims, path: string): Prom
         ? ledgerRows.map((r) => ({
             primary: `${r.student.person.givenName} ${r.student.person.familyName}`,
             secondary: r.label,
-            amount: r.amountCad,
+            amount: Number(r.amountCad),
             status: r.status,
           }))
         : tuitionFor(campus);
@@ -1796,9 +1796,10 @@ export async function getCampusOverview(institutionId: string): Promise<CampusOv
   let feesOpenCad = 0;
   let feesPastDueCad = 0;
   for (const row of ledger) {
+    const amount = Number(row.amountCad);
     const signed =
-      row.kind === "payment" || row.kind === "credit" ? -Math.abs(row.amountCad) : Math.abs(row.amountCad);
-    feesPostedCad += Math.abs(row.amountCad);
+      row.kind === "payment" || row.kind === "credit" ? -Math.abs(amount) : Math.abs(amount);
+    feesPostedCad += Math.abs(amount);
     if (row.status === "open" || row.status === "posted") {
       feesOpenCad += signed;
       if (row.dueAt && row.dueAt.getTime() < now && signed > 0) {

@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { prisma } from "@myheritage/db";
 
 export async function notifyAccount(input: {
@@ -9,17 +9,34 @@ export async function notifyAccount(input: {
   templateKey: string;
 }) {
   if (!input.accountId) return;
-  await prisma.notification.create({
-    data: {
-      id: randomUUID(),
+  const dedupeKey = createHash("sha256").update(`${input.templateKey}\0${input.title}\0${input.body}`).digest("hex");
+  const duplicate = await prisma.notification.findFirst({
+    where: {
       institutionId: input.institutionId,
       recipientAccountId: input.accountId,
-      channel: "in_app",
+      templateKey: input.templateKey,
       title: input.title,
       body: input.body,
-      templateKey: input.templateKey,
     },
+    select: { id: true },
   });
+  if (duplicate) return;
+  try {
+    await prisma.notification.create({
+      data: {
+        id: randomUUID(),
+        institutionId: input.institutionId,
+        recipientAccountId: input.accountId,
+        channel: "in_app",
+        title: input.title,
+        body: input.body,
+        templateKey: input.templateKey,
+        dedupeKey,
+      },
+    });
+  } catch (error) {
+    if ((error as { code?: string }).code !== "P2002") throw error;
+  }
 }
 
 export async function notifyAccounts(input: {

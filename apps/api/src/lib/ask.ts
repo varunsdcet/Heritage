@@ -1,4 +1,3 @@
-const DEFAULT_ASK_URL = "https://onlinemandiapp.com/Humanitix/api/ask";
 const ASK_TIMEOUT_MS = 8_000;
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = ASK_TIMEOUT_MS) {
@@ -51,12 +50,13 @@ async function callDeepSeek(
 }
 
 function askConfigured() {
-  const url = process.env.HUMANITIX_ASK_URL || DEFAULT_ASK_URL;
+  const url = process.env.HUMANITIX_ASK_URL;
   return Boolean(url && url !== "off");
 }
 
 async function callHumanitixAsk(systemPrompt: string, question: string, timeoutMs = ASK_TIMEOUT_MS): Promise<AskResult> {
-  const url = process.env.HUMANITIX_ASK_URL || DEFAULT_ASK_URL;
+  const url = process.env.HUMANITIX_ASK_URL;
+  if (!url) throw new Error("HUMANITIX_ASK_URL missing");
   const response = await fetchWithTimeout(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },

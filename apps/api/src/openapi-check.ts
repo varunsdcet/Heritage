@@ -1,4 +1,6 @@
-import { REGISTERED_ROUTES, openApiDocument } from "./openapi.js";
+process.env.NODE_ENV = "test";
+await import("./main.js");
+const { openApiDocument } = await import("./openapi.js");
 
 const runtimeRoutes = [
   "/auth/login",
@@ -36,9 +38,15 @@ const runtimeRoutes = [
   "/auth/reset-password",
 ];
 
-const missing = runtimeRoutes.filter((r) => !REGISTERED_ROUTES.includes(r));
+const registeredRoutes = Object.keys(openApiDocument.paths);
+const missing = runtimeRoutes.filter((r) => !registeredRoutes.includes(r));
 if (missing.length) {
   console.error("OpenAPI missing routes:", missing);
   process.exit(1);
 }
-console.log("OpenAPI check OK:", Object.keys(openApiDocument.paths).length, "paths");
+const operations = Object.values(openApiDocument.paths).reduce((sum, path) => sum + Object.keys(path).length, 0);
+if (registeredRoutes.length < 300 || operations < 500) {
+  console.error(`OpenAPI inventory unexpectedly small: ${registeredRoutes.length} paths / ${operations} operations`);
+  process.exit(1);
+}
+console.log("OpenAPI check OK:", registeredRoutes.length, "paths /", operations, "operations");

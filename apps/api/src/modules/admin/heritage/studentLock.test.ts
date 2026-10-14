@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { withStudentMoneyLock } from "./studentLock.js";
+import { STUDENT_MONEY_LOCK_SQL, withStudentMoneyLock } from "./studentLock.js";
 
 const institutionId = "00000000-0000-4000-8000-000000000004";
 
@@ -16,6 +16,10 @@ function deferred<T = void>() {
 const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 describe("withStudentMoneyLock", () => {
+  it("casts both database lock keys to PostgreSQL integer", () => {
+    expect(STUDENT_MONEY_LOCK_SQL).toBe("SELECT pg_advisory_xact_lock($1::integer, $2::integer)");
+  });
+
   it("runs calls for the same student one after another", async () => {
     const events: string[] = [];
     const gate = deferred();

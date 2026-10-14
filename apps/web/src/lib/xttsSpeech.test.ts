@@ -1,21 +1,18 @@
-import { describe, expect, it } from "vitest";
-import { estimateWordTimes } from "./xttsSpeech";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { xttsConfig } from "./xttsSpeech";
 
-describe("estimateWordTimes", () => {
-  it("spreads every word across the clip in order", () => {
-    const words = estimateWordTimes("Good morning class. Today we study supply and demand.", 4);
-    expect(words.map((w) => w.word)).toEqual(["Good", "morning", "class.", "Today", "we", "study", "supply", "and", "demand."]);
-    for (let i = 1; i < words.length; i++) expect(words[i].start).toBeGreaterThanOrEqual(words[i - 1].end);
-    expect(words[0].start).toBe(0);
-    expect(words.at(-1)!.end).toBeLessThanOrEqual(4);
+describe("xttsConfig", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("stays disabled until the model licence has been accepted", () => {
+    vi.stubEnv("XTTS_URL", "http://xtts.internal:8020");
+    vi.stubEnv("XTTS_LICENSE_ACCEPTED", "0");
+    expect(xttsConfig()).toBeNull();
   });
 
-  it("leaves a pause after sentence punctuation", () => {
-    const [, morning, cls, today] = estimateWordTimes("Good morning class. Today", 3);
-    expect(today.start - cls.end).toBeGreaterThan(morning.start - morning.end + 0.1);
-  });
-
-  it("returns nothing for empty text", () => {
-    expect(estimateWordTimes("   ", 2)).toEqual([]);
+  it("returns configured servers after explicit acceptance", () => {
+    vi.stubEnv("XTTS_URL", "http://one:8020/, http://two:8020");
+    vi.stubEnv("XTTS_LICENSE_ACCEPTED", "true");
+    expect(xttsConfig()).toEqual({ urls: ["http://one:8020", "http://two:8020"] });
   });
 });

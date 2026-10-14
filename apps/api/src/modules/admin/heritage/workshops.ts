@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
+import { writeAuditAndOutbox } from "@myheritage/events";
 import {
   ALL_ACCESSES,
   ALL_CAMPUSES,
@@ -86,10 +88,12 @@ const statusLabel = (st: EnrolmentStatus) => (st.charAt(0).toUpperCase() + st.sl
 const money = (n: number) => `$${n.toFixed(2)}`;
 
 /**
- * Instructor portal access: an instructor works with the workshops they teach, plus workshops that have
- * no instructor assigned yet. Admin callers pass no scope and are checked against Course Management instead.
+ * Instructor portal access is limited to workshops explicitly assigned to the instructor.
+ * Admin callers pass no scope and are checked against Course Management instead.
  */
 export type WorkshopScope = { accountId: string; workshopIds: Set<string> };
+
+export const workshopAssignedTo = (instructorIds: readonly string[], accountId: string) => instructorIds.includes(accountId);
 
 async function gate(user: SessionClaims, level: "view" | "edit", scope?: WorkshopScope) {
   if (!scope) await assertPermission(user, "courseManagement", level);
@@ -106,7 +110,7 @@ export async function instructorWorkshopScope(user: SessionClaims): Promise<Work
   const ids = ws
     .filter((w) => {
       const instructors = workshopSettings(w, tz).instructors;
-      return !instructors.length || instructors.includes(user.accountId);
+      return workshopAssignedTo(instructors, user.accountId);
     })
     .map((w) => w.id);
   return { accountId: user.accountId, workshopIds: new Set(ids) };
@@ -902,7 +906,7 @@ export async function createEnrolment(
   assertInScope(scope, workshopId);
   const [student, workshop, { tz, today }] = await Promise.all([
     prisma.student.findFirst({ where: { id: studentId, institutionId: inst }, include: studentInclude }),
-    prisma.workshop.findFirst({ where: { id: workshopId, institutionId: inst }, include: { registrations: true } }),
+    prisma.workshop.findFirst({ where: { id: workshopId, institutionId: inst } }),
     clock(inst),
   ]);
   if (!student) throw httpError(400, "The selected user is not a student of this institution");
@@ -911,12 +915,6 @@ export async function createEnrolment(
   const phase = workshopPhase(workshop, st, today);
   if (phase === "inactive") throw httpError(409, `${workshop.title} is inactive and not accepting enrolments`, "CONFLICT");
   if (phase === "completed") throw httpError(409, `${workshop.title} has already been completed`, "CONFLICT");
-  const existing = workshop.registrations.find((r) => r.studentId === student.id);
-  if (existing && ["pending", "approved", "registered", "completed"].includes(existing.status)) {
-    throw httpError(409, `${student.person.givenName} ${student.person.familyName} is already enrolled in ${workshop.title} (${statusLabel(statusOf(existing.status))})`, "CONFLICT");
-  }
-  const seated = workshop.registrations.filter((r) => SEAT_STATUSES.includes(r.status) && r.id !== existing?.id).length;
-  if (seated >= workshop.capacity) throw httpError(409, `${workshop.title} is full (${workshop.capacity} of ${workshop.capacity} seats taken)`, "CONFLICT");
   let roleId: string | null = null;
   if (st.rolesMode === "Enabled") {
     roleId = s(body.roleId);
@@ -928,18 +926,66 @@ export async function createEnrolment(
   const fee = feeFor(st, await residencyOf(inst, student.id));
   const postFee = st.feeCollection === "Immediately" || (st.feeCollection === "Upon Approval" && status === "approved");
   const reg = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`workshop-seats:${workshop.id}`}))`;
+    const existing = await tx.workshopRegistration.findFirst({
+      where: { institutionId: inst, workshopId: workshop.id, studentId: student.id },
+    });
+    if (existing && ["pending", "approved", "registered", "completed"].includes(existing.status)) {
+      throw httpError(409, `${student.person.givenName} ${student.person.familyName} is already enrolled in ${workshop.title} (${statusLabel(statusOf(existing.status))})`, "CONFLICT");
+    }
+    const seated = await tx.workshopRegistration.count({
+      where: { workshopId: workshop.id, status: { in: [...SEAT_STATUSES] }, ...(existing ? { id: { not: existing.id } } : {}) },
+    });
+    if (seated >= workshop.capacity) throw httpError(409, `${workshop.title} is full (${workshop.capacity} of ${workshop.capacity} seats taken)`, "CONFLICT");
     const saved = existing
       ? await tx.workshopRegistration.update({ where: { id: existing.id }, data: { status, note, roleId, rowVersion: { increment: 1 } } })
       : await tx.workshopRegistration.create({ data: { institutionId: inst, workshopId: workshop.id, studentId: student.id, status, note, roleId } });
     if (postFee) await postWorkshopFee(tx, { institutionId: inst, registrationId: saved.id, studentId: student.id, workshop, amount: fee });
+    await writeAuditAndOutbox(tx, {
+      institutionId: inst,
+      actorId: user.accountId,
+      eventName: "WorkshopEnrolment.created",
+      purpose: "workshop_enrolment",
+      before: existing ? { status: existing.status } : null,
+      after: { registrationId: saved.id, workshopId: workshop.id, studentId: student.id, status, roleId, fee: postFee ? fee : 0 },
+      source: "workshops.enrolment.create",
+      correlationId: randomUUID(),
+    });
     return saved;
   });
-  await audit(user, "W04", `workshop:${workshop.id}`, "enrolment.created", { recordId: reg.id, after: { studentId: student.id, status, roleId, fee: postFee ? fee : 0 } });
   const who = `${student.person.familyName}, ${student.person.givenName}`;
   return {
     id: reg.id,
     status: statusLabel(status),
     message: `${who} enrolled in ${workshop.title} — ${status === "approved" ? "approved automatically" : "pending approval"}${postFee && fee > 0 ? `; workshop fee ${money(fee)} posted` : ""}`,
+  };
+}
+
+export async function createEnrolments(
+  user: SessionClaims,
+  body: { studentIds?: string[]; workshopId?: string; roleId?: string; note?: string },
+  scope?: WorkshopScope,
+) {
+  await gate(user, "edit", scope);
+  const studentIds = [...new Set((body.studentIds ?? []).map(s).filter(Boolean))];
+  if (!studentIds.length) throw httpError(400, "Select at least one student from the search results");
+  if (studentIds.length > 50) throw httpError(400, "You can enrol up to 50 students at a time");
+
+  const enrolled: Array<{ studentId: string; id: string; status: string; message: string }> = [];
+  const failed: Array<{ studentId: string; message: string }> = [];
+  for (const studentId of studentIds) {
+    try {
+      const result = await createEnrolment(user, { ...body, studentId }, scope);
+      enrolled.push({ studentId, ...result });
+    } catch (error) {
+      failed.push({ studentId, message: error instanceof Error ? error.message : "Could not enrol this student" });
+    }
+  }
+  return {
+    enrolled,
+    failed,
+    message: `${enrolled.length} student${enrolled.length === 1 ? "" : "s"} enrolled${failed.length ? `; ${failed.length} failed` : ""}`,
+    status: enrolled[0]?.status ?? "Pending",
   };
 }
 
@@ -960,17 +1006,19 @@ export async function setEnrolmentStatus(user: SessionClaims, id: string, next: 
   if (!TRANSITIONS[current].includes(target)) throw httpError(409, `A ${statusLabel(current).toLowerCase()} enrolment cannot be changed to ${statusLabel(target).toLowerCase()}`, "CONFLICT");
   const tz = await institutionTimezone(inst);
   const st = workshopSettings(r.workshop, tz);
-  if (target === "approved" || target === "pending") {
-    const seated = await prisma.workshopRegistration.count({ where: { workshopId: r.workshopId, status: { in: SEAT_STATUSES }, id: { not: r.id } } });
-    if (seated >= r.workshop.capacity) throw httpError(409, `${r.workshop.title} is full (${r.workshop.capacity} seats)`, "CONFLICT");
-  }
   const fee = feeFor(st, await residencyOf(inst, r.studentId));
   let feeMsg = "";
   await prisma.$transaction(async (tx) => {
-    await tx.workshopRegistration.update({
-      where: { id: r.id },
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`workshop-seats:${r.workshopId}`}))`;
+    if (target === "approved" || target === "pending") {
+      const seated = await tx.workshopRegistration.count({ where: { workshopId: r.workshopId, status: { in: [...SEAT_STATUSES] }, id: { not: r.id } } });
+      if (seated >= r.workshop.capacity) throw httpError(409, `${r.workshop.title} is full (${r.workshop.capacity} seats)`, "CONFLICT");
+    }
+    const changed = await tx.workshopRegistration.updateMany({
+      where: { id: r.id, institutionId: inst, status: r.status, rowVersion: r.rowVersion },
       data: { status: target, ...(note && s(note) ? { note: s(note).slice(0, 2000) } : {}), rowVersion: { increment: 1 } },
     });
+    if (changed.count !== 1) throw httpError(409, "This enrolment changed; reload and try again", "CONFLICT");
     if (target === "approved" && st.feeCollection === "Upon Approval") {
       const posted = await postWorkshopFee(tx, { institutionId: inst, registrationId: r.id, studentId: r.studentId, workshop: r.workshop, amount: fee });
       if (posted && fee > 0) feeMsg = `; workshop fee ${money(fee)} posted`;
@@ -982,8 +1030,17 @@ export async function setEnrolmentStatus(user: SessionClaims, id: string, next: 
       const waived = await waiveWorkshopFee(tx, inst, r.id, `Waived — enrolment ${target}`);
       if (waived) feeMsg = "; unpaid workshop fee waived";
     }
+    await writeAuditAndOutbox(tx, {
+      institutionId: inst,
+      actorId: user.accountId,
+      eventName: `WorkshopEnrolment.${target}`,
+      purpose: "workshop_enrolment",
+      before: { registrationId: r.id, status: current },
+      after: { registrationId: r.id, workshopId: r.workshopId, status: target, note: s(note) || null },
+      source: "workshops.enrolment.status",
+      correlationId: randomUUID(),
+    });
   });
-  await audit(user, "W01", `workshop:${r.workshopId}`, `enrolment.${target}`, { recordId: r.id, before: { status: current }, after: { status: target }, note: s(note) || null });
   return { status: statusLabel(target), message: `${r.student.person.familyName}, ${r.student.person.givenName} — ${r.workshop.title}: ${statusLabel(target).toLowerCase()}${feeMsg}` };
 }
 
@@ -996,8 +1053,17 @@ export async function deleteEnrolment(user: SessionClaims, id: string) {
   await prisma.$transaction(async (tx) => {
     await waiveWorkshopFee(tx, inst, r.id, "Waived — enrolment deleted");
     await tx.workshopRegistration.delete({ where: { id: r.id } });
+    await writeAuditAndOutbox(tx, {
+      institutionId: inst,
+      actorId: user.accountId,
+      eventName: "WorkshopEnrolment.deleted",
+      purpose: "workshop_enrolment",
+      before: { registrationId: r.id, workshopId: r.workshopId, studentId: r.studentId, status: r.status },
+      after: null,
+      source: "workshops.enrolment.delete",
+      correlationId: randomUUID(),
+    });
   });
-  await audit(user, "W01", `workshop:${r.workshopId}`, "enrolment.deleted", { recordId: r.id, before: { studentId: r.studentId, status: r.status } });
   return { message: `Enrolment for ${r.student.person.familyName}, ${r.student.person.givenName} in ${r.workshop.title} deleted` };
 }
 

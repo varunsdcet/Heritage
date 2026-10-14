@@ -37,10 +37,10 @@ function SuccessInner() {
     void fetch("/api/selfpaced/checkout/verify", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sessionId, slug, demo, free, accountId: session?.accountId }),
+      body: JSON.stringify({ sessionId, slug, demo, free }),
     })
       .then(async (response) => {
-        const result = (await response.json()) as { verified?: boolean; error?: string; proof?: string; timestamp?: number };
+        const result = (await response.json()) as { verified?: boolean; error?: string };
         if (!response.ok || !result.verified) throw new Error(result.error || "Payment verification failed.");
         if (cancelled) return;
         if (free) {
@@ -48,8 +48,8 @@ function SuccessInner() {
           if (!token) throw new Error("Sign in with your student account before activating free access.");
           await api("/selfpaced/enrolments/free", { method: "POST", body: JSON.stringify({ slug }) }, token, { skipAuthRedirect: true });
         } else if (!demo) {
-          if (!session?.accessToken || !sessionId || !result.proof || !result.timestamp) throw new Error("Secure payment confirmation is incomplete.");
-          await api("/selfpaced/enrolments/paid", { method: "POST", body: JSON.stringify({ slug, sessionId, accountId: session.accountId, timestamp: result.timestamp, proof: result.proof }) }, session.accessToken, { skipAuthRedirect: true });
+          if (!session?.accessToken || !sessionId) throw new Error("Sign in before confirming paid enrolment.");
+          await api("/selfpaced/enrolments/paid", { method: "POST", body: JSON.stringify({ slug, sessionId }) }, session.accessToken, { skipAuthRedirect: true });
         }
         enrollProgram(slug);
         setVerified(true);

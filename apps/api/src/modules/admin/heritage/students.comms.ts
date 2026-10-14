@@ -3,6 +3,7 @@
 import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
 import { mailConfigured, sendMailViaHumanitix } from "../../../lib/mailer.js";
+import { buildDocumentPdf, type DocLine } from "../../../lib/taxPdf.js";
 import { entityRecords, sanitizeHtml } from "./sysconfig.js";
 import { page } from "./finance.core.js";
 import {
@@ -46,6 +47,56 @@ import {
 
 const MISC_ID = "misc";
 const plain = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+
+export async function generateStudentDocument(user: SessionClaims, studentId: string, body: Data) {
+  await canStudents(user, "view");
+  const templateId = required(body.templateId, "Document Template");
+  const student = await requireStudentRow(user.institutionId, studentId);
+  const template = (await entityRecords(user.institutionId, "documentTemplates")).find((row) => row.id === templateId);
+  if (!template) throw httpError(404, "Document template not found");
+
+  const today = new Date().toISOString().slice(0, 10);
+  const templateName = s(template.data.name) || "Document";
+  const suppliedInputs = body.inputs && typeof body.inputs === "object" && !Array.isArray(body.inputs) ? body.inputs as Data : {};
+  const requiredInputs = [...s(template.data.content).matchAll(/\{input:([A-Za-z0-9_-]+)\}/g)].map((match) => match[1]!).filter((value, index, all) => all.indexOf(value) === index);
+  const missingInputs = requiredInputs.filter((key) => !s(suppliedInputs[key]).trim());
+  if (missingInputs.length) throw httpError(400, `Complete the required document inputs: ${missingInputs.join(", ")}`);
+  const tokens: Record<string, string> = {
+    "{template}": templateName,
+    "{student_number}": student.studentNumber,
+    "{last_name}": student.person.familyName,
+    "{first_name}": student.person.givenName,
+    "{student.student_number}": student.studentNumber,
+    "{student.last_name}": student.person.familyName,
+    "{student.first_name}": student.person.givenName,
+    "{student.program}": student.programName,
+    "{student.address}": "",
+    "{date}": today,
+    ...Object.fromEntries(requiredInputs.map((key) => [`{input:${key}}`, s(suppliedInputs[key]).trim().slice(0, 500)])),
+  };
+  const merge = (value: string) => Object.entries(tokens).reduce((out, [token, replacement]) => out.replaceAll(token, replacement), value);
+  const content = merge(s(template.data.content))
+    .replace(/<\s*br\s*\/?\s*>/gi, "\n")
+    .replace(/<\s*\/\s*(p|div|li|h[1-6])\s*>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .split(/\n+/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const lines: DocLine[] = [
+    { kind: "title", text: templateName },
+    { kind: "text", text: `${student.person.givenName} ${student.person.familyName} · ${student.studentNumber}`, bold: true },
+    { kind: "rule" },
+    ...(content.length ? content.map((text): DocLine => ({ kind: "text", text })) : [{ kind: "text" as const, text: "No template content configured." }]),
+  ];
+  const requestedName = s(template.data.naming) === "Custom Naming" ? merge(s(template.data.namingPattern)) : `${templateName}-${student.studentNumber}-${today}`;
+  const filename = `${requestedName.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "student-document"}.pdf`;
+  await stuAudit(user, "Workflows/Requirements", studentId, "Student document generated", { templateId, templateName, filename });
+  return { pdf: buildDocumentPdf(lines, `Generated ${today}`), filename };
+}
 
 async function accountNames(ids: string[]) {
   const uniq = [...new Set(ids.filter(Boolean))];

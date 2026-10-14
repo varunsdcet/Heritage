@@ -295,6 +295,31 @@ export const CONFIG: Record<string, ConfigDef> = {
     },
     form: { createTitle: "Add Collection Agency", editTitle: named("Edit Collection Agency"), saveLabel: "Save Collection Agency" },
   },
+  agents: {
+    entity: "agents",
+    title: "Manage Agents",
+    dir: {
+      noun: "agent",
+      createLabel: "Add Agent",
+      empty: "No agents have been added yet. Add an agent before creating commissions or bonuses.",
+      filter: { placeholder: "Search agent number, name, company or email", keys: ["agentNumber", "firstName", "lastName", "company", "email"] },
+      confirmLabel: "Delete Agent",
+      columns: [
+        {
+          label: "Agent",
+          render: (r) => (
+            <>
+              <strong>{`${str(r.lastName)}, ${str(r.firstName)}`.replace(/^, |, $/, "") || str(r.agentNumber)}</strong>
+              {sub([str(r.agentNumber), str(r.company), str(r.email)].filter(Boolean).join(" · "))}
+            </>
+          ),
+        },
+        { label: "Commission", render: (r) => (r.commissionType === "Fixed" ? `$${Number(r.commissionRate || 0).toFixed(2)}` : `${str(r.commissionRate) || "0"}%`) },
+        { label: "Status", render: (r) => statusBadge(r.status || "Active") },
+      ],
+    },
+    form: { createTitle: "Add Agent", editTitle: () => "Edit Agent", saveLabel: "Save Agent" },
+  },
 };
 
 /* ------------------------------------------------------------------ */

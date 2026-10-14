@@ -1325,6 +1325,7 @@ export function InvoiceEditor({ meta, onClose, onDone, invoiceId, studentId, stu
   const [unpaid, setUnpaid] = useState<Unpaid | null>(null);
   const [checked, setChecked] = useState<string[]>([]);
   const [adding, setAdding] = useState(false);
+  const [addingStudentFee, setAddingStudentFee] = useState(false);
   const [generate, setGenerate] = useState(false);
   const [send, setSend] = useState("Do not send");
   const [note, setNote] = useState("");
@@ -1521,7 +1522,11 @@ export function InvoiceEditor({ meta, onClose, onDone, invoiceId, studentId, stu
               <button type="button" className="mh-sa__btn mh-sa__btn--sm" onClick={() => setAdding(true)}>
                 Add Item
               </button>
-              {type === "Student" && sid ? <a className="mh-sa__btn mh-sa__btn--sm" href={`${FIN}/student?ctx=student:${encodeURIComponent(sid)}&tab=overview`}>Add Fee to Student</a> : null}
+              {type === "Student" && sid ? (
+                <button type="button" className="mh-sa__btn mh-sa__btn--sm" onClick={() => setAddingStudentFee(true)}>
+                  Add Fee to Student
+                </button>
+              ) : null}
               <dl className="fn-totals">
                 <dt>Subtotal</dt>
                 <dd>{money(subtotal)}</dd>
@@ -1560,6 +1565,25 @@ export function InvoiceEditor({ meta, onClose, onDone, invoiceId, studentId, stu
         )}
       </ActionModal>
       {adding ? <AddItemModal meta={meta} studentId={type === "Student" ? sid : ""} credits={unpaid?.credits ?? []} onClose={() => setAdding(false)} onAdd={(list) => (setItems((x) => [...x, ...list]), setAdding(false))} /> : null}
+      {addingStudentFee && sid ? (
+        <AddFeeModal
+          meta={meta}
+          studentId={sid}
+          onClose={() => setAddingStudentFee(false)}
+          onDone={() => {
+            setAddingStudentFee(false);
+            if (termId) {
+              fin<Unpaid>(`/student/${sid}/unpaid-fees?term=${encodeURIComponent(termId)}`)
+                .then((next) => {
+                  setUnpaid(next);
+                  setChecked([]);
+                  setStage("pick");
+                })
+                .catch(() => undefined);
+            }
+          }}
+        />
+      ) : null}
     </>
   );
 }

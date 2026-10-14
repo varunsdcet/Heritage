@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@myheritage/db", () => ({ prisma: {} }));
 
-import { courseStanding } from "./degree-progress.service.js";
+import { courseStanding, projectedTermFromCalendar } from "./degree-progress.service.js";
 
 const row = (over: Partial<Parameters<typeof courseStanding>[0][number]>) => ({
   courseCode: "HCA101",
@@ -13,6 +13,23 @@ const row = (over: Partial<Parameters<typeof courseStanding>[0][number]>) => ({
   gradePoints: null as number | null,
   countsTowardCgpa: true,
   ...over,
+});
+
+describe("projectedTermFromCalendar", () => {
+  const terms = [
+    { name: "Autumn 2028", startsOn: "2028-09-01", endsOn: "2028-12-20" },
+    { name: "Spring 2028", startsOn: "2028-01-08", endsOn: "2028-04-25" },
+    { name: "Summer 2028", startsOn: "2028-05-01", endsOn: "2028-08-20" },
+  ];
+
+  it("uses the institution calendar rather than fixed term names", () => {
+    expect(projectedTermFromCalendar(terms, 2, "2028-01-01")).toBe("Summer 2028");
+    expect(projectedTermFromCalendar(terms, 3, "2028-01-01")).toBe("Autumn 2028");
+  });
+
+  it("returns null when the calendar does not reach the projection", () => {
+    expect(projectedTermFromCalendar(terms, 4, "2028-01-01")).toBeNull();
+  });
 });
 
 describe("courseStanding", () => {

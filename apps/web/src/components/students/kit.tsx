@@ -55,7 +55,7 @@ export type StudentsMeta = {
   agents: Named[];
   flagTemplates: Array<Named & { message: string }>;
   correspondence: { categories: Named[]; types: Array<Named & { categories: string[] }> };
-  documentTemplates: Array<Named & { documentType: string }>;
+  documentTemplates: Array<Named & { documentType: string; inputs: string[] }>;
   capturedDocumentGroups: string[];
   notificationTemplates: Array<Named & { subject: string; body: string }>;
   documentTypes: Named[];

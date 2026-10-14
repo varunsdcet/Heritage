@@ -94,8 +94,10 @@ describe("course category actions", () => {
   });
 
   it.each(["Delete Category", "Edit category", "Remove Category"])("does not create a category for %s", async (action) => {
-    const out = await run(action, { "Category Name": "Accounting" });
-    expect(out.message ?? "").not.toMatch(/Category created/);
+    await expect(run(action, { "Category Name": "Accounting" })).rejects.toMatchObject({
+      status: 422,
+      code: "ACTION_NOT_SUPPORTED",
+    });
     expect(appendedCategoryNames()).not.toContain("Accounting");
   });
 });

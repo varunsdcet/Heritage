@@ -1,9 +1,13 @@
 import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
 import { writeAuditAndOutbox } from "@myheritage/events";
+import { decideApproval } from "@myheritage/auth";
 import { STUDENT_PROGRAMS, STUDENT_STATUSES, assertPermission, patchStudentMeta, studentMetaMap } from "../superAdmin.service.js";
 import { applyStudentProfileChange } from "../registrar-gaps.service.js";
 import { audit } from "./service.js";
+import { S, loadBook, loadConfig, nextNumber, r2 } from "./finance.core.js";
+import { withStudentMoneyLock } from "./studentLock.js";
+import { promoteWaitlisted } from "./enrolment.js";
 
 /* ------------------------------------------------------------------ */
 /* Vocabulary captured from the User Requests screens                   */
@@ -488,6 +492,9 @@ export async function updateRequest(user: SessionClaims, number: number, body: E
   await assertPermission(user, "userRequests", "edit");
   const { item } = await findByNumber(user, number);
   requirePending(item);
+  if (item.approvalId) {
+    throw httpError(409, "The proposed change is locked after submission. Decline this request and ask the requester to submit a corrected proposal.", "CONFLICT");
+  }
   const inst = user.institutionId;
 
   if (item.kind === "profile") {
@@ -570,6 +577,25 @@ async function closeApproval(tx: Tx, user: SessionClaims, approvalId: string | n
     throw httpError(403, "You cannot approve your own request; another approver must decide it", "FORBIDDEN");
   }
   const decisions = parse<Array<{ actorId?: string }>>(row.decisionsJson, []);
+  if (row.status === "approved" && decision === "approve") {
+    const claimed = await tx.approvalRequest.updateMany({
+      where: { id: row.id, rowVersion: row.rowVersion, status: "approved" },
+      data: { status: "applied", rowVersion: { increment: 1 } },
+    });
+    if (claimed.count !== 1) throw httpError(409, "This request was decided by someone else. Reload and try again.", "CONFLICT");
+    await writeAuditAndOutbox(tx, {
+      institutionId: user.institutionId,
+      actorId: user.accountId,
+      eventName: "ApprovalRequest.applied",
+      purpose: "approval",
+      before: { status: row.status },
+      after: { status: "applied", decision },
+      source: "user-requests",
+      correlationId: row.id,
+      outboxPayload: { approvalId: row.id, type: row.type, subjectRef: row.subjectRef, decision, status: "applied" },
+    });
+    return;
+  }
   if (row.status === "pending" && decisions.some((d) => d.actorId === user.accountId)) {
     throw httpError(409, "You have already decided this request", "CONFLICT");
   }
@@ -614,6 +640,35 @@ function validSettings(input: Partial<LoaSettings> | undefined): LoaSettings {
   };
 }
 
+async function courseWithdrawalPlan(user: SessionClaims, studentId: string, approvalId: string | null) {
+  if (!approvalId) throw httpError(409, "This withdrawal has no approval record", "CONFLICT");
+  const approval = await prisma.approvalRequest.findFirst({ where: { id: approvalId, institutionId: user.institutionId } });
+  if (!approval) throw httpError(404, "Withdrawal approval record not found", "NOT_FOUND");
+  const sectionId = str(parse<Record<string, unknown>>(approval.proposedDiffJson, {}).sectionId);
+  if (!sectionId) {
+    throw httpError(409, "This older withdrawal request does not identify a course section. Ask the student to submit it again.", "CONFLICT");
+  }
+  const enrolment = await prisma.enrolment.findFirst({
+    where: { institutionId: user.institutionId, studentId, sectionId, status: "enrolled" },
+    include: { section: { include: { course: true } } },
+  });
+  if (!enrolment) throw httpError(409, "The selected course section is no longer an active enrolment", "CONFLICT");
+
+  const cfg = await loadConfig(user.institutionId);
+  const book = await loadBook(user.institutionId, cfg, studentId);
+  const linked = await prisma.financeLedgerEntry.findMany({
+    where: { institutionId: user.institutionId, studentId, sectionId, kind: "charge" },
+    select: { id: true },
+  });
+  const linkedIds = new Set(linked.map((entry) => entry.id));
+  const charges = book.charges.filter((charge) => linkedIds.has(charge.id) && !charge.hidden && charge.owing > 0.005);
+  const adjustments = [] as Array<{ number: number; chargeId: string; amount: number }>;
+  for (const charge of charges) {
+    adjustments.push({ number: await nextNumber(user.institutionId, "adjustment"), chargeId: charge.id, amount: r2(charge.owing) });
+  }
+  return { approval, enrolment, adjustments, courseLabel: `${enrolment.section.course.code} ${enrolment.section.code}` };
+}
+
 export async function decideRequest(user: SessionClaims, number: number, decision: "approve" | "decline", body: DecisionBody) {
   await assertPermission(user, "userRequests", "edit");
   const { item } = await findByNumber(user, number);
@@ -625,11 +680,34 @@ export async function decideRequest(user: SessionClaims, number: number, decisio
   const patch: Partial<Meta> = { comments, decidedAt: new Date().toISOString(), decidedBy: await actorName(user) };
   let message = `User request #${number} ${verb}`;
 
+  // User Requests and the central approvals inbox share one decision engine. This
+  // enforces approver roles, self-approval protection, distinct voters and quorum
+  // before any requested change is applied to the student record.
+  if (item.approvalId) {
+    const approval = await decideApproval({
+      approvalId: item.approvalId,
+      institutionId: inst,
+      actorId: user.accountId,
+      actorRoles: user.roles,
+      decision: approve ? "approve" : "reject",
+      comment: comments || undefined,
+    });
+    if (approve && approval.status === "pending") {
+      await audit(user, item.kind === "loa" ? "R02" : item.kind === "profile" ? "R04" : "R01", item.ref, "request.approval_recorded", {
+        recordId: item.sourceId,
+        after: { approvalId: approval.id, status: approval.status },
+        note: comments || null,
+      });
+      return { message: `Approval recorded for user request #${number}; additional approval is still required`, status: "Pending" };
+    }
+  }
+
   if (item.kind === "loa") {
     const settings = approve ? validSettings(body.settings) : undefined;
     const loa = await prisma.leaveOfAbsenceRequest.findFirst({ where: { id: item.sourceId, institutionId: inst } });
     if (!loa) throw httpError(404, "Leave of absence request not found", "NOT_FOUND");
     let withdrawnIds: string[] = [];
+    let withdrawnSectionIds: string[] = [];
     await prisma.$transaction(async (tx) => {
       const claimed = await tx.leaveOfAbsenceRequest.updateMany({
         where: { id: loa.id, rowVersion: loa.rowVersion, status: "pending" },
@@ -646,9 +724,10 @@ export async function decideRequest(user: SessionClaims, number: number, decisio
             status: "enrolled",
             section: { term: { endsOn: { gte: settings.absenceStart }, ...(settings.returning ? { startsOn: { lt: settings.returning } } : {}) } },
           },
-          select: { id: true },
+          select: { id: true, sectionId: true },
         });
         withdrawnIds = overlapping.map((e) => e.id);
+        withdrawnSectionIds = [...new Set(overlapping.map((e) => e.sectionId))];
         if (withdrawnIds.length) {
           await tx.enrolment.updateMany({ where: { id: { in: withdrawnIds }, status: "enrolled" }, data: { status: "withdrawn", rowVersion: { increment: 1 } } });
         }
@@ -664,6 +743,7 @@ export async function decideRequest(user: SessionClaims, number: number, decisio
         loaReturnStatus: settings.returningStatus,
       });
       message += ` — student status set to ${settings.changeStatus}${withdrawn ? `, ${withdrawn} active enrolment${withdrawn === 1 ? "" : "s"} withdrawn` : ""}`;
+      if (withdrawnSectionIds.length) await Promise.allSettled(withdrawnSectionIds.map((sectionId) => promoteWaitlisted(user, sectionId)));
     }
     await audit(user, "R02", item.ref, `request.${verb}`, { recordId: loa.id, after: { comments, settings, withdrawnEnrolmentIds: withdrawnIds }, note: comments || null });
   } else if (item.kind === "profile") {
@@ -687,10 +767,52 @@ export async function decideRequest(user: SessionClaims, number: number, decisio
   } else {
     const sr = await prisma.serviceRequest.findFirst({ where: { id: item.sourceId, institutionId: inst } });
     if (!sr) throw httpError(404, "Request not found", "NOT_FOUND");
-    await prisma.$transaction(async (tx) => {
-      await tx.serviceRequest.update({ where: { id: sr.id }, data: { status: approve ? "resolved" : "rejected", rowVersion: { increment: 1 } } });
-      await closeApproval(tx, user, sr.approvalRequestId, approve ? "approve" : "reject", comments);
-    });
+    if (approve && sr.type === "course_withdrawal") {
+      const outcome = await withStudentMoneyLock(inst, sr.studentId, async () => {
+        const plan = await courseWithdrawalPlan(user, sr.studentId, sr.approvalRequestId);
+        await prisma.$transaction(async (tx) => {
+          const claimed = await tx.enrolment.updateMany({
+            where: { id: plan.enrolment.id, institutionId: inst, studentId: sr.studentId, status: "enrolled", rowVersion: plan.enrolment.rowVersion },
+            data: { status: "withdrawn", rowVersion: { increment: 1 } },
+          });
+          if (claimed.count !== 1) throw httpError(409, "The enrolment changed while this request was being approved", "CONFLICT");
+          for (const adjustment of plan.adjustments) {
+            await tx.heritageRecord.create({
+              data: {
+                institutionId: inst,
+                screenId: S.ADJUSTMENT,
+                contextKey: sr.studentId,
+                dataJson: JSON.stringify({
+                  number: adjustment.number,
+                  direction: "Decrease balance (credit)",
+                  amount: adjustment.amount,
+                  reason: `Course withdrawal fee review: ${plan.courseLabel}`,
+                  status: "Pending",
+                  requestedBy: plan.approval.requestedBy,
+                  requestedAt: new Date().toISOString(),
+                  ledgerEntryId: adjustment.chargeId,
+                  ledgerAction: "waive",
+                  withdrawalRequestId: sr.id,
+                  sectionId: plan.enrolment.sectionId,
+                }),
+                createdById: user.accountId,
+                updatedById: user.accountId,
+              },
+            });
+          }
+          await tx.serviceRequest.update({ where: { id: sr.id }, data: { status: "resolved", rowVersion: { increment: 1 } } });
+          await closeApproval(tx, user, sr.approvalRequestId, "approve", comments);
+        });
+        return { courseLabel: plan.courseLabel, reviews: plan.adjustments.length, sectionId: plan.enrolment.sectionId };
+      });
+      await promoteWaitlisted(user, outcome.sectionId);
+      message += ` — withdrawn from ${outcome.courseLabel}${outcome.reviews ? `; ${outcome.reviews} fee review${outcome.reviews === 1 ? "" : "s"} sent for approval` : ""}`;
+    } else {
+      await prisma.$transaction(async (tx) => {
+        await tx.serviceRequest.update({ where: { id: sr.id }, data: { status: approve ? "resolved" : "rejected", rowVersion: { increment: 1 } } });
+        await closeApproval(tx, user, sr.approvalRequestId, approve ? "approve" : "reject", comments);
+      });
+    }
     await audit(user, "R01", item.ref, `request.${verb}`, { recordId: sr.id, note: comments || null });
   }
 

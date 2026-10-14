@@ -619,7 +619,7 @@ export default function StudentHomePage() {
           </div>
           <details className="mh-ct-dash__acc">
             <summary>Shared Files</summary>
-            <p className="mh-teacher-muted">No shared files yet.</p>
+            <button type="button" className="mh-hcc-link" onClick={() => router.push("/student/library")}>Open shared files</button>
           </details>
           <details className="mh-ct-dash__acc" open={Boolean(alerts.length || evaluations.length)}>
             <summary>To-do</summary>

@@ -1,8 +1,10 @@
 /* Student profile › Finance. Ledger writes go through Financial Management (finance.ledger); this adds the per-student views. */
 
+import { randomUUID } from "node:crypto";
 import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
 import { getTranscriptSummary } from "../../academic/program-plan.service.js";
+import { assertNoActiveStudentHold } from "../../me/studentAlignment.js";
 import { assertPermission } from "../superAdmin.service.js";
 import {
   EPS,
@@ -11,6 +13,7 @@ import {
   agentLabel,
   amountOf,
   arr,
+  assertPeriodOpen,
   cad,
   day,
   drop,
@@ -39,6 +42,7 @@ import {
   defaultFee,
   generateReceipt,
   postCredit,
+  postFee,
   receiptInfo,
   receiptPdf,
   refundPayment,
@@ -46,6 +50,7 @@ import {
   studentCtx,
   type StudentCtx,
 } from "./finance.ledger.js";
+import { withStudentMoneyLock } from "./studentLock.js";
 import { ADVANCE_CREDIT } from "./finance.spec.js";
 import { auditTrail } from "./students.js";
 import { loadProfile, saveProfile } from "./students.core.js";
@@ -212,6 +217,7 @@ export async function financeTransactions(user: SessionClaims, id: string, q: Da
 
 /** Refund of one payment, or (Issue Refund) spread over the newest refundable payments. "Originating payment source" reuses each payment's method. */
 export async function issueRefund(user: SessionClaims, id: string, body: Data) {
+  await assertNoActiveStudentHold(user.institutionId, id, "Issuing a refund");
   const c = await studentCtx(user, id, "edit");
   const origin = s(body.method) === "Originating payment source";
   const payload = (p: Fund, amount: number) => ({ ...body, amount, method: origin ? s(p.meta.method) || p.source : body.method });
@@ -252,7 +258,7 @@ export async function regenerateReceipt(user: SessionClaims, id: string, entryId
 /* Manage Invoices                                                      */
 /* ------------------------------------------------------------------ */
 
-type InvoiceItem = { type: string; quantity: number; description: string; fee: number; total: number; chargeId?: string; courseId?: string };
+type InvoiceItem = { id?: string; type: string; quantity: number; description: string; fee: number; total: number; chargeId?: string; courseId?: string };
 
 export async function invoices(user: SessionClaims, id: string) {
   const c = await studentCtx(user, id, "view");
@@ -286,7 +292,11 @@ export async function invoices(user: SessionClaims, id: string) {
   };
 }
 
-export async function createInvoice(user: SessionClaims, id: string, body: Data) {
+export function createInvoice(user: SessionClaims, id: string, body: Data) {
+  return withStudentMoneyLock(user.institutionId, id, () => createInvoiceLocked(user, id, body));
+}
+
+async function createInvoiceLocked(user: SessionClaims, id: string, body: Data) {
   const c = await studentCtx(user, id, "edit");
   const dueDate = s(body.dueDate).trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) throw httpError(400, "Due Date is required");
@@ -302,7 +312,7 @@ export async function createInvoice(user: SessionClaims, id: string, body: Data)
       const ch = c.book.charges.find((x) => x.id === chargeId && !x.hidden);
       if (!ch) throw httpError(400, "One of the selected fees was not found");
       if (ch.owing < EPS) throw httpError(400, `Fee #${ch.number} is already paid`);
-      items.push({ type: "Other Fee / Ledger Item", quantity: 1, description: `#${ch.number} ${ch.ledgerTypeName}`, fee: ch.owing, total: ch.owing, chargeId });
+      items.push({ id: randomUUID(), type: "Other Fee / Ledger Item", quantity: 1, description: `#${ch.number} ${ch.ledgerTypeName}`, fee: ch.owing, total: ch.owing, chargeId });
       continue;
     }
     const quantity = Number(raw.quantity ?? 1);
@@ -312,10 +322,29 @@ export async function createInvoice(user: SessionClaims, id: string, body: Data)
     const fee = amountOf(raw.fee, "Fee", { allowZero: true });
     const type = s(raw.type) || "Course";
     if (!(INVOICE_ITEM_TYPES as readonly string[]).includes(type)) throw httpError(400, `Item Type "${type}" is not valid`);
-    items.push({ type, quantity, description, fee, total: r2(fee * quantity), ...(s(raw.courseId) ? { courseId: s(raw.courseId) } : {}) });
+    items.push({ id: randomUUID(), type, quantity, description, fee, total: r2(fee * quantity), ...(s(raw.courseId) ? { courseId: s(raw.courseId) } : {}) });
   }
   if (!items.length) throw httpError(400, "Add at least one invoice item");
   const number = await nextNumber(c.inst, "invoice");
+  await assertPeriodOpen(user, c.cfg, c.st.campus, new Date(), "This invoice");
+  for (const item of items) {
+    if (item.chargeId || item.type === "Credit / Disbursement") continue;
+    const trigger = item.type === "Course" ? "Course Tuition" : item.type === "Textbook" ? "Textbooks" : "";
+    const ledgerType = trigger ? c.cfg.ledgerTypes.find((type) => s(type.data.trigger) === trigger) : undefined;
+    if (trigger && !ledgerType) throw httpError(400, `${trigger} ledger type is not configured`);
+    const posted = await postFee(c, {
+      type: ledgerType,
+      label: item.description,
+      unit: item.fee,
+      quantity: item.quantity,
+      termId: term?.id ?? null,
+      note: `Invoice #${number}: ${item.description}`,
+      dueAt: new Date(`${dueDate}T12:00:00.000Z`),
+      courseId: item.courseId ?? null,
+      extra: { invoiceItem: item.id ?? "" },
+    });
+    item.chargeId = posted.id;
+  }
   const total = sum(items.map((i) => i.total));
   const template = templateRow ? s((JSON.parse(templateRow.dataJson) as Data).name) : "";
   const rec = await add(user, S.INVOICE, { number, dueDate, termId: term?.id ?? "", term: term?.name ?? "", templateId: templateRow?.id ?? "", template, items, total }, id);

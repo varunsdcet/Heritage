@@ -62,7 +62,8 @@ export async function adminCampusFacts(inst: string): Promise<AdminFact[]> {
   let pastDue = 0;
   for (const r of ledger) {
     if (r.status !== "open" && r.status !== "posted") continue;
-    const signed = r.kind === "payment" || r.kind === "credit" ? -Math.abs(r.amountCad) : Math.abs(r.amountCad);
+    const amount = Number(r.amountCad);
+    const signed = r.kind === "payment" || r.kind === "credit" ? -Math.abs(amount) : Math.abs(amount);
     const b = bal.get(r.studentId) ?? { open: 0, pastDue: 0 };
     b.open += signed;
     open += signed;

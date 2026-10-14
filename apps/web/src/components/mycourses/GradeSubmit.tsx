@@ -18,6 +18,7 @@ type Cell = GradebookResponse["rows"][number]["cells"][number];
 const token = () => loadSession()?.accessToken;
 const cellKey = (studentId: string, assignmentId: string) => `${studentId}:${assignmentId}`;
 const cellLabel = (c: Cell) => (c.status === "published" ? "Approved" : c.status === "pending_publish" ? "Pending" : c.score == null ? "Missing" : "Not submitted");
+const publishKey = (sectionId: string, ids: string[]) => `grade-publish:${sectionId}:${[...ids].sort().join(",")}`;
 
 export function GradeSubmit() {
   const sp = useSearchParams();
@@ -119,7 +120,7 @@ export function GradeSubmit() {
       }
       await api(
         `/gradebooks/${encodeURIComponent(sectionId)}/publish`,
-        { method: "POST", body: JSON.stringify({ gradeItemIds: ids }), headers: { "idempotency-key": `my-courses-${sectionId}-${Date.now()}` } },
+        { method: "POST", body: JSON.stringify({ gradeItemIds: ids }), headers: { "idempotency-key": publishKey(sectionId, ids) } },
         token(),
       );
       await load();

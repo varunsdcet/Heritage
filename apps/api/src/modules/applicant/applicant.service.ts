@@ -2,8 +2,9 @@ import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { prisma } from "@myheritage/db";
-import type { SessionClaims } from "@myheritage/contracts";
+import { ADMISSIONS_STAGE_PROGRESS, type SessionClaims } from "@myheritage/contracts";
 import { writeAuditAndOutbox } from "@myheritage/events";
+import { submissionStorageRoot } from "../../lib/submissionFiles.js";
 import type { PortalRow, PortalView } from "../portal/portal.service.js";
 import {
   APPLICATION_FIELDS,
@@ -152,19 +153,12 @@ async function requireApplication(user: SessionClaims) {
 }
 
 export async function getApplicationForm(user: SessionClaims) {
-  let app = await requireApplication(user);
-  if (app.status === "draft" && app.documents.length === 0) {
-    // Applications opened by Admissions may have no checklist yet; without rows there is nothing to upload against.
-    await prisma.applicationDocument.createMany({
-      data: REQUIRED_APPLICANT_DOCUMENTS.map((label) => ({ institutionId: user.institutionId, applicationId: app.id, label, status: "missing" })),
-    });
-    app = await requireApplication(user);
-  }
+  const app = await requireApplication(user);
   return formPayload(app, await formOptions(user.institutionId));
 }
 
 export async function saveApplicationForm(user: SessionClaims, input: unknown) {
-  const app = await requireApplication(user);
+  let app = await requireApplication(user);
   if (app.status !== "draft") throw httpError("This application has been submitted and can no longer be edited", "CONFLICT", 409);
   const options = await formOptions(user.institutionId);
   const before = formValuesOf(app);
@@ -172,6 +166,13 @@ export async function saveApplicationForm(user: SessionClaims, input: unknown) {
   const problems = Object.values(errors);
   if (problems.length) throw Object.assign(httpError(problems.join("; "), "VALIDATION_ERROR", 400), { fields: errors });
   const merged = { ...before, ...values };
+  const missingChecklist = REQUIRED_APPLICANT_DOCUMENTS.filter((label) => !app.documents.some((document) => document.label === label));
+  if (missingChecklist.length) {
+    await prisma.applicationDocument.createMany({
+      data: missingChecklist.map((label) => ({ institutionId: user.institutionId, applicationId: app.id, label, status: "missing" })),
+    });
+    app = await requireApplication(user);
+  }
   const progressPct = applicationCompleteness(merged, app.documents).pct;
   await prisma.admissionsApplication.update({
     where: { id: app.id },
@@ -472,12 +473,7 @@ export async function buildApplicantView(user: SessionClaims, path: string): Pro
         ],
       },
     ];
-    base.actions = [
-      ...(app.status === "under_review" || app.status === "submitted"
-        ? [{ label: "Mark ready for interview", action: "ready_interview", variant: "primary" as const }]
-        : []),
-      { label: "Ask Heritage", href: "/applicant/ask", variant: "ai" },
-    ];
+    base.actions = [{ label: "Ask Heritage", href: "/applicant/ask", variant: "ai" }];
     return base;
   }
 
@@ -549,7 +545,7 @@ export async function runApplicantAction(
     }
     const claimed = await prisma.admissionsApplication.updateMany({
       where: { id: app.id, status: "draft", rowVersion: app.rowVersion },
-      data: { status: "submitted", progressPct: 100, submittedAt: new Date(), rowVersion: { increment: 1 } },
+      data: { status: "submitted", progressPct: ADMISSIONS_STAGE_PROGRESS.submitted, submittedAt: new Date(), rowVersion: { increment: 1 } },
     });
     if (claimed.count !== 1) throw httpError("The application changed while submitting. Reload and try again.", "CONFLICT", 409);
     await addTimeline(app.id, user.institutionId, "Application submitted", "Packet sent to admissions review");
@@ -569,7 +565,7 @@ export async function runApplicantAction(
       eventName: "ApplicantApplication.submitted",
       purpose: "applicant_mutation",
       before: { applicationId: app.id, status: app.status },
-      after: { applicationId: app.id, status: "submitted", progressPct: 100 },
+      after: { applicationId: app.id, status: "submitted", progressPct: ADMISSIONS_STAGE_PROGRESS.submitted },
       source: "applicant.submit_application",
       correlationId: randomUUID(),
       outboxPayload: { applicationId: app.id, status: "submitted" },
@@ -578,6 +574,9 @@ export async function runApplicantAction(
   }
 
   if (action === "upload_document") {
+    if (app.status !== "draft") {
+      throw httpError("Documents can only be uploaded while the application is a draft", "APPLICATION_LOCKED", 409);
+    }
     const documentId = String(payload?.documentId ?? "");
     const filename = typeof payload?.filename === "string" ? payload.filename : "";
     const mimeType = typeof payload?.mimeType === "string" ? payload.mimeType : "";
@@ -611,7 +610,7 @@ export async function runApplicantAction(
       app.id,
       `${doc.id}-${safeName}`,
     );
-    const storageRoot = path.resolve(process.env.FILE_STORAGE_ROOT ?? path.join(process.cwd(), "var", "uploads"));
+    const storageRoot = submissionStorageRoot();
     const storedPath = path.resolve(storageRoot, relativePath);
     if (!storedPath.startsWith(`${storageRoot}${path.sep}`)) {
       throw httpError("Invalid storage path", "VALIDATION_ERROR", 400);
@@ -646,23 +645,7 @@ export async function runApplicantAction(
   }
 
   if (action === "ready_interview") {
-    await prisma.admissionsApplication.update({
-      where: { id: app.id },
-      data: { status: "interview", progressPct: Math.max(app.progressPct, 85) },
-    });
-    await addTimeline(app.id, user.institutionId, "Interview readiness confirmed", "Applicant marked ready for interview");
-    await writeAuditAndOutbox(prisma, {
-      institutionId: user.institutionId,
-      actorId: user.accountId,
-      eventName: "ApplicantApplication.interviewReady",
-      purpose: "applicant_mutation",
-      before: { applicationId: app.id, status: app.status },
-      after: { applicationId: app.id, status: "interview" },
-      source: "applicant.ready_interview",
-      correlationId: randomUUID(),
-      outboxPayload: { applicationId: app.id, status: "interview" },
-    });
-    return { ok: true, status: "interview" };
+    throw httpError("Only Admissions staff can move an application to interview", "FORBIDDEN", 403);
   }
 
   if (action === "accept_offer" || action === "decline_offer") {

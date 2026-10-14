@@ -3,6 +3,8 @@ import type { SessionClaims } from "@myheritage/contracts";
 import { CAMPUSES, assertPermission, patchStudentMeta, studentMetaMap } from "../superAdmin.service.js";
 import { audit, refs } from "./service.js";
 import { courseRefLists } from "./courses.refs.js";
+import { bytesMatchMime, decodeBase64 } from "../../../lib/fileSniff.js";
+import { encryptConfigSecret } from "../../../lib/configSecrets.js";
 
 /* ------------------------------------------------------------------ */
 /* Storage                                                              */
@@ -165,7 +167,7 @@ async function clean(inst: string, fields: Field[], input: Data, base: Data, loo
       case "secret": {
         const v = s(raw);
         if (v.length > 200) errors.push(`${f.label} is too long`);
-        out[f.key] = v || s(base[f.key]);
+        out[f.key] = v ? encryptConfigSecret(v) : s(base[f.key]);
         break;
       }
       case "number": {
@@ -953,7 +955,22 @@ export async function deleteEntity(user: SessionClaims, entity: EntityKey, id: s
   if (entity === "regions") block("campus", await usage(inst, LOC.campus, "region", id));
   if (entity === "provinces") block("campus", await usage(inst, LOC.campus, "province", id));
   if (entity === "classroomTypes") block("classroom", await usage(inst, LOC.classroom, "type", id));
-  if (entity === "campuses") cascade.push(...(await list(inst, LOC.classroom, id)).map((r) => r.id));
+  if (entity === "campuses") {
+    const campusName = s(rec.data.name);
+    const [cohorts, meta] = await Promise.all([
+      prisma.cohort.count({ where: { institutionId: inst, campus: campusName } }),
+      studentMetaMap(inst),
+    ]);
+    const students = Object.values(meta).filter((m) => m.campus === campusName).length;
+    if (cohorts || students) {
+      throw httpError(
+        409,
+        `"${name}" is still assigned to ${cohorts} cohort(s) and ${students} student profile(s). Reassign them before deleting the campus.`,
+        "CONFLICT",
+      );
+    }
+    cascade.push(...(await list(inst, LOC.classroom, id)).map((r) => r.id));
+  }
   if (entity === "institutions")
     for (const sc of [LOC.agreement, LOC.bridge, LOC.transferCourse]) cascade.push(...(await list(inst, sc, id)).map((r) => r.id));
   await remove(inst, user.accountId, [id, ...cascade]);
@@ -1056,9 +1073,11 @@ export async function uploadFile(user: SessionClaims, body: { name: string; mime
   if (!name) throw httpError(400, "File name is required");
   if (!FILE_TYPES.test(mime)) throw httpError(400, "Unsupported file type. Upload an image, PDF, Word, Excel, PowerPoint, text or CSV file.");
   const b64 = s(body.base64).replace(/^data:[^,]*,/, "");
-  const size = Math.floor((b64.length * 3) / 4) - (b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0);
+  const bytes = decodeBase64(b64);
+  const size = bytes.length;
   if (!size) throw httpError(400, "The file is empty");
   if (size > FILE_MAX) throw httpError(400, "Files must be 8 MB or smaller");
+  if (!bytesMatchMime(bytes, mime)) throw httpError(400, "File contents do not match the declared file type");
   const rec = await insert(user.institutionId, user.accountId, LOC.file, { name, mime, size, base64: b64 });
   return { id: rec.id, name, mime, size };
 }

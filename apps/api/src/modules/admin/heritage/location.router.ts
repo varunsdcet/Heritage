@@ -73,7 +73,7 @@ locationRouter.put("/brands/:id/settings/:tab", handle((req) => saveBrandSetting
 
 locationRouter.get(
   "/:entity",
-  handle((req) => listEntity(user(req), entityOf(req), { parentId: q(req.query.parentId), q: q(req.query.q), page: Number(req.query.page) || 1, perPage: Number(req.query.perPage) || 0 })),
+  handle((req) => listEntity(user(req), entityOf(req), { parentId: q(req.query.parentId), q: q(req.query.name) ?? q(req.query.q), page: Number(req.query.page) || 1, perPage: Number(req.query.perPage) || 0 })),
 );
 locationRouter.post("/:entity", handle((req) => createEntity(user(req), entityOf(req), Body.parse(req.body) as Record<string, unknown> & { parentId?: string }), 201));
 locationRouter.get("/:entity/:id", handle((req) => getEntity(user(req), entityOf(req), req.params.id!)));

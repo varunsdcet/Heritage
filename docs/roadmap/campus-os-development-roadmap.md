@@ -1,9 +1,11 @@
 # MyHeritage Campus OS development roadmap
 
-Status: implementation roadmap
+Status: historical roadmap with current implementation note
 
 Source evidence: `MyHeritage_Campus_OS_Map.pdf`
 Repository baseline: 2026-09-15
+
+Current implementation note (2026-10-14): this file preserves the planning baseline; it is not a live gap register. Campus Coach APIs/history, multi-role UI, password reset, session revocation, student assignment files, attendance, content, finance, applicant/employer records, and many listed admin workflows now exist. Use the mounted OpenAPI inventory, `tools/register/register_v2.csv`, current tests, and target-environment E2E evidence to determine present support.
 
 ## Product outcome
 
@@ -27,7 +29,7 @@ The PDF is product evidence, not an implementation instruction. A route or catal
 - applicant application, documents, requirements, interview, offer, contract, payment, and onboarding;
 - employer placements, hours, evaluations, agreements, and organization profile;
 - admin admissions, catalogue management, scheduling, finance, practicum, CRM, records, transcripts, analytics, integrations, and AI operations;
-- cross-role Ask Heritage. The map declares `POST /ai/ask`, but no such API, interaction persistence, or five-role UI existed at the baseline.
+- cross-role Ask Heritage was absent at this historical baseline; it is implemented in the current repository and must be evaluated from current contracts/tests.
 
 ### Important map/repository differences
 

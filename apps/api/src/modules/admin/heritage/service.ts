@@ -12,7 +12,7 @@ import {
   type PermissionModuleKey,
 } from "../superAdmin.service.js";
 import { rawRegistry, screenSchema, screenSchemas, type ContextType, type FieldDef, type ScreenSchema } from "./registry.js";
-import { DOMAIN_SOURCES, WRITE_THROUGH, domainStatus, type DomainRow } from "./domain.js";
+import { DOMAIN_SOURCES, WRITE_THROUGH, domainStatus, updateDomainRecord, type DomainRow } from "./domain.js";
 import { bytesMatchMime, decodeBase64 } from "../../../lib/fileSniff.js";
 
 type Data = Record<string, unknown>;
@@ -165,6 +165,7 @@ export const DEDICATED: Record<string, string> = {
   F20: "/admin/financial/funding-sources",
   F21: "/admin/financial/collection-agencies",
   F22: "/admin/financial/promotion-allocations",
+  F23: "/admin/financial/agents",
   SF01: "/admin/financial/student?tab=overview",
   SF02: "/admin/financial/student?tab=overview",
   SF03: "/admin/financial/student?tab=transactions",
@@ -178,8 +179,8 @@ export const DEDICATED: Record<string, string> = {
 };
 
 const MODULE_PERMISSION: Record<string, PermissionModuleKey | null> = {
-  "Global / Dashboard": null,
-  "My Profile / Settings": null,
+  "Global / Dashboard": "systemConfiguration",
+  "My Profile / Settings": "facultyProfiles",
   "My Courses": "courseManagement",
   Workshops: "courseManagement",
   Students: "studentRecords",
@@ -438,6 +439,10 @@ function recordTitle(data: Data) {
 export async function getScreen(user: SessionClaims, id: string, query: ScreenQuery) {
   const schema = requireSchema(id);
   await guard(user, schema, "view");
+  const canEdit = await guard(user, schema, "edit").then(
+    () => true,
+    () => false,
+  );
   const store = storeOf(schema);
   const ctx = parseCtx(schema, query.ctx);
   const [records, overlays, auditCount, label] = await Promise.all([
@@ -501,6 +506,7 @@ export async function getScreen(user: SessionClaims, id: string, query: ScreenQu
     singleton,
     summary: domain?.summary ?? null,
     auditCount,
+    canEdit,
   };
 }
 
@@ -713,9 +719,10 @@ export async function updateRecord(user: SessionClaims, id: string, recordId: st
   const ctx = parseCtx(schema, body.ctx);
   if (isDomainId(recordId)) {
     const data = coerce(schema, body.data ?? {}, true);
-    const o = await upsertOverlay(user, store, ctx.key, recordId, data);
-    await audit(user, store, ctx.key, "update", { recordId, after: { ...data, _overlayId: o.id } });
-    return { ok: true, id: recordId, message: "Updated" };
+    const message = await updateDomainRecord(user, recordId, data);
+    if (!message) throw httpError(409, "This live record is read-only on this screen. Use its dedicated management page.", "DOMAIN_RECORD_READ_ONLY");
+    await audit(user, store, ctx.key, "update", { recordId, after: data, note: "Persisted to domain table" });
+    return { ok: true, id: recordId, message };
   }
   const rec = await loadRecord(user, store, recordId);
   const before = parseData(rec.dataJson);

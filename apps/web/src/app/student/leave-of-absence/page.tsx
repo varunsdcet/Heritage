@@ -64,6 +64,17 @@ export default function LeaveOfAbsencePage() {
     }
   }
 
+  async function cancel(id: string) {
+    const session = loadSession();
+    if (!session) return;
+    setBusy(true); setError(null); setNotice(null);
+    try {
+      const data = await api<{ requests: Loa[] }>(`/student/leave-of-absence/${id}/cancel`, { method: "POST", body: "{}" }, session.accessToken);
+      setRequests(data.requests); setNotice("Leave request cancelled.");
+    } catch (err) { setError(err instanceof Error ? err.message : "Cancellation failed"); }
+    finally { setBusy(false); }
+  }
+
   return (
     <StudentSisShell
       title="Leave of Absence"
@@ -125,6 +136,7 @@ export default function LeaveOfAbsencePage() {
                 <span className={`mh-teacher-badge ${r.status === "approved" ? "is-active" : r.status === "rejected" ? "is-warning" : "is-info"}`}>
                   {r.status}
                 </span>
+                {r.status === "pending" ? <button type="button" className="mh-teacher-btn" disabled={busy} onClick={() => void cancel(r.id)}>Cancel</button> : null}
               </div>
             ))}
             {!requests.length ? <p className="mh-teacher-muted">No leave requests yet.</p> : null}

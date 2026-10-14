@@ -1167,7 +1167,7 @@ export function StudentProfileView() {
       setFamilyName(resource.data.familyName);
       setMiddleName(resource.data.middleName ?? "");
       setPreferredName(resource.data.preferredName ?? "");
-      setEmail(resource.data.personalEmail || resource.data.primaryEmail);
+      setEmail(resource.data.personalEmail ?? "");
       setPhone(resource.data.phone ?? "");
       setEmergencyContactName(resource.data.emergencyContactName ?? "");
       setEmergencyContactPhone(resource.data.emergencyContactPhone ?? "");
@@ -1176,7 +1176,8 @@ export function StudentProfileView() {
 
   async function requestChange(event: FormEvent) {
     event.preventDefault();
-    if (!resource.session) return;
+    const profile = resource.data;
+    if (!resource.session || !profile) return;
     setNotice(null);
     setActionError(null);
     setSendingChange(true);
@@ -1190,7 +1191,8 @@ export function StudentProfileView() {
             familyName: familyName.trim(),
             middleName: middleName.trim() || undefined,
             preferredName: preferredName.trim() || undefined,
-            primaryEmail: email.trim(),
+            primaryEmail: profile.primaryEmail,
+            ...(email.trim() ? { personalEmail: email.trim() } : {}),
             phone: phone.trim(),
             emergencyContactName: emergencyContactName.trim(),
             emergencyContactPhone: emergencyContactPhone.trim(),
@@ -1269,13 +1271,16 @@ export function StudentProfileView() {
                     <input className="mh-teacher-field" value={phone} onChange={(e) => setPhone(e.target.value)} required minLength={7} />
                   </label>
                   <label>
-                    <span>E-mail address *</span>
+                    <span>Official college e-mail</span>
+                    <input className="mh-teacher-field" type="email" value={profile.primaryEmail} readOnly aria-readonly="true" />
+                  </label>
+                  <label>
+                    <span>Personal e-mail</span>
                     <input
                       className="mh-teacher-field"
                       type="email"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      required
                     />
                   </label>
                   <label>

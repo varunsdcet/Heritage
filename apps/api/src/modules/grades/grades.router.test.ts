@@ -28,10 +28,19 @@ const db = vi.hoisted(() => ({
   portalRecord: { findMany: vi.fn() },
 }));
 
-const transcript = vi.hoisted(() => ({ getTranscriptSummary: vi.fn() }));
+const transcript = vi.hoisted(() => ({
+  getTranscriptSummary: vi.fn(),
+  weightedPercent: vi.fn((items: Array<{ score: number | null; maxScore: number; weightPercent: number }>) => {
+    const weighted = items.filter((item) => item.score != null && item.maxScore > 0);
+    if (!weighted.length) return null;
+    const totalWeight = weighted.reduce((sum, item) => sum + item.weightPercent, 0);
+    return totalWeight ? weighted.reduce((sum, item) => sum + (item.score! / item.maxScore) * item.weightPercent, 0) / totalWeight * 100 : null;
+  }),
+}));
 
 vi.mock("@myheritage/db", () => ({ prisma: db }));
 vi.mock("../academic/program-plan.service.js", () => transcript);
+vi.mock("../../lib/gradingScheme.js", () => ({ letterForSection: vi.fn(async () => "A-") }));
 vi.mock("../../middleware/auth.js", () => ({
   requireAuth(req: Request, _res: Response, next: NextFunction) {
     Object.assign(req, { user: testClaims, correlationId: "test-correlation" });

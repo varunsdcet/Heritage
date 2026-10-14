@@ -39,10 +39,13 @@ describe("courseStatus", () => {
 });
 
 describe("passingLetter", () => {
-  it("passes letters with grade points or no grade points shown, and fails F", () => {
+  it("awards credit only for earned passing grades", () => {
     expect(passingLetter("D")).toBe(true);
     expect(passingLetter("P")).toBe(true);
-    expect(passingLetter("—")).toBe(true);
     expect(passingLetter("F")).toBe(false);
+    expect(passingLetter("—")).toBe(false);
+    expect(passingLetter("I")).toBe(false);
+    expect(passingLetter("IP")).toBe(false);
+    expect(passingLetter("W")).toBe(false);
   });
 });

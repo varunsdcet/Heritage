@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 export function submissionStorageRoot() {
-  return path.resolve(process.env.FILE_STORAGE_ROOT ?? path.join(process.cwd(), "var", "uploads"));
+  return path.resolve(process.env.OBJECT_STORAGE_ROOT ?? process.env.FILE_STORAGE_ROOT ?? path.join(process.cwd(), "var", "uploads"));
 }
 
 /** Reads a stored submission file; the stored relative path must stay inside the storage root. */

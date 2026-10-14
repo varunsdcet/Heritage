@@ -97,7 +97,8 @@ function RateCategoryModal({ current, onClose, onSaved }: { current: string; onC
 }
 
 export function StudentOverview() {
-  const { id } = useProfile();
+  const { id, notice } = useProfile();
+  const router = useRouter();
   const { data, error, reload } = useLoad<Overview>(`/${enc(id)}/overview`);
   const [deleting, setDeleting] = useState(false);
   const [editingRate, setEditingRate] = useState(false);
@@ -187,13 +188,25 @@ export function StudentOverview() {
       </Card>
       <p>
         <LinkBtn danger onClick={() => setDeleting(true)}>
-          Delete Profile
+          Archive Profile
         </LinkBtn>
       </p>
       {deleting ? (
-        <Modal title="Delete Profile" onClose={() => setDeleting(false)} footer={<Btn onClick={() => setDeleting(false)}>Close</Btn>}>
-          <SourceNotice>The confirmation and deletion flow after &quot;Delete Profile&quot; was not captured from the original system, so this profile cannot be deleted from here.</SourceNotice>
-        </Modal>
+        <ConfirmModal
+          title="Archive Student Profile"
+          body="Archive this profile? Portal login will be disabled and the student will be marked withdrawn. Academic, finance and audit history will be retained."
+          ok="Archive Profile"
+          onCancel={() => setDeleting(false)}
+          onOk={async () => {
+            try {
+              await send(`/${enc(id)}`, "DELETE");
+              notice.ok("Student profile archived and login disabled.");
+              router.push("/admin/student-management");
+            } catch (error) {
+              notice.fail(error instanceof Error ? error.message : "Could not archive profile");
+            }
+          }}
+        />
       ) : null}
     </>
   );
@@ -415,6 +428,7 @@ export function NewProgramProfile() {
 export function ChangeStatus() {
   const { id, meta, header, reloadHeader, notice } = useProfile();
   const [open, setOpen] = useState(true);
+  const [graduateOpen, setGraduateOpen] = useState(false);
   const [status, setStatus] = useState("");
   const { busy, error, setError, run } = useSubmit();
   const save = async () => {
@@ -432,9 +446,10 @@ export function ChangeStatus() {
       <Card
         title="Change Status"
         actions={
-          <Btn small tone="primary" onClick={() => setOpen(true)}>
-            Change Status
-          </Btn>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Btn small onClick={() => setGraduateOpen(true)}>Run Graduation Audit</Btn>
+            <Btn small tone="primary" onClick={() => setOpen(true)}>Change Status</Btn>
+          </div>
         }
       >
         <p>
@@ -457,6 +472,28 @@ export function ChangeStatus() {
             <Sel value={status} onChange={setStatus} empty="— Select —" options={statusOptions(meta).filter((o) => o.value !== header.status)} />
           </F>
         </Modal>
+      ) : null}
+      {graduateOpen ? (
+        <ConfirmModal
+          title="Graduate Student"
+          body="Run the final degree, requirements, requests, holds and balance audit. Only a clear audit will mark the profile Graduated and issue the degree credential."
+          ok={busy ? "Auditing…" : "Audit & Graduate"}
+          danger={false}
+          onCancel={() => setGraduateOpen(false)}
+          onOk={() => {
+            void (async () => {
+              const out = await run(
+                () => send<{ status: string; credentialTitle: string }>(`/${enc(id)}/graduation`, "POST", {}),
+                "Graduation audit failed",
+              );
+              if (out) {
+                setGraduateOpen(false);
+                notice.ok(`${out.credentialTitle} issued; student status changed to ${out.status}.`);
+                reloadHeader();
+              }
+            })();
+          }}
+        />
       ) : null}
     </>
   );

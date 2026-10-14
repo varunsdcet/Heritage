@@ -98,6 +98,7 @@ function LoginForm() {
           ? navigator.userAgent.replace(/\s+/g, " ").slice(0, 48)
           : "browser";
       const deviceFingerprint = `web-${ua}-${remember ? "remember" : "session"}`.slice(0, 120);
+      const institutionId = searchParams.get("institutionId");
       const session = await api<Session & { requiresMfa?: boolean }>("/auth/login", {
         method: "POST",
         body: JSON.stringify({
@@ -105,6 +106,9 @@ function LoginForm() {
           password,
           deviceFingerprint: deviceFingerprint.length >= 8 ? deviceFingerprint : `web-device-${Date.now()}`,
           remember,
+          ...(institutionId && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(institutionId)
+            ? { institutionId }
+            : {}),
         }),
       });
       if (session.requiresMfa) {

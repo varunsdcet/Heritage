@@ -58,7 +58,25 @@ const CreateUser = z.object({
   password: z.string().min(8).max(200),
   studentNumber: z.string().optional(),
   programName: z.string().optional(),
+  intakeTerm: z.string().optional(),
 });
+
+function isUniqueConflict(error: unknown) {
+  return typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === "P2002";
+}
+
+async function generatedStudentNumber(institutionId: string, offset = 0) {
+  const year = new Date().getFullYear();
+  const prefix = `ST-${year}-`;
+  const rows = await prisma.student.findMany({
+    where: { institutionId, studentNumber: { startsWith: prefix } },
+    select: { studentNumber: true },
+  });
+  const used = new Set(rows.map((row) => row.studentNumber));
+  let sequence = rows.length + 1 + offset;
+  while (used.has(`${prefix}${String(sequence).padStart(3, "0")}`)) sequence += 1;
+  return `${prefix}${String(sequence).padStart(3, "0")}`;
+}
 
 const CreateSection = z.object({
   courseCode: z.string().min(2),
@@ -101,7 +119,9 @@ const LEGACY_PERMISSIONS: Array<[RegExp, PermissionModuleKey]> = [
   [/^\/users(\/|$)/, "userManagement"],
   [/^\/(sections|sections-lite|assignments)(\/|$)/, "courseManagement"],
   [/^\/(programs-lite|cohorts)(\/|$)/, "programManagement"],
+  [/^\/curriculum(\/|$)/, "programManagement"],
   [/^\/(enrolments|students-lite|extracurricular|student-documents|retakes)(\/|$)/, "studentRecords"],
+  [/^\/degree-scenarios(\/|$)/, "studentRecords"],
   [/^\/(financial-terms|finance|tax-documents)(\/|$)/, "financialManagement"],
   [/^\/mail-policy(\/|$)/, "emailMessaging"],
 ];
@@ -119,7 +139,7 @@ adminRouter.use(async (req, _res, next) => {
 
 adminRouter.get("/campus-overview", async (req, res, next) => {
   try {
-    const user = (req as AuthedRequest).user;
+    const user = (req as unknown as AuthedRequest).user;
     const [overview, access] = await Promise.all([getCampusOverview(user.institutionId), effectiveAccess(user.institutionId, user.accountId)]);
     res.json(canView(access.permissions.userRequests) ? overview : { ...overview, pendingApprovals: 0, pendingGrades: 0 });
   } catch (err) {
@@ -129,7 +149,7 @@ adminRouter.get("/campus-overview", async (req, res, next) => {
 
 adminRouter.get("/users", async (req, res, next) => {
   try {
-    const user = (req as AuthedRequest).user;
+    const user = (req as unknown as AuthedRequest).user;
     const accounts = await prisma.account.findMany({
       where: { institutionId: user.institutionId },
       include: { person: true },
@@ -157,7 +177,7 @@ adminRouter.get("/users", async (req, res, next) => {
 
 adminRouter.post("/users", async (req, res, next) => {
   try {
-    const user = (req as AuthedRequest).user;
+    const user = (req as unknown as AuthedRequest).user;
     const body = CreateUser.parse(req.body);
     const access = await assertPermission(user, "userManagement", "edit");
     if ((body.role === "admin" || body.role === "registrar") && !access.administrator) {
@@ -196,8 +216,26 @@ adminRouter.post("/users", async (req, res, next) => {
 
     let studentNumber: string | null = null;
     let studentId: string | null = null;
+    const requestedStudentNumber = body.studentNumber?.trim() || null;
+    if (body.role === "student" && requestedStudentNumber) {
+      const clash = await prisma.student.findFirst({ where: { institutionId: user.institutionId, studentNumber: requestedStudentNumber } });
+      if (clash) throw Object.assign(new Error(`Student number ${requestedStudentNumber} is already in use`), { status: 409, code: "CONFLICT" });
+    }
+    const intake = body.role === "applicant"
+      ? await prisma.term.findFirst({
+          where: {
+            institutionId: user.institutionId,
+            ...(body.intakeTerm?.trim() ? { name: body.intakeTerm.trim() } : { endsOn: { gte: new Date().toISOString().slice(0, 10) } }),
+          },
+          orderBy: { startsOn: "asc" },
+          select: { name: true },
+        })
+      : null;
+    if (body.role === "applicant" && body.intakeTerm?.trim() && !intake) {
+      throw Object.assign(new Error("The selected intake term does not exist"), { status: 400, code: "VALIDATION_ERROR" });
+    }
 
-    await prisma.$transaction(async (tx) => {
+    const create = async (generatedOffset: number) => prisma.$transaction(async (tx) => {
       await tx.person.create({
         data: {
           id: personId,
@@ -220,17 +258,7 @@ adminRouter.post("/users", async (req, res, next) => {
       });
 
       if (role === "student") {
-        const requested = body.studentNumber?.trim();
-        studentNumber = requested || `ST-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
-        const clash = await tx.student.findFirst({
-          where: { institutionId: user.institutionId, studentNumber },
-        });
-        if (clash && requested) {
-          throw Object.assign(new Error(`Student number ${requested} is already in use`), { status: 409, code: "CONFLICT" });
-        }
-        if (clash) {
-          studentNumber = `ST-${new Date().getFullYear()}-${randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase()}`;
-        }
+        studentNumber = requestedStudentNumber || await generatedStudentNumber(user.institutionId, generatedOffset);
         const student = await tx.student.create({
           data: {
             institutionId: user.institutionId,
@@ -250,7 +278,7 @@ adminRouter.post("/users", async (req, res, next) => {
             accountId,
             personId,
             programName: body.programName?.trim() || "General Studies",
-            intakeTerm: "Fall 2026",
+            intakeTerm: intake?.name ?? "Not assigned",
             status: "draft",
             progressPct: 10,
             documents: {
@@ -311,6 +339,15 @@ adminRouter.post("/users", async (req, res, next) => {
         },
       });
     });
+    const attempts = requestedStudentNumber ? 1 : 5;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        await create(attempt);
+        break;
+      } catch (error) {
+        if (role !== "student" || requestedStudentNumber || !isUniqueConflict(error) || attempt === attempts - 1) throw error;
+      }
+    }
 
     try {
       const { sendMailViaHumanitix, mailConfigured } = await import("../../lib/mailer.js");
@@ -608,6 +645,49 @@ adminRouter.get("/enrolments/students", async (req, res, next) => {
   }
 });
 
+adminRouter.get("/enrolments/section/:sectionId", async (req, res, next) => {
+  try {
+    const user = (req as unknown as AuthedRequest).user;
+    const sectionId = z.string().uuid().parse(req.params.sectionId);
+    const section = await prisma.section.findFirst({
+      where: { id: sectionId, institutionId: user.institutionId },
+      include: { course: true },
+    });
+    if (!section) throw Object.assign(new Error("Section not found"), { status: 404, code: "NOT_FOUND" });
+    const enrolments = await prisma.enrolment.findMany({
+      where: { institutionId: user.institutionId, sectionId, status: { in: ["enrolled", "waitlisted"] } },
+      include: { student: { include: { person: true } } },
+      orderBy: { createdAt: "desc" },
+    });
+    const latestByStudent = new Map<string, (typeof enrolments)[number]>();
+    for (const enrolment of enrolments) if (!latestByStudent.has(enrolment.studentId)) latestByStudent.set(enrolment.studentId, enrolment);
+    const items = [...latestByStudent.values()]
+      .map((enrolment) => ({
+        enrolmentId: enrolment.id,
+        studentId: enrolment.studentId,
+        studentNumber: enrolment.student.studentNumber,
+        givenName: enrolment.student.person.givenName,
+        familyName: enrolment.student.person.familyName,
+        email: enrolment.student.person.email,
+        programName: enrolment.student.programName,
+        status: enrolment.status,
+        enrolledAt: enrolment.createdAt.toISOString(),
+      }))
+      .sort((a, b) => a.status.localeCompare(b.status) || a.familyName.localeCompare(b.familyName) || a.givenName.localeCompare(b.givenName));
+    res.json({
+      section: { id: section.id, code: section.code, courseCode: section.course.code, courseTitle: section.course.title },
+      counts: {
+        enrolled: items.filter((item) => item.status === "enrolled").length,
+        waitlisted: items.filter((item) => item.status === "waitlisted").length,
+        total: items.length,
+      },
+      items,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 adminRouter.post("/enrolments/bulk", async (req, res, next) => {
   try {
     const user = (req as AuthedRequest).user;
@@ -758,6 +838,9 @@ adminRouter.post("/sis/action", async (req, res, next) => {
     if (!body.path.startsWith("/admin")) {
       res.status(400).json({ error: { message: "path must be an /admin route" } });
       return;
+    }
+    if (/\/admin\/f\/fn-|\/admin\/financ/i.test(body.path)) {
+      await assertPermission(user, "financialManagement", "edit");
     }
     const view = await runSisAction(user, body);
     res.json(view);
@@ -911,6 +994,99 @@ adminRouter.delete("/extracurricular/:id", async (req, res, next) => {
   } catch (err) {
     next(err);
   }
+});
+
+const CurriculumBody = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("version"), programId: z.string().uuid(), label: z.string().trim().min(1).max(120), effectiveOn: z.string().date(), totalCredits: z.number().min(0).max(300), status: z.string().trim().min(1).max(40).default("active") }),
+  z.object({ kind: z.literal("requirement"), programVersionId: z.string().uuid(), courseId: z.string().uuid().nullable().optional(), courseCode: z.string().trim().min(1).max(30), title: z.string().trim().min(1).max(200), credits: z.number().min(0).max(60), requirementKind: z.enum(["required", "elective", "capstone"]).default("required"), sortOrder: z.number().int().min(0).max(10000).default(0) }),
+  z.object({ kind: z.literal("prerequisite"), courseId: z.string().uuid(), requiredCourseId: z.string().uuid() }),
+  z.object({ kind: z.literal("corequisite"), courseId: z.string().uuid(), requiredCourseId: z.string().uuid() }),
+  z.object({ kind: z.literal("offering"), courseId: z.string().uuid(), termCode: z.string().trim().min(1).max(40), termName: z.string().trim().min(1).max(120), seatsOpen: z.number().int().min(0), seatsTotal: z.number().int().positive(), status: z.string().trim().min(1).max(40).default("published") }),
+]);
+
+adminRouter.get("/curriculum", async (req, res, next) => {
+  try {
+    const institutionId = (req as AuthedRequest).user.institutionId;
+    const [programs, versions, courses, requirements, prerequisites, corequisites, offerings] = await Promise.all([
+      prisma.program.findMany({ where: { institutionId }, orderBy: { name: "asc" } }),
+      prisma.programVersion.findMany({ where: { institutionId }, include: { program: true }, orderBy: { effectiveOn: "desc" } }),
+      prisma.course.findMany({ where: { institutionId }, orderBy: { code: "asc" } }),
+      prisma.degreeRequirement.findMany({ where: { institutionId }, include: { programVersion: { include: { program: true } } }, orderBy: [{ programVersionId: "asc" }, { sortOrder: "asc" }] }),
+      prisma.coursePrerequisite.findMany({ where: { institutionId }, include: { course: true, prerequisiteCourse: true } }),
+      prisma.courseCorequisite.findMany({ where: { institutionId }, include: { course: true, corequisiteCourse: true } }),
+      prisma.courseOffering.findMany({ where: { institutionId }, include: { course: true }, orderBy: { termCode: "desc" } }),
+    ]);
+    res.json({ programs, versions, courses, requirements, prerequisites, corequisites, offerings });
+  } catch (err) { next(err); }
+});
+
+adminRouter.post("/curriculum", async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    const body = CurriculumBody.parse(req.body);
+    const ownsCourse = async (id: string) => Boolean(await prisma.course.findFirst({ where: { id, institutionId: user.institutionId }, select: { id: true } }));
+    let item: unknown;
+    if (body.kind === "version") {
+      const program = await prisma.program.findFirst({ where: { id: body.programId, institutionId: user.institutionId } });
+      if (!program) throw Object.assign(new Error("Program not found"), { status: 400 });
+      item = await prisma.programVersion.create({ data: { institutionId: user.institutionId, programId: body.programId, label: body.label, effectiveOn: body.effectiveOn, totalCredits: body.totalCredits, status: body.status } });
+    } else if (body.kind === "requirement") {
+      const version = await prisma.programVersion.findFirst({ where: { id: body.programVersionId, institutionId: user.institutionId } });
+      if (!version || (body.courseId && !(await ownsCourse(body.courseId)))) throw Object.assign(new Error("Program version or course not found"), { status: 400 });
+      item = await prisma.degreeRequirement.create({ data: { institutionId: user.institutionId, programVersionId: body.programVersionId, courseId: body.courseId ?? null, courseCode: body.courseCode, title: body.title, credits: body.credits, kind: body.requirementKind, sortOrder: body.sortOrder } });
+    } else if (body.kind === "prerequisite") {
+      if (body.courseId === body.requiredCourseId || !(await ownsCourse(body.courseId)) || !(await ownsCourse(body.requiredCourseId))) throw Object.assign(new Error("Select two different courses from this institution"), { status: 400 });
+      item = await prisma.coursePrerequisite.create({ data: { institutionId: user.institutionId, courseId: body.courseId, prerequisiteCourseId: body.requiredCourseId } });
+    } else if (body.kind === "corequisite") {
+      if (body.courseId === body.requiredCourseId || !(await ownsCourse(body.courseId)) || !(await ownsCourse(body.requiredCourseId))) throw Object.assign(new Error("Select two different courses from this institution"), { status: 400 });
+      item = await prisma.courseCorequisite.create({ data: { institutionId: user.institutionId, courseId: body.courseId, corequisiteCourseId: body.requiredCourseId } });
+    } else {
+      if (!(await ownsCourse(body.courseId)) || body.seatsOpen > body.seatsTotal) throw Object.assign(new Error("Course not found or open seats exceed total seats"), { status: 400 });
+      item = await prisma.courseOffering.create({ data: { institutionId: user.institutionId, courseId: body.courseId, termCode: body.termCode, termName: body.termName, seatsOpen: body.seatsOpen, seatsTotal: body.seatsTotal, status: body.status } });
+    }
+    await prisma.auditEvent.create({ data: { institutionId: user.institutionId, actorId: user.accountId, eventName: `admin.curriculum.${body.kind}.create`, purpose: "curriculum_management", afterJson: JSON.stringify(item), source: "api", correlationId: randomUUID() } });
+    res.status(201).json(item);
+  } catch (err) { next(err); }
+});
+
+adminRouter.delete("/curriculum/:kind/:id", async (req, res, next) => {
+  try {
+    const user = (req as unknown as AuthedRequest).user;
+    const id = z.string().uuid().parse(req.params.id);
+    const kind = z.enum(["version", "requirement", "prerequisite", "corequisite", "offering"]).parse(req.params.kind);
+    const where = { id, institutionId: user.institutionId };
+    const result = kind === "version" ? await prisma.programVersion.deleteMany({ where }) : kind === "requirement" ? await prisma.degreeRequirement.deleteMany({ where }) : kind === "prerequisite" ? await prisma.coursePrerequisite.deleteMany({ where }) : kind === "corequisite" ? await prisma.courseCorequisite.deleteMany({ where }) : await prisma.courseOffering.deleteMany({ where });
+    if (!result.count) throw Object.assign(new Error("Curriculum record not found"), { status: 404, code: "NOT_FOUND" });
+    await prisma.auditEvent.create({ data: { institutionId: user.institutionId, actorId: user.accountId, eventName: `admin.curriculum.${kind}.delete`, purpose: "curriculum_management", afterJson: JSON.stringify({ id }), source: "api", correlationId: randomUUID() } });
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+adminRouter.get("/degree-scenarios", async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    const rows = await prisma.degreePlanScenario.findMany({
+      where: { institutionId: user.institutionId },
+      include: { student: { include: { person: true } } },
+      orderBy: { createdAt: "desc" },
+      take: 500,
+    });
+    res.json({ items: rows.map((row) => ({ id: row.id, label: row.label, status: row.status, reviewNote: row.reviewNote, reviewedAt: row.reviewedAt?.toISOString() ?? null, createdAt: row.createdAt.toISOString(), studentId: row.studentId, studentNumber: row.student.studentNumber, studentName: `${row.student.person.givenName} ${row.student.person.familyName}`.trim(), assumptions: JSON.parse(row.assumptionsJson), result: JSON.parse(row.resultJson) })) });
+  } catch (err) { next(err); }
+});
+
+adminRouter.patch("/degree-scenarios/:id/review", async (req, res, next) => {
+  try {
+    const user = (req as unknown as AuthedRequest).user;
+    const id = z.string().uuid().parse(req.params.id);
+    const body = z.object({ status: z.enum(["approved", "rejected"]), note: z.string().trim().min(3).max(2000) }).parse(req.body);
+    const current = await prisma.degreePlanScenario.findFirst({ where: { id, institutionId: user.institutionId } });
+    if (!current) throw Object.assign(new Error("Degree scenario not found"), { status: 404, code: "NOT_FOUND" });
+    if (current.status !== "draft") throw Object.assign(new Error("This scenario has already been reviewed"), { status: 409, code: "CONFLICT" });
+    const claimed = await prisma.degreePlanScenario.updateMany({ where: { id, institutionId: user.institutionId, status: "draft" }, data: { status: body.status, reviewNote: body.note, reviewedAt: new Date(), reviewedById: user.accountId, rowVersion: { increment: 1 } } });
+    if (claimed.count !== 1) throw Object.assign(new Error("The scenario changed while reviewing it"), { status: 409, code: "CONFLICT" });
+    res.json({ ok: true, id, status: body.status });
+  } catch (err) { next(err); }
 });
 
 adminRouter.get("/student-documents", async (req, res, next) => {

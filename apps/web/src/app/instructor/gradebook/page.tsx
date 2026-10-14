@@ -7,6 +7,7 @@ import { CourseReviewShell } from "@/components/CourseReviewShell";
 import { api, loadSession, type Session } from "@/lib/api";
 
 const NIL = "00000000-0000-4000-8000-000000000000";
+const publishKey = (sectionId: string, ids: string[]) => `grade-publish:${sectionId}:${[...ids].sort().join(",")}`;
 
 /** RFC UUID or demo seed ids (e.g. a1a1a1a1-s0s0-…). Matches packages/contracts Uuid. */
 function isSectionId(value: string | null | undefined): value is string {
@@ -335,7 +336,7 @@ function InstructorGradebookInner() {
         {
           method: "POST",
           body: JSON.stringify({ gradeItemIds: ids }),
-          headers: { "idempotency-key": `web-${Date.now()}` },
+          headers: { "idempotency-key": publishKey(sectionId, ids) },
         },
         session.accessToken,
       );
@@ -345,6 +346,36 @@ function InstructorGradebookInner() {
       setError(err instanceof Error ? err.message : "Publish failed");
     } finally {
       setPublishing(false);
+    }
+  }
+
+  async function requestCorrection(gradeItemId: string, currentScore: number | null, maxScore: number, rowVersion: number, feedback: string | null) {
+    if (!session || currentScore == null) return;
+    const entered = window.prompt(`Corrected score (0–${maxScore})`, String(currentScore));
+    if (entered == null) return;
+    const score = Number(entered);
+    if (!Number.isFinite(score) || score < 0 || score > maxScore) {
+      setError(`Score must be between 0 and ${maxScore}.`);
+      return;
+    }
+    const reason = window.prompt("Reason for correcting this published grade (required)", "Correction after grade review");
+    if (!reason?.trim() || reason.trim().length < 5) {
+      setError("Enter a correction reason of at least 5 characters.");
+      return;
+    }
+    setSaving(gradeItemId);
+    setError(null);
+    try {
+      const result = await api<{ approvalRequestId: string }>(
+        `/grade-items/${gradeItemId}/corrections`,
+        { method: "POST", body: JSON.stringify({ score, feedback, reason: reason.trim(), rowVersion }) },
+        session.accessToken,
+      );
+      setStatus(`Grade correction submitted for approval · ${result.approvalRequestId.slice(0, 8)}…`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Correction request failed");
+    } finally {
+      setSaving(null);
     }
   }
 
@@ -534,6 +565,14 @@ function InstructorGradebookInner() {
                                       {cell.score}/{cell.maxScore}
                                     </strong>
                                     <span className="mh-teacher-badge is-success">published</span>
+                                    <button
+                                      type="button"
+                                      className="mh-teacher-link"
+                                      disabled={saving === cell.gradeItemId}
+                                      onClick={() => void requestCorrection(cell.gradeItemId, cell.score, cell.maxScore, cell.rowVersion, cell.feedback ?? null)}
+                                    >
+                                      {saving === cell.gradeItemId ? "Submitting…" : "Request correction"}
+                                    </button>
                                     {cell.feedback ? (
                                       <details>
                                         <summary>Feedback</summary>

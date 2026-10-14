@@ -1,4 +1,6 @@
 import { prisma } from "@myheritage/db";
+import { writeAuditAndOutbox } from "@myheritage/events";
+import { randomUUID } from "node:crypto";
 import { POLICY } from "./policy.js";
 
 export async function buildComplianceInbox(input: {
@@ -116,40 +118,31 @@ export async function submitExplanation(input: {
     throw Object.assign(new Error("Not allowed"), { status: 403, code: "FORBIDDEN" });
   }
 
-  const updated = await prisma.complianceCase.update({
-    where: { id: c.id },
-    data: {
-      explanation: text,
-      status: "explained",
-      resolvedAt: new Date(),
-      resolvedById: input.accountId,
-      rowVersion: { increment: 1 },
-    },
-  });
-
-  if (ownsStudent && c.caseKind === POLICY.CASE_KINDS.STUDENT_MISS_PAUSE) {
-    const stillPaused = await prisma.complianceCase.count({
-      where: {
-        institutionId: input.institutionId,
-        subjectType: "student",
-        subjectRef: student!.id,
-        caseKind: POLICY.CASE_KINDS.STUDENT_MISS_PAUSE,
-        status: "open",
+  const updated = await prisma.$transaction(async (tx) => {
+    const row = await tx.complianceCase.update({
+      where: { id: c.id },
+      data: {
+        explanation: text,
+        status: "explained",
+        resolvedAt: null,
+        resolvedById: null,
+        rowVersion: { increment: 1 },
       },
     });
-    if (stillPaused === 0) {
-      await prisma.account.updateMany({
-        where: { institutionId: input.institutionId, personId: input.personId, status: "paused" },
-        data: { status: "active" },
-      });
-      await prisma.student.update({
-        where: { id: student!.id },
-        data: { standing: "warning" },
-      });
-    }
-  }
+    await writeAuditAndOutbox(tx, {
+      institutionId: input.institutionId,
+      actorId: input.accountId,
+      eventName: "ComplianceCase.explained",
+      purpose: "compliance",
+      before: { caseId: c.id, status: c.status, explanation: c.explanation },
+      after: { caseId: c.id, status: "explained", explanation: text, reviewRequired: true },
+      source: "compliance.explain",
+      correlationId: randomUUID(),
+    });
+    return row;
+  });
 
-  return { case: updated, restored: ownsStudent && c.caseKind === POLICY.CASE_KINDS.STUDENT_MISS_PAUSE };
+  return { case: updated, restored: false, reviewRequired: true };
 }
 
 function safeJson(raw: string) {

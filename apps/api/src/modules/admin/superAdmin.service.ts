@@ -242,6 +242,45 @@ export async function listAccessLevels(institutionId: string): Promise<AccessLev
   return levels.some((l) => l.id === "registrar") ? levels : [...levels, registrarAccessLevel()];
 }
 
+async function syncAccessLevelDefinition(institutionId: string, level: AccessLevel) {
+  return prisma.accessLevelDefinition.upsert({
+    where: { institutionId_key: { institutionId, key: level.id } },
+    create: {
+      institutionId,
+      key: level.id,
+      name: level.name,
+      profileType: level.profileType,
+      assignableByNonAdmins: level.assignableByNonAdmins,
+      permissionsJson: JSON.stringify(level.permissions),
+    },
+    update: {
+      name: level.name,
+      profileType: level.profileType,
+      assignableByNonAdmins: level.assignableByNonAdmins,
+      permissionsJson: JSON.stringify(level.permissions),
+      active: true,
+    },
+  });
+}
+
+async function assignNormalizedAccessLevel(institutionId: string, accountId: string, level: AccessLevel, actorId: string) {
+  const definition = await syncAccessLevelDefinition(institutionId, level);
+  const current = await prisma.accountAccessLevelAssignment.findUnique({
+    where: { institutionId_accountId: { institutionId, accountId } },
+  });
+  if (current?.accessLevelId === definition.id) return;
+  await prisma.$transaction([
+    prisma.accountAccessLevelAssignment.upsert({
+      where: { institutionId_accountId: { institutionId, accountId } },
+      create: { institutionId, accountId, accessLevelId: definition.id, assignedById: actorId },
+      update: { accessLevelId: definition.id, assignedAt: new Date(), assignedById: actorId },
+    }),
+    prisma.accountAccessLevelHistory.create({
+      data: { institutionId, accountId, accessLevelId: definition.id, changedById: actorId },
+    }),
+  ]);
+}
+
 export const AccessLevelBody = z.object({
   name: z.string().trim().min(1).max(80),
   profileType: z.enum(PROFILE_TYPES),
@@ -301,6 +340,7 @@ async function upsertAccessLevelLocked(user: SessionClaims, id: string | null, b
     levels.push(saved);
   }
   await kvSet(user.institutionId, "access-levels", levels);
+  await syncAccessLevelDefinition(user.institutionId, saved);
   await audit(user, id ? "admin.access_level.update" : "admin.access_level.create", { id: saved.id, name: saved.name });
   return saved;
 }
@@ -325,6 +365,7 @@ async function deleteAccessLevelLocked(user: SessionClaims, id: string) {
     "access-levels",
     levels.filter((l) => l.id !== id),
   );
+  await prisma.accessLevelDefinition.updateMany({ where: { institutionId: user.institutionId, key: id }, data: { active: false } });
   await audit(user, "admin.access_level.delete", { id, name: level.name });
   return { ok: true as const };
 }
@@ -741,6 +782,7 @@ async function saveUserLocked(user: SessionClaims, accountId: string | null, bod
     ...(body.customizeRegional ? { campuses: body.campuses } : {}),
   };
   await kvSet(institutionId, "user-meta", meta);
+  await assignNormalizedAccessLevel(institutionId, id!, level, user.accountId);
   if (level.profileType === "Student") {
     const account = await prisma.account.findUniqueOrThrow({ where: { id: id! }, select: { personId: true } });
     await ensureStudentRecord(institutionId, account.personId);
@@ -849,6 +891,26 @@ export async function patchStudentMeta(institutionId: string, studentId: string,
     }
     map[studentId] = next as StudentMeta;
     await kvSet(institutionId, "student-meta", map);
+    const status = patch.status && patch.status.trim();
+    if (status) {
+      const key = catalogKey(status) || status.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      const definition = await prisma.studentStatusDefinition.upsert({
+        where: { institutionId_key: { institutionId, key } },
+        create: { institutionId, key, name: status },
+        update: { name: status, active: true },
+      });
+      const current = await prisma.studentLifecycleStatus.findUnique({ where: { institutionId_studentId: { institutionId, studentId } } });
+      if (current?.statusDefinitionId !== definition.id) {
+        await prisma.$transaction([
+          prisma.studentLifecycleStatus.upsert({
+            where: { institutionId_studentId: { institutionId, studentId } },
+            create: { institutionId, studentId, statusDefinitionId: definition.id },
+            update: { statusDefinitionId: definition.id, assignedAt: new Date() },
+          }),
+          prisma.studentLifecycleStatusHistory.create({ data: { institutionId, studentId, statusDefinitionId: definition.id } }),
+        ]);
+      }
+    }
     return map[studentId];
   });
 }
@@ -893,8 +955,9 @@ const norm = (v: string | null | undefined) => (v ?? "").toLowerCase().trim();
 const has = (hay: string | null | undefined, needle: string | undefined) => !needle || norm(hay).includes(norm(needle));
 const digits = (v: string | null | undefined) => (v ?? "").replace(/\D/g, "");
 
-export async function searchStudents(institutionId: string, query: z.infer<typeof StudentSearchQuery>) {
-  const [students, metaMap] = await Promise.all([
+export async function searchStudents(user: SessionClaims, query: z.infer<typeof StudentSearchQuery>) {
+  const institutionId = user.institutionId;
+  const [students, metaMap, access] = await Promise.all([
     prisma.student.findMany({
       where: { institutionId },
       include: {
@@ -903,13 +966,17 @@ export async function searchStudents(institutionId: string, query: z.infer<typeo
       },
     }),
     kvGet<Record<string, StudentMeta>>(institutionId, "student-meta", {}),
+    assertPermission(user, "studentRecords", "view"),
   ]);
 
   const programFilter = query.program
     ? STUDENT_PROGRAMS.find((p) => p.code === query.program) ?? { code: query.program, name: query.program }
     : null;
 
-  const rows = students
+  const campusScoped = access.superAdmin || access.campuses.length === CAMPUSES.length
+    ? students
+    : students.filter((student) => access.campuses.includes(metaMap[student.id]?.campus ?? ""));
+  const rows = campusScoped
     .map((s) => {
       const m = metaMap[s.id] ?? {};
       const status = m.status ?? (s.enrolments.length ? "Active Student" : "Registered Student");

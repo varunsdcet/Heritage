@@ -21,6 +21,7 @@ type TeacherLiveResponse = {
     email: string;
     studentCount: number;
     sectionCount: number;
+    courseCount: number;
     draftGradeCount: number;
     unreadNotifications: number;
     workshopCounts?: {
@@ -291,7 +292,7 @@ export function TeacherLiveProvider({
       setBusy(true);
       setToast(null);
       try {
-        const res = await api<TeacherLiveResponse & { result?: { href?: string } }>(
+        const res = await api<TeacherLiveResponse & { result?: { href?: string; download?: { filename?: string; mime?: string; content?: string } } }>(
           `/instructor/sis/action`,
           {
             method: "POST",
@@ -309,6 +310,15 @@ export function TeacherLiveProvider({
         if (nextHref) {
           window.location.assign(nextHref);
           return true;
+        }
+        if (res.result?.download?.content != null) {
+          const blob = new Blob([res.result.download.content], { type: res.result.download.mime || "text/plain" });
+          const url = URL.createObjectURL(blob);
+          const anchor = document.createElement("a");
+          anchor.href = url;
+          anchor.download = res.result.download.filename || "download.txt";
+          anchor.click();
+          URL.revokeObjectURL(url);
         }
         setToast(res.message || `Saved · ${action}`);
         window.setTimeout(() => setToast(null), 2800);

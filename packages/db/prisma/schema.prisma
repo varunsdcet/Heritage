@@ -49,19 +49,19 @@ model Person {
 }
 
 model Account {
-  id                    String                 @id @default(uuid())
+  id                    String                        @id @default(uuid())
   institutionId         String
   personId              String
   email                 String
   passwordHash          String
-  status                String                 @default("active")
-  mfaEnabled            Boolean                @default(false)
-  timezone              String                 @default("America/Vancouver")
-  rolesJson             String                 @default("[]")
-  createdAt             DateTime               @default(now())
-  updatedAt             DateTime               @updatedAt
-  rowVersion            Int                    @default(1)
-  person                Person                 @relation(fields: [personId], references: [id])
+  status                String                        @default("active")
+  mfaEnabled            Boolean                       @default(false)
+  timezone              String                        @default("America/Vancouver")
+  rolesJson             String                        @default("[]")
+  createdAt             DateTime                      @default(now())
+  updatedAt             DateTime                      @updatedAt
+  rowVersion            Int                           @default(1)
+  person                Person                        @relation(fields: [personId], references: [id])
   sessions              Session[]
   notifications         Notification[]
   aiInteractions        AiInteraction[]
@@ -69,6 +69,7 @@ model Account {
   mailboxSettings       MailboxSettings?
   mailPlacements        MailThreadPlacement[]
   mailDistributionLists MailDistributionList[]
+  accessLevelAssignment AccountAccessLevelAssignment?
 
   @@unique([institutionId, email])
   @@index([institutionId])
@@ -105,20 +106,20 @@ model SecurityPolicy {
 }
 
 model Student {
-  id                     String                  @id @default(uuid())
+  id                     String                          @id @default(uuid())
   institutionId          String
   personId               String
   studentNumber          String
   programName            String
   programVersionId       String?
   cohortId               String?
-  standing               String                  @default("good")
-  createdAt              DateTime                @default(now())
-  updatedAt              DateTime                @updatedAt
-  rowVersion             Int                     @default(1)
-  person                 Person                  @relation(fields: [personId], references: [id])
-  programVersion         ProgramVersion?         @relation(fields: [programVersionId], references: [id])
-  cohort                 Cohort?                 @relation(fields: [cohortId], references: [id])
+  standing               String                          @default("good")
+  createdAt              DateTime                        @default(now())
+  updatedAt              DateTime                        @updatedAt
+  rowVersion             Int                             @default(1)
+  person                 Person                          @relation(fields: [personId], references: [id])
+  programVersion         ProgramVersion?                 @relation(fields: [programVersionId], references: [id])
+  cohort                 Cohort?                         @relation(fields: [cohortId], references: [id])
   enrolments             Enrolment[]
   gradeItems             GradeItem[]
   submissions            Submission[]
@@ -143,11 +144,103 @@ model Student {
   extracurricularRecords ExtracurricularRecord[]
   badges                 StudentBadge[]
   documents              StudentDocument[]
+  lifecycleStatus        StudentLifecycleStatus?
+  lifecycleHistory       StudentLifecycleStatusHistory[]
 
   @@unique([institutionId, studentNumber])
   @@index([institutionId])
   @@index([programVersionId])
   @@index([cohortId])
+}
+
+/// Normalized student lifecycle catalogue and assignment. Legacy metadata is
+/// retained during rollout, but authorization and reporting can now join by FK.
+model StudentStatusDefinition {
+  id            String                          @id @default(uuid())
+  institutionId String
+  key           String
+  name          String
+  parentKey     String?
+  flagsJson     String                          @default("{}")
+  active        Boolean                         @default(true)
+  createdAt     DateTime                        @default(now())
+  updatedAt     DateTime                        @updatedAt
+  assignments   StudentLifecycleStatus[]
+  history       StudentLifecycleStatusHistory[]
+
+  @@unique([institutionId, key])
+  @@unique([id, institutionId])
+}
+
+model StudentLifecycleStatus {
+  id                 String                  @id @default(uuid())
+  institutionId      String
+  studentId          String                  @unique
+  statusDefinitionId String
+  assignedAt         DateTime                @default(now())
+  assignedById       String?
+  student            Student                 @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  statusDefinition   StudentStatusDefinition @relation(fields: [statusDefinitionId, institutionId], references: [id, institutionId], onDelete: Restrict)
+
+  @@unique([institutionId, studentId])
+  @@index([institutionId, statusDefinitionId])
+}
+
+model StudentLifecycleStatusHistory {
+  id                 String                  @id @default(uuid())
+  institutionId      String
+  studentId          String
+  statusDefinitionId String
+  changedAt          DateTime                @default(now())
+  changedById        String?
+  student            Student                 @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  statusDefinition   StudentStatusDefinition @relation(fields: [statusDefinitionId, institutionId], references: [id, institutionId], onDelete: Restrict)
+
+  @@index([institutionId, studentId, changedAt])
+}
+
+model AccessLevelDefinition {
+  id                    String                         @id @default(uuid())
+  institutionId         String
+  key                   String
+  name                  String
+  profileType           String
+  assignableByNonAdmins Boolean                        @default(false)
+  permissionsJson       String                         @default("{}")
+  active                Boolean                        @default(true)
+  createdAt             DateTime                       @default(now())
+  updatedAt             DateTime                       @updatedAt
+  assignments           AccountAccessLevelAssignment[]
+  history               AccountAccessLevelHistory[]
+
+  @@unique([institutionId, key])
+  @@unique([id, institutionId])
+}
+
+model AccountAccessLevelAssignment {
+  id            String                @id @default(uuid())
+  institutionId String
+  accountId     String                @unique
+  accessLevelId String
+  assignedAt    DateTime              @default(now())
+  assignedById  String?
+  account       Account               @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  accessLevel   AccessLevelDefinition @relation(fields: [accessLevelId, institutionId], references: [id, institutionId], onDelete: Restrict)
+
+  @@unique([institutionId, accountId])
+  @@index([institutionId, accessLevelId])
+}
+
+model AccountAccessLevelHistory {
+  id            String                @id @default(uuid())
+  institutionId String
+  accountId     String
+  accessLevelId String
+  changedAt     DateTime              @default(now())
+  changedById   String?
+  accessLevel   AccessLevelDefinition @relation(fields: [accessLevelId, institutionId], references: [id, institutionId], onDelete: Restrict)
+
+  @@index([institutionId, accountId, changedAt])
 }
 
 model Program {
@@ -205,6 +298,7 @@ model ProgramPlan {
   items         ProgramPlanItem[]
 
   @@index([institutionId, studentId])
+  @@index([institutionId, studentId, status])
   @@index([cohortId])
 }
 
@@ -310,19 +404,23 @@ model CoursePrerequisite {
 }
 
 model DegreePlanScenario {
-  id              String   @id @default(uuid())
+  id              String    @id @default(uuid())
   institutionId   String
   studentId       String
   label           String
   assumptionsJson String
   resultJson      String
-  status          String   @default("draft")
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  rowVersion      Int      @default(1)
-  student         Student  @relation(fields: [studentId], references: [id])
+  status          String    @default("draft")
+  reviewNote      String?
+  reviewedAt      DateTime?
+  reviewedById    String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  rowVersion      Int       @default(1)
+  student         Student   @relation(fields: [studentId], references: [id])
 
   @@index([institutionId, studentId, createdAt])
+  @@index([institutionId, status, createdAt])
 }
 
 model KnowledgeDocument {
@@ -406,6 +504,7 @@ model Section {
   folders            CourseFolder[]
   syllabusTopics     SyllabusTopic[]
 
+  @@unique([institutionId, termId, code])
   @@index([institutionId])
   @@index([academicBlockId])
 }
@@ -615,6 +714,7 @@ model Notification {
   body               String
   readAt             DateTime?
   templateKey        String?
+  dedupeKey          String?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
   rowVersion         Int       @default(1)
@@ -622,6 +722,7 @@ model Notification {
 
   @@index([institutionId])
   @@index([recipientAccountId])
+  @@unique([institutionId, recipientAccountId, dedupeKey])
 }
 
 model MessageThread {
@@ -843,7 +944,7 @@ model Placement {
   createdAt     DateTime              @default(now())
   updatedAt     DateTime              @updatedAt
   rowVersion    Int                   @default(1)
-  employerOrg   EmployerOrg           @relation(fields: [employerOrgId], references: [id], onDelete: Cascade)
+  employerOrg   EmployerOrg           @relation(fields: [employerOrgId], references: [id], onDelete: Restrict)
   student       Student?              @relation(fields: [studentId], references: [id])
   hours         HoursEntry[]
   evaluations   PlacementEvaluation[]
@@ -1060,6 +1161,7 @@ model Assessment {
   durationMinutes Int                 @default(60)
   maxAttempts     Int                 @default(1)
   status          String              @default("published")
+  questionsJson   String              @default("[]")
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
   rowVersion      Int                 @default(1)
@@ -1079,6 +1181,9 @@ model AssessmentAttempt {
   startedAt     DateTime   @default(now())
   submittedAt   DateTime?
   expiresAt     DateTime
+  answersJson   String     @default("{}")
+  score         Float?
+  maxScore      Float?
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
   rowVersion    Int        @default(1)
@@ -1106,6 +1211,7 @@ model AttendanceRecord {
   section        Section       @relation(fields: [sectionId], references: [id])
   classSession   ClassSession? @relation(fields: [classSessionId], references: [id])
 
+  @@unique([institutionId, studentId, sectionId, meetingLabel])
   @@index([institutionId, studentId])
   @@index([sectionId, recordedAt])
   @@index([sectionId, meetingLabel])
@@ -1152,7 +1258,7 @@ model FinanceLedgerEntry {
   institutionId   String
   studentId       String
   label           String
-  amountCad       Float
+  amountCad       Decimal        @db.Decimal(14, 2)
   kind            String
   status          String         @default("open")
   source          String?

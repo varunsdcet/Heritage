@@ -10,7 +10,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-heritage}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-HeritagePg!2026}
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}"
       POSTGRES_DB: ${POSTGRES_DB:-heritage}
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -29,11 +29,14 @@ services:
     env_file:
       - .env.production
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-heritage}:${POSTGRES_PASSWORD:-HeritagePg!2026}@postgres:5432/${POSTGRES_DB:-heritage}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-heritage}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}@postgres:5432/${POSTGRES_DB:-heritage}
       API_PORT: "4000"
       WEB_ORIGIN: ${WEB_ORIGIN:-http://46.202.163.202}
       NODE_ENV: production
+      ENABLE_API_SCHEDULERS: "true"
+      PORTAL_COOKIE_SECRET: ${PORTAL_COOKIE_SECRET}
       FILE_STORAGE_ROOT: /app/var/uploads
+      OBJECT_STORAGE_ROOT: /app/var/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -43,6 +46,39 @@ services:
       - "4000:4000"
     volumes:
       - uploads:/app/var/uploads
+    networks: [internal]
+
+  # Daily, checksummed backups of PostgreSQL and the persistent object volume.
+  # BACKUP_ROOT should point at storage copied off-host by the VPS backup agent.
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-heritage}
+      PGPASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}"
+      PGDATABASE: ${POSTGRES_DB:-heritage}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - uploads:/objects:ro
+      - ${BACKUP_ROOT:-./backups/runtime}:/backups
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        while true; do
+          stamp=$$(date -u +%Y%m%dT%H%M%SZ)
+          mkdir -p /backups/$$stamp
+          pg_dump --format=custom --file=/backups/$$stamp/postgres.dump
+          tar -C /objects -czf /backups/$$stamp/objects.tar.gz .
+          sha256sum /backups/$$stamp/postgres.dump /backups/$$stamp/objects.tar.gz > /backups/$$stamp/SHA256SUMS
+          find /backups -mindepth 1 -maxdepth 1 -type d -mtime +$${BACKUP_RETENTION_DAYS} -exec rm -rf {} +
+          sleep $${BACKUP_INTERVAL_SECONDS}
+        done
     networks: [internal]
 
   web:
@@ -55,6 +91,7 @@ services:
     restart: unless-stopped
     environment:
       NODE_ENV: production
+      PORTAL_COOKIE_SECRET: ${PORTAL_COOKIE_SECRET}
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/__api}
       API_PROXY_TARGET: ${API_PROXY_TARGET:-http://api:4000}
       GOOGLE_TTS_API_KEY: ${GOOGLE_TTS_API_KEY:-}
@@ -67,7 +104,8 @@ services:
       HEYGEN_API_KEY: ${HEYGEN_API_KEY:-}
       HEYGEN_VOICE_ID: ${HEYGEN_VOICE_ID:-}
       HEYGEN_MALE_VOICE_ID: ${HEYGEN_MALE_VOICE_ID:-}
-      XTTS_URL: ${XTTS_URL:-http://xtts:8020,http://xtts2:8020}
+      XTTS_LICENSE_ACCEPTED: ${XTTS_LICENSE_ACCEPTED:-0}
+      XTTS_URL: ${XTTS_URL:-}
     depends_on:
       - api
     expose:
@@ -84,7 +122,7 @@ services:
     env_file:
       - .env.production
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-heritage}:${POSTGRES_PASSWORD:-HeritagePg!2026}@postgres:5432/${POSTGRES_DB:-heritage}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-heritage}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}@postgres:5432/${POSTGRES_DB:-heritage}
       NODE_ENV: production
     depends_on:
       postgres:
@@ -97,6 +135,7 @@ services:
   # XTTS only uses about one CPU core per request, so two copies (~3.5 GB RAM each) prepare a lecture twice as fast;
   # generated audio is shared through the xtts-cache volume.
   xtts: &xtts
+    profiles: ["xtts"]
     build:
       context: ./apps/xtts
       dockerfile: ../../deploy/Dockerfile.xtts

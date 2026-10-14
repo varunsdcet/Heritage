@@ -243,14 +243,19 @@ export function weeklyText(value: unknown) {
   return days.length ? days.map(([d, t]) => `${d.slice(0, 3)} ${fmtTime(t.start)}–${fmtTime(t.end)}`).join(", ") : "TBD";
 }
 
-function PeoplePicker({ value, onChange, options, single, label }: { value: unknown; onChange: (v: unknown) => void; options: Opt[]; single?: boolean; label: string }) {
+function PeoplePicker({ value, onChange, options, single, label, placeholder }: { value: unknown; onChange: (v: unknown) => void; options: Opt[]; single?: boolean; label: string; placeholder?: string }) {
   const ids = single ? (str(value) ? [str(value)] : []) : Array.isArray(value) ? (value as string[]) : [];
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const name = (id: string) => options.find((o) => o.id === id)?.label ?? "(user removed)";
   const hits = useMemo(() => {
     const n = q.trim().toLowerCase();
-    return n ? options.filter((o) => !ids.includes(o.id) && o.label.toLowerCase().includes(n)).slice(0, 8) : [];
+    const available = options.filter((o) => !ids.includes(o.id));
+    if (!n) return available.slice(0, 20);
+    return available
+      .filter((o) => o.label.toLowerCase().includes(n))
+      .sort((a, b) => Number(!a.label.toLowerCase().startsWith(n)) - Number(!b.label.toLowerCase().startsWith(n)) || a.label.localeCompare(b.label))
+      .slice(0, 100);
   }, [q, options, ids]);
   const pick = (id: string) => {
     onChange(single ? id : [...ids, id]);
@@ -276,7 +281,7 @@ function PeoplePicker({ value, onChange, options, single, label }: { value: unkn
           <input
             className="mh-sa__input"
             aria-label={label}
-            placeholder="Start typing the user's name"
+            placeholder={placeholder ?? "Start typing the user's name"}
             value={q}
             onChange={(e) => {
               setQ(e.target.value);
@@ -428,7 +433,7 @@ export function FieldControl({ field: f, value, values, onChange, meta, refs, ba
       break;
     case "person":
     case "people":
-      control = <PeoplePicker value={value} onChange={onChange} options={meta.staff} single={f.kind === "person"} label={f.label} />;
+      control = <PeoplePicker value={value} onChange={onChange} options={meta.staff} single={f.kind === "person"} label={f.label} placeholder={f.placeholder} />;
       break;
     case "weekly":
       control = <WeeklyEditor value={value} onChange={onChange} weekdays={meta.weekdays} />;

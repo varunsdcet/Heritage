@@ -45,6 +45,9 @@ import { askHeritageAi } from "../../lib/ask.js";
 import { adminCampusFacts, relevantFacts } from "./admin-facts.js";
 import { currentStudentId } from "../me/studentAlignment.js";
 import { ensureProgramVersion } from "../academic/program-version.js";
+import { hasOpenAssessmentAttempt } from "./assessment-policy.js";
+import { containsRestrictedSecret } from "./input-policy.js";
+import { GOVERNANCE_PATH, GovernancePolicy, assertGovernanceRoleAllowed, governancePolicy } from "./governance-policy.js";
 
 const DEGREE_CAPABILITIES = new Set(["student_advisor", "degree_progress", "what_if_planner"]);
 
@@ -91,16 +94,6 @@ ${sourceLines || "(none)"}`;
 
 function validationError(message: string, issues?: unknown) {
   return Object.assign(new Error(message), { code: "VALIDATION_ERROR", status: 400, issues });
-}
-
-function containsRestrictedSecret(question: string) {
-  return (
-    /\b\d{3}[- ]?\d{2}[- ]?\d{4}\b/.test(question) ||
-    /\b\d{3}[- ]?\d{3}[- ]?\d{3}\b/.test(question) ||
-    /-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(question) ||
-    /\b(?:passport(?: number)?|password|access[_ -]?token)\s*[:=]\s*\S{4,}/i.test(question) ||
-    /\bbearer\s+[A-Za-z0-9._~-]{12,}/i.test(question)
-  );
 }
 
 function parseStored<T>(value: string, fallback: T): T {
@@ -171,7 +164,7 @@ aiRouter.get("/governance", async (req, res, next) => {
       });
     }
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const [knowledgeCount, recent] = await Promise.all([
+    const [knowledgeCount, recent, policy] = await Promise.all([
       prisma.knowledgeDocument.count({
         where: { institutionId: user.institutionId, status: "published" },
       }),
@@ -179,6 +172,7 @@ aiRouter.get("/governance", async (req, res, next) => {
         where: { institutionId: user.institutionId, createdAt: { gte: since } },
         select: { latencyMs: true, estimatedTokens: true, resultStatus: true },
       }),
+      governancePolicy(user.institutionId),
     ]);
     const studyPolicy = resolveStudyCoachPolicy({});
     const requestsLast24h = recent.length;
@@ -219,9 +213,7 @@ aiRouter.get("/governance", async (req, res, next) => {
         tools: listAiTools(),
         policies: {
           ...studyPolicy,
-          studentAiAllowed: true,
-          instructorAiAllowed: true,
-          gradingAssistanceAllowed: true,
+          ...policy,
         },
         knowledgeSources: [
           {
@@ -238,6 +230,36 @@ aiRouter.get("/governance", async (req, res, next) => {
         },
       }),
     );
+  } catch (error) {
+    next(error);
+  }
+});
+
+aiRouter.put("/governance", async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    if (!user.roles.includes("admin")) {
+      throw Object.assign(new Error("Only administrators can change AI governance"), { code: "FORBIDDEN", status: 403 });
+    }
+    const policy = GovernancePolicy.parse(req.body);
+    await prisma.$transaction(async (tx) => {
+      await tx.sisScreenState.upsert({
+        where: { institutionId_path: { institutionId: user.institutionId, path: GOVERNANCE_PATH } },
+        create: { institutionId: user.institutionId, path: GOVERNANCE_PATH, payloadJson: JSON.stringify(policy) },
+        update: { payloadJson: JSON.stringify(policy), rowVersion: { increment: 1 } },
+      });
+      await writeAuditAndOutbox(tx, {
+        institutionId: user.institutionId,
+        actorId: user.accountId,
+        eventName: "AiGovernance.updated",
+        purpose: "ai_governance",
+        before: null,
+        after: policy,
+        source: "ai.governance",
+        correlationId: (req as AuthedRequest).correlationId,
+      });
+    });
+    res.json({ ok: true, policies: { ...resolveStudyCoachPolicy({}), ...policy } });
   } catch (error) {
     next(error);
   }
@@ -281,12 +303,33 @@ aiRouter.get("/history", async (req, res, next) => {
 });
 
 aiRouter.post("/ask", async (req, res, next) => {
+  const requestStartedAt = Date.now();
+  const requestUser = (req as AuthedRequest).user;
+  let failedQuestion: string | null = null;
+  let failedRole = "unknown";
+  let failedCapability: AiCapabilityId = "campus_coach";
   try {
-    const user = (req as AuthedRequest).user;
+    const user = requestUser;
     const parsed = AskCoachRequest.safeParse(req.body);
     if (!parsed.success) throw validationError("Invalid Coach question", parsed.error.issues);
     if (containsRestrictedSecret(parsed.data.question)) {
       throw validationError("Do not include government identifiers or credential secrets in Coach questions");
+    }
+    failedQuestion = parsed.data.question;
+    const governance = await governancePolicy(user.institutionId);
+    assertGovernanceRoleAllowed(governance, user.roles);
+    const usedLastHour = await prisma.aiInteraction.count({
+      where: {
+        institutionId: user.institutionId,
+        accountId: user.accountId,
+        createdAt: { gte: new Date(Date.now() - 3_600_000) },
+      },
+    });
+    if (usedLastHour >= governance.maxRequestsPerHour) {
+      throw Object.assign(new Error("Institutional AI request limit reached. Try again later."), {
+        code: "RATE_LIMITED",
+        status: 429,
+      });
     }
     const idempotencyKey = req.header("idempotency-key")?.trim();
     if (!idempotencyKey || idempotencyKey.length > 200) {
@@ -329,6 +372,7 @@ aiRouter.post("/ask", async (req, res, next) => {
     }
 
     const role = resolveCoachRole(user, parsed.data.contextPath);
+    failedRole = role;
     const question = parsed.data.question;
     const requested = parsed.data.capability;
 
@@ -351,6 +395,13 @@ aiRouter.post("/ask", async (req, res, next) => {
     ) {
       capability = /book.*advisor/.test(question.toLowerCase()) ? "student_advisor" : "student_services";
     }
+    failedCapability = capability;
+    if (capability === "grading_assistant" && !governance.gradingAssistanceAllowed) {
+      throw Object.assign(new Error("AI grading assistance is disabled by institutional policy"), {
+        code: "FORBIDDEN",
+        status: 403,
+      });
+    }
 
     const startedAt = Date.now();
 
@@ -364,6 +415,9 @@ aiRouter.post("/ask", async (req, res, next) => {
       const versionId = await ensureProgramVersion(user.institutionId, student.id).catch(() => null);
       if (versionId) student = { ...student, programVersionId: versionId };
     }
+    const assessmentAttemptOpen = student
+      ? await hasOpenAssessmentAttempt(user.institutionId, student.id)
+      : false;
 
     const ctx = buildAiRequestContext({
       user,
@@ -372,7 +426,7 @@ aiRouter.post("/ask", async (req, res, next) => {
       activeStudentId: student?.id,
       activeCourseId: parsed.data.activeCourseId,
       activeSectionId: parsed.data.activeSectionId,
-      assessmentAttemptOpen: parsed.data.assessmentAttemptOpen,
+      assessmentAttemptOpen,
     });
 
     const coachFacts = await buildCoachFacts(user, role);
@@ -388,7 +442,7 @@ aiRouter.post("/ask", async (req, res, next) => {
     let executiveMetrics: ExecutiveMetricsSnapshot | undefined;
     let gradingSuggestion: GradingSuggestion | undefined;
     let studyPolicy = capability === "study_coach" ? resolveStudyCoachPolicy({
-      assessmentAttemptOpen: parsed.data.assessmentAttemptOpen,
+      assessmentAttemptOpen,
       contextPath: parsed.data.contextPath,
     }) : undefined;
 
@@ -414,7 +468,7 @@ aiRouter.post("/ask", async (req, res, next) => {
           const appointment = (await executeAiTool("create_advisor_appointment", ctx, {
             studentId: student.id,
             topic: "Degree plan review",
-            startsAt: new Date(Date.now() + 3 * 86_400_000).toISOString(),
+            startsAt: parsed.data.appointmentStartsAt ?? new Date(Date.now() + 3 * 86_400_000).toISOString(),
             notes: "Requested via Ask Heritage",
           })) as { id: string; topic: string; startsAt: string; status: string };
           grounded = {
@@ -483,7 +537,7 @@ aiRouter.post("/ask", async (req, res, next) => {
         question,
         content: merged,
         contextPath: parsed.data.contextPath,
-        assessmentAttemptOpen: parsed.data.assessmentAttemptOpen,
+        assessmentAttemptOpen,
       });
       grounded = studyResult;
       studyPolicy = studyResult.studyPolicy;
@@ -493,7 +547,7 @@ aiRouter.post("/ask", async (req, res, next) => {
       executiveMetrics = await getExecutiveMetrics(user.institutionId);
       const all = await adminCampusFacts(user.institutionId);
       const cited = relevantFacts(question, all);
-      const base = adminAskDataAnswer({ question, facts: all });
+      const base = adminAskDataAnswer({ question, facts: cited });
       grounded = {
         ...base,
         sources: cited.map(({ id, title, uri }) => ({ id, title, uri })),
@@ -828,6 +882,41 @@ aiRouter.post("/ask", async (req, res, next) => {
       throw error;
     }
   } catch (error) {
+    if (failedQuestion) {
+      const interactionId = randomUUID();
+      const errorCode = String((error as { code?: string }).code || "AI_REQUEST_FAILED").slice(0, 80);
+      await prisma.$transaction(async (tx) => {
+        await tx.aiInteraction.create({
+          data: {
+            id: interactionId,
+            institutionId: requestUser.institutionId,
+            accountId: requestUser.accountId,
+            role: failedRole,
+            question: failedQuestion!,
+            answer: "Request failed",
+            sourcesJson: "[]",
+            suggestedActionsJson: "[]",
+            tier: "read_only",
+            provider: "campus_grounding_v1",
+            capability: failedCapability,
+            latencyMs: Date.now() - requestStartedAt,
+            estimatedTokens: Math.ceil(failedQuestion!.length / 4),
+            resultStatus: "failed",
+            status: "failed",
+          },
+        });
+        await writeAuditAndOutbox(tx, {
+          institutionId: requestUser.institutionId,
+          actorId: requestUser.accountId,
+          eventName: "AiInteraction.failed",
+          purpose: `grounded_${failedCapability}`,
+          before: null,
+          after: { interactionId, role: failedRole, capability: failedCapability, errorCode },
+          source: "ai.ask",
+          correlationId: (req as AuthedRequest).correlationId,
+        });
+      }).catch((auditError) => console.error("failed AI interaction audit failed", auditError));
+    }
     next(error);
   }
 });

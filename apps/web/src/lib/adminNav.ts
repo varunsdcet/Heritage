@@ -63,6 +63,7 @@ export const AI_NAV: AdminNavChild[] = [
 
 /** Programs, terms, calendars, scheduling, courses, student queues and faculty profiles live in the Heritage SIS modules above. */
 export const ACADEMICS_NAV: AdminNavChild[] = [
+  { label: "Curriculum Catalogue", href: "/admin/curriculum" },
   { label: "Change Requests", href: "/admin/ops/academics/change-requests" },
 ];
 
@@ -92,6 +93,7 @@ export const REGISTRAR_NAV: AdminNavChild[] = [
   { label: "Enrolments", href: "/admin/enrolments" },
   { label: "Transfer Credits", href: "/admin/ops/registrar/transfer-credits" },
   { label: "Academic Standing", href: "/admin/ops/registrar/academic-standing" },
+  { label: "Degree Scenario Review", href: "/admin/degree-scenarios" },
   { label: "Cohorts", href: "/admin/cohorts" },
   { label: "Retakes / Make-up", href: "/admin/retakes" },
   { label: "Extracurricular", href: "/admin/extracurricular" },
@@ -155,7 +157,7 @@ export const ADMIN_SIDEBAR: AdminSidebarEntry[] = [
   { type: "label", label: "CAMPUSONE SIS" },
   ...HERITAGE_SIDEBAR.map((item): AdminSidebarEntry => ({ type: "item", item })),
   { type: "item", item: { label: "Search Students", href: "/admin/student-search", icon: "school", gate: { modules: ["studentRecords"] } } },
-  { type: "item", item: { label: "My E-mail / Messages", href: "/admin/messages", icon: "mail" } },
+  { type: "item", item: { label: "My E-mail / Messages", href: "/admin/messages", icon: "mail", gate: { modules: ["emailMessaging"] } } },
   { type: "item", item: { label: "Ask CampusOne", href: "/admin/ai/ask", icon: "sparkle" } },
   { type: "label", label: "RECRUIT" },
   {

@@ -3,12 +3,14 @@ import { AskAboutGradeResponse, SendMessageRequest } from "@myheritage/contracts
 import { prisma } from "@myheritage/db";
 import { writeAuditAndOutbox } from "@myheritage/events";
 import { requireAuth, requireRoles, type AuthedRequest } from "../../middleware/auth.js";
+import { assertPermission } from "../admin/superAdmin.service.js";
 
 export const messagesRouter: Router = Router();
 
 messagesRouter.post("/ask-grade", requireAuth, requireRoles("student"), async (req, res, next) => {
   try {
     const user = (req as AuthedRequest).user;
+    await assertPermission(user, "emailMessaging", "edit");
     const body = SendMessageRequest.parse(req.body);
     if (!body.relatedGradeItemId) {
       throw Object.assign(new Error("relatedGradeItemId required"), { code: "VALIDATION", status: 400 });

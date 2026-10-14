@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { splitScript } from "@/lib/monicaScript";
+import { loadSession } from "@/lib/api";
 
 type Narration = { audio: string; mime?: string; duration: number; words: string[]; wtimes: number[]; wdurations: number[] };
 
@@ -200,9 +201,11 @@ export function MonicaLecture({ teacher = MONICA }: { teacher?: LectureTeacher }
       const cache = cacheRef.current;
       let pending = cache.get(i);
       if (!pending) {
+        const accessToken = loadSession()?.accessToken;
+        if (!accessToken) return Promise.reject(new Error("Sign in with an instructor account to use narration."));
         pending = fetch(teacher.narrateUrl, {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: { "content-type": "application/json", authorization: `Bearer ${accessToken}` },
           body: JSON.stringify({ text: parts[i].text, speed }),
         }).then(async (res) => {
           const json = await res.json().catch(() => ({}));

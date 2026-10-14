@@ -7,6 +7,7 @@ import { assertPermission } from "../admin/superAdmin.service.js";
 import { S, s, settingsOf } from "../admin/heritage/courses.js";
 import { StoryboardSlide, normalizeStoryboard, sanitizeLessonHtml } from "./aiDraftContent.js";
 import { isFacultyAssigned } from "./sectionFaculty.js";
+import { assertInstitutionAiAllowed } from "../ai/governance-policy.js";
 
 export const AiDraftRequest = z.object({
   path: z.string().min(1),
@@ -63,6 +64,7 @@ export async function loadSectionForDraft(user: SessionClaims, path: string) {
 }
 
 export async function generateAiDraft(user: SessionClaims, input: z.infer<typeof AiDraftRequest>) {
+  await assertInstitutionAiAllowed(user.institutionId, user.roles);
   const section = await loadSectionForDraft(user, input.path);
   const course = (await settingsOf(user.institutionId, S.courseSettings, [section.courseId])).get(section.courseId)?.data ?? {};
   const description = s(course.description).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 1500);

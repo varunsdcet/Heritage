@@ -248,7 +248,12 @@ const SESSION_FIELDS: Field[] = [
   f("sameAsClassroom", "Same as classroom size", "bool", { dflt: false, section: "Session Settings" }),
   sel("selfEnrolment", "Student Self-Enrolment", ["Disabled", "Enabled"], { section: "Session Settings" }),
   f("feedIn", "This is a feed-in course session", "bool", { dflt: false, section: "Session Settings" }),
-  f("instructors", "Instructor(s)", "people", { dflt: [], section: "Session Instruction & Accesses" }),
+  f("instructors", "Faculty Members (Multiple Select)", "people", {
+    dflt: [],
+    section: "Session Instruction & Accesses",
+    placeholder: "Search and add faculty members",
+    hint: "Select faculty members one by one. Every selected faculty stays as a removable chip.",
+  }),
   f("assistants", "Teaching Assistant(s)", "people", { dflt: [], section: "Session Instruction & Accesses" }),
   f("guests", "Guest(s)", "people", { dflt: [], section: "Session Instruction & Accesses" }),
   f("startDate", "Start Date", "date", { section: "Session Schedule" }),

@@ -3,6 +3,7 @@ import type { AuthedRequest } from "../../../middleware/auth.js";
 import { addFee, applyPayment, createDisbursement, removeDisbursement, removeFee, updateDisbursement, updateFee } from "./finance.ledger.js";
 import {
   addFlag,
+  archiveStudentProfile,
   attendance,
   auditTrail,
   changeStatus,
@@ -30,6 +31,7 @@ import {
   deleteCorrespondence,
   deleteRequirement,
   getCorrespondence,
+  generateStudentDocument,
   listActions,
   listCases,
   listCorrespondence,
@@ -42,8 +44,10 @@ import {
   uploadRequirement,
 } from "./students.comms.js";
 import { addTest, enrolProgram, finalMarks, listTests, programPlan, transcriptPdf } from "./students.plan.js";
+import { graduateStudent } from "../../academic/graduation.service.js";
 import {
   academicAlerts,
+  resolveAcademicAlert,
   approveGradeSubmission,
   badgeQueue,
   bulkLog,
@@ -57,6 +61,7 @@ import {
   studentFlags,
   studentRequirements,
   transcriptChanges,
+  decideTranscriptChange,
   withdrawRequests,
 } from "./students.queues.js";
 import {
@@ -81,8 +86,18 @@ import {
   updateAward,
   updatePlan,
 } from "./students.finance.js";
+import { assertStudentCampusAccess } from "./students.core.js";
 
 export const studentsRouter: Router = Router();
+
+studentsRouter.param("id", async (req, _res, next, id) => {
+  try {
+    await assertStudentCampusAccess((req as unknown as AuthedRequest).user, String(id));
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
 
 const user = (req: Request) => (req as unknown as AuthedRequest).user;
 type Q = Record<string, unknown>;
@@ -113,6 +128,7 @@ studentsRouter.post("/", handle((req) => createStudent(user(req), body(req)), 20
 
 /* Global queues */
 studentsRouter.get("/queues/alerts", handle((req) => academicAlerts(user(req), query(req))));
+studentsRouter.post("/queues/alerts/:alertId/resolve", handle((req) => resolveAcademicAlert(user(req), p(req, "alertId"))));
 studentsRouter.get("/queues/flags", handle((req) => studentFlags(user(req), query(req))));
 studentsRouter.post("/queues/flags/:flagId/dismiss", handle((req) => dismissFlag(user(req), p(req, "flagId"))));
 studentsRouter.delete("/queues/flags/:flagId", handle((req) => deleteFlagGlobal(user(req), p(req, "flagId"))));
@@ -125,6 +141,7 @@ studentsRouter.get("/queues/grades/:approvalId", handle((req) => gradeSubmission
 studentsRouter.post("/queues/grades/:approvalId/approve", handle((req) => approveGradeSubmission(user(req), p(req, "approvalId"), body(req))));
 studentsRouter.post("/queues/grades/:approvalId/decline", handle((req) => declineGradeSubmission(user(req), p(req, "approvalId"))));
 studentsRouter.get("/queues/transcript-changes", handle((req) => transcriptChanges(user(req))));
+studentsRouter.post("/queues/transcript-changes/:changeId/decide", handle((req) => decideTranscriptChange(user(req), p(req, "changeId"), body(req))));
 studentsRouter.get("/queues/entry-marks", handle((req) => pendingEntryMarks(user(req))));
 studentsRouter.get("/queues/badges", handle((req) => badgeQueue(user(req), query(req))));
 studentsRouter.post("/queues/badges/:badgeId/decide", handle((req) => decideBadge(user(req), p(req, "badgeId"), body(req))));
@@ -136,6 +153,7 @@ studentsRouter.get("/:id/overview", handle((req) => overview(user(req), p(req, "
 studentsRouter.post("/:id/files", handle((req) => uploadStudentFile(user(req), p(req, "id"), body(req)), 201));
 studentsRouter.get("/:id/files/:fileId", handle((req) => downloadStudentFile(user(req), p(req, "id"), p(req, "fileId"))));
 studentsRouter.post("/:id/status", handle((req) => changeStatus(user(req), p(req, "id"), body(req))));
+studentsRouter.post("/:id/graduation", handle((req) => graduateStudent(user(req), p(req, "id"))));
 studentsRouter.put("/:id/rate-category", handle((req) => setRateCategory(user(req), p(req, "id"), body(req))));
 studentsRouter.post("/:id/program-profile", handle((req) => newProgramProfile(user(req), p(req, "id"), body(req)), 201));
 studentsRouter.get("/:id/flags", handle((req) => listFlags(user(req), p(req, "id"), query(req))));
@@ -152,6 +170,7 @@ studentsRouter.get("/:id/correspondence/:corrId", handle((req) => getCorresponde
 studentsRouter.put("/:id/correspondence/:corrId", handle((req) => updateCorrespondence(user(req), p(req, "id"), p(req, "corrId"), body(req))));
 studentsRouter.delete("/:id/correspondence/:corrId", handle((req) => deleteCorrespondence(user(req), p(req, "id"), p(req, "corrId"))));
 studentsRouter.post("/:id/notifications", handle((req) => sendNotification(user(req), p(req, "id"), body(req))));
+studentsRouter.post("/:id/documents/generate", pdf((req) => generateStudentDocument(user(req), p(req, "id"), body(req))));
 studentsRouter.get("/:id/actions", handle((req) => listActions(user(req), p(req, "id"), query(req))));
 studentsRouter.get("/:id/assessments", handle((req) => listCases(user(req), p(req, "id"), query(req))));
 studentsRouter.get("/:id/assessments/available", handle((req) => assessmentOptions(user(req), p(req, "id"))));
@@ -199,3 +218,6 @@ studentsRouter.put("/:id/finance/plans/:planId", handle((req) => updatePlan(user
 studentsRouter.delete("/:id/finance/plans/:planId", handle((req) => deletePlan(user(req), p(req, "id"), p(req, "planId"))));
 studentsRouter.get("/:id/finance/tax", handle((req) => taxDocuments(user(req), p(req, "id"))));
 studentsRouter.get("/:id/finance/audit", handle((req) => financeAudit(user(req), p(req, "id"), query(req))));
+
+/* Keep the generic profile archival route last so it cannot shadow nested resources. */
+studentsRouter.delete("/:id", handle((req) => archiveStudentProfile(user(req), p(req, "id"))));

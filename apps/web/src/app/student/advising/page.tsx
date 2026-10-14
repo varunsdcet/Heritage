@@ -11,6 +11,11 @@ export default function StudentAdvisingPage() {
   const router = useRouter();
   const [items, setItems] = useState<AdvisingAppointmentRecord[]>([]);
   const [topic, setTopic] = useState("Degree plan review");
+  const [startsAt, setStartsAt] = useState(() => {
+    const date = new Date(Date.now() + 3 * 86_400_000);
+    date.setMinutes(0, 0, 0);
+    return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+  });
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [userName, setUserName] = useState("Student");
@@ -47,7 +52,7 @@ export default function StudentAdvisingPage() {
           method: "POST",
           body: JSON.stringify({
             topic,
-            startsAt: new Date(Date.now() + 3 * 86_400_000).toISOString(),
+            startsAt: new Date(startsAt).toISOString(),
             notes: "Booked from Advising",
           }),
         },
@@ -76,6 +81,10 @@ export default function StudentAdvisingPage() {
             <label style={{ display: "grid", gap: 6 }}>
               <span>Topic</span>
               <input value={topic} onChange={(e) => setTopic(e.target.value)} />
+            </label>
+            <label style={{ display: "grid", gap: 6 }}>
+              <span>Preferred date and time</span>
+              <input type="datetime-local" required value={startsAt} onChange={(e) => setStartsAt(e.target.value)} />
             </label>
             <Button type="submit" disabled={saving}>
               {saving ? "Requesting…" : "Request appointment"}

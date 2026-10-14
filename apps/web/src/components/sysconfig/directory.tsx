@@ -48,7 +48,7 @@ export type DirectoryProps = {
   empty: string;
   /** Captured screens show a large empty state with the create button instead of the table. */
   emptyCta?: boolean;
-  filter?: { placeholder: string; label?: string; keys: string[]; submitLabel?: string };
+  filter?: { placeholder: string; label?: string; keys: string[]; submitLabel?: string; live?: boolean };
   selects?: SelectFilter[];
   sortable?: boolean;
   rowActions?: (r: Row, ctx: Ctx) => ReactNode;
@@ -104,7 +104,7 @@ export function Directory(p: DirectoryProps) {
   const writable = canEditIn(meta, p.entity);
   const sortable = p.sortable && writable;
   const ctx: Ctx = { reload: load, ok, fail, meta, rows: rows ?? [], canEdit: writable };
-  const live = !p.filter?.submitLabel;
+  const live = p.filter?.live ?? !p.filter?.submitLabel;
   const needle = (live ? q : applied).trim().toLowerCase();
   const activeSel = live ? sel : appliedSel;
   const shown = useMemo(
@@ -272,7 +272,15 @@ export function Directory(p: DirectoryProps) {
                 {p.filter ? (
                   <label className="mh-sa__field">
                     <span className="mh-sa__label">{p.filter.label ?? "Filter"}</span>
-                    <input className="mh-sa__input" placeholder={p.filter.placeholder} value={q} onChange={(e) => setQ(e.target.value)} />
+                    <input
+                      className="mh-sa__input"
+                      placeholder={p.filter.placeholder}
+                      value={q}
+                      onChange={(e) => {
+                        setQ(e.target.value);
+                        if (live) setPage(1);
+                      }}
+                    />
                   </label>
                 ) : null}
                 {p.filter?.submitLabel ? (

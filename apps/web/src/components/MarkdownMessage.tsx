@@ -5,10 +5,19 @@ import { marked, Renderer } from "marked";
 
 const renderer = new Renderer();
 renderer.link = ({ href, title, text }) => {
-  const safeHref = href?.startsWith("javascript:") ? "#" : href || "#";
+  const safeHref = safeUrl(href);
   const titleAttr = title ? ` title="${escapeAttr(title)}"` : "";
   return `<a href="${escapeAttr(safeHref)}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
 };
+renderer.image = ({ href, title, text }) => {
+  const safeHref = safeUrl(href);
+  if (safeHref === "#") return escapeHtml(text || "Image");
+  const titleAttr = title ? ` title="${escapeAttr(title)}"` : "";
+  return `<img src="${escapeAttr(safeHref)}" alt="${escapeAttr(text || "")}"${titleAttr}>`;
+};
+// Model output is Markdown, not trusted HTML. Render raw HTML as text so there is
+// no browser HTML parser attack surface to patch with a regex deny-list.
+renderer.html = ({ text }) => escapeHtml(text);
 
 marked.setOptions({
   gfm: true,
@@ -20,18 +29,25 @@ function escapeAttr(value: string) {
   return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 }
 
-/** Strip obvious XSS vectors from model/API markdown HTML. */
-function sanitizeHtml(html: string) {
-  return html
-    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, "")
-    .replace(/<iframe[\s\S]*?>[\s\S]*?<\/iframe>/gi, "")
-    .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
-    .replace(/(href|src)\s*=\s*(['"])\s*javascript:[^'"]*\2/gi, '$1="#"');
+function escapeHtml(value: string) {
+  return escapeAttr(value).replace(/>/g, "&gt;");
+}
+
+function safeUrl(value: string | null | undefined) {
+  const href = (value || "").trim();
+  if (!href) return "#";
+  if (href.startsWith("/") || href.startsWith("#")) return href;
+  try {
+    const url = new URL(href);
+    return ["http:", "https:", "mailto:"].includes(url.protocol) ? href : "#";
+  } catch {
+    return "#";
+  }
 }
 
 export function renderMarkdownHtml(text: string): string {
   const parsed = marked.parse(text || "", { async: false });
-  return sanitizeHtml(typeof parsed === "string" ? parsed : String(parsed));
+  return typeof parsed === "string" ? parsed : String(parsed);
 }
 
 export function MarkdownMessage({

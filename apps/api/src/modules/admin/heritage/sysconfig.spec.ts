@@ -981,7 +981,7 @@ export const SETTINGS: Record<SettingsKey, { label: string; audit: string; save:
     audit: "SC24",
     save: "Save Session Settings",
     fields: [
-      sel("expiry", "Session Expiry", ["Until browser is closed", "30 minutes of inactivity", "1 hour of inactivity", "4 hours of inactivity", "8 hours of inactivity", "24 hours of inactivity"]),
+      sel("expiry", "Session Expiry", ["Until browser is closed", "30 minutes of inactivity", "1 hour of inactivity", "4 hours of inactivity", "5 hours of inactivity", "8 hours of inactivity", "24 hours of inactivity"]),
       f("keepLoggedIn", "Enable “Keep me logged in” option", "bool", { dflt: true }),
       sel("deviceRegistration", "Device Registration", DIS_EN),
       sel("ipAuthentication", "IP Authentication", DIS_EN),

@@ -370,12 +370,15 @@ export const StartAssessmentAttemptResponse = z.object({
   attemptId: Uuid,
   expiresAt: IsoDateTime,
   assessmentAttemptOpen: z.literal(true),
+  questions: z.array(z.object({ id: z.string().min(1), prompt: z.string().min(1), options: z.array(z.string().min(1)).min(2) })),
 });
 
 export const SubmitAssessmentAttemptResponse = z.object({
   attemptId: Uuid,
   status: z.literal("submitted"),
   submittedAt: IsoDateTime,
+  score: z.number().nonnegative(),
+  maxScore: z.number().positive(),
 });
 
 export const StudentAttendanceRecord = z.object({
@@ -451,14 +454,21 @@ export const StudentServiceRequest = z.object({
   createdAt: IsoDateTime,
 });
 
+export const StudentWithdrawalOption = z.object({
+  sectionId: Uuid,
+  label: z.string().min(1),
+});
+
 export const CreateStudentServiceRequest = z.object({
   type: StudentServiceRequestType,
   subject: z.string().trim().min(3).max(200),
   details: z.string().trim().min(10).max(4000),
+  sectionId: Uuid.optional(),
 });
 
 export const StudentServiceRequestsResponse = z.object({
   requests: z.array(StudentServiceRequest),
+  withdrawalOptions: z.array(StudentWithdrawalOption).default([]),
 });
 
 export const StudentPracticumHours = z.object({

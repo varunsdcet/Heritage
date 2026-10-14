@@ -22,6 +22,7 @@ import {
   s,
   saveProfile,
   statusOf,
+  studentStatusPolicy,
   stuAudit,
   type Data,
 } from "./students.core.js";
@@ -30,6 +31,7 @@ import { enrolInSections, quoteSectionFee } from "./enrolment.js";
 import { linkScheduleSections } from "./programs.js";
 import { scheduleSectionIds } from "./programs.sections.js";
 import { ENROLMENT_STATUSES, RATE_CATEGORIES, STU, TRANSCRIPT_OPTIONS } from "./students.spec.js";
+import { assertNoActiveStudentHold } from "../../me/studentAlignment.js";
 
 /* ------------------------------------------------------------------ */
 /* Program enrolment                                                    */
@@ -63,6 +65,7 @@ export async function programPlan(user: SessionClaims, id: string) {
   await canStudents(user, "view");
   const inst = user.institutionId;
   const st = await requireStudentRow(inst, id);
+  await assertNoActiveStudentHold(inst, id, "Transcript generation");
   const [meta, pm, enrolRows] = await Promise.all([metaOf(inst, id), programCatalogue(inst), rows(inst, STU.ENROL, id)]);
   const sessions = await feedInSessions(
     inst,
@@ -113,6 +116,8 @@ export async function enrolProgram(user: SessionClaims, id: string, body: Data) 
   if (!session) throw httpError(400, "Feed-in Course is required");
   const status = oneOf(body.status, ENROLMENT_STATUSES, "Student Status");
   let meta = await metaOf(inst, id);
+  const currentPolicy = await studentStatusPolicy(inst, statusOf(meta, 0));
+  if (currentPolicy?.locksPlan) throw httpError(409, `Student status "${currentPolicy.name}" locks the program plan`, "PROGRAM_PLAN_LOCKED");
   const rate = s(body.rateCategory).trim() || (s(meta.rateCategory).trim() ? "" : defaultRateCategory(meta));
   if (rate && rate !== meta.rateCategory) {
     await setRateCategory(user, id, { rateCategory: rate });

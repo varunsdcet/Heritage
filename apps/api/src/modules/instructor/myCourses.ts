@@ -4,7 +4,9 @@
  */
 import { requireApproval } from "@myheritage/auth";
 import { prisma } from "@myheritage/db";
+import { writeAuditAndOutbox } from "@myheritage/events";
 import type { SessionClaims } from "@myheritage/contracts";
+import { randomUUID } from "node:crypto";
 import { addDays, hmIn, institutionTimezone, ymdIn } from "../../lib/workshopPolicy.js";
 import { REPOSITORY_LIST_PATH, buildRepositoryCatalog, mergeRepositoryList } from "./courseContentScreens.js";
 import { facultySectionIds } from "./sectionFaculty.js";
@@ -556,23 +558,36 @@ export async function decideSchedule(user: SessionClaims, id: string, body: { de
   }
   decisions.push({ actorId: user.accountId, decision: decision === "accept" ? "approve" : "reject", comment: comment || undefined, decidedAt: new Date().toISOString() });
   const status = decision === "accept" ? "approved" : "rejected";
-  const claimed = await prisma.approvalRequest.updateMany({
-    where: { id: req.id, rowVersion: req.rowVersion, status: "pending" },
-    data: { status, decisionsJson: JSON.stringify(decisions), rowVersion: { increment: 1 } },
-  });
-  if (claimed.count !== 1) throw httpError(409, "This schedule was reviewed by someone else. Reload and try again.", "CONFLICT");
   const what = req.type === SCHEDULE_APPROVAL_TYPES.newSession ? "new session" : "schedule change";
-  if (req.requestedBy !== user.accountId) {
-    await prisma.notification.create({
-      data: {
-        institutionId: user.institutionId,
-        recipientAccountId: req.requestedBy,
-        channel: "in_app",
-        title: decision === "accept" ? "Course schedule accepted" : "Course schedule declined",
-        body: `${offeringLabel(o)}: the instructor ${decision === "accept" ? "accepted" : "declined"} the ${what}.${comment ? ` Note: ${comment}` : ""}`.slice(0, 4000),
-      },
+  await prisma.$transaction(async (tx) => {
+    const claimed = await tx.approvalRequest.updateMany({
+      where: { id: req.id, rowVersion: req.rowVersion, status: "pending" },
+      data: { status, decisionsJson: JSON.stringify(decisions), rowVersion: { increment: 1 } },
     });
-  }
+    if (claimed.count !== 1) throw httpError(409, "This schedule was reviewed by someone else. Reload and try again.", "CONFLICT");
+    if (req.requestedBy !== user.accountId) {
+      await tx.notification.create({
+        data: {
+          institutionId: user.institutionId,
+          recipientAccountId: req.requestedBy,
+          channel: "in_app",
+          title: decision === "accept" ? "Course schedule accepted" : "Course schedule declined",
+          body: `${offeringLabel(o)}: the instructor ${decision === "accept" ? "accepted" : "declined"} the ${what}.${comment ? ` Note: ${comment}` : ""}`.slice(0, 4000),
+        },
+      });
+    }
+    await writeAuditAndOutbox(tx, {
+      institutionId: user.institutionId,
+      actorId: user.accountId,
+      eventName: decision === "accept" ? "CourseSchedule.accepted" : "CourseSchedule.declined",
+      purpose: "course_schedule",
+      before: { approvalRequestId: req.id, status: req.status },
+      after: { approvalRequestId: req.id, status, sectionId: o.id, comment: comment || null },
+      source: "my_courses.schedule.decision",
+      correlationId: randomUUID(),
+      outboxPayload: { notifyAccountId: req.requestedBy, sectionId: o.id, status },
+    });
+  });
   return { id: req.id, sectionId: o.id, status, message: `${o.code} (${o.offering}) ${what} ${decision === "accept" ? "accepted" : "declined"}` };
 }
 

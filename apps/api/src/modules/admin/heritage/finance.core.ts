@@ -191,6 +191,7 @@ export type StudentInfo = {
   residency: string;
   rateCategory: string;
   country: string;
+  province: string;
   schedule: string;
   standing: string;
   personId: string;
@@ -223,6 +224,7 @@ export async function studentsInfo(inst: string, ids?: string[]): Promise<Map<st
       residency: m.residency ?? "Domestic",
       rateCategory: m.rateCategory ?? m.residency ?? "Domestic",
       country: m.country ?? "",
+      province: "province" in m ? s(m.province) : "",
       schedule: m.schedule ?? st.cohort?.label ?? "",
       standing: st.standing,
       personId: st.personId,
@@ -308,16 +310,13 @@ export async function loadBooks(inst: string, cfg: Config, studentIds?: string[]
   const termName = new Map(terms.map((t) => [t.id, t.name]));
   const metaBy = new Map(metas.filter((m) => m.singletonKey).map((m) => [m.singletonKey!, m.data]));
 
-  // Running numbers for entries recorded outside Financial Management (registrar postings, workshop fees, …).
+  // Entries recorded outside Financial Management may not have a display-number
+  // metadata row. Reads must never create one: derive a stable, non-sequential
+  // display number from the immutable UUID instead.
   for (const e of entries) {
     if (metaBy.has(e.id)) continue;
-    const data = { number: await nextNumber(inst, NUMBER_KIND[e.kind] ?? "transaction"), managed: false };
-    await prisma.heritageRecord.upsert({
-      where: { institutionId_screenId_contextKey_singletonKey: { institutionId: inst, screenId: S.META, contextKey: e.studentId, singletonKey: e.id } },
-      create: { institutionId: inst, screenId: S.META, contextKey: e.studentId, singletonKey: e.id, dataJson: JSON.stringify(data), createdById: "system", updatedById: "system" },
-      update: {},
-    });
-    metaBy.set(e.id, data);
+    const tail = e.id.replace(/[^a-f0-9]/gi, "").slice(-8);
+    metaBy.set(e.id, { number: 8_000_000 + (Number.parseInt(tail || "0", 16) % 1_000_000), managed: false });
   }
 
   const tuitionTypes = tuitionTypeIds(cfg);
@@ -337,7 +336,7 @@ export async function loadBooks(inst: string, cfg: Config, studentIds?: string[]
       studentId: e.studentId,
       kind: e.kind,
       label: e.label,
-      amount: e.amountCad,
+      amount: num(e.amountCad),
       status: e.status,
       source: e.source ?? "",
       note: e.note ?? "",
@@ -355,7 +354,7 @@ export async function loadBooks(inst: string, cfg: Config, studentIds?: string[]
     if (e.kind === "charge") {
       const paidAlloc = r2(b.allocs.filter((a) => a.chargeId === e.id).reduce((t, a) => t + a.amount, 0));
       const legacyPaid = e.status === "paid" && paidAlloc < EPS;
-      const total = r2(e.amountCad);
+      const total = r2(num(e.amountCad));
       const paid = legacyPaid ? total : Math.min(paidAlloc, Math.max(total, paidAlloc));
       const refunded = meta.refunded === true;
       const removed = meta.removed === true || (e.status === "waived" && !refunded) || e.status === "void";
@@ -382,7 +381,7 @@ export async function loadBooks(inst: string, cfg: Config, studentIds?: string[]
       const refunded = r2(num(meta.refundedAmount));
       const removed = meta.removed === true || e.status === "void";
       const active = !removed && (e.kind === "payment" ? true : e.status !== "waived");
-      const amount = r2(e.amountCad);
+      const amount = r2(num(e.amountCad));
       const available = active && base.managed ? r2(Math.max(0, amount - allocated - refunded)) : 0;
       let statusLabel = "";
       if (e.kind === "payment") {
@@ -449,6 +448,17 @@ export async function postEntry(
   meta: Data,
   db: Db = prisma,
 ) {
+  const [cfg, student] = await Promise.all([
+    loadConfig(user.institutionId),
+    requireStudent(user.institutionId, input.studentId),
+  ]);
+  await assertPeriodOpen(
+    user,
+    cfg,
+    student.campus,
+    input.postedAt ?? new Date(),
+    `This ${input.kind === "charge" ? "receivable" : input.kind}`,
+  );
   const entry = await db.financeLedgerEntry.create({
     data: {
       institutionId: user.institutionId,

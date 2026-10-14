@@ -1,8 +1,8 @@
-import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
-import { hashPassword } from "@myheritage/auth";
+import { hashPassword, validateInstitutionPassword } from "@myheritage/auth";
 import { writeAuditAndOutbox } from "@myheritage/events";
 
 const fail = (status: number, code: string, message: string) => Object.assign(new Error(message), { status, code });
@@ -13,6 +13,38 @@ const LearnerRegistrationBody = z.object({
   email: z.string().trim().toLowerCase().email().max(254),
   password: z.string().min(8).max(128),
 });
+
+const PaidEnrolmentBody = z.object({
+  slug: z.string().trim().min(1).max(120),
+  sessionId: z.string().trim().regex(/^cs_[A-Za-z0-9_]{8,250}$/),
+});
+
+type StripeCheckoutSession = {
+  id: string;
+  status: string | null;
+  payment_status: string;
+  currency: string | null;
+  amount_total: number | null;
+  payment_intent: string | null;
+  metadata: Record<string, string> | null;
+  customer_details?: { email?: string | null } | null;
+};
+
+function stripeKey() {
+  const key = process.env.STRIPE_SECRET_KEY || "";
+  return key.startsWith("sk_test_") || key.startsWith("sk_live_") ? key : "";
+}
+
+async function retrieveStripeSession(sessionId: string) {
+  const key = stripeKey();
+  if (!key) throw fail(503, "PAYMENT_UNAVAILABLE", "Stripe payment verification is not configured.");
+  const response = await fetch(`https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(sessionId)}`, {
+    headers: { Authorization: `Bearer ${key}` },
+  });
+  const json = await response.json().catch(() => ({})) as StripeCheckoutSession & { error?: { message?: string } };
+  if (!response.ok) throw fail(502, "PAYMENT_PROVIDER_ERROR", json.error?.message || "Stripe could not verify this payment.");
+  return json;
+}
 
 export type PublicSelfpacedProgram = {
   id: string;
@@ -133,15 +165,16 @@ export async function registerSelfpacedLearner(input: unknown) {
   const institutionId = await publicInstitutionId();
   const email = body.email.toLowerCase();
   const existing = await prisma.account.findFirst({ where: { institutionId, email }, select: { id: true } });
-  if (existing) throw fail(409, "ACCOUNT_EXISTS", "An account already exists for this email. Sign in instead.");
+  if (existing) return { accepted: true as const, email };
 
   // Do not attach a public signup to a pre-existing SIS identity; staff can resolve that account safely.
   const existingPerson = await prisma.person.findFirst({ where: { institutionId, email }, select: { id: true } });
-  if (existingPerson) throw fail(409, "ACCOUNT_EXISTS", "This email already belongs to a Heritage profile. Sign in or reset your password.");
+  if (existingPerson) return { accepted: true as const, email };
 
   const words = body.name.split(/\s+/).filter(Boolean);
   const givenName = words.shift()!;
   const familyName = words.join(" ") || "Learner";
+  await validateInstitutionPassword(institutionId, body.password, { givenName, familyName, login: email });
   const passwordHash = await hashPassword(body.password);
   const studentNumber = `SP-${new Date().getFullYear()}-${randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase()}`;
 
@@ -167,11 +200,11 @@ export async function registerSelfpacedLearner(input: unknown) {
         correlationId: randomUUID(),
         outboxPayload: { accountId: account.id, studentNumber },
       });
-      return { created: true as const, email, studentNumber };
+      return { accepted: true as const, email };
     });
   } catch (err) {
     if ((err as { code?: string })?.code === "P2002") {
-      throw fail(409, "ACCOUNT_EXISTS", "An account already exists for this email. Sign in instead.");
+      return { accepted: true as const, email };
     }
     throw err;
   }
@@ -263,36 +296,103 @@ export async function enrolFreeProgram(user: SessionClaims, slug: string) {
   if (!program) throw fail(404, "NOT_FOUND", "Published program not found.");
   if (program.priceCad !== 0) throw fail(402, "PAYMENT_REQUIRED", "Payment verification is required for this program.");
   const path = `selfpaced:enrolment:${user.accountId}:${slug}`;
+  const existing = await prisma.sisScreenState.findUnique({ where: { institutionId_path: { institutionId: user.institutionId, path } } });
+  if (existing) return JSON.parse(existing.payloadJson) as { slug: string; enrolledAt: string; method: string };
+  const student = await prisma.student.findFirst({ where: { institutionId: user.institutionId, personId: user.personId }, select: { id: true } });
+  if (!student) throw fail(404, "STUDENT_NOT_FOUND", "Student record not found.");
   const enrolledAt = new Date().toISOString();
-  const row = await prisma.sisScreenState.upsert({
-    where: { institutionId_path: { institutionId: user.institutionId, path } },
-    create: { institutionId: user.institutionId, path, payloadJson: JSON.stringify({ slug, enrolledAt, method: "free" }) },
-    update: {},
+  const payload = { slug, enrolledAt, method: "free" };
+  const row = await prisma.$transaction(async (tx) => {
+    const saved = await tx.sisScreenState.create({
+      data: { institutionId: user.institutionId, path, payloadJson: JSON.stringify(payload) },
+    });
+    await tx.financeLedgerEntry.create({
+      data: {
+        institutionId: user.institutionId,
+        studentId: student.id,
+        label: `Self-paced enrolment · ${program.title}`,
+        amountCad: 0,
+        kind: "selfpaced_enrolment",
+        status: "paid",
+        source: `selfpaced:${slug}`,
+        note: "Free programme enrolment",
+      },
+    });
+    await writeAuditAndOutbox(tx, {
+      institutionId: user.institutionId,
+      actorId: user.accountId,
+      eventName: "SelfpacedEnrolment.created",
+      purpose: "selfpaced_enrolment",
+      before: null,
+      after: { ...payload, studentId: student.id, amountCad: 0 },
+      source: "selfpaced.enrol",
+      correlationId: randomUUID(),
+    });
+    return saved;
   });
   return JSON.parse(row.payloadJson) as { slug: string; enrolledAt: string; method: string };
 }
 
 export async function enrolPaidProgram(user: SessionClaims, input: unknown) {
-  const body = z.object({ slug: z.string().min(1).max(120), sessionId: z.string().startsWith("cs_").max(255), accountId: z.string().uuid(), timestamp: z.number().int(), proof: z.string().regex(/^[a-f0-9]{64}$/) }).parse(input);
-  if (body.accountId !== user.accountId) throw fail(403, "PAYMENT_OWNER_MISMATCH", "This payment confirmation belongs to another account.");
-  if (Math.abs(Date.now() - body.timestamp) > 5 * 60_000) throw fail(409, "PAYMENT_PROOF_EXPIRED", "Payment confirmation expired. Verify the checkout again.");
-  const secret = process.env.STRIPE_SECRET_KEY || "";
-  if (!secret) throw fail(503, "PAYMENT_UNAVAILABLE", "Payment confirmation is not configured.");
-  const message = `${body.accountId}.${body.slug}.${body.sessionId}.${body.timestamp}`;
-  const expected = createHmac("sha256", secret).update(message).digest("hex");
-  if (!timingSafeEqual(Buffer.from(expected), Buffer.from(body.proof))) throw fail(403, "INVALID_PAYMENT_PROOF", "Payment confirmation is invalid.");
+  const parsed = PaidEnrolmentBody.parse(input);
   const programs = await listSelfpacedPrograms(user.institutionId);
-  const program = programs.find((item) => item.slug === body.slug);
+  const program = programs.find((item) => item.slug === parsed.slug);
   if (!program) throw fail(404, "NOT_FOUND", "Published program not found.");
-  if (program.priceCad <= 0) throw fail(409, "FREE_PROGRAM", "Use free enrolment for this program.");
-  const path = `selfpaced:enrolment:${user.accountId}:${body.slug}`;
-  const enrolledAt = new Date().toISOString();
-  const row = await prisma.sisScreenState.upsert({
-    where: { institutionId_path: { institutionId: user.institutionId, path } },
-    create: { institutionId: user.institutionId, path, payloadJson: JSON.stringify({ slug: body.slug, enrolledAt, method: "stripe", paymentReference: body.sessionId }) },
-    update: {},
+  if (program.priceCad <= 0) throw fail(409, "FREE_PROGRAM", "Use the free enrolment route for this program.");
+
+  const [student, person, session] = await Promise.all([
+    prisma.student.findFirst({ where: { institutionId: user.institutionId, personId: user.personId }, select: { id: true } }),
+    prisma.person.findFirst({ where: { institutionId: user.institutionId, id: user.personId }, select: { email: true, personalEmail: true } }),
+    retrieveStripeSession(parsed.sessionId),
+  ]);
+  if (!student) throw fail(404, "STUDENT_NOT_FOUND", "Student record not found.");
+  const expectedCents = Math.round(program.priceCad * 100);
+  const metadata = session.metadata ?? {};
+  if (session.status !== "complete" || session.payment_status !== "paid" || session.currency?.toLowerCase() !== "cad"
+    || session.amount_total !== expectedCents || metadata.programId !== program.id || metadata.programSlug !== program.slug) {
+    throw fail(409, "PAYMENT_MISMATCH", "Payment does not match this program.");
+  }
+  const payerEmail = session.customer_details?.email?.trim().toLowerCase() ?? "";
+  const accountEmails = [person?.email, person?.personalEmail].filter((value): value is string => Boolean(value)).map((value) => value.trim().toLowerCase());
+  if (!payerEmail || !accountEmails.includes(payerEmail)) {
+    throw fail(403, "PAYMENT_OWNER_MISMATCH", "Sign in with the student account whose email was used for this Stripe payment.");
+  }
+
+  const enrolmentPath = `selfpaced:enrolment:${user.accountId}:${program.slug}`;
+  const paymentPath = `selfpaced:stripe-session:${session.id}`;
+  const existing = await prisma.sisScreenState.findUnique({ where: { institutionId_path: { institutionId: user.institutionId, path: enrolmentPath } } });
+  if (existing) return JSON.parse(existing.payloadJson) as { slug: string; enrolledAt: string; method: string };
+  const used = await prisma.sisScreenState.findUnique({ where: { institutionId_path: { institutionId: user.institutionId, path: paymentPath } } });
+  if (used) throw fail(409, "PAYMENT_ALREADY_USED", "This Stripe payment has already been used for an enrolment.");
+
+  const payload = { slug: program.slug, enrolledAt: new Date().toISOString(), method: "stripe", sessionId: session.id };
+  await prisma.$transaction(async (tx) => {
+    await tx.sisScreenState.create({ data: { institutionId: user.institutionId, path: paymentPath, payloadJson: JSON.stringify({ accountId: user.accountId, slug: program.slug }) } });
+    await tx.sisScreenState.create({ data: { institutionId: user.institutionId, path: enrolmentPath, payloadJson: JSON.stringify(payload) } });
+    await tx.financeLedgerEntry.create({
+      data: {
+        institutionId: user.institutionId,
+        studentId: student.id,
+        label: `Self-paced enrolment · ${program.title}`,
+        amountCad: program.priceCad,
+        kind: "selfpaced_enrolment",
+        status: "paid",
+        source: `selfpaced:${program.slug}`,
+        note: `Stripe ${session.payment_intent ?? session.id}`,
+      },
+    });
+    await writeAuditAndOutbox(tx, {
+      institutionId: user.institutionId,
+      actorId: user.accountId,
+      eventName: "SelfpacedEnrolment.created",
+      purpose: "selfpaced_enrolment",
+      before: null,
+      after: { ...payload, studentId: student.id, amountCad: program.priceCad },
+      source: "selfpaced.enrol.paid",
+      correlationId: randomUUID(),
+    });
   });
-  return JSON.parse(row.payloadJson) as { slug: string; enrolledAt: string; method: string; paymentReference: string };
+  return payload;
 }
 
 export async function listMySelfpacedEnrolments(user: SessionClaims) {

@@ -29,21 +29,7 @@ export class ApiError extends Error {
   }
 }
 
-const KEY = "mh.session";
 const KEY_SESSION = "mh.session.ephemeral";
-const ROLE_COOKIE = "mh_roles";
-
-/** Align role-cookie lifetime with JWT access token (30d default). */
-const SESSION_MAX_AGE_SEC = 60 * 60 * 24 * 30;
-const SESSION_SHORT_AGE_SEC = 60 * 60 * 12;
-
-function writeRoleCookie(roles: string[], maxAgeSec = SESSION_MAX_AGE_SEC) {
-  if (typeof document === "undefined") return;
-  // Comma-separated is more reliable than JSON for middleware cookie parsing.
-  const value = encodeURIComponent(roles.map(String).filter(Boolean).join(","));
-  const secure = typeof window !== "undefined" && window.location.protocol === "https:" ? "; Secure" : "";
-  document.cookie = `${ROLE_COOKIE}=${value}; Path=/; SameSite=Lax; Max-Age=${maxAgeSec}${secure}`;
-}
 
 function tokenExpired(accessToken: string): boolean {
   try {
@@ -64,28 +50,18 @@ function tokenExpired(accessToken: string): boolean {
   }
 }
 
-function clearRoleCookie() {
-  if (typeof document === "undefined") return;
-  document.cookie = `${ROLE_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`;
-}
-
 export function saveSession(session: Session, remember = true) {
   const raw = JSON.stringify(session);
   if (typeof window === "undefined") return;
-  if (remember) {
-    sessionStorage.removeItem(KEY_SESSION);
-    localStorage.setItem(KEY, raw);
-    writeRoleCookie(session.roles ?? [], SESSION_MAX_AGE_SEC);
-  } else {
-    localStorage.removeItem(KEY);
-    sessionStorage.setItem(KEY_SESSION, raw);
-    writeRoleCookie(session.roles ?? [], SESSION_SHORT_AGE_SEC);
-  }
+  // Bearer tokens never enter localStorage. The server owns the signed, httpOnly portal cookie;
+  // this tab-scoped copy only supplies Authorization headers to the API client.
+  void remember;
+  sessionStorage.setItem(KEY_SESSION, raw);
 }
 
 export function loadSession(): Session | null {
   if (typeof window === "undefined") return null;
-  const raw = localStorage.getItem(KEY) ?? sessionStorage.getItem(KEY_SESSION);
+  const raw = sessionStorage.getItem(KEY_SESSION);
   if (!raw) return null;
   try {
     const session = JSON.parse(raw) as Session;
@@ -93,8 +69,6 @@ export function loadSession(): Session | null {
       clearSession();
       return null;
     }
-    const remember = Boolean(localStorage.getItem(KEY));
-    writeRoleCookie(session.roles ?? [], remember ? SESSION_MAX_AGE_SEC : SESSION_SHORT_AGE_SEC);
     return session;
   } catch {
     clearSession();
@@ -103,15 +77,13 @@ export function loadSession(): Session | null {
 }
 
 export function clearSession() {
-  localStorage.removeItem(KEY);
   sessionStorage.removeItem(KEY_SESSION);
-  clearRoleCookie();
 }
 
 /** Revokes the server session (best-effort) before clearing local session state. */
 export async function logout(): Promise<void> {
   if (typeof window === "undefined") return;
-  const raw = localStorage.getItem(KEY) ?? sessionStorage.getItem(KEY_SESSION);
+  const raw = sessionStorage.getItem(KEY_SESSION);
   let accessToken: string | undefined;
   try {
     accessToken = raw ? (JSON.parse(raw) as Session).accessToken : undefined;
@@ -127,6 +99,7 @@ export async function logout(): Promise<void> {
         headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
         body: "{}",
         keepalive: true,
+        credentials: "include",
         signal: controller.signal,
       });
     } catch {
@@ -148,7 +121,7 @@ export async function api<T>(
   headers.set("content-type", "application/json");
   if (token) headers.set("authorization", `Bearer ${token}`);
   const base = API_URL.replace(/\/$/, "");
-  const res = await fetch(`${base}${path}`, { ...init, headers });
+  const res = await fetch(`${base}${path}`, { ...init, headers, credentials: init.credentials ?? "include" });
   if (!res.ok) {
     let message = res.statusText;
     let code: string | undefined;

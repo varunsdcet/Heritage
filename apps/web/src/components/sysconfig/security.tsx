@@ -31,12 +31,12 @@ function SecurityQuestions() {
   const [confirm, setConfirm] = useState<{ entity: "securityQuestions" | "securityCategories"; row: Row } | null>(null);
   const writable = useCanEdit("securityQuestions");
   const load = useCallback(() => {
-    Promise.all([sx<Listing>("/e/securityCategories"), sx<Listing>("/e/securityQuestions")])
-      .then(([c, q]) => {
-        setCats(c.items);
-        setQuestions(q.items);
-      })
-      .catch((e) => fail(errMsg(e, "Could not load security questions")));
+    void sx<Listing>("/e/securityCategories")
+      .then((c) => setCats(c.items))
+      .catch((e) => { setCats([]); fail(errMsg(e, "Could not load security question categories")); });
+    void sx<Listing>("/e/securityQuestions")
+      .then((q) => setQuestions(q.items))
+      .catch((e) => { setQuestions([]); fail(errMsg(e, "Could not load security questions")); });
   }, [fail]);
   useEffect(load, [load]);
   return (

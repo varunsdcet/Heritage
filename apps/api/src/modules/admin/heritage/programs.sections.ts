@@ -110,7 +110,7 @@ export async function syncSessionSection(user: SessionClaims, rec: SessionRec, s
   const linked = sectionId ? await prisma.section.findFirst({ where: { id: sectionId, institutionId: inst } }) : null;
   const section = linked
     ? await prisma.section.update({ where: { id: linked.id }, data: { courseId: course.id, termId: term.id, ...(instructorPersonId ? { instructorPersonId } : {}), rowVersion: { increment: 1 } } })
-    : await prisma.section.create({ data: { institutionId: inst, courseId: course.id, termId: term.id, code: await nextSectionCode(inst, course.id, course.code, start), instructorPersonId } });
+    : await prisma.section.create({ data: { institutionId: inst, courseId: course.id, termId: term.id, code: await nextSectionCode(inst, term.id, course.code, start), instructorPersonId } });
   sectionId = section.id;
 
   const before = (await settingsOf(inst, CM.session, [sectionId])).get(sectionId)?.data ?? {};

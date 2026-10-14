@@ -342,7 +342,7 @@ export function NewWorkshopEnrolment() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<StudentRef[]>([]);
   const [searchedFor, setSearchedFor] = useState("");
-  const [picked, setPicked] = useState<StudentRef | null>(null);
+  const [picked, setPicked] = useState<StudentRef[]>([]);
   const [workshopId, setWorkshopId] = useState(sp?.get("workshop") ?? "");
   const [detail, setDetail] = useState<Detail | null>(null);
   const [roleId, setRoleId] = useState("");
@@ -360,7 +360,6 @@ export function NewWorkshopEnrolment() {
   useEffect(loadAvailable, [loadAvailable]);
 
   useEffect(() => {
-    if (picked) return;
     const q = query.trim();
     if (q.length < 2) {
       setResults([]);
@@ -374,7 +373,7 @@ export function NewWorkshopEnrolment() {
         .finally(() => n === seq.current && setSearchedFor(q));
     }, 250);
     return () => clearTimeout(t);
-  }, [query, picked]);
+  }, [query]);
 
   useEffect(() => {
     setDetail(null);
@@ -390,13 +389,14 @@ export function NewWorkshopEnrolment() {
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    if (!picked) return setError("Search for a user and select them from the results");
+    if (!picked.length) return setError("Search for and select at least one student");
     if (!workshopId) return setError("Please select a workshop");
     setBusy(true);
     try {
-      const r = await ws<{ message: string; status: string }>("/enrolments", json("POST", { studentId: picked.id, workshopId, roleId: roleId || undefined, note: note.trim() || undefined }));
+      const r = await ws<{ message: string; status: string; failed: Array<{ studentId: string; message: string }> }>("/enrolments/bulk", json("POST", { studentIds: picked.map((student) => student.id), workshopId, roleId: roleId || undefined, note: note.trim() || undefined }));
+      if (r.failed.length) setError(r.failed.map((failure) => failure.message).join("; "));
       setNotice({ text: r.message, status: r.status });
-      setPicked(null);
+      setPicked([]);
       setQuery("");
       setWorkshopId("");
       setNote("");
@@ -434,19 +434,17 @@ export function NewWorkshopEnrolment() {
                 <span className="mh-sa__label">
                   <Req label="User" />
                 </span>
-                {picked ? (
-                  <div className="wk-picked">
-                    <span>
-                      <strong>{picked.name}</strong> · {picked.studentNumber}
-                      {picked.programCode ? <span className="ur-code">{picked.programCode}</span> : null}
-                      <span className="mh-sa__sub">{picked.login}</span>
-                    </span>
-                    <button type="button" className="mh-sa__link" onClick={() => setPicked(null)}>
-                      Change
-                    </button>
-                  </div>
-                ) : (
-                  <>
+                <>
+                    {picked.length ? (
+                      <div className="wk-picked" aria-label="Selected students">
+                        <span><strong>{picked.length} student{picked.length === 1 ? "" : "s"} selected</strong></span>
+                        {picked.map((student) => (
+                          <button key={student.id} type="button" className="mh-sa__link" onClick={() => setPicked((current) => current.filter((item) => item.id !== student.id))}>
+                            {student.name} · {student.studentNumber} ×
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
                     <input
                       className="mh-sa__input"
                       role="combobox"
@@ -461,12 +459,13 @@ export function NewWorkshopEnrolment() {
                       <ul className="wk-results" id="wk-user-results" role="listbox">
                         {searchedFor !== query.trim() && !results.length ? <li className="mh-sa__muted">Searching…</li> : null}
                         {searchedFor === query.trim() && !results.length ? <li className="mh-sa__muted">No users matched “{query.trim()}”.</li> : null}
-                        {results.map((u) => (
+                        {results.filter((u) => !picked.some((student) => student.id === u.id)).map((u) => (
                           <li key={u.id} role="option" aria-selected={false}>
                             <button
                               type="button"
                               onClick={() => {
-                                setPicked(u);
+                                setPicked((current) => [...current, u]);
+                                setQuery("");
                                 setResults([]);
                               }}
                             >
@@ -479,7 +478,6 @@ export function NewWorkshopEnrolment() {
                       </ul>
                     ) : null}
                   </>
-                )}
               </div>
               <label className="mh-sa__field">
                 <span className="mh-sa__label">

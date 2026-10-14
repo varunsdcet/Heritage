@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { EmptyState } from "@myheritage/ui";
-import { api, loadSession } from "@/lib/api";
+import { API_URL, api, loadSession } from "@/lib/api";
 import { StudentFrame } from "@/components/StudentSisShell";
 import { useEffect, useCallback } from "react";
 import { ApiError, type Session } from "@/lib/api";
@@ -319,8 +319,35 @@ export function StudentFeesView() {
 export function StudentTransactionHistoryView() {
   const router = useRouter();
   const resource = useFinance(null);
+  const [receiptBusy, setReceiptBusy] = useState<string | null>(null);
+  const [receiptError, setReceiptError] = useState<string | null>(null);
 
   const months = useMemo(() => resource.data?.history ?? [], [resource.data]);
+
+  async function downloadReceipt(entryId: string) {
+    if (!resource.session) return;
+    setReceiptBusy(entryId);
+    setReceiptError(null);
+    try {
+      const response = await fetch(`${API_URL}/student/finance/receipts/${encodeURIComponent(entryId)}`, {
+        headers: { authorization: `Bearer ${resource.session.accessToken}` },
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+        throw new Error(payload?.error?.message || "Receipt download failed");
+      }
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `receipt-${entryId}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setReceiptError(error instanceof Error ? error.message : "Receipt download failed");
+    } finally {
+      setReceiptBusy(null);
+    }
+  }
 
   return (
     <StudentFrame role="student" title="" activeHref="/student/fees">
@@ -332,6 +359,7 @@ export function StudentTransactionHistoryView() {
         <button type="button" className="mh-sis-finance__back" onClick={() => router.push("/student/fees")}>
           « Back to Statements
         </button>
+        {receiptError ? <p style={{ color: "var(--mh-danger)" }}>{receiptError}</p> : null}
 
         {resource.state !== "ready" ? (
           <div className="mh-hcc-panel">
@@ -356,8 +384,8 @@ export function StudentTransactionHistoryView() {
                           })}
                         </strong>
                         {event.receiptAvailable ? (
-                          <button type="button" className="mh-sis-finance__receipt">
-                            Receipt
+                          <button type="button" className="mh-sis-finance__receipt" disabled={receiptBusy === event.id} onClick={() => void downloadReceipt(event.id)}>
+                            {receiptBusy === event.id ? "Opening…" : "Receipt"}
                           </button>
                         ) : null}
                       </div>

@@ -377,6 +377,7 @@ export const DegreePlanAnalysis = z.object({
     }),
   ),
   prerequisiteGraph: z.array(PrerequisiteEdge),
+  failedCourseCodes: z.array(z.string()).default([]),
   projectedCompletionTerm: z.string().nullable(),
   warnings: z.array(z.string()),
   suggestedOptions: z.array(z.string()),
@@ -500,6 +501,8 @@ export const AiGovernanceSnapshot = z.object({
     studentAiAllowed: z.boolean(),
     instructorAiAllowed: z.boolean(),
     gradingAssistanceAllowed: z.boolean(),
+    adminAiAllowed: z.boolean(),
+    maxRequestsPerHour: z.number().int().min(1).max(10000),
   }),
   knowledgeSources: z.array(
     z.object({
@@ -589,6 +592,7 @@ export const AskCoachRequest = z.object({
   activeCourseId: Uuid.optional(),
   activeSectionId: Uuid.optional(),
   assessmentAttemptOpen: z.boolean().optional(),
+  appointmentStartsAt: IsoDateTime.optional(),
 });
 
 export const CoachSource = z.object({

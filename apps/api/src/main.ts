@@ -10,7 +10,7 @@ import { meRouter } from "./modules/me/me.router.js";
 import { coursesRouter } from "./modules/courses/courses.router.js";
 import { notificationsRouter } from "./modules/notifications/notifications.router.js";
 import { calendarRouter } from "./modules/calendar/calendar.router.js";
-import { openApiDocument } from "./openapi.js";
+import { documentExpressApp, openApiDocument } from "./openapi.js";
 import { catalogRouter } from "./modules/catalog/catalog.router.js";
 import { portalRouter } from "./modules/portal/portal.router.js";
 import { adminRouter } from "./modules/admin/admin.router.js";
@@ -28,6 +28,7 @@ import { publicRouter } from "./modules/public/public.router.js";
 import { selfpacedRouter } from "./modules/selfpaced/selfpaced.router.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { trustProxySetting } from "./lib/clientIp.js";
+import { sensitiveEndpointRateLimit } from "./middleware/rateLimit.js";
 
 const app: Express = express();
 app.set("trust proxy", trustProxySetting(process.env.TRUST_PROXY));
@@ -40,13 +41,13 @@ app.use(
   cors({
     origin(origin, cb) {
       // Allow same-origin tools / server-to-server (no Origin) and listed browser origins
-      if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes("*")) {
+      if (!origin || allowedOrigins.includes(origin) || (process.env.NODE_ENV !== "production" && allowedOrigins.includes("*"))) {
         cb(null, true);
         return;
       }
       try {
         const parsed = new URL(origin);
-        if (parsed.hostname === "46.202.163.202") {
+        if (process.env.NODE_ENV !== "production" && parsed.hostname === "46.202.163.202") {
           cb(null, true);
           return;
         }
@@ -64,6 +65,7 @@ app.use("/admin/super", express.json({ limit: "2mb" }));
 app.use("/admin/heritage", express.json({ limit: "12mb" }));
 app.use("/lms-files", express.json({ limit: "12mb" }));
 app.use(express.json());
+app.use(sensitiveEndpointRateLimit);
 app.use((req, _res, next) => {
   (req as express.Request & { correlationId: string }).correlationId =
     (req.header("x-correlation-id") as string) || randomUUID();
@@ -144,6 +146,7 @@ app.use("/admin", adminRouter);
 
 app.use("/public", publicRouter);
 
+documentExpressApp(app as Express & { _router?: { stack?: never[] } });
 app.use(errorHandler);
 
 const port = Number(process.env.API_PORT ?? 4000);
@@ -152,13 +155,15 @@ if (process.env.NODE_ENV !== "test") {
     console.log(`MyHeritage API listening on http://localhost:${port}`);
   });
 
-  void import("./modules/applicant/governmentIdPurge.js")
+  if (process.env.ENABLE_API_SCHEDULERS === "true") void import("./modules/applicant/governmentIdPurge.js")
     .then(({ purgeLegacyGovernmentIdData }) => purgeLegacyGovernmentIdData())
     .then((summary) => {
       if (summary.documents || summary.forms) console.log("government ID purge", summary);
     })
     .catch((err) => console.error("government ID purge failed", err));
 
+  // Run background schedules on exactly one explicitly designated API instance.
+  if (process.env.ENABLE_API_SCHEDULERS === "true") {
   // Campus compliance: pre-class reminders, miss escalation, teacher SLAs.
   const sweepMs = Number(process.env.COMPLIANCE_SWEEP_MS ?? 60_000);
   setTimeout(() => {
@@ -193,6 +198,7 @@ if (process.env.NODE_ENV !== "test") {
       })
       .catch((err) => console.error("report schedule sweep failed", err));
   }, Math.max(60_000, Number(process.env.REPORT_SWEEP_MS ?? 120_000)));
+  }
 }
 
 export { app };

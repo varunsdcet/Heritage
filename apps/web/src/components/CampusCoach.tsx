@@ -170,6 +170,7 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
   const fileRef = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState("");
   const [attachNote, setAttachNote] = useState<string | null>(null);
+  const [attachContent, setAttachContent] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(true);
@@ -228,6 +229,9 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
     }
     const trimmed = readDraft(question);
     if (!trimmed || sendingRef.current) return;
+    const questionWithAttachment = attachNote && attachContent
+      ? `${trimmed}\n\nAttached file: ${attachNote}\n${attachContent}`.slice(0, 2000)
+      : trimmed;
     sendingRef.current = true;
 
     const pendingId = `local-${clientId()}`;
@@ -243,6 +247,7 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
       { id: pendingId, role: "user", text: trimmed, createdAt: new Date().toISOString() },
     ]);
     setAttachNote(null);
+    setAttachContent(null);
 
     try {
       const response = await api<CoachAnswer>(
@@ -251,7 +256,7 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
           method: "POST",
           headers: { "idempotency-key": clientId() },
           body: JSON.stringify({
-            question: trimmed,
+            question: questionWithAttachment,
             contextPath,
             capability: capabilityForPath(role, contextPath),
           }),
@@ -464,7 +469,7 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
           {attachNote ? (
             <p className="mh-ask-chat__attach-note">
               Attachment ready: <strong>{attachNote}</strong>{" "}
-              <button type="button" className="mh-ask-chat__attach-clear" onClick={() => setAttachNote(null)}>
+              <button type="button" className="mh-ask-chat__attach-clear" onClick={() => { setAttachNote(null); setAttachContent(null); }}>
                 Remove
               </button>
             </p>
@@ -475,9 +480,16 @@ function CampusCoachBody({ role, contextPath }: { role: ShellRole; contextPath: 
               type="file"
               className="mh-ask-chat__file"
               aria-label="Add attachment"
-              onChange={(e) => {
+              onChange={async (e) => {
                 const file = e.target.files?.[0];
-                setAttachNote(file ? file.name : null);
+                if (!file) { setAttachNote(null); setAttachContent(null); return; }
+                if (file.size > 256 * 1024 || !/\.(txt|md|csv)$/i.test(file.name)) {
+                  setError("Coach attachments must be a TXT, Markdown, or CSV file no larger than 256 KB.");
+                  setAttachNote(null); setAttachContent(null); e.target.value = ""; return;
+                }
+                setError(null);
+                setAttachNote(file.name);
+                setAttachContent((await file.text()).slice(0, 1200));
                 e.target.value = "";
               }}
             />

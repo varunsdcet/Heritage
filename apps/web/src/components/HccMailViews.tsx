@@ -171,12 +171,13 @@ export function HccMailViews({
         const kind = KIND_BY_VIEW[view];
         if (kind) await loadFolder(session, kind);
         if (view === "settings" || view === "compose") {
-          const [st, aud] = await Promise.all([
-            api<{ settings: Settings }>("/mail/settings", {}, session.accessToken),
-            api<Audience>("/mail/audience", {}, session.accessToken),
-          ]);
-          setSettings(st.settings);
-          setAudience(aud);
+          const settingsRequest = api<{ settings: Settings }>("/mail/settings", {}, session.accessToken)
+            .then((st) => setSettings(st.settings))
+            .catch((err) => setError(err instanceof Error ? err.message : "Could not load mail settings"));
+          const audienceRequest = api<Audience>("/mail/audience", {}, session.accessToken)
+            .then(setAudience)
+            .catch((err) => setError(err instanceof Error ? err.message : "Could not load recipients"));
+          await Promise.allSettled([settingsRequest, audienceRequest]);
         }
         if (view === "lists") {
           const res = await api<{ items: Array<{ id: string; name: string; recipientCount: number }> }>(

@@ -8,6 +8,8 @@ import { StudentFrame } from "@/components/StudentSisShell";
 import { ApiError, api, loadSession, type Session } from "@/lib/api";
 
 type Assessment = StudentAssessmentsResponse["assessments"][number];
+type AttemptQuestion = { id: string; prompt: string; options: string[] };
+type ActiveAttempt = { attemptId: string; expiresAt: string; questions: AttemptQuestion[] };
 type LoadState = "loading" | "ready" | "offline" | "forbidden" | "error";
 
 function formatDate(value: string | null | undefined) {
@@ -50,6 +52,8 @@ function StudentAssessmentsInner() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [activeAttempt, setActiveAttempt] = useState<ActiveAttempt | null>(null);
+  const [answers, setAnswers] = useState<Record<string, number>>({});
 
   useEffect(() => {
     setSelectedId(urlId);
@@ -104,6 +108,8 @@ function StudentAssessmentsInner() {
   function openAssessment(id: string) {
     setNotice(null);
     setActionError(null);
+    setActiveAttempt(null);
+    setAnswers({});
     setSelectedId(id);
     router.replace(`/student/assessments?id=${encodeURIComponent(id)}`, { scroll: false });
   }
@@ -121,11 +127,13 @@ function StudentAssessmentsInner() {
     setNotice(null);
     setActionError(null);
     try {
-      const result = await api<{ attemptId: string; expiresAt: string }>(
+      const result = await api<ActiveAttempt>(
         `/student/assessments/${assessment.id}/start`,
         { method: "POST", body: "{}" },
         session.accessToken,
       );
+      setActiveAttempt(result);
+      setAnswers({});
       await refresh(session, { silent: true });
       setNotice(`Attempt started. Submit before ${formatDate(result.expiresAt)}.`);
     } catch (caught) {
@@ -136,18 +144,21 @@ function StudentAssessmentsInner() {
   }
 
   async function submitAttempt(assessment: Assessment) {
-    if (!session || !assessment.openAttemptId) return;
+    const attemptId = activeAttempt?.attemptId ?? assessment.openAttemptId;
+    if (!session || !attemptId || !activeAttempt) return;
     setBusy(true);
     setNotice(null);
     setActionError(null);
     try {
-      const result = await api<{ attemptId: string; status: string; submittedAt: string }>(
-        `/student/assessments/attempts/${assessment.openAttemptId}/submit`,
-        { method: "POST", body: "{}" },
+      const result = await api<{ attemptId: string; status: string; submittedAt: string; score: number; maxScore: number }>(
+        `/student/assessments/attempts/${attemptId}/submit`,
+        { method: "POST", body: JSON.stringify({ answers }) },
         session.accessToken,
       );
       await refresh(session, { silent: true });
-      setNotice(`Assessment submitted successfully at ${formatDate(result.submittedAt)}.`);
+      setActiveAttempt(null);
+      setAnswers({});
+      setNotice(`Assessment submitted at ${formatDate(result.submittedAt)}. Score: ${result.score}/${result.maxScore}.`);
     } catch (caught) {
       setActionError(caught instanceof Error ? caught.message : "Could not submit attempt");
     } finally {
@@ -201,6 +212,9 @@ function StudentAssessmentsInner() {
           assessment={selected}
           attemptOpen={Boolean(data?.assessmentAttemptOpen)}
           busy={busy}
+          activeAttempt={activeAttempt}
+          answers={answers}
+          onAnswer={(questionId, option) => setAnswers((current) => ({ ...current, [questionId]: option }))}
           onBack={backToList}
           onStart={() => void startAttempt(selected)}
           onSubmit={() => void submitAttempt(selected)}
@@ -262,6 +276,9 @@ function AssessmentDetail({
   assessment,
   attemptOpen,
   busy,
+  activeAttempt,
+  answers,
+  onAnswer,
   onBack,
   onStart,
   onSubmit,
@@ -269,6 +286,9 @@ function AssessmentDetail({
   assessment: Assessment;
   attemptOpen: boolean;
   busy: boolean;
+  activeAttempt: ActiveAttempt | null;
+  answers: Record<string, number>;
+  onAnswer: (questionId: string, option: number) => void;
   onBack: () => void;
   onStart: () => void;
   onSubmit: () => void;
@@ -404,11 +424,36 @@ function AssessmentDetail({
               <p className="mh-teacher-muted" style={{ marginTop: 0 }}>
                 Your attempt is open. Submit when you are finished. This cannot be undone.
               </p>
+              {!activeAttempt ? (
+                <button type="button" className="mh-teacher-btn mh-teacher-btn--secondary" disabled={busy} onClick={onStart}>
+                  {busy ? "Loading…" : "Resume attempt"}
+                </button>
+              ) : (
+                <div className="mh-teacher-stack">
+                  <p className="mh-teacher-muted">Submit before {formatDate(activeAttempt.expiresAt)}.</p>
+                  {activeAttempt.questions.map((question, questionIndex) => (
+                    <fieldset key={question.id} className="mh-teacher-section">
+                      <legend><strong>{questionIndex + 1}. {question.prompt}</strong></legend>
+                      {question.options.map((option, optionIndex) => (
+                        <label key={`${question.id}-${optionIndex}`} style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                          <input
+                            type="radio"
+                            name={`answer-${question.id}`}
+                            checked={answers[question.id] === optionIndex}
+                            onChange={() => onAnswer(question.id, optionIndex)}
+                          />
+                          <span>{option}</span>
+                        </label>
+                      ))}
+                    </fieldset>
+                  ))}
+                </div>
+              )}
               <div className="mh-teacher-actions">
                 <button
                   type="button"
                   className="mh-teacher-btn mh-teacher-btn--primary"
-                  disabled={busy}
+                  disabled={busy || !activeAttempt || activeAttempt.questions.some((question) => answers[question.id] === undefined)}
                   onClick={onSubmit}
                 >
                   {busy ? "Submitting…" : "Submit attempt"}

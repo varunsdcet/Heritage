@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getActivity, getChapter, getCurriculum } from "@/lib/selfpacedCurriculum";
 import { getSelfpacedProgram } from "@/lib/selfpacedPrograms";
+import { API_URL } from "@/lib/api";
+import { requireWebApiSession } from "@/lib/serverRouteAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -238,6 +240,8 @@ ${chunks.join("\n\n") || "No unlocked purchased content is available."}`;
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await requireWebApiSession(req, ["student"]);
+    if (session instanceof NextResponse) return session;
     const body = (await req.json()) as {
       question?: string;
       slug?: string;
@@ -256,7 +260,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Coach disabled for graded work", code: "coach_disabled" }, { status: 403 });
     }
 
-    const enrolled = (body.enrolled || []).filter((e) => e?.slug && (e.openChapterCount || 0) > 0);
+    const enrolmentResponse = await fetch(`${API_URL.replace(/\/$/, "")}/selfpaced/enrolments`, {
+      headers: { authorization: session.authorization },
+      cache: "no-store",
+    });
+    if (!enrolmentResponse.ok) {
+      return NextResponse.json({ error: "Could not verify course enrolment." }, { status: 403 });
+    }
+    const verified = (await enrolmentResponse.json()) as {
+      items?: Array<{ slug?: string; enrolledAt?: string }>;
+    };
+    const requested = new Map((body.enrolled || []).map((item) => [item.slug, item.openChapterCount]));
+    const enrolled = (verified.items || []).flatMap((item) => {
+      if (!item.slug || !requested.has(item.slug)) return [];
+      const enrolledAt = item.enrolledAt ? new Date(item.enrolledAt) : new Date();
+      const elapsedDays = Number.isNaN(enrolledAt.getTime())
+        ? 0
+        : Math.max(0, Math.floor((Date.now() - enrolledAt.getTime()) / 86_400_000));
+      return [{ slug: item.slug, openChapterCount: Math.min(requested.get(item.slug) || 0, elapsedDays + 1) }];
+    }).filter((item) => item.openChapterCount > 0);
     if (enrolled.length === 0 && !body.slug) {
       return NextResponse.json({
         ok: true,

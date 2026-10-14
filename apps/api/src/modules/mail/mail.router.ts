@@ -9,6 +9,7 @@ import {
   UpdateMailboxSettingsRequest,
 } from "@myheritage/contracts";
 import { requireAuth, requireRoles, type AuthedRequest } from "../../middleware/auth.js";
+import { assertPermission } from "../admin/superAdmin.service.js";
 import {
   bulkMailAction,
   composeMail,
@@ -28,6 +29,14 @@ import {
 export const mailRouter: Router = Router();
 
 mailRouter.use(requireAuth, requireRoles("student", "instructor", "admin", "registrar"));
+mailRouter.use(async (req, _res, next) => {
+  try {
+    await assertPermission((req as AuthedRequest).user, "emailMessaging", req.method === "GET" ? "view" : "edit");
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
 
 mailRouter.get("/", async (req, res, next) => {
   try {

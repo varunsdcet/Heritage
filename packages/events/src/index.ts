@@ -15,7 +15,14 @@ export async function writeAuditAndOutbox(
     correlationId: string;
     outboxPayload?: unknown;
   },
-) {
+): Promise<void> {
+  // A PrismaClient call must still be atomic. Transaction clients do not expose
+  // $transaction, so calls already participating in a business transaction
+  // continue directly on that transaction.
+  if ("$transaction" in tx && typeof tx.$transaction === "function") {
+    await tx.$transaction(async (db): Promise<void> => writeAuditAndOutbox(db, input));
+    return;
+  }
   await tx.auditEvent.create({
     data: {
       institutionId: input.institutionId,

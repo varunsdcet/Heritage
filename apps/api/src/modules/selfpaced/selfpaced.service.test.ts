@@ -4,7 +4,7 @@ const tx = vi.hoisted(() => ({ credentialRecord: { create: vi.fn() } }));
 const db = vi.hoisted(() => ({
   student: { findFirst: vi.fn() },
   credentialRecord: { findFirst: vi.fn() },
-  sisScreenState: { findMany: vi.fn(), upsert: vi.fn() },
+  sisScreenState: { findMany: vi.fn(), findUnique: vi.fn(), upsert: vi.fn() },
   $transaction: vi.fn(),
 }));
 
@@ -29,6 +29,7 @@ beforeEach(() => {
   db.sisScreenState.findMany.mockResolvedValue([
     { path: "selfpaced:catalogue:dynamic-course", payloadJson: JSON.stringify({ slug: "dynamic-course", status: "published", curriculum: [] }), updatedAt: issuedAt },
   ]);
+  db.sisScreenState.findUnique.mockResolvedValue({ id: "enrol-1" });
   db.sisScreenState.upsert.mockResolvedValue({});
   db.$transaction.mockImplementation(async (work: (client: typeof tx) => Promise<unknown>) => work(tx));
   tx.credentialRecord.create.mockResolvedValue(record);
@@ -83,6 +84,14 @@ describe("self-paced certificates", () => {
     await expect(issueSelfpacedCertificate(user, { slug, completedActivityIds: all, assessmentsPassed: true })).rejects.toMatchObject({
       status: 403,
       code: "STUDENT_PROFILE_REQUIRED",
+    });
+  });
+
+  it("requires a real enrolment before issuing a certificate", async () => {
+    db.sisScreenState.findUnique.mockResolvedValue(null);
+    await expect(issueSelfpacedCertificate(user, { slug, completedActivityIds: all, assessmentsPassed: true })).rejects.toMatchObject({
+      status: 403,
+      code: "ENROLMENT_REQUIRED",
     });
   });
 });

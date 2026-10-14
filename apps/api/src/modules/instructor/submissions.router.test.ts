@@ -25,6 +25,7 @@ const db = vi.hoisted(() => ({
   submission: { findMany: vi.fn() },
   gradeItem: { findMany: vi.fn() },
   fileObject: { findFirst: vi.fn() },
+  sisScreenState: { findMany: vi.fn() },
 }));
 
 vi.mock("@myheritage/db", () => ({ prisma: db }));
@@ -100,6 +101,7 @@ beforeEach(() => {
     },
   ]);
   db.gradeItem.findMany.mockResolvedValue([]);
+  db.sisScreenState.findMany.mockResolvedValue([]);
 });
 
 describe("instructor submissions", () => {

@@ -4,6 +4,8 @@ import { hashPassword } from "@myheritage/auth";
 import type { SessionClaims } from "@myheritage/contracts";
 import { assertPermission, canEdit, effectiveAccess, patchStudentMeta, studentMetaMap } from "../superAdmin.service.js";
 import { audit, refs } from "./service.js";
+import { bytesMatchMime, decodeBase64 } from "../../../lib/fileSniff.js";
+import { encryptConfigSecret } from "../../../lib/configSecrets.js";
 import {
   COLOURS,
   ENTITIES,
@@ -220,7 +222,7 @@ async function clean(fields: Field[], input: Data, base: Data, ctx: Ctx, prefix 
       case "secret": {
         const v = s(raw);
         if (v.length > 500) err(f, "is too long");
-        out[f.key] = v || s(base[f.key]);
+        out[f.key] = v ? encryptConfigSecret(v) : s(base[f.key]);
         break;
       }
       case "password": {
@@ -1249,9 +1251,11 @@ export async function uploadFile(user: SessionClaims, body: { name: string; mime
   if (!name) throw httpError(400, "File name is required");
   if (!FILE_TYPES.test(mime) || mime === "application/octet-stream") throw httpError(400, "Unsupported file type. Upload a PNG, JPG, GIF, WebP, PDF or font (TTF, OTF, WOFF) file.");
   const b64 = s(body.base64).replace(/^data:[^,]*,/, "");
-  const size = Math.floor((b64.length * 3) / 4) - (b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0);
+  const bytes = decodeBase64(b64);
+  const size = bytes.length;
   if (!size) throw httpError(400, "The file is empty");
   if (size > FILE_MAX) throw httpError(400, "Files must be 8 MB or smaller");
+  if (!bytesMatchMime(bytes, mime)) throw httpError(400, "File contents do not match the declared file type");
   const rec = await insert(user.institutionId, user.accountId, FILE_SCREEN, { name, mime, size, base64: b64 });
   return { id: rec.id, name, mime, size };
 }

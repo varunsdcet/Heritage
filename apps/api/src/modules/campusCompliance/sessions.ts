@@ -92,9 +92,11 @@ export async function recordSessionJoin(input: {
   accountId: string;
   personId: string;
   userAgent: string;
+  roles: string[];
 }) {
   const session = await prisma.classSession.findFirst({
     where: { id: input.classSessionId, institutionId: input.institutionId },
+    include: { section: { select: { instructorPersonId: true } } },
   });
   if (!session) {
     throw Object.assign(new Error("Class session not found"), { status: 404, code: "NOT_FOUND" });
@@ -104,13 +106,30 @@ export async function recordSessionJoin(input: {
     where: { institutionId: input.institutionId, personId: input.personId },
   });
 
+  const isStaff = input.roles.includes("admin") || input.roles.includes("registrar");
+  const isInstructor = input.roles.includes("instructor") && session.section.instructorPersonId === input.personId;
+  const enrolled = student
+    ? await prisma.enrolment.findFirst({
+        where: {
+          institutionId: input.institutionId,
+          sectionId: session.sectionId,
+          studentId: student.id,
+          status: "enrolled",
+        },
+        select: { id: true },
+      })
+    : null;
+  if (!isStaff && !isInstructor && !enrolled) {
+    throw Object.assign(new Error("You are not enrolled in this class session"), { status: 403, code: "FORBIDDEN" });
+  }
+
   const clientKind = detectClientKind(input.userAgent);
   const event = await prisma.sessionJoinEvent.create({
     data: {
       id: randomUUID(),
       institutionId: input.institutionId,
       classSessionId: session.id,
-      studentId: student?.id ?? null,
+      studentId: enrolled ? student!.id : null,
       accountId: input.accountId,
       clientKind,
       userAgent: input.userAgent.slice(0, 500),

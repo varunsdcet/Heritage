@@ -107,16 +107,16 @@ function useLites(session: Session | null) {
   const [terms, setTerms] = useState<TermLite[]>([]);
   useEffect(() => {
     if (!session) return;
-    void Promise.all([
+    void Promise.allSettled([
       api<{ items: StudentLite[] }>("/admin/students-lite", {}, session.accessToken),
       api<{ items: ProgramLite[] }>("/admin/programs-lite", {}, session.accessToken),
       api<{ items: SectionLite[] }>("/admin/sections-lite", {}, session.accessToken),
       api<{ items: TermLite[] }>("/admin/financial-terms", {}, session.accessToken),
     ]).then(([s, p, sec, t]) => {
-      setStudents(s.items);
-      setPrograms(p.items);
-      setSections(sec.items);
-      setTerms(t.items);
+      if (s.status === "fulfilled") setStudents(s.value.items);
+      if (p.status === "fulfilled") setPrograms(p.value.items);
+      if (sec.status === "fulfilled") setSections(sec.value.items);
+      if (t.status === "fulfilled") setTerms(t.value.items);
     });
   }, [session]);
   return { students, programs, sections, terms };
@@ -548,6 +548,7 @@ export function AdminRetakesView() {
     creditAwarded: false,
     continuous: false,
     addMakeupPlanItem: true,
+    feeCad: 250,
   });
 
   const refresh = useCallback(async () => {
@@ -595,6 +596,7 @@ export function AdminRetakesView() {
               ))}
             </select>
           </Field>
+          <Field label="Retake fee (CAD)"><input style={inputStyle} type="number" min="0.01" step="0.01" required value={form.feeCad} onChange={(e) => setForm({ ...form, feeCad: Number(e.target.value) })} /></Field>
           <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={form.countsTowardCgpa} onChange={(e) => setForm({ ...form, countsTowardCgpa: e.target.checked })} /> Counts toward CGPA</label>
           <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={form.creditAwarded} onChange={(e) => setForm({ ...form, creditAwarded: e.target.checked })} /> Credit awarded</label>
           <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={form.continuous} onChange={(e) => setForm({ ...form, continuous: e.target.checked })} /> Continuous</label>

@@ -11,6 +11,8 @@ export default function MobileInstructorGradesPage() {
   const router = useRouter();
   const [session, setSession] = useState<Session | null>(null);
   const [book, setBook] = useState<GradebookResponse | null>(null);
+  const [sections, setSections] = useState<Array<{ sectionId: string; code?: string; title?: string }>>([]);
+  const [sectionId, setSectionId] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -20,24 +22,44 @@ export default function MobileInstructorGradesPage() {
       return;
     }
     setSession(s);
-    api<{ items: Array<{ sectionId: string }> }>("/courses/me", {}, s.accessToken)
+    api<{ items: Array<{ sectionId: string; sectionCode?: string; courseCode?: string; title?: string }> }>("/courses/me", {}, s.accessToken)
       .then(async (res) => {
-        const sid = res.items?.[0]?.sectionId;
+        const available = res.items.map((item) => ({ sectionId: item.sectionId, code: [item.courseCode, item.sectionCode].filter(Boolean).join(" "), title: item.title }));
+        setSections(available);
+        const sid = available[0]?.sectionId;
         if (!sid) {
           setError("No sections assigned.");
           return;
         }
+        setSectionId(sid);
         const data = await api<GradebookResponse>(`/gradebooks/${sid}`, {}, s.accessToken);
         setBook(data);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load"));
   }, [router]);
 
+  async function chooseSection(next: string) {
+    if (!session || !next) return;
+    setSectionId(next);
+    setBook(null);
+    setError(null);
+    try { setBook(await api<GradebookResponse>(`/gradebooks/${next}`, {}, session.accessToken)); }
+    catch (err) { setError(err instanceof Error ? err.message : "Failed to load"); }
+  }
+
   return (
     <MobileChrome title="Gradebook">
       <div style={{ padding: 16 }}>
         <h1 style={{ fontSize: 20, marginTop: 0 }}>Grades (read-only)</h1>
         <p style={{ color: "var(--mh-text-muted)", fontSize: 13 }}>Mobile view is read-only. Edit scores on desktop gradebook.</p>
+        {sections.length > 1 ? (
+          <label style={{ display: "grid", gap: 6, marginBottom: 14 }}>
+            <span style={{ fontSize: 13 }}>Course section</span>
+            <select value={sectionId} onChange={(event) => void chooseSection(event.target.value)}>
+              {sections.map((section) => <option key={section.sectionId} value={section.sectionId}>{section.code || section.title || section.sectionId}</option>)}
+            </select>
+          </label>
+        ) : null}
         {error ? <p style={{ color: "var(--mh-danger)" }}>{error}</p> : null}
         {!book && !error ? <p>Loading…</p> : null}
         {book ? (

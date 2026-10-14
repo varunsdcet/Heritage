@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@myheritage/db", () => ({ prisma: {} }));
 
-import { offeringOf, plannedMeetings } from "./sectionOffering.js";
+import { holidayDates, offeringOf, plannedMeetings } from "./sectionOffering.js";
 import { dateBoundsFromSessions, scheduleTextFromSessions } from "./sectionSchedule.js";
 
 const labels = {
@@ -27,6 +27,20 @@ describe("section offering", () => {
     const planned = plannedMeetings({ startsOn: "2026-10-26", endsOn: "2026-11-02", meetings }, null, "America/Toronto");
     expect(planned.map((p) => p.startsAt.toISOString())).toEqual(["2026-10-26T13:00:00.000Z", "2026-11-02T14:00:00.000Z"]);
     expect(plannedMeetings({ startsOn: null, endsOn: null, meetings }, null, "America/Vancouver")).toEqual([]);
+  });
+
+  it("does not generate class sessions on single-day or ranged holidays", () => {
+    const excluded = holidayDates([
+      { dataJson: JSON.stringify({ date: "2026-10-26", singleDay: true }) },
+      { dataJson: JSON.stringify({ date: "2026-11-02", endDate: "2026-11-03", singleDay: false }) },
+    ]);
+    const planned = plannedMeetings(
+      { startsOn: "2026-10-19", endsOn: "2026-11-09", meetings: [{ day: "Monday", start: "09:00", end: "11:00" }] },
+      null,
+      "America/Toronto",
+      excluded,
+    );
+    expect(planned.map((p) => p.startsAt.toISOString().slice(0, 10))).toEqual(["2026-10-19", "2026-11-09"]);
   });
 
   it("formats class-session times and dates in the institution time zone, not the server's", () => {

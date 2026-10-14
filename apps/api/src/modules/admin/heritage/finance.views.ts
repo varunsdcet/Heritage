@@ -4,7 +4,6 @@ import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
 import { assertPermission } from "../superAdmin.service.js";
 import { refs } from "./service.js";
-import { ensureSeed } from "./sysconfig.js";
 import { ADVANCE_CREDIT, PLAN_FREQUENCIES } from "./finance.spec.js";
 import {
   EPS,
@@ -66,7 +65,6 @@ async function can(user: SessionClaims, mod: "financialManagement" | "agentManag
 
 async function base(user: SessionClaims) {
   await canFinance(user, "view");
-  await ensureSeed(user);
   const inst = user.institutionId;
   const cfg = await loadConfig(inst);
   const [students, books] = await Promise.all([studentsInfo(inst), loadBooks(inst, cfg)]);
@@ -78,7 +76,6 @@ const campusOk = (st: StudentInfo | undefined, campus: string) => !has(campus) |
 
 export async function financeMeta(user: SessionClaims) {
   await canFinance(user, "view");
-  await ensureSeed(user);
   const inst = user.institutionId;
   const [cfg, r, terms, canEdit, agents] = await Promise.all([loadConfig(inst), refs(user), termOptions(inst), can(user, "financialManagement", "edit"), can(user, "agentManagement", "view")]);
   const list = (recs: Config["paymentMethods"]) => recs.map((x) => ({ id: x.id, name: nameOf(x) })).sort((a, b) => a.name.localeCompare(b.name));

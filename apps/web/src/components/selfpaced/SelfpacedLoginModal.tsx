@@ -112,7 +112,7 @@ export function SelfpacedLoginModal({
     try {
       const ua = navigator.userAgent.replace(/\s+/g, " ").slice(0, 48) || "browser";
       if (mode === "signup") {
-        await api<{ created: true; email: string; studentNumber: string }>("/selfpaced/register", {
+        await api<{ accepted: true; email: string }>("/selfpaced/register", {
           method: "POST",
           body: JSON.stringify({ name: name.trim(), email: trimmed.toLowerCase(), password }),
         }, undefined, { skipAuthRedirect: true });

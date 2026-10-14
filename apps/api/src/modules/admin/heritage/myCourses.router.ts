@@ -68,12 +68,10 @@ myCoursesRouter.post(
   "/pending-schedules/:id/decide",
   handle(async (req) => {
     const u = user(req);
-    await assertPermission(u, "courseManagement", "view");
+    await assertPermission(u, "courseManagement", "edit");
     const id = z.string().uuid().parse(req.params.id);
     const body = ScheduleDecisionBody.parse(req.body);
-    const decided = await decideSchedule(u, id, body);
-    await audit(u, "MC04", "my-courses", `schedule.${body.decision === "accept" ? "accepted" : "declined"}`, { recordId: id, after: { status: decided.status, sectionId: decided.sectionId } });
-    return decided;
+    return decideSchedule(u, id, body);
   }),
 );
 myCoursesRouter.get("/grades", view((req) => gradeSubmissions(user(req), GradesQuery.parse(req.query))));

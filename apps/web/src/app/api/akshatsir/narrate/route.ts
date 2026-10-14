@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { rateLimited } from "@/lib/heygenSpeech";
-import { xttsConfig, xttsSpeech } from "@/lib/xttsSpeech";
+import { xttsConfig, xttsLicenseAccepted, xttsSpeech } from "@/lib/xttsSpeech";
+import { requireWebApiSession } from "@/lib/serverRouteAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,6 +11,11 @@ const MAX_CHARS = 3000;
 const VOICE = "monica";
 
 export async function POST(req: NextRequest) {
+  const session = await requireWebApiSession(req, ["instructor", "admin", "registrar"]);
+  if (session instanceof NextResponse) return session;
+  if (!xttsLicenseAccepted()) {
+    return NextResponse.json({ error: "XTTS is disabled until an administrator accepts the model licence." }, { status: 503 });
+  }
   const xtts = xttsConfig();
   if (!xtts) {
     return NextResponse.json({ error: "Narration voice is not configured on the server." }, { status: 503 });

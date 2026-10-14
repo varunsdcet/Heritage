@@ -177,8 +177,10 @@ describe("course workspace activities keep what the instructor entered", () => {
   });
 
   it("refuses a javascript: link", async () => {
-    const out = await act("Add Activity", { TopicId: "topic-1", ActivityType: "URL", Name: "Bad", "External URL": "javascript:alert(1)" });
-    expect(out.message).toMatch(/https:\/\/ or http:\/\//);
+    await expect(act("Add Activity", { TopicId: "topic-1", ActivityType: "URL", Name: "Bad", "External URL": "javascript:alert(1)" })).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringMatching(/https:\/\/ or http:\/\//),
+    });
     expect(topicActivities()).toHaveLength(0);
   });
 

@@ -190,7 +190,13 @@ approvalsRouter.post(
         comment: body.comment,
       });
       if (updated.status === "rejected") await settleRejectedApproval(user.institutionId, id, body.comment);
-      res.json({ id: updated.id, status: updated.status });
+      // Grade publication has no useful intermediate state for staff: once the
+      // required reviewer approves it, publish it atomically through the same
+      // audited apply path so the student can see the marks immediately.
+      const final = updated.status === "approved" && GRADE_PUBLISH_TYPES.has(updated.type)
+        ? await applyApprovedRequest(user.institutionId, id, user.accountId)
+        : updated;
+      res.json({ id: final.id, status: final.status });
     } catch (err) {
       next(err);
     }

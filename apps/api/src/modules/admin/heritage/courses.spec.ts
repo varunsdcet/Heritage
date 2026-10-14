@@ -172,7 +172,12 @@ export const SESSION_FIELDS: Field[] = [
   sel("waitlist", "Enrolment Waitlist", EN_DIS, { section: SS }),
   sel("reserved", "Reserved Enrolments", DIS_EN, { section: SS }),
   sel("selfEnrolment", "Student Self-Enrolment", EN_DIS, { section: SS }),
-  f("instructors", "Instructor(s)", "people", { section: SI, placeholder: "Type a name and select the user" }),
+  f("instructors", "Faculty Members (Multiple Select)", "people", {
+    dflt: [],
+    section: SI,
+    placeholder: "Search and add faculty members",
+    hint: "Select faculty members one by one. Every selected faculty stays as a removable chip.",
+  }),
   f("assistants", "Teaching Assistant(s)", "people", { section: SI, placeholder: "Type a name and select the user" }),
   f("guests", "Guest(s)", "people", { section: SI, placeholder: "Type a name and select the user" }),
   f("continuous", "This is a continuous feed-in course session", "bool", { section: SC }),

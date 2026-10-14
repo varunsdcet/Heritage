@@ -21,19 +21,25 @@ function portalForPath(pathname: string): string | null {
   return null;
 }
 
-function rolesFromCookie(raw: string | undefined): string[] {
+function decodeBase64Url(raw: string) {
+  const normalized = raw.replace(/-/g, "+").replace(/_/g, "/");
+  return Uint8Array.from(atob(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=")), (char) => char.charCodeAt(0));
+}
+
+async function rolesFromCookie(raw: string | undefined): Promise<string[]> {
   if (!raw) return [];
   try {
-    const decoded = decodeURIComponent(raw);
-    // Prefer JSON array when present.
-    if (decoded.trim().startsWith("[")) {
-      const parsed = JSON.parse(decoded) as unknown;
-      return Array.isArray(parsed) ? parsed.map(String) : [];
-    }
-    // Comma-separated: admin,registrar
-    return decoded.split(",").map((r) => r.trim()).filter(Boolean);
+    const [payload, signature] = raw.split(".");
+    if (!payload || !signature) return [];
+    const secret = (process.env.PORTAL_COOKIE_SECRET || process.env.JWT_SECRET || "dev-portal-cookie-secret-change-me").trim();
+    if (process.env.NODE_ENV === "production" && secret.length < 32) return [];
+    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+    if (!(await crypto.subtle.verify("HMAC", key, decodeBase64Url(signature), new TextEncoder().encode(payload)))) return [];
+    const parsed = JSON.parse(new TextDecoder().decode(decodeBase64Url(payload))) as { roles?: unknown; exp?: unknown };
+    if (!Array.isArray(parsed.roles) || typeof parsed.exp !== "number" || parsed.exp <= Date.now() / 1000) return [];
+    return parsed.roles.map(String);
   } catch {
-    return raw.split(",").map((r) => r.trim()).filter(Boolean);
+    return [];
   }
 }
 
@@ -54,12 +60,12 @@ function canReviewCourseWork(pathname: string, roles: string[]): boolean {
   return pathname === "/instructor/gradebook" || pathname === "/instructor/submissions";
 }
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const portal = portalForPath(pathname);
   if (!portal) return NextResponse.next();
 
-  const roles = rolesFromCookie(request.cookies.get("mh_roles")?.value);
+  const roles = await rolesFromCookie(request.cookies.get("mh_roles")?.value);
   if (roles.length === 0) {
     const login = request.nextUrl.clone();
     login.pathname = "/login";

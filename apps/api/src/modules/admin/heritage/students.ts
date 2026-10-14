@@ -45,6 +45,7 @@ import {
   staffAccounts,
   statusOf,
   statusTree,
+  studentStatusPolicy,
   storeFile,
   storeValidFile,
   stuAudit,
@@ -52,7 +53,7 @@ import {
   validateFile,
   type Data,
 } from "./students.core.js";
-import { studentMetaMap } from "../superAdmin.service.js";
+import { CAMPUSES, studentMetaMap } from "../superAdmin.service.js";
 import { applicantLeads } from "./applicationStatus.js";
 import {
   ACTION_STATUSES,
@@ -151,7 +152,14 @@ export async function studentsMeta(user: SessionClaims) {
       categories: corrCategories.map((r) => ({ id: r.id, name: name(r) })).filter((c) => c.name),
       types: corrTypes.map((r) => ({ id: r.id, name: name(r), categories: arr<string>(r.data.categories) })).filter((t) => t.name),
     },
-    documentTemplates: docTemplates.map((r) => ({ id: r.id, name: name(r), documentType: s(r.data.documentType) })).filter((t) => t.name),
+    documentTemplates: docTemplates
+      .map((r) => ({
+        id: r.id,
+        name: name(r),
+        documentType: s(r.data.documentType),
+        inputs: [...s(r.data.content).matchAll(/\{input:([A-Za-z0-9_-]+)\}/g)].map((match) => match[1]!).filter((value, index, all) => all.indexOf(value) === index),
+      }))
+      .filter((t) => t.name),
     capturedDocumentGroups: CAPTURED_DOCUMENT_GROUPS,
     notificationTemplates: [
       ...CAPTURED_NOTIFICATION_TEMPLATES.map((n) => ({ id: `captured:${n}`, name: n, subject: "", body: "" })),
@@ -213,7 +221,7 @@ export async function studentsMeta(user: SessionClaims) {
 type DirectoryQuery = Record<string, unknown>;
 
 export async function directory(user: SessionClaims, q: DirectoryQuery) {
-  await canStudents(user, "view");
+  const access = await canStudents(user, "view");
   const inst = user.institutionId;
   const [students, metaMap, advisors, leads] = await Promise.all([
     prisma.student.findMany({
@@ -292,7 +300,10 @@ export async function directory(user: SessionClaims, q: DirectoryQuery) {
       (!adv.delivery || normalizeDelivery(m.delivery) === normalizeDelivery(adv.delivery))
     );
   };
-  const all = students.filter((st) => advancedMatch(st, (metaMap[st.id] ?? {}) as Record<string, string | undefined>)).map((st) => {
+  const campusScoped = access.superAdmin || access.campuses.length === CAMPUSES.length
+    ? students
+    : students.filter((st) => access.campuses.includes(s(metaMap[st.id]?.campus)));
+  const all = campusScoped.filter((st) => advancedMatch(st, (metaMap[st.id] ?? {}) as Record<string, string | undefined>)).map((st) => {
     const m = (metaMap[st.id] ?? {}) as Record<string, string | undefined>;
     const p = profiles.get(st.id);
     const status = statusOf(m, st.enrolments.length);
@@ -569,6 +580,24 @@ export async function header(user: SessionClaims, id: string) {
   };
 }
 
+/** Preserve statutory/academic history while removing portal access and active-directory visibility. */
+export async function archiveStudentProfile(user: SessionClaims, id: string) {
+  await canStudents(user, "edit");
+  const student = await requireStudentRow(user.institutionId, id);
+  const before = await metaOf(user.institutionId, id);
+  if (s(before.status) === "Archived") return { id, status: "Archived" };
+  await prisma.$transaction([
+    prisma.account.updateMany({
+      where: { institutionId: user.institutionId, personId: student.personId },
+      data: { status: "disabled", rowVersion: { increment: 1 } },
+    }),
+    prisma.student.update({ where: { id }, data: { standing: "withdrawn", rowVersion: { increment: 1 } } }),
+  ]);
+  await patchMetaLoose(user.institutionId, id, { status: "Archived" });
+  await stuAudit(user, "Profile Changes", id, "Student profile archived", { status: "Archived", login: "disabled" }, null, { status: s(before.status) });
+  return { id, status: "Archived" };
+}
+
 export async function overview(user: SessionClaims, id: string) {
   await canStudents(user, "view");
   const inst = user.institutionId;
@@ -663,9 +692,31 @@ export async function changeStatus(user: SessionClaims, id: string, body: Data) 
   const before = statusOf(meta, st._count.enrolments);
   if (before === status) throw httpError(400, `The student is already "${status}"`);
   assertRateCategory(meta, status);
+  const policy = await studentStatusPolicy(inst, status);
   await patchMetaLoose(inst, id, { status });
+  let generatedStudentNumber: string | null = null;
+  if (policy?.generateNumber && (!st.studentNumber.trim() || /^PENDING[-_]/i.test(st.studentNumber))) {
+    generatedStudentNumber = await nextStudentNumber(inst);
+    await prisma.student.update({ where: { id }, data: { studentNumber: generatedStudentNumber, rowVersion: { increment: 1 } } });
+  }
+  if (policy?.grantsAdmission) {
+    await prisma.admissionsApplication.updateMany({ where: { institutionId: inst, personId: st.personId, status: { notIn: ["accepted", "enrolled"] } }, data: { status: "accepted", progressPct: 100, rowVersion: { increment: 1 } } });
+  }
+  if (policy?.withdrawn) {
+    await prisma.enrolment.updateMany({ where: { institutionId: inst, studentId: id, status: { in: ["enrolled", "waitlisted"] } }, data: { status: "withdrawn", rowVersion: { increment: 1 } } });
+  } else if (policy?.completes) {
+    await prisma.enrolment.updateMany({ where: { institutionId: inst, studentId: id, status: "enrolled" }, data: { status: "completed", creditAwarded: true, rowVersion: { increment: 1 } } });
+  }
+  if (policy?.createLogin) {
+    const person = await prisma.person.findFirst({ where: { id: st.personId, institutionId: inst } });
+    const account = person ? await prisma.account.findFirst({ where: { institutionId: inst, personId: person.id } }) : null;
+    if (person && !account) {
+      const temporaryPassword = temporaryPasswordFor();
+      await prisma.account.create({ data: { institutionId: inst, personId: person.id, email: person.email, passwordHash: await hashPassword(temporaryPassword), status: "active", rolesJson: JSON.stringify(["student"]) } });
+    }
+  }
   await stuAudit(user, "Profile Changes", id, "Student status changed", { status }, null, { status: before });
-  return { status };
+  return { status, studentNumber: generatedStudentNumber ?? st.studentNumber };
 }
 
 export async function newProgramProfile(user: SessionClaims, id: string, body: Data) {
@@ -891,38 +942,52 @@ export async function auditTrail(user: SessionClaims, id: string, q: Data, onlyF
 /* ------------------------------------------------------------------ */
 
 export async function counts(user: SessionClaims) {
-  await canStudents(user, "view");
+  const access = await canStudents(user, "view");
   const inst = user.institutionId;
   const [students, metaMap, flags, reqs, loas, withdraws, grades, alerts, assess, marks, badges, changes, leads] = await Promise.all([
     prisma.student.findMany({ where: { institutionId: inst }, select: { id: true, _count: { select: { enrolments: { where: { status: "enrolled" } } } } } }),
     studentMetaMap(inst),
     rows(inst, STU.FLAG),
     rows(inst, STU.REQ),
-    prisma.leaveOfAbsenceRequest.count({ where: { institutionId: inst, status: "pending" } }),
-    prisma.serviceRequest.count({ where: { institutionId: inst, type: { contains: "withdraw", mode: "insensitive" }, status: { in: ["open", "pending", "pending_approval", "submitted"] } } }),
-    prisma.approvalRequest.count({ where: { institutionId: inst, type: { in: ["grade.publish", "grade_publish"] }, status: "pending" } }),
+    prisma.leaveOfAbsenceRequest.findMany({ where: { institutionId: inst, status: "pending" }, select: { studentId: true } }),
+    prisma.serviceRequest.findMany({ where: { institutionId: inst, type: { contains: "withdraw", mode: "insensitive" }, status: { in: ["open", "pending", "pending_approval", "submitted"] } }, select: { studentId: true } }),
+    prisma.approvalRequest.findMany({ where: { institutionId: inst, type: { in: ["grade.publish", "grade_publish"] }, status: "pending" }, select: { subjectRef: true } }),
     rows(inst, STU.ALERT),
     rows(inst, STU.ASSESS),
     rows(inst, STU.TEST),
-    prisma.studentBadge.count({ where: { institutionId: inst, status: "pending" } }),
+    prisma.studentBadge.findMany({ where: { institutionId: inst, status: "pending" }, select: { studentId: true } }),
     rows(inst, STU.TRANSCRIPT_CHANGE),
     applicantLeads(inst),
   ]);
-  const out: Record<string, number> = { "students:all": students.length + leads.length };
-  for (const st of students) {
+  const scopedStudents = access.superAdmin || access.campuses.length === CAMPUSES.length
+    ? students
+    : students.filter((st) => access.campuses.includes(s(metaMap[st.id]?.campus)));
+  const scopedStudentIds = new Set(scopedStudents.map((student) => student.id));
+  const gradeSectionIds = grades.map((approval) => approval.subjectRef.replace(/^section:/, ""));
+  const gradeSections = gradeSectionIds.length
+    ? await prisma.section.findMany({ where: { institutionId: inst, id: { in: gradeSectionIds } }, select: { id: true, enrolments: { select: { studentId: true } } } })
+    : [];
+  const scopedGradeSectionIds = new Set(
+    gradeSections
+      .filter((section) => section.enrolments.length > 0 && section.enrolments.every((enrolment) => scopedStudentIds.has(enrolment.studentId)))
+      .map((section) => section.id),
+  );
+  const inScope = (studentId: string) => scopedStudentIds.has(studentId);
+  const out: Record<string, number> = { "students:all": scopedStudents.length + (access.superAdmin ? leads.length : 0) };
+  for (const st of scopedStudents) {
     const status = statusOf((metaMap[st.id] ?? {}) as Record<string, string | undefined>, st._count.enrolments);
     out[`students:${status}`] = (out[`students:${status}`] ?? 0) + 1;
   }
-  for (const a of leads) out[`students:${a.lifecycleStatus}`] = (out[`students:${a.lifecycleStatus}`] ?? 0) + 1;
-  out["queue:alerts"] = alerts.filter((a) => s(a.data.status) !== "Dismissed" && s(a.data.resolved) !== "Yes").length;
-  out["queue:flags"] = flags.filter((f) => (s(f.data.status) || "Active") === "Active" && s(f.data.resolved) !== "Yes").length;
-  out["queue:assessments"] = assess.filter((a) => ["Pending Assignment", "Pending Review"].includes(s(a.data.status))).length;
-  out["queue:requirements"] = reqs.filter((r) => (s(r.data.status) || "Pending") === "Pending").length;
-  out["queue:loa"] = loas;
-  out["queue:withdraw"] = withdraws;
-  out["queue:grades"] = grades;
-  out["queue:transcript"] = changes.filter((c) => s(c.data.status) === "Pending").length;
-  out["queue:marks"] = marks.filter((m) => !s(m.data.mark)).length;
-  out["queue:badges"] = badges;
+  if (access.superAdmin) for (const a of leads) out[`students:${a.lifecycleStatus}`] = (out[`students:${a.lifecycleStatus}`] ?? 0) + 1;
+  out["queue:alerts"] = alerts.filter((a) => inScope(a.contextKey) && s(a.data.status) !== "Dismissed" && s(a.data.resolved) !== "Yes").length;
+  out["queue:flags"] = flags.filter((f) => inScope(f.contextKey) && (s(f.data.status) || "Active") === "Active" && s(f.data.resolved) !== "Yes").length;
+  out["queue:assessments"] = assess.filter((a) => inScope(a.contextKey) && ["Pending Assignment", "Pending Review"].includes(s(a.data.status))).length;
+  out["queue:requirements"] = reqs.filter((r) => inScope(r.contextKey) && (s(r.data.status) || "Pending") === "Pending").length;
+  out["queue:loa"] = loas.filter((request) => inScope(request.studentId)).length;
+  out["queue:withdraw"] = withdraws.filter((request) => inScope(request.studentId)).length;
+  out["queue:grades"] = grades.filter((approval) => scopedGradeSectionIds.has(approval.subjectRef.replace(/^section:/, ""))).length;
+  out["queue:transcript"] = changes.filter((c) => inScope(c.contextKey) && s(c.data.status) === "Pending").length;
+  out["queue:marks"] = marks.filter((m) => inScope(m.contextKey) && !s(m.data.mark)).length;
+  out["queue:badges"] = badges.filter((badge) => inScope(badge.studentId)).length;
   return out;
 }

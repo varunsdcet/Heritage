@@ -169,7 +169,9 @@ export function workshopSettings(w: WorkshopRow, tz: string): WorkshopSettings {
     roleIds: Array.isArray(raw.roleIds) ? (raw.roleIds as unknown[]).filter((x): x is string => typeof x === "string") : [],
     maxEnrolments: num(raw.maxEnrolments, w.capacity),
     sameAsClassroom: typeof raw.sameAsClassroom === "boolean" ? raw.sameAsClassroom : false,
-    privacy: str(raw.privacy, legacy ? "Public Workshop" : "Private Workshop"),
+    // Self-registration is opt-in. Legacy rows did not store a privacy setting;
+    // treating them as public exposed unrelated workshops to every student.
+    privacy: str(raw.privacy, "Private Workshop"),
     approval: str(raw.approval, "Manual Decision"),
     hours: num(raw.hours, legacy ? legacyHours : 0),
     continuous: raw.continuous === true,

@@ -94,6 +94,16 @@ export async function activeFlags(institutionId: string, studentIds: string[]) {
     .sort((a, b) => b.date.localeCompare(a.date));
 }
 
+export async function assertNoActiveStudentHold(institutionId: string, studentId: string, action: string) {
+  const hold = (await activeFlags(institutionId, [studentId])).find((flag) => flag.isHold);
+  if (hold) {
+    throw Object.assign(new Error(`${action} is blocked by the active hold “${hold.name}”. Resolve or dismiss the hold first.`), {
+      code: "STUDENT_HOLD",
+      status: 409,
+    });
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Admin dashboard content blocks (Dashboard › Content Blocks)          */
 /* ------------------------------------------------------------------ */

@@ -394,7 +394,6 @@ function designationRequirement(d: Data) {
 }
 
 function ProgramSettings({ id, onName }: { id: string | null; onName: (n: string) => void }) {
-  const router = useRouter();
   const sp = useSearchParams();
   const notice = useNotice();
   const facultyId = sp?.get("faculty") ?? "";
@@ -423,8 +422,12 @@ function ProgramSettings({ id, onName }: { id: string | null; onName: (n: string
         form
           .save()
           .then((out) => {
+            if (!id) {
+              const cleanUrl = `${window.location.pathname}?notice=${encodeURIComponent(out.message)}`;
+              window.location.assign(cleanUrl);
+              return;
+            }
             notice.ok(out.message);
-            if (!id && out.id) router.push(`${FAC}/program?id=${out.id}&notice=${encodeURIComponent(out.message)}`);
           })
           .catch((err) => notice.fail(errMsg(err, "Save failed")));
       }}

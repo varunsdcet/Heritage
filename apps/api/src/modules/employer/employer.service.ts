@@ -272,26 +272,15 @@ export async function runEmployerAction(
 
   if (action === "approve_hours") {
     const hoursId = String(payload?.hoursId ?? "");
-    let entry =
-      org.placements.flatMap((p) => p.hours).find((h) => h.id === hoursId) ??
-      org.placements.flatMap((p) => p.hours).find((h) => h.status === "pending");
+    if (!hoursId) {
+      throw Object.assign(new Error("Choose a pending practicum hours entry"), { status: 400, code: "HOURS_ID_REQUIRED" });
+    }
+    const entry = org.placements
+      .flatMap((p) => p.hours)
+      .find((h) => h.id === hoursId && h.status === "pending");
 
-    // Smoke / re-runs: if nothing pending, log a fresh demo week then approve it.
     if (!entry) {
-      const placement = org.placements[0];
-      if (!placement) {
-        return { ok: true, status: "already_clear", message: "No placements to approve hours for" };
-      }
-      const weekLabel = `Week ${new Date().getUTCFullYear()}-W${String(Math.ceil((Date.now() % 31449600000) / 604800000) + 1).padStart(2, "0")}`;
-      entry = await prisma.hoursEntry.create({
-        data: {
-          institutionId: user.institutionId,
-          placementId: placement.id,
-          weekLabel,
-          hours: 24,
-          status: "pending",
-        },
-      });
+      throw Object.assign(new Error("No pending practicum hours entry was found"), { status: 404, code: "HOURS_NOT_FOUND" });
     }
 
     await prisma.hoursEntry.update({ where: { id: entry.id }, data: { status: "approved" } });

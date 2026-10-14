@@ -124,9 +124,9 @@ const NAV: NavItem[] = [
       { section: "STUDENT MANAGEMENT", label: "Course Withdraw Requests", href: "/instructor/f/t49-course-withdraw-requests" },
       { section: "STUDENT MANAGEMENT", label: "Pending Grade Submissions", href: "/instructor/f/t62-pending-grade-submissions", countKey: "grades" },
       { section: "STUDENT MANAGEMENT", label: "Accountability inbox", href: "/instructor/compliance" },
-      { section: "STUDENT MANAGEMENT", label: "Pending Transcript Changes (0)", href: "/instructor/f/t64-pending-transcript-changes" },
-      { section: "STUDENT MANAGEMENT", label: "Pending Entry / Progress Marks (0)", href: "/instructor/f/t62-pending-grade-submissions" },
-      { section: "STUDENT MANAGEMENT", label: "Badges / Accomplishments (0)", href: "/instructor/f/t82-badges-accomplishments" },
+      { section: "STUDENT MANAGEMENT", label: "Pending Transcript Changes", href: "/instructor/f/t64-pending-transcript-changes" },
+      { section: "STUDENT MANAGEMENT", label: "Pending Entry / Progress Marks", href: "/instructor/f/t62-pending-grade-submissions" },
+      { section: "STUDENT MANAGEMENT", label: "Badges / Accomplishments", href: "/instructor/f/t82-badges-accomplishments" },
     ],
   },
   {
@@ -163,7 +163,7 @@ const NAV: NavItem[] = [
         href: "/instructor/f/t37-course-repository",
         match: ["/instructor/f/t80-create-content-course"],
       },
-      { section: "COURSE MANAGEMENT", label: "Course Backups (0)", href: "/instructor/f/t65-course-backups" },
+      { section: "COURSE MANAGEMENT", label: "Course Backups", href: "/instructor/f/t65-course-backups" },
       {
         section: "COURSE MANAGEMENT",
         label: "Course Textbooks",

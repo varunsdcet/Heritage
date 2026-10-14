@@ -14,6 +14,7 @@ export default function StudentServicesPage() {
   const [error, setError] = useState<string | null>(null);
   const [subject, setSubject] = useState("");
   const [details, setDetails] = useState("");
+  const [sectionId, setSectionId] = useState("");
   const [type, setType] = useState<
     | "general_inquiry"
     | "official_transcript"
@@ -46,15 +47,24 @@ export default function StudentServicesPage() {
     try {
       await api(
         "/student/services",
-        { method: "POST", body: JSON.stringify({ type, subject, details }) },
+        { method: "POST", body: JSON.stringify({ type, subject, details, ...(type === "course_withdrawal" ? { sectionId } : {}) }) },
         session.accessToken,
       );
       setSubject("");
       setDetails("");
+      setSectionId("");
       await refresh(session);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Create failed");
     }
+  }
+
+  async function cancel(id: string) {
+    if (!session) return;
+    setError(null);
+    try {
+      setData(await api<StudentServiceRequestsResponse>(`/student/services/${id}/cancel`, { method: "POST", body: "{}" }, session.accessToken));
+    } catch (err) { setError(err instanceof Error ? err.message : "Cancellation failed"); }
   }
 
   if (!session) return null;
@@ -80,6 +90,14 @@ export default function StudentServicesPage() {
               <option value="academic_appeal">Academic appeal (approval)</option>
               <option value="leave_of_absence">Leave of absence (approval)</option>
             </select>
+            {type === "course_withdrawal" ? (
+              <select value={sectionId} onChange={(e) => setSectionId(e.target.value)} required>
+                <option value="">Select enrolled course section</option>
+                {(data?.withdrawalOptions ?? []).map((option) => (
+                  <option key={option.sectionId} value={option.sectionId}>{option.label}</option>
+                ))}
+              </select>
+            ) : null}
             <input placeholder="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} required minLength={3} />
             <textarea placeholder="Details" value={details} onChange={(e) => setDetails(e.target.value)} required minLength={10} rows={4} />
             <Button type="submit">Submit request</Button>
@@ -96,7 +114,10 @@ export default function StudentServicesPage() {
                     <strong>{r.subject}</strong>
                     <div style={{ color: "var(--mh-text-muted)", fontSize: 13 }}>{r.type} · {r.createdAt.slice(0, 10)}</div>
                   </div>
-                  <StatusPill tone={r.status === "resolved" ? "success" : "warning"}>{r.status}</StatusPill>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <StatusPill tone={r.status === "resolved" ? "success" : "warning"}>{r.status}</StatusPill>
+                    {r.status === "open" || r.status === "pending_approval" ? <Button type="button" onClick={() => void cancel(r.id)}>Cancel</Button> : null}
+                  </div>
                 </li>
               ))}
             </ul>

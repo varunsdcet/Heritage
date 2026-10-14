@@ -5,7 +5,8 @@ import type { SessionClaims } from "@myheritage/contracts";
 import { buildDocumentPdf, type DocLine } from "../../../lib/taxPdf.js";
 import { termLabel } from "../../../lib/sectionTerm.js";
 import { loadSectionTerms } from "../../instructor/myCoursesFacts.js";
-import { ensureSeed, type Rec } from "./sysconfig.js";
+import { assertNoActiveStudentHold } from "../../me/studentAlignment.js";
+import { type Rec } from "./sysconfig.js";
 import { ADVANCE_CREDIT } from "./finance.spec.js";
 import { withStudentMoneyLock } from "./studentLock.js";
 import { effectiveAccess } from "../superAdmin.service.js";
@@ -51,7 +52,6 @@ export type StudentCtx = { user: SessionClaims; inst: string; cfg: Config; st: S
 
 export async function studentCtx(user: SessionClaims, studentId: string, level: "view" | "edit"): Promise<StudentCtx> {
   await canFinance(user, level);
-  await ensureSeed(user);
   const inst = user.institutionId;
   const cfg = await loadConfig(inst);
   const st = await requireStudent(inst, studentId);
@@ -102,11 +102,23 @@ function notFuture(d: Date, label: string) {
 
 type TaxLine = { name: string; rate: number; inclusive: boolean; amount: number };
 
-export function feeTotals(cfg: Config, type: Rec | undefined, unit: number, quantity: number) {
+function sameRegion(a: string, b: string) {
+  const clean = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  return Boolean(clean(a)) && clean(a) === clean(b);
+}
+
+export function feeTotals(cfg: Config, type: Rec | undefined, unit: number, quantity: number, student?: Pick<StudentInfo, "province" | "country">) {
   const subtotal = r2(unit * quantity);
+  const province = student?.province ?? "";
+  const country = student?.country ?? "";
   const taxes: TaxLine[] = arr<string>(type?.data.taxes)
     .map((id) => cfg.byId.get(id))
-    .filter((t): t is Rec => Boolean(t) && t!.data.regionalize !== "Yes")
+    .filter((t): t is Rec => {
+      if (!t) return false;
+      if (t.data.regionalize !== "Yes") return true;
+      const regions = arr<string>(t.data.regions);
+      return Boolean(student) && regions.some((region) => sameRegion(region, province) || sameRegion(region, country));
+    })
     .map((t) => {
       const rate = num(t.data.rate);
       const inclusive = t.data.inclusive === "Yes";
@@ -151,7 +163,7 @@ export async function postFee(
   c: StudentCtx,
   input: { type: Rec | undefined; label?: string; unit: number; quantity: number; termId: string | null; note: string; dueAt?: Date | null; extra?: Data; courseId?: string | null; sectionId?: string | null },
 ) {
-  const { subtotal, taxes, total } = feeTotals(c.cfg, input.type, input.unit, input.quantity);
+  const { subtotal, taxes, total } = feeTotals(c.cfg, input.type, input.unit, input.quantity, c.st);
   if (total < EPS) throw httpError(400, "Fee Amount must be greater than zero");
   const { entry, number } = await postEntry(
     c.user,
@@ -238,10 +250,21 @@ async function addFeeLocked(user: SessionClaims, studentId: string, body: Data) 
     applied = await applyAvailable(c, [fee.id]);
   }
   await refresh(c);
-  return { id: fee.id, number: fee.number, message: applied > EPS ? `Fee added and ${cad(applied)} paid from available credit` : "Fee added successfully" };
+  const { applyAutomatedPromotions } = await import("./finance.records.js");
+  const promotions = await applyAutomatedPromotions(user, studentId);
+  return {
+    id: fee.id,
+    number: fee.number,
+    promotionsApplied: promotions.length,
+    message: `${applied > EPS ? `Fee added and ${cad(applied)} paid from available credit` : "Fee added successfully"}${promotions.length ? `; ${promotions.length} automated promotion${promotions.length === 1 ? "" : "s"} applied` : ""}`,
+  };
 }
 
-export async function updateFee(user: SessionClaims, entryId: string, body: Data) {
+export function updateFee(user: SessionClaims, entryId: string, body: Data) {
+  return withStudentLock(user, entryId, () => updateFeeLocked(user, entryId, body));
+}
+
+async function updateFeeLocked(user: SessionClaims, entryId: string, body: Data) {
   const c = await entryCtx(user, entryId, "edit");
   const ch = findCharge(c, entryId);
   if (ch.hidden || ch.statusLabel === "Refunded") throw httpError(400, "Removed or refunded fees cannot be edited");
@@ -249,7 +272,7 @@ export async function updateFee(user: SessionClaims, entryId: string, body: Data
   const quantity = quantityOf(body.quantity ?? ch.meta.quantity);
   const unit = body.amount === undefined ? num(ch.meta.unitAmount) || ch.total : amountOf(body.amount, "Fee Amount", { allowZero: true });
   if (type && type.data.overridable === "No" && Math.abs(unit - defaultFee(type, c.st)) > EPS && Math.abs(unit - num(ch.meta.unitAmount)) > EPS) throw httpError(400, `"${nameOf(type)}" is not overridable`);
-  const { subtotal, taxes, total } = feeTotals(c.cfg, type, unit, quantity);
+  const { subtotal, taxes, total } = feeTotals(c.cfg, type, unit, quantity, c.st);
   if (total < EPS) throw httpError(400, "Fee Amount must be greater than zero");
   if (total < ch.paid - EPS) throw httpError(400, `This fee already has ${cad(ch.paid)} paid; the new total (${cad(total)}) cannot be lower. Refund part of the fee instead.`);
   const paidElsewhere = ch.status === "paid" && !c.book.allocs.some((a) => a.chargeId === ch.id);
@@ -264,16 +287,30 @@ export async function updateFee(user: SessionClaims, entryId: string, body: Data
   return { id: ch.id, message: "Fee updated successfully" };
 }
 
-export async function removeFee(user: SessionClaims, entryId: string) {
+export function removeFee(user: SessionClaims, entryId: string) {
+  return withStudentLock(user, entryId, () => removeFeeLocked(user, entryId));
+}
+
+async function removeFeeLocked(user: SessionClaims, entryId: string) {
   const c = await entryCtx(user, entryId, "edit");
   const ch = findCharge(c, entryId);
   if (ch.hidden) throw httpError(400, "This fee has already been removed");
   if (ch.paid > EPS) throw httpError(400, `This fee has ${cad(ch.paid)} paid against it and cannot be removed. Refund it instead.`);
   await assertPeriodOpen(user, c.cfg, c.st.campus, ch.postedAt, "This fee");
-  await prisma.financeLedgerEntry.update({ where: { id: ch.id }, data: { status: "waived", rowVersion: { increment: 1 } } });
-  await patchMeta(user, ch, { removed: true, removedAt: new Date().toISOString() });
-  await finAudit(user, c.st.id, "Receivable removed", `Receivable #${ch.number}`, { type: ch.ledgerTypeName, amount: cad(ch.total) }, ch.id);
-  return { message: "Fee removed successfully" };
+  const { createAdjustment } = await import("./finance.records.js");
+  const adjustment = await createAdjustment(user, {
+    studentId: c.st.id,
+    direction: "Decrease balance (credit)",
+    amount: ch.owing,
+    reason: `Remove receivable #${ch.number} ${ch.ledgerTypeName}`,
+    ledgerEntryId: ch.id,
+    ledgerAction: "waive",
+  });
+  return {
+    pendingApproval: true,
+    adjustmentId: adjustment.id,
+    message: `Removal submitted as Financial Adjustment #${adjustment.number}. Another user must approve it before the balance changes.`,
+  };
 }
 
 type RefundInput = { refundType: "Cash Back" | "Apply Credit"; method: Rec | null; amount: number; date: Date; note: string };
@@ -379,7 +416,11 @@ async function refundFeeLocked(user: SessionClaims, entryId: string, body: Data)
 export const PAYMENT_TYPES = ["Standard", "Deposit", "Correction"] as const;
 export const PAYEES = ["Student", "Institution"] as const;
 
-export async function applyPayment(user: SessionClaims, studentId: string, body: Data) {
+export function applyPayment(user: SessionClaims, studentId: string, body: Data) {
+  return withStudentMoneyLock(user.institutionId, studentId, () => applyPaymentLocked(user, studentId, body));
+}
+
+async function applyPaymentLocked(user: SessionClaims, studentId: string, body: Data) {
   const c = await studentCtx(user, studentId, "edit");
   const paymentType = s(body.paymentType) || "Standard";
   if (!(PAYMENT_TYPES as readonly string[]).includes(paymentType)) throw httpError(400, `Payment Type "${paymentType}" is not valid`);
@@ -414,7 +455,11 @@ export async function applyPayment(user: SessionClaims, studentId: string, body:
 }
 
 /** Applies a payment's unapplied amount to open fees (oldest first). */
-export async function allocatePayment(user: SessionClaims, entryId: string) {
+export function allocatePayment(user: SessionClaims, entryId: string) {
+  return withStudentLock(user, entryId, () => allocatePaymentLocked(user, entryId));
+}
+
+async function allocatePaymentLocked(user: SessionClaims, entryId: string) {
   const c = await entryCtx(user, entryId, "edit");
   const f = [...c.book.payments, ...c.book.credits].find((x) => x.id === entryId);
   if (!f) throw httpError(404, "Transaction not found", "NOT_FOUND");
@@ -559,7 +604,12 @@ export async function setCreditStatus(c: StudentCtx, fund: Fund, status: string,
   await refresh(c);
 }
 
-export async function createDisbursement(user: SessionClaims, studentId: string, body: Data) {
+export function createDisbursement(user: SessionClaims, studentId: string, body: Data) {
+  return withStudentMoneyLock(user.institutionId, studentId, () => createDisbursementLocked(user, studentId, body));
+}
+
+async function createDisbursementLocked(user: SessionClaims, studentId: string, body: Data) {
+  await assertNoActiveStudentHold(user.institutionId, studentId, "Creating a disbursement");
   const c = await studentCtx(user, studentId, "edit");
   const type = disbursementType(c.cfg, body.typeId);
   const amount = amountOf(body.amount, "Amount");
@@ -570,7 +620,11 @@ export async function createDisbursement(user: SessionClaims, studentId: string,
   return { id: out.id, number: out.number, message: "Disbursement created successfully" };
 }
 
-export async function updateDisbursement(user: SessionClaims, entryId: string, body: Data) {
+export function updateDisbursement(user: SessionClaims, entryId: string, body: Data) {
+  return withStudentLock(user, entryId, () => updateDisbursementLocked(user, entryId, body));
+}
+
+async function updateDisbursementLocked(user: SessionClaims, entryId: string, body: Data) {
   const c = await entryCtx(user, entryId, "edit");
   const f = findFund(c, entryId, "credit");
   if (f.hidden) throw httpError(400, "This disbursement has been removed");
@@ -596,7 +650,11 @@ export async function updateDisbursement(user: SessionClaims, entryId: string, b
   return { message: "Disbursement updated successfully" };
 }
 
-export async function removeDisbursement(user: SessionClaims, entryId: string) {
+export function removeDisbursement(user: SessionClaims, entryId: string) {
+  return withStudentLock(user, entryId, () => removeDisbursementLocked(user, entryId));
+}
+
+async function removeDisbursementLocked(user: SessionClaims, entryId: string) {
   const c = await entryCtx(user, entryId, "edit");
   const f = findFund(c, entryId, "credit");
   if (f.hidden) throw httpError(400, "This disbursement has already been removed");

@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { decideApproval, hashPassword } from "@myheritage/auth";
 import type { RoleName } from "@myheritage/contracts";
 import { prisma } from "@myheritage/db";
+import { ADMISSIONS_LEAD_STATUSES, ADMISSIONS_STAGE_PROGRESS, ADMISSIONS_STAGE_TEXT } from "@myheritage/contracts";
 import { forgetSessionRevocation } from "../../../middleware/auth.js";
 import { SAFE_LINK_MESSAGE, isSafeLink } from "../../../lib/safeLink.js";
 import { OPEN_SERVICE_REQUEST_STATUSES, applyApprovedRequest, settleRejectedApproval } from "../../approvals/approvals.service.js";
@@ -28,6 +29,23 @@ const rolesOf = (json: string) => {
 };
 const changed = (c: Change, key: string) => s(c.data[key]) !== s(c.before?.[key]);
 const lines = (xs: string[]) => xs.filter(Boolean).join("\n");
+const diffLabel = (key: string) => key.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_.]/g, " ").replace(/^./, (c) => c.toUpperCase());
+function approvalDiffText(diff: Data) {
+  const rows = Object.entries(diff).flatMap(([key, value]) => {
+    if (key.startsWith("_") || value === null || value === undefined || value === "") return [];
+    if ((key === "gradeItemIds" || key === "studentIds") && Array.isArray(value)) {
+      const label = key === "gradeItemIds" ? "Grade items" : "Students";
+      return [`${label}: ${value.length} record${value.length === 1 ? "" : "s"}`];
+    }
+    if (Array.isArray(value)) return [`${diffLabel(key)}: ${value.map((item) => (typeof item === "object" ? "record" : s(item))).join(", ") || "None"}`];
+    if (typeof value === "object") {
+      const nested = Object.entries(value as Data).map(([child, item]) => `${diffLabel(child)}: ${s(item)}`).join("; ");
+      return [`${diffLabel(key)}: ${nested || "None"}`];
+    }
+    return [`${diffLabel(key)}: ${typeof value === "boolean" ? (value ? "Yes" : "No") : s(value)}`];
+  });
+  return lines(rows) || "No proposed field changes";
+}
 const downloadLink = (d: Data) => {
   const url = s(d.downloadUrl).trim();
   if (url && !isSafeLink(url)) throw httpError(400, SAFE_LINK_MESSAGE, "VALIDATION_ERROR");
@@ -94,21 +112,9 @@ export const EXT_REFS: Partial<Record<OpsRef, (inst: string) => Promise<Opt[]>>>
 /* Admissions helpers                                                   */
 /* ------------------------------------------------------------------ */
 
-const LEADS = ["new_inquiry", "prospective", "follow_up", "draft"];
-const STAGE_TEXT: Record<string, string> = {
-  under_review: "Your application is now being reviewed by Admissions.",
-  interview: "You have been invited to an admissions interview.",
-  waitlisted: "Your application has been placed on the waitlist.",
-  approved_application: "Congratulations — you have been admitted. Your letter will follow.",
-  offered: "An offer letter is waiting for you in the applicant portal.",
-  cloa: "A letter of acceptance is waiting for you in the applicant portal.",
-  accepted: "Your acceptance has been recorded.",
-  enrolled: "Welcome to Heritage! Your student record has been created; sign in to the student portal.",
-  declined: "A decision has been made on your application. Please check the applicant portal.",
-  refused_visa: "Your application was updated following the visa decision.",
-  withdrawn: "Your application has been withdrawn.",
-};
-const PROGRESS: Record<string, number> = { submitted: 60, under_review: 70, interview: 80, approved_application: 90, offered: 90, cloa: 90, accepted: 100, enrolled: 100 };
+const LEADS: readonly string[] = ADMISSIONS_LEAD_STATUSES;
+const STAGE_TEXT = ADMISSIONS_STAGE_TEXT;
+const PROGRESS = ADMISSIONS_STAGE_PROGRESS;
 
 async function timeline(inst: string, applicationId: string, title: string, detail?: string) {
   await prisma.applicationTimelineEvent.create({ data: { institutionId: inst, applicationId, title, detail: detail ?? null } });
@@ -126,9 +132,9 @@ async function setStage(inst: string, applicationId: string, status: string, tit
   if (STAGE_TEXT[status]) await notify(inst, app.accountId, "Application update", STAGE_TEXT[status]!);
 }
 
-async function nextStudentNumber(inst: string) {
+async function nextStudentNumber(inst: string, offset = 0) {
   const year = new Date().getFullYear();
-  let k = (await prisma.student.count({ where: { institutionId: inst, studentNumber: { startsWith: `ST-${year}-` } } })) + 1;
+  let k = (await prisma.student.count({ where: { institutionId: inst, studentNumber: { startsWith: `ST-${year}-` } } })) + 1 + offset;
   while (await prisma.student.findFirst({ where: { institutionId: inst, studentNumber: `ST-${year}-${String(k).padStart(3, "0")}` } })) k++;
   return `ST-${year}-${String(k).padStart(3, "0")}`;
 }
@@ -352,10 +358,26 @@ export const EXT_TABLES: Partial<Record<EntityKey, Adapter>> = {
     },
     async update(inst, id, d, user) {
       const prev = await prisma.complianceCase.findFirst({ where: { id, institutionId: inst } });
+      if (!prev) throw httpError(404, "Compliance case not found", "NOT_FOUND");
       const open = s(d.status) === "open";
-      await prisma.complianceCase.update({
-        where: { id },
-        data: { severity: s(d.severity), status: s(d.status), explanation: s(d.explanation) || null, resolvedAt: open ? null : (prev?.resolvedAt ?? new Date()), resolvedById: open ? null : (prev?.resolvedById ?? user.accountId), ...bump },
+      const nextStatus = s(d.status);
+      await prisma.$transaction(async (tx) => {
+        await tx.complianceCase.update({
+          where: { id },
+          data: { severity: s(d.severity), status: nextStatus, explanation: s(d.explanation) || null, resolvedAt: open || nextStatus === "explained" ? null : (prev.resolvedAt ?? new Date()), resolvedById: open || nextStatus === "explained" ? null : (prev.resolvedById ?? user.accountId), ...bump },
+        });
+        if (prev.subjectType === "student" && prev.caseKind === "student_miss_pause" && (nextStatus === "resolved" || nextStatus === "dismissed")) {
+          const remaining = await tx.complianceCase.count({
+            where: { institutionId: inst, subjectType: "student", subjectRef: prev.subjectRef, caseKind: "student_miss_pause", status: { in: ["open", "explained"] }, id: { not: id } },
+          });
+          if (remaining === 0) {
+            const student = await tx.student.findFirst({ where: { id: prev.subjectRef, institutionId: inst }, select: { personId: true } });
+            if (student) {
+              await tx.account.updateMany({ where: { institutionId: inst, personId: student.personId, status: "paused" }, data: { status: "active" } });
+              await tx.student.update({ where: { id: prev.subjectRef }, data: { standing: "warning", rowVersion: { increment: 1 } } });
+            }
+          }
+        }
       });
     },
   },
@@ -396,7 +418,7 @@ export const EXT_TABLES: Partial<Record<EntityKey, Adapter>> = {
           _requester: accounts.get(r.requestedBy) ?? r.requestedBy,
           _age: r.status === "pending" ? age(r.createdAt) : "—",
           _decisions: lines(decisions.map((x) => `${x.decidedAt.slice(0, 16).replace("T", " ")} · ${accounts.get(x.actorId) ?? x.actorId} · ${x.decision}${x.comment ? ` — ${x.comment}` : ""}`)) || "No decisions yet",
-          _diff: JSON.stringify(diff, null, 2).slice(0, 3000),
+          _diff: approvalDiffText(diff).slice(0, 3000),
           _where: inbox ? "Workflows / Approvals inbox" : "My Courses → Pending Course Schedules",
           _inbox: inbox,
           updatedAt: r.updatedAt.toISOString(),
@@ -797,13 +819,70 @@ export const RUN: Partial<Record<EntityKey, Record<string, (ctx: Ctx, row: Row) 
     async convert(ctx, row) {
       const app = await prisma.admissionsApplication.findFirst({ where: { id: row.id, institutionId: ctx.inst } });
       if (!app) throw httpError(404, "Application not found", "NOT_FOUND");
+      if (!APP_ADMITTED.includes(app.status)) throw httpError(409, "Only an accepted application or issued acceptance letter can be converted", "CONFLICT");
       const existing = await prisma.student.findFirst({ where: { institutionId: ctx.inst, personId: app.personId, programName: app.programName } });
       if (existing) throw httpError(409, `Already a student: ${existing.studentNumber}`, "CONFLICT");
-      const studentNumber = await nextStudentNumber(ctx.inst);
-      await prisma.student.create({ data: { institutionId: ctx.inst, personId: app.personId, studentNumber, programName: app.programName, standing: "good" } });
+      const [program, term, heritagePrograms] = await Promise.all([
+        prisma.program.findFirst({
+          where: { institutionId: ctx.inst, name: app.programName },
+          include: { versions: { where: { status: "active" }, include: { requirements: { orderBy: { sortOrder: "asc" } } }, orderBy: { effectiveOn: "desc" }, take: 1 } },
+        }),
+        prisma.term.findFirst({ where: { institutionId: ctx.inst, name: app.intakeTerm } }),
+        records(ctx.inst, "PM:PROGRAM"),
+      ]);
+      const version = program?.versions[0] ?? null;
+      const requirements = version?.requirements ?? [];
+      if (!program || !version) throw httpError(409, `Configure an active programme version for ${app.programName} before conversion`, "CONFLICT");
+      if (!term) throw httpError(409, `Configure the intake term ${app.intakeTerm} before conversion`, "CONFLICT");
+      if (!requirements.length) throw httpError(409, `Add degree requirements to ${version.label} before conversion`, "CONFLICT");
+      const sections = term && requirements.length
+        ? await prisma.section.findMany({ where: { institutionId: ctx.inst, termId: term.id, courseId: { in: requirements.map((r) => r.courseId).filter((id): id is string => Boolean(id)) } } })
+        : [];
+      const sectionByCourse = new Map<string, (typeof sections)[number]>();
+      for (const section of sections) if (!sectionByCourse.has(section.courseId)) sectionByCourse.set(section.courseId, section);
+      const heritageProgram = heritagePrograms.find((candidate) => s(candidate.name) === app.programName);
+      const feeRows = heritageProgram
+        ? await prisma.heritageRecord.findMany({ where: { institutionId: ctx.inst, screenId: "PM:FEE", contextKey: heritageProgram.id, deletedAt: null } })
+        : [];
+      let residency = "";
+      try { residency = s(JSON.parse(app.formJson || "{}").residency).toLowerCase(); } catch { residency = ""; }
+      const international = /international|study permit|visa/.test(residency);
+      const fees = feeRows.map((fee) => parse(fee.dataJson)).map((fee) => ({ label: s(fee.ledgerType) || "Program fee", amount: n(international ? fee.international : fee.domestic) ?? 0 })).filter((fee) => fee.amount > 0);
+      if (!sectionByCourse.size) throw httpError(409, `No ${app.intakeTerm} sections match the programme requirements`, "CONFLICT");
+      if (!fees.length) throw httpError(409, `Configure a ${international ? "international" : "domestic"} programme fee before conversion`, "CONFLICT");
       const account = await prisma.account.findUnique({ where: { id: app.accountId } });
-      if (account && !rolesOf(account.rolesJson).includes("student")) await prisma.account.update({ where: { id: account.id }, data: { rolesJson: JSON.stringify([...rolesOf(account.rolesJson), "student"]), ...bump } });
-      await setStage(ctx.inst, app.id, "enrolled", `Converted to student ${studentNumber}`, `${app.programName} · ${app.intakeTerm}`);
+      let studentNumber = "";
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        studentNumber = await nextStudentNumber(ctx.inst, attempt);
+        try {
+          await prisma.$transaction(async (tx) => {
+            const claimed = await tx.admissionsApplication.updateMany({
+              where: { id: app.id, institutionId: ctx.inst, status: { in: [...APP_ADMITTED] } },
+              data: { status: "converting", ...bump },
+            });
+            if (claimed.count !== 1) throw httpError(409, "Application is already being converted or its status changed", "CONFLICT");
+            const student = await tx.student.create({ data: { institutionId: ctx.inst, personId: app.personId, studentNumber, programName: app.programName, programVersionId: version?.id ?? null, standing: "good" } });
+            if (account && !rolesOf(account.rolesJson).includes("student")) await tx.account.update({ where: { id: account.id }, data: { rolesJson: JSON.stringify([...rolesOf(account.rolesJson), "student"]), ...bump } });
+            await tx.programPlan.create({
+              data: {
+                institutionId: ctx.inst,
+                studentId: student.id,
+                status: "active",
+                items: { create: requirements.map((requirement) => ({ institutionId: ctx.inst, courseId: requirement.courseId, courseCode: requirement.courseCode, title: requirement.title, credits: requirement.credits, sortOrder: requirement.sortOrder, category: "main", status: "not_started", sectionId: requirement.courseId ? sectionByCourse.get(requirement.courseId)?.id ?? null : null })) },
+              },
+            });
+            for (const section of sectionByCourse.values()) await tx.enrolment.create({ data: { institutionId: ctx.inst, sectionId: section.id, studentId: student.id, status: "enrolled" } });
+            for (const fee of fees) await tx.financeLedgerEntry.create({ data: { institutionId: ctx.inst, studentId: student.id, label: fee.label, amountCad: fee.amount, kind: "charge", status: "open", source: "admissions_conversion", note: `${app.programName} · ${app.intakeTerm}` } });
+            await tx.admissionsApplication.update({ where: { id: app.id }, data: { status: "enrolled", progressPct: 100, submittedAt: app.submittedAt ?? new Date(), ...bump } });
+            await tx.applicationTimelineEvent.create({ data: { institutionId: ctx.inst, applicationId: app.id, title: `Converted to student ${studentNumber}`, detail: `${app.programName} · ${app.intakeTerm}` } });
+            await tx.notification.create({ data: { institutionId: ctx.inst, recipientAccountId: app.accountId, channel: "in_app", title: "Application update", body: STAGE_TEXT.enrolled } });
+          });
+          break;
+        } catch (error) {
+          const collision = typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === "P2002";
+          if (!collision || attempt === 4) throw error;
+        }
+      }
       return `Student ${studentNumber} created for ${s(row._name)}`;
     },
   },

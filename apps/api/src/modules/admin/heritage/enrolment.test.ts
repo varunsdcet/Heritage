@@ -5,13 +5,22 @@ const user = { sub: "acct-1", accountId: "acct-1", personId: "p-admin", institut
 
 const tx = vi.hoisted(() => ({
   $executeRaw: vi.fn(),
-  enrolment: { findFirst: vi.fn(), count: vi.fn(), create: vi.fn(), update: vi.fn() },
+  enrolment: { findFirst: vi.fn(), count: vi.fn(), create: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
+  student: { findFirst: vi.fn() },
+  account: { findFirst: vi.fn() },
+  notification: { create: vi.fn() },
   auditEvent: { create: vi.fn() },
+  eventOutbox: { create: vi.fn() },
 }));
 
 const db = vi.hoisted(() => ({
   student: { findFirst: vi.fn() },
   section: { findFirst: vi.fn() },
+  coursePrerequisite: { findMany: vi.fn() },
+  courseCorequisite: { findMany: vi.fn() },
+  enrolment: { findMany: vi.fn(), findFirst: vi.fn() },
+  transferCredit: { findMany: vi.fn() },
+  heritageRecord: { findFirst: vi.fn() },
   account: { findFirst: vi.fn() },
   notification: { create: vi.fn() },
   $transaction: vi.fn(),
@@ -30,12 +39,19 @@ const fin = vi.hoisted(() => ({
 vi.mock("@myheritage/db", () => ({ prisma: db }));
 vi.mock("./courses.js", () => ({ S: { session: "CM:SESSION", courseSettings: "CM:COURSE" }, settingsOf: courses.settingsOf }));
 vi.mock("./finance.core.js", async (importOriginal) => ({ ...(await importOriginal<typeof import("./finance.core.js")>()), ...fin }));
-vi.mock("./finance.ledger.js", () => ({ isInternational: (st: { rateCategory?: string }) => /international/i.test(st.rateCategory ?? "") }));
+vi.mock("./finance.ledger.js", () => ({
+  isInternational: (st: { rateCategory?: string }) => /international/i.test(st.rateCategory ?? ""),
+  feeTotals: (_cfg: unknown, _type: unknown, unit: number, quantity: number) => ({ subtotal: unit * quantity, taxes: [], total: unit * quantity }),
+}));
+vi.mock("./finance.records.js", () => ({ applyAutomatedPromotions: vi.fn(async () => []) }));
 vi.mock("./studentLock.js", () => ({ withStudentMoneyLock: (_inst: string, _student: string, work: () => Promise<unknown>) => work() }));
+vi.mock("../superAdmin.service.js", () => ({ studentMetaMap: vi.fn(async () => ({})) }));
+vi.mock("./students.core.js", () => ({ studentStatusPolicy: vi.fn(async () => null) }));
+vi.mock("../../me/studentAlignment.js", () => ({ assertNoActiveStudentHold: vi.fn(async () => undefined) }));
 const facts = vi.hoisted(() => ({ loadSectionTerms: vi.fn() }));
 vi.mock("../../instructor/myCoursesFacts.js", () => facts);
 
-import { courseFeeQuote, enrolInSections, seatDecision, seatRule } from "./enrolment.js";
+import { courseFeeQuote, enrolInSections, missingCourseRequirements, promoteWaitlisted, seatDecision, seatRule } from "./enrolment.js";
 
 const section = {
   id: "sec-1",
@@ -61,10 +77,20 @@ beforeEach(() => {
   db.student.findFirst.mockResolvedValue({ id: "stu-1", personId: "p-stu" });
   db.section.findFirst.mockResolvedValue(section);
   db.account.findFirst.mockResolvedValue(null);
+  db.coursePrerequisite.findMany.mockResolvedValue([]);
+  db.courseCorequisite.findMany.mockResolvedValue([]);
+  db.enrolment.findMany.mockResolvedValue([]);
+  db.enrolment.findFirst.mockResolvedValue(null);
+  db.transferCredit.findMany.mockResolvedValue([]);
+  db.heritageRecord.findFirst.mockResolvedValue(null);
   db.$transaction.mockImplementation(async (work: (client: typeof tx) => Promise<unknown>) => work(tx));
   tx.enrolment.findFirst.mockResolvedValue(null);
   tx.enrolment.create.mockImplementation(async ({ data }: { data: { status: string } }) => ({ id: "enr-1", ...data }));
+  tx.enrolment.updateMany.mockResolvedValue({ count: 1 });
   tx.auditEvent.create.mockResolvedValue({});
+  tx.eventOutbox.create.mockResolvedValue({});
+  tx.student.findFirst.mockResolvedValue(null);
+  tx.account.findFirst.mockResolvedValue(null);
   fin.requireStudent.mockResolvedValue({ id: "stu-1", campus: "Surrey", rateCategory: "Domestic" });
   fin.loadConfig.mockResolvedValue({ ledgerTypes: [{ id: "lt-fee", data: { name: "Course Fee" } }] });
   fin.ensureFinancialTerm.mockResolvedValue({ id: "fin-term-1" });
@@ -91,6 +117,21 @@ describe("course fee quote", () => {
     expect(courseFeeQuote({ tuitionIncluded: false, domestic: 100 }, { tuitionIncluded: false, domestic: 250, international: 900 }, 3, true)).toMatchObject({ amount: 900, source: "session" });
     expect(courseFeeQuote({ tuitionIncluded: false, costCalculation: "Per Credit", domestic: 100, international: 300 }, undefined, 3, false)).toMatchObject({ amount: 300, source: "course" });
     expect(courseFeeQuote({ tuitionIncluded: true }, undefined, 3, false)).toEqual({ amount: 0, included: true, source: "none", domestic: 0, international: 0 });
+  });
+});
+
+describe("course requirements", () => {
+  it("requires completed prerequisites and completed, active or co-selected corequisites", () => {
+    const req = (courseId: string, requiredCourseId: string) => ({ courseId, requiredCourseId, requiredCode: requiredCourseId.toUpperCase(), requiredTitle: "Required course" });
+    expect(missingCourseRequirements(new Set(["advanced"]), new Set(), new Set(), [req("advanced", "intro")], [])).toMatchObject({ missingPrerequisites: [expect.objectContaining({ requiredCourseId: "intro" })] });
+    expect(missingCourseRequirements(new Set(["advanced", "lab"]), new Set(["intro"]), new Set(), [req("advanced", "intro")], [req("advanced", "lab")])).toEqual({ missingPrerequisites: [], missingCorequisites: [] });
+  });
+
+  it("blocks enrolment before opening a transaction when a prerequisite is missing", async () => {
+    settings({ maxEnrolments: 10 }, undefined);
+    db.coursePrerequisite.findMany.mockResolvedValue([{ courseId: "course-1", prerequisiteCourseId: "course-0", prerequisiteCourse: { code: "CS100", title: "Foundations" } }]);
+    await expect(enrolInSections(user, "stu-1", ["sec-1"], { source: "test" })).rejects.toMatchObject({ status: 409, code: "COURSE_REQUIREMENTS_NOT_MET" });
+    expect(db.$transaction).not.toHaveBeenCalled();
   });
 });
 
@@ -155,5 +196,20 @@ describe("enrolInSections", () => {
     await expect(enrolInSections(user, "stu-1", ["sec-1"], { source: "test", skipExisting: true })).resolves.toEqual([expect.objectContaining({ enrolmentId: "enr-old", status: "existing" })]);
     await expect(enrolInSections(user, "stu-1", ["sec-1"], { source: "test" })).rejects.toMatchObject({ status: 409, code: "ALREADY_ENROLLED" });
     expect(tx.enrolment.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("waitlist promotion", () => {
+  it("promotes the oldest waitlisted enrolment when a seat opens", async () => {
+    settings({ maxEnrolments: 2, waitlist: "Enabled" }, undefined);
+    const candidate = { id: "enr-wait", studentId: "stu-2", sectionId: "sec-1", status: "waitlisted", rowVersion: 3, createdAt: new Date("2026-10-01") };
+    db.enrolment.findFirst.mockResolvedValue(candidate);
+    tx.enrolment.findFirst.mockResolvedValue(candidate);
+    seats(1, 1);
+    await expect(promoteWaitlisted(user, "sec-1")).resolves.toEqual({ enrolmentId: "enr-wait", studentId: "stu-2", sectionId: "sec-1" });
+    expect(tx.enrolment.updateMany).toHaveBeenCalledWith({
+      where: { id: "enr-wait", status: "waitlisted", rowVersion: 3 },
+      data: { status: "enrolled", rowVersion: { increment: 1 } },
+    });
   });
 });

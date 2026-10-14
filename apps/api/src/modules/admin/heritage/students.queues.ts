@@ -4,8 +4,8 @@ import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
 import { applyApproval, decideApproval } from "@myheritage/auth";
 import { dateBoundsFromSessions, deliveryFromSessions, instructorDisplayName, roomFromSessions, scheduleTextFromSessions } from "../../courses/sectionSchedule.js";
-import { page, studentMatches, studentsInfo, type StudentInfo } from "./finance.core.js";
-import { add, arr, canStudents, httpError, optDate, rows, s, stuAudit, text, type Data } from "./students.core.js";
+import { page, studentMatches, type StudentInfo } from "./finance.core.js";
+import { add, arr, assertStudentCampusAccess, canStudents, httpError, optDate, rows, s, scopedStudentsInfo, stuAudit, text, type Data } from "./students.core.js";
 import { caseView, reqView } from "./students.comms.js";
 import { testView } from "./students.plan.js";
 import { filterFlags, flagView } from "./students.js";
@@ -27,12 +27,13 @@ export async function academicAlerts(user: SessionClaims, q: Data) {
   await canStudents(user, "view");
   const inst = user.institutionId;
   const list = await rows(inst, STU.ALERT);
-  const info = await studentsInfo(inst, [...new Set(list.map((r) => r.contextKey))]);
+  const info = await scopedStudentsInfo(user, [...new Set(list.map((r) => r.contextKey))]);
   const status = s(q.status) || "Active";
   const resolved = s(q.resolved) || "No";
   const items = list
     .filter((r) => {
       const st = info.get(r.contextKey);
+      if (!st) return false;
       if (s(q.campus) && st?.campus !== s(q.campus)) return false;
       if (s(q.student) && !studentMatches(st, s(q.student))) return false;
       if ((s(r.data.status) || "Active") !== status) return false;
@@ -40,7 +41,22 @@ export async function academicAlerts(user: SessionClaims, q: Data) {
       return true;
     })
     .map((r) => ({ id: r.id, student: studentCell(info.get(r.contextKey), r.contextKey), description: s(r.data.description), status: s(r.data.status) || "Active", resolved: s(r.data.resolved) || "No", date: r.createdAt.toISOString() }));
-  return { items };
+  const canDecide = await canStudents(user, "edit").then(() => true, () => false);
+  return { items, canDecide };
+}
+
+export async function resolveAcademicAlert(user: SessionClaims, alertId: string) {
+  await canStudents(user, "edit");
+  const row = await prisma.heritageRecord.findFirst({ where: { id: alertId, institutionId: user.institutionId, screenId: STU.ALERT, deletedAt: null } });
+  if (!row) throw httpError(404, "Academic alert not found", "NOT_FOUND");
+  await assertStudentCampusAccess(user, row.contextKey);
+  const before = JSON.parse(row.dataJson) as Data;
+  if (s(before.resolved) === "Yes") throw httpError(409, "This academic alert is already resolved", "CONFLICT");
+  const after = { ...before, resolved: "Yes", status: "Dismissed", resolvedAt: new Date().toISOString(), resolvedBy: user.accountId };
+  const claimed = await prisma.heritageRecord.updateMany({ where: { id: row.id, rowVersion: row.rowVersion }, data: { dataJson: JSON.stringify(after), rowVersion: { increment: 1 }, updatedById: user.accountId } });
+  if (claimed.count !== 1) throw httpError(409, "This alert changed while you were reviewing it. Reload and try again.", "CONFLICT");
+  await stuAudit(user, "Assessments", row.contextKey, "Academic alert resolved", after, row.id, before);
+  return { status: "resolved", message: "Academic alert resolved" };
 }
 
 /* ------------------------------------------------------------------ */
@@ -51,13 +67,14 @@ export async function studentFlags(user: SessionClaims, q: Data) {
   await canStudents(user, "view");
   const inst = user.institutionId;
   const list = (await rows(inst, STU.FLAG)).map(flagView);
-  const info = await studentsInfo(inst, [...new Set(list.map((f) => f.studentId))]);
+  const info = await scopedStudentsInfo(user, [...new Set(list.map((f) => f.studentId))]);
   const template = s(q.template);
   const templateRow = template ? await prisma.heritageRecord.findFirst({ where: { id: template, institutionId: inst, screenId: "SYS:FLAG_TEMPLATE" } }) : null;
   const templateName = templateRow ? s((JSON.parse(templateRow.dataJson) as Data).name) : "";
   const items = filterFlags(list, q)
     .filter((f) => {
       const st = info.get(f.studentId);
+      if (!st) return false;
       if (s(q.campus) && st?.campus !== s(q.campus)) return false;
       if (s(q.student) && !studentMatches(st, s(q.student))) return false;
       if (template && f.templateId !== template && f.name !== templateName) return false;
@@ -76,9 +93,10 @@ export async function studentAssessments(user: SessionClaims, q: Data) {
   await canStudents(user, "view");
   const inst = user.institutionId;
   const list = (await rows(inst, STU.ASSESS)).map(caseView);
-  const info = await studentsInfo(inst, [...new Set(list.map((c) => c.studentId))]);
+  const info = await scopedStudentsInfo(user, [...new Set(list.map((c) => c.studentId))]);
   const items = list
     .filter((c) => {
+      if (!info.has(c.studentId)) return false;
       if (s(q.number) && !c.number.includes(s(q.number))) return false;
       if (s(q.student) && !studentMatches(info.get(c.studentId), s(q.student))) return false;
       if (s(q.status) && c.status !== s(q.status)) return false;
@@ -97,7 +115,7 @@ export async function studentRequirements(user: SessionClaims, q: Data) {
   await canStudents(user, "view");
   const inst = user.institutionId;
   const list = await rows(inst, STU.REQ);
-  const info = await studentsInfo(inst, [...new Set(list.map((r) => r.contextKey))]);
+  const info = await scopedStudentsInfo(user, [...new Set(list.map((r) => r.contextKey))]);
   const taskIds = list.map((r) => s(r.data.taskId)).filter(Boolean);
   const done = new Set((taskIds.length ? await prisma.requiredTask.findMany({ where: { institutionId: inst, id: { in: taskIds }, completedAt: { not: null } }, select: { id: true } }) : []).map((t) => t.id));
   const letter = letterOf(q.letter);
@@ -105,6 +123,7 @@ export async function studentRequirements(user: SessionClaims, q: Data) {
     .map((r) => reqView(r, done.has(s(r.data.taskId))))
     .filter((r) => {
       const st = info.get(r.studentId);
+      if (!st) return false;
       if (s(q.student) && !studentMatches(st, s(q.student))) return false;
       if (s(q.status) && s(q.status) !== "All" && r.status !== s(q.status)) return false;
       if (s(q.submission) && r.submission !== s(q.submission)) return false;
@@ -138,13 +157,13 @@ export async function leaveOfAbsence(user: SessionClaims, q: Data) {
   await canStudents(user, "view");
   const inst = user.institutionId;
   const loas = await prisma.leaveOfAbsenceRequest.findMany({ where: { institutionId: inst }, orderBy: { createdAt: "desc" }, take: 2000 });
-  const info = await studentsInfo(inst, [...new Set(loas.map((l) => l.studentId))]);
+  const info = await scopedStudentsInfo(user, [...new Set(loas.map((l) => l.studentId))]);
   const status = s(q.status);
   if (status && !(LOA_STATUSES as readonly string[]).includes(status)) throw httpError(400, "Unknown status");
   const letter = letterOf(q.letter);
   const today = ymdIn(new Date(), await institutionTimezone(inst));
   const items = loas
-    .filter((l) => l.status !== "cancelled")
+    .filter((l) => l.status !== "cancelled" && info.has(l.studentId))
     .map((l) => ({ id: l.id, student: studentCell(info.get(l.studentId), l.studentId), reason: l.reason, startsOn: l.startsOn, endsOn: l.endsOn, status: loaStatus(l.status, l.startsOn, l.endsOn, today), requested: l.createdAt.toISOString(), decisionNote: l.decisionNote ?? "" }))
     .filter((l) => (!status || l.status === status) && (!s(q.student) || studentMatches(info.get(l.student.id), s(q.student))) && byLetter(info.get(l.student.id), letter));
   return withRequestNumbers(user, page(items, q), "loa");
@@ -176,12 +195,12 @@ export async function withdrawRequests(user: SessionClaims, q: Data) {
   await canStudents(user, "view");
   const inst = user.institutionId;
   const list = await prisma.serviceRequest.findMany({ where: { institutionId: inst, type: { contains: "withdraw", mode: "insensitive" } }, orderBy: { createdAt: "desc" }, take: 2000 });
-  const info = await studentsInfo(inst, [...new Set(list.map((r) => r.studentId))]);
+  const info = await scopedStudentsInfo(user, [...new Set(list.map((r) => r.studentId))]);
   const status = s(q.status);
   if (status && !(WITHDRAW_STATUSES as readonly string[]).includes(status)) throw httpError(400, "Unknown status");
   const letter = letterOf(q.letter);
   const items = list
-    .filter((r) => r.status !== "cancelled")
+    .filter((r) => r.status !== "cancelled" && info.has(r.studentId))
     .map((r) => ({ id: r.id, student: studentCell(info.get(r.studentId), r.studentId), subject: r.subject, details: r.details, status: withdrawStatus(r.status), requested: r.createdAt.toISOString() }))
     .filter((r) => (!status || r.status === status) && (!s(q.student) || studentMatches(info.get(r.student.id), s(q.student))) && byLetter(info.get(r.student.id), letter));
   return withRequestNumbers(user, page(items, q), "service");
@@ -237,7 +256,7 @@ export async function gradeSubmissions(user: SessionClaims, q: Data) {
   );
   const names = await accountName(approvals.map((a) => a.requestedBy));
   const campusFilter = s(q.campus);
-  const info = campusFilter ? await studentsInfo(inst) : null;
+  const info = await scopedStudentsInfo(user);
   const items = approvals
     .map((a) => {
       const sec = sections.get(sectionIdOf(a.subjectRef));
@@ -260,8 +279,9 @@ export async function gradeSubmissions(user: SessionClaims, q: Data) {
       };
     })
     .filter((x): x is NonNullable<typeof x> => Boolean(x))
+    .filter((x) => x.studentIds.length > 0 && x.studentIds.every((sid) => info.has(sid)))
     .filter((x) => (!s(q.course) || x.courseId === s(q.course)) && (!s(q.instructor) || x.instructorPersonId === s(q.instructor)))
-    .filter((x) => !campusFilter || x.studentIds.some((sid) => info!.get(sid)?.campus === campusFilter))
+    .filter((x) => !campusFilter || x.studentIds.some((sid) => info.get(sid)?.campus === campusFilter))
     .map(({ studentIds: _s, ...x }) => x);
   const courseOptions = [...new Map([...sections.values()].map((x) => [x.courseId, `${x.course.code} — ${x.course.title}`])).entries()].map(([value, label]) => ({ value, label }));
   const instructorOptions = [...new Map([...sections.values()].map((x) => [x.instructorPersonId, x.instructor])).entries()].map(([value, label]) => ({ value, label }));
@@ -283,7 +303,8 @@ export async function gradeSubmission(user: SessionClaims, approvalId: string) {
   const diff = JSON.parse(a.proposedDiffJson) as { gradeItemIds?: string[] };
   const items = await prisma.gradeItem.findMany({ where: { institutionId: inst, id: { in: diff.gradeItemIds ?? [] } } });
   const studentIds = [...new Set(items.map((g) => g.studentId))];
-  const info = await studentsInfo(inst, studentIds);
+  const info = await scopedStudentsInfo(user, studentIds);
+  if (studentIds.some((studentId) => !info.has(studentId))) throw httpError(403, "This grade submission includes a student outside your assigned campus scope", "FORBIDDEN");
   const bounds = dateBoundsFromSessions(sec.classSessions);
   const endsOn = bounds.endsOn ?? sec.term.endsOn;
   const saved = await rows(inst, "STU:COMPLETION", approvalId);
@@ -328,11 +349,14 @@ export async function gradeSubmission(user: SessionClaims, approvalId: string) {
 }
 
 export async function approveGradeSubmission(user: SessionClaims, approvalId: string, body: Data) {
-  await canStudents(user, "edit");
+  await assertPermission(user, "userRequests", "edit");
   const inst = user.institutionId;
   const a = await pendingGrade(inst, approvalId);
   if (a.status !== "pending") throw httpError(409, "This grade submission has already been decided", "CONFLICT");
   const dates: Record<string, string> = {};
+  const proposedIds = arr<string>((JSON.parse(a.proposedDiffJson) as Data).gradeItemIds);
+  const proposedStudents = [...new Set((await prisma.gradeItem.findMany({ where: { id: { in: proposedIds }, institutionId: inst }, select: { studentId: true } })).map((item) => item.studentId))];
+  for (const studentId of proposedStudents) await assertStudentCampusAccess(user, studentId);
   for (const [sid, v] of Object.entries((body.completionDates as Data | undefined) ?? {})) {
     const d = optDate(v, "Completion Date");
     if (d) dates[sid] = d;
@@ -356,10 +380,13 @@ export async function approveGradeSubmission(user: SessionClaims, approvalId: st
 }
 
 export async function declineGradeSubmission(user: SessionClaims, approvalId: string) {
-  await canStudents(user, "edit");
+  await assertPermission(user, "userRequests", "edit");
   const inst = user.institutionId;
   const a = await pendingGrade(inst, approvalId);
   if (a.status !== "pending") throw httpError(409, "This grade submission has already been decided", "CONFLICT");
+  const proposedIds = arr<string>((JSON.parse(a.proposedDiffJson) as Data).gradeItemIds);
+  const proposedStudents = [...new Set((await prisma.gradeItem.findMany({ where: { id: { in: proposedIds }, institutionId: inst }, select: { studentId: true } })).map((item) => item.studentId))];
+  for (const studentId of proposedStudents) await assertStudentCampusAccess(user, studentId);
   await decideApproval({ approvalId, institutionId: inst, actorId: user.accountId, actorRoles: user.roles, decision: "reject" });
   const ids = arr<string>(JSON.parse(a.proposedDiffJson).gradeItemIds);
   if (ids.length) await prisma.gradeItem.updateMany({ where: { id: { in: ids }, institutionId: inst, status: "pending_publish" }, data: { status: "draft" } });
@@ -373,15 +400,32 @@ export async function declineGradeSubmission(user: SessionClaims, approvalId: st
 export async function transcriptChanges(user: SessionClaims) {
   await canStudents(user, "view");
   const list = (await rows(user.institutionId, STU.TRANSCRIPT_CHANGE)).filter((r) => s(r.data.status) === "Pending");
-  const info = await studentsInfo(user.institutionId, [...new Set(list.map((r) => r.contextKey))]);
-  return { items: list.map((r) => ({ id: r.id, student: studentCell(info.get(r.contextKey), r.contextKey), description: s(r.data.description), date: r.createdAt.toISOString() })) };
+  const info = await scopedStudentsInfo(user, [...new Set(list.map((r) => r.contextKey))]);
+  const canDecide = await canStudents(user, "edit").then(() => true, () => false);
+  return { canDecide, items: list.filter((r) => info.has(r.contextKey)).map((r) => ({ id: r.id, student: studentCell(info.get(r.contextKey), r.contextKey), description: s(r.data.description), date: r.createdAt.toISOString() })) };
+}
+
+export async function decideTranscriptChange(user: SessionClaims, changeId: string, body: Data) {
+  await canStudents(user, "edit");
+  const decision = s(body.decision);
+  if (decision !== "approve" && decision !== "reject") throw httpError(400, "Choose Approve or Reject");
+  const row = await prisma.heritageRecord.findFirst({ where: { id: changeId, institutionId: user.institutionId, screenId: STU.TRANSCRIPT_CHANGE, deletedAt: null } });
+  if (!row) throw httpError(404, "Transcript change not found", "NOT_FOUND");
+  await assertStudentCampusAccess(user, row.contextKey);
+  const before = JSON.parse(row.dataJson) as Data;
+  if (s(before.status) !== "Pending") throw httpError(409, "This transcript change has already been decided", "CONFLICT");
+  const after = { ...before, status: decision === "approve" ? "Approved" : "Rejected", decisionNote: text(body.note, 1000), decidedAt: new Date().toISOString(), decidedBy: user.accountId };
+  const claimed = await prisma.heritageRecord.updateMany({ where: { id: row.id, rowVersion: row.rowVersion }, data: { dataJson: JSON.stringify(after), rowVersion: { increment: 1 }, updatedById: user.accountId } });
+  if (claimed.count !== 1) throw httpError(409, "This transcript change was decided by someone else. Reload and try again.", "CONFLICT");
+  await stuAudit(user, "Transcripts/Final Marks", row.contextKey, `Transcript change ${decision === "approve" ? "approved" : "rejected"}`, after, row.id, before);
+  return { status: after.status, message: `Transcript change ${decision === "approve" ? "approved" : "rejected"}` };
 }
 
 export async function pendingEntryMarks(user: SessionClaims) {
   await canStudents(user, "view");
   const list = (await rows(user.institutionId, STU.TEST)).map(testView).filter((t) => !t.mark);
-  const info = await studentsInfo(user.institutionId, [...new Set(list.map((t) => t.studentId))]);
-  return { items: list.map((t) => ({ ...t, student: studentCell(info.get(t.studentId), t.studentId) })) };
+  const info = await scopedStudentsInfo(user, [...new Set(list.map((t) => t.studentId))]);
+  return { items: list.filter((t) => info.has(t.studentId)).map((t) => ({ ...t, student: studentCell(info.get(t.studentId), t.studentId) })) };
 }
 
 function badgeStatus(status: string) {
@@ -397,10 +441,11 @@ export async function badgeQueue(user: SessionClaims, q: Data) {
   const status = s(q.status);
   if (status && !(BADGE_STATUSES as readonly string[]).includes(status)) throw httpError(400, "Unknown status");
   const list = await prisma.studentBadge.findMany({ where: { institutionId: inst }, orderBy: { createdAt: "desc" }, take: 3000 });
-  const info = await studentsInfo(inst, [...new Set(list.map((b) => b.studentId))]);
+  const info = await scopedStudentsInfo(user, [...new Set(list.map((b) => b.studentId))]);
   const userQ = text(q.user, 120).toLowerCase();
   const badge = s(q.badge);
   const items = list
+    .filter((b) => info.has(b.studentId))
     .map((b) => ({ id: b.id, student: studentCell(info.get(b.studentId), b.studentId), email: info.get(b.studentId)?.email ?? "", badge: b.title, code: b.code, status: badgeStatus(b.status), earned: b.earnedAt?.toISOString() ?? "" }))
     .filter((b) => (!status || b.status === status) && (!badge || b.badge === badge || b.code === badge))
     .filter((b) => !userQ || b.student.number.toLowerCase().includes(userQ) || b.email.toLowerCase().includes(userQ) || b.student.name.toLowerCase().startsWith(userQ));
@@ -418,6 +463,7 @@ export async function decideBadge(user: SessionClaims, badgeId: string, body: Da
   if (decision !== "approve" && decision !== "decline") throw httpError(400, "Choose Approve or Decline");
   const badge = await prisma.studentBadge.findFirst({ where: { id: badgeId, institutionId: inst } });
   if (!badge) throw httpError(404, "Badge not found", "NOT_FOUND");
+  await assertStudentCampusAccess(user, badge.studentId);
   if (badge.status !== "pending") throw httpError(409, "This badge has already been reviewed", "CONFLICT");
   const approve = decision === "approve";
   const claimed = await prisma.studentBadge.updateMany({

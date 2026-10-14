@@ -77,6 +77,15 @@ function WorkshopsInner() {
     }
   }
 
+  async function cancel(workshopId: string) {
+    const session = loadSession();
+    if (!session) return;
+    setBusyId(workshopId); setError(null);
+    try { setData(await api<Payload>(`/student/workshops/${workshopId}/cancel`, { method: "POST", body: "{}" }, session.accessToken)); }
+    catch (err) { setError(err instanceof Error ? err.message : "Cancellation failed"); }
+    finally { setBusyId(null); }
+  }
+
   function setTab(next: Tab) {
     const params = new URLSearchParams();
     if (next !== "mine") params.set("tab", next);
@@ -155,13 +164,13 @@ function WorkshopsInner() {
                 <th>LENGTH</th>
                 <th>DATES</th>
                 <th>SCHEDULE</th>
-                {tab === "available" ? <th /> : null}
+                {tab !== "completed" ? <th /> : null}
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={tab === "available" ? 7 : 6}>
+                  <td colSpan={tab !== "completed" ? 7 : 6}>
                     {tab === "available"
                       ? "No available workshops."
                       : tab === "completed"
@@ -203,12 +212,12 @@ function WorkshopsInner() {
                       {w.endsAt ? ` – ${fmtDate(w.endsAt)}` : ""}
                     </td>
                     <td className="mh-hcc-pre">{w.scheduleText || w.location || "—"}</td>
-                    {tab === "available" ? (
+                    {tab !== "completed" ? (
                       <td
                         onClick={(e) => e.stopPropagation()}
                         onKeyDown={(e) => e.stopPropagation()}
                       >
-                        {w.registrationStatus === "none" ? (
+                        {tab === "available" && w.registrationStatus === "none" ? (
                           <button
                             type="button"
                             className="mh-hcc-btn"
@@ -217,6 +226,8 @@ function WorkshopsInner() {
                           >
                             {busyId === w.id ? "Saving…" : "Register"}
                           </button>
+                        ) : tab === "mine" ? (
+                          <button type="button" className="mh-hcc-btn ghost" disabled={busyId === w.id} onClick={() => void cancel(w.id)}>{busyId === w.id ? "Saving…" : "Cancel"}</button>
                         ) : (
                           <span className="mh-hcc-pill">{w.registrationStatus}</span>
                         )}

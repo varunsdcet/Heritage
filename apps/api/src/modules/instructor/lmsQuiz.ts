@@ -1,5 +1,7 @@
 import type { SessionClaims } from "@myheritage/contracts";
 import { prisma } from "@myheritage/db";
+import { writeAuditAndOutbox } from "@myheritage/events";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { studentCanAccessLmsActivity } from "./lmsAccessRestrictions.js";
 
@@ -91,6 +93,7 @@ export async function submitQuizAttempt(
   sectionId: string,
   activityId: string,
   body: unknown,
+  correlationId: string = randomUUID(),
 ) {
   const input = QuizAttemptRequest.parse(body);
   const enrolment = await prisma.enrolment.findFirst({
@@ -112,8 +115,20 @@ export async function submitQuizAttempt(
     submittedAt: new Date().toISOString(),
   };
   try {
-    await prisma.sisScreenState.create({
-      data: { institutionId: user.institutionId, path: `${attemptPrefix(sectionId, activityId)}${student.id}`, payloadJson: JSON.stringify(attempt) },
+    await prisma.$transaction(async (tx) => {
+      await tx.sisScreenState.create({
+        data: { institutionId: user.institutionId, path: `${attemptPrefix(sectionId, activityId)}${student.id}`, payloadJson: JSON.stringify(attempt) },
+      });
+      await writeAuditAndOutbox(tx, {
+        institutionId: user.institutionId,
+        actorId: user.accountId,
+        eventName: "QuizAttempt.submitted",
+        purpose: "assessment",
+        before: null,
+        after: { sectionId, activityId, studentId: student.id, score: attempt.score, maxScore: attempt.maxScore },
+        source: "student.quiz.submit",
+        correlationId,
+      });
     });
   } catch (err) {
     if ((err as { code?: string }).code === "P2002") throw httpError("You have already submitted this quiz. Only the first attempt is graded.", "CONFLICT", 409);

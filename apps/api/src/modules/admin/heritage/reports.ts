@@ -2,7 +2,7 @@ import { prisma } from "@myheritage/db";
 import type { SessionClaims } from "@myheritage/contracts";
 import { buildXlsx, type XlsxCell } from "../../../lib/xlsx.js";
 import { mailConfigured, sendMailViaHumanitix } from "../../../lib/mailer.js";
-import { assertPermission, studentMetaMap } from "../superAdmin.service.js";
+import { assertPermission, canEdit, effectiveAccess, studentMetaMap } from "../superAdmin.service.js";
 import { audit, refs } from "./service.js";
 
 /* ------------------------------------------------------------------ */
@@ -169,11 +169,12 @@ function letterFor(pct: number) {
 }
 
 async function ledgerByStudent(inst: string, range: Range) {
-  const entries = await prisma.financeLedgerEntry.findMany({
+  const storedEntries = await prisma.financeLedgerEntry.findMany({
     where: { institutionId: inst, status: { notIn: ["waived", "void"] }, ...(range ? { postedAt: { gte: range.from, lte: range.to } } : {}) },
     include: { financialTerm: true },
     take: 20000,
   });
+  const entries = storedEntries.map((entry) => ({ ...entry, amountCad: Number(entry.amountCad) }));
   const by = new Map<string, typeof entries>();
   for (const e of entries) by.set(e.studentId, [...(by.get(e.studentId) ?? []), e]);
   return by;
@@ -1484,6 +1485,13 @@ export async function runDueReportSchedules(now = new Date()) {
     let lastStatus: string;
     let lastRunId = s.lastRunId;
     try {
+      const creator = await prisma.account.findFirst({
+        where: { id: rec.createdById, institutionId: rec.institutionId },
+        select: { status: true },
+      });
+      if (!creator || creator.status !== "active") throw new Error("Schedule owner account is not active");
+      const access = await effectiveAccess(rec.institutionId, rec.createdById);
+      if (!canEdit(access.permissions.reporting)) throw new Error("Schedule owner no longer has permission to run reports");
       const out = await executeSchedule(rec.institutionId, rec.createdById, "Scheduler", rec.id, s);
       lastStatus = `OK — ${out.count} row(s)${out.mailed ? `, ${out.mailed} e-mail(s)` : ""}`;
       lastRunId = out.runId;

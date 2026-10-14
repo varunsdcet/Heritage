@@ -9,6 +9,8 @@ export const LoginRequest = z.object({
   deviceFingerprint: z.string().min(8),
   /** When false, short-lived session (12h). Default / true = 30d. */
   remember: z.boolean().optional(),
+  /** Required only when an identifier exists in more than one institution. */
+  institutionId: Uuid.optional(),
 });
 
 export const ChangePasswordRequest = z.object({

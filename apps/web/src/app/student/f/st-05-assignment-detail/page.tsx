@@ -21,9 +21,9 @@ export default function Page() {
       setReady(true);
       return;
     }
-    void api<{ items?: Array<{ id: string }> }>("/student/assignments", {}, session.accessToken)
+    void api<{ assignments?: Array<{ id: string }> }>("/student/assignments", {}, session.accessToken)
       .then((data) => {
-        setAssignmentId(data.items?.[0]?.id ?? null);
+        setAssignmentId(data.assignments?.[0]?.id ?? null);
         setReady(true);
       })
       .catch(() => setReady(true));

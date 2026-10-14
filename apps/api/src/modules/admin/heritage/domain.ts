@@ -117,12 +117,13 @@ async function ledger(ctx: DomainCtx, kinds: string[], perStudent: boolean): Pro
     kind: { in: kinds },
     ...(perStudent && ctx.contextId ? { studentId: ctx.contextId } : {}),
   };
-  const entries = await prisma.financeLedgerEntry.findMany({
+  const storedEntries = await prisma.financeLedgerEntry.findMany({
     where,
     include: { student: { include: { person: true } } },
     orderBy: { postedAt: "desc" },
     take: 1000,
   });
+  const entries = storedEntries.map((entry) => ({ ...entry, amountCad: Number(entry.amountCad) }));
   const terms = new Map((await prisma.financialTerm.findMany({ where: { institutionId: ctx.user.institutionId } })).map((t) => [t.id, t.name]));
   let running = 0;
   const rows = entries.map((e, i) => {
@@ -161,9 +162,10 @@ async function ledger(ctx: DomainCtx, kinds: string[], perStudent: boolean): Pro
   });
   let summary: Record<string, unknown> | undefined;
   if (perStudent && ctx.contextId) {
-    const all = await prisma.financeLedgerEntry.findMany({
+    const stored = await prisma.financeLedgerEntry.findMany({
       where: { institutionId: ctx.user.institutionId, studentId: ctx.contextId, status: { notIn: ["waived", "void"] } },
     });
+    const all = stored.map((entry) => ({ ...entry, amountCad: Number(entry.amountCad) }));
     const sum = (f: (e: (typeof all)[number]) => boolean) => money(all.filter(f).reduce((a, e) => a + e.amountCad, 0));
     const isTuition = (e: (typeof all)[number]) => /tuition/i.test(e.label);
     const tuitionTotal = sum((e) => e.kind === "charge" && isTuition(e));
@@ -191,12 +193,13 @@ async function ledger(ctx: DomainCtx, kinds: string[], perStudent: boolean): Pro
 }
 
 async function invoices(ctx: DomainCtx): Promise<DomainResult> {
-  const entries = await prisma.financeLedgerEntry.findMany({
+  const storedEntries = await prisma.financeLedgerEntry.findMany({
     where: { institutionId: ctx.user.institutionId, kind: "charge" },
     include: { student: { include: { person: true } } },
     orderBy: { postedAt: "desc" },
     take: 2000,
   });
+  const entries = storedEntries.map((entry) => ({ ...entry, amountCad: Number(entry.amountCad) }));
   const groups = new Map<string, typeof entries>();
   for (const e of entries) {
     const k = `${e.studentId}:${e.financialTermId ?? "none"}`;
@@ -886,8 +889,9 @@ export const WRITE_THROUGH: Record<string, (user: SessionClaims, data: Data, con
       let left = amount;
       const open = await prisma.financeLedgerEntry.findMany({ where: { institutionId: user.institutionId, studentId, kind: "charge", status: "open" }, orderBy: { postedAt: "asc" } });
       for (const c of open) {
-        if (left < c.amountCad) break;
-        left -= c.amountCad;
+        const chargeAmount = Number(c.amountCad);
+        if (left < chargeAmount) break;
+        left -= chargeAmount;
         await prisma.financeLedgerEntry.update({ where: { id: c.id }, data: { status: "paid", rowVersion: { increment: 1 } } });
       }
     }
@@ -922,7 +926,7 @@ export const WRITE_THROUGH: Record<string, (user: SessionClaims, data: Data, con
         where: { institutionId: user.institutionId, studentId, kind: { in: ["payment", "refund"] }, status: { not: "waived" } },
         _sum: { amountCad: true },
       });
-      const total = (k: string) => sums.find((x) => x.kind === k)?._sum.amountCad ?? 0;
+      const total = (k: string) => Number(sums.find((x) => x.kind === k)?._sum.amountCad ?? 0);
       const refundable = money(total("payment") - total("refund"));
       if (amount > refundable + 0.005) {
         throw Object.assign(new Error(`Refund Amount cannot exceed $${Math.max(0, refundable).toFixed(2)} (paid minus already refunded)`), { status: 400, code: "VALIDATION_ERROR" });
@@ -1052,6 +1056,122 @@ export async function domainStatus(user: SessionClaims, domainId: string, status
     }
     await prisma.financeLedgerEntry.updateMany({ where: { id, institutionId: user.institutionId, status: "open" }, data: { status: "waived", rowVersion: { increment: 1 } } });
     return "Ledger entry waived";
+  }
+  return null;
+}
+
+/**
+ * Persist edits made from a generic Heritage grid into the table that supplied
+ * the row. Returning null means the row is read-only; callers must never hide
+ * such an edit in a HeritageRecord overlay because every dedicated page reads
+ * the core table directly.
+ */
+export async function updateDomainRecord(user: SessionClaims, domainId: string, patch: Data): Promise<string | null> {
+  const colon = domainId.indexOf(":");
+  const kind = domainId.slice(0, colon);
+  const id = domainId.slice(colon + 1);
+  const inst = user.institutionId;
+  if (!id) return null;
+
+  if (kind === "student") {
+    const student = await prisma.student.findFirst({ where: { id, institutionId: inst }, select: { personId: true } });
+    if (!student) throw domainError(404, "Student not found", "NOT_FOUND");
+    await prisma.$transaction(async (tx) => {
+      await tx.student.update({
+        where: { id },
+        data: {
+          ...(str(patch.student_number) ? { studentNumber: str(patch.student_number) } : {}),
+          ...(str(patch.program) ? { programName: str(patch.program) } : {}),
+          rowVersion: { increment: 1 },
+        },
+      });
+      await tx.person.update({
+        where: { id: student.personId },
+        data: {
+          ...(str(patch.first_name) ? { givenName: str(patch.first_name) } : {}),
+          ...(str(patch.last_name) ? { familyName: str(patch.last_name) } : {}),
+          ...(str(patch.phone_number) ? { phone: str(patch.phone_number) } : {}),
+          rowVersion: { increment: 1 },
+        },
+      });
+    });
+    const meta: Record<string, unknown> = {};
+    if (str(patch.status) || str(patch.student_status)) meta.status = str(patch.status) || str(patch.student_status);
+    if (str(patch.campus)) meta.campus = str(patch.campus);
+    if (str(patch.admission_term)) meta.admissionTerm = str(patch.admission_term);
+    if (str(patch.domestic_international) || str(patch.nationality)) meta.residency = str(patch.domestic_international) || str(patch.nationality);
+    if (Object.keys(meta).length) await patchStudentMeta(inst, id, meta);
+    return "Student record updated";
+  }
+  if (kind === "program") {
+    const result = await prisma.program.updateMany({
+      where: { id, institutionId: inst },
+      data: {
+        ...(str(patch.abbreviation) ? { code: str(patch.abbreviation).toUpperCase() } : {}),
+        ...(str(patch.program_name) ? { name: str(patch.program_name) } : {}),
+        ...(str(patch.program_type) ? { awardLevel: str(patch.program_type) } : {}),
+        rowVersion: { increment: 1 },
+      },
+    });
+    if (!result.count) throw domainError(404, "Program not found", "NOT_FOUND");
+    return "Program updated";
+  }
+  if (kind === "course") {
+    const result = await prisma.course.updateMany({
+      where: { id, institutionId: inst },
+      data: {
+        ...(str(patch.number) ? { code: str(patch.number).toUpperCase() } : {}),
+        ...(str(patch.name) ? { title: str(patch.name) } : {}),
+        ...(patch.credit_value !== undefined ? { credits: num(patch.credit_value) } : {}),
+        rowVersion: { increment: 1 },
+      },
+    });
+    if (!result.count) throw domainError(404, "Course not found", "NOT_FOUND");
+    return "Course updated";
+  }
+  if (kind === "term") {
+    const result = await prisma.term.updateMany({
+      where: { id, institutionId: inst },
+      data: {
+        ...(str(patch.term_abbreviation) ? { code: str(patch.term_abbreviation).toUpperCase() } : {}),
+        ...(str(patch.term_name) ? { name: str(patch.term_name) } : {}),
+        ...(str(patch.start_date) ? { startsOn: str(patch.start_date) } : {}),
+        ...(str(patch.end_date) ? { endsOn: str(patch.end_date) } : {}),
+        rowVersion: { increment: 1 },
+      },
+    });
+    if (!result.count) throw domainError(404, "Term not found", "NOT_FOUND");
+    return "Term updated";
+  }
+  if (kind === "attendance") {
+    const result = await prisma.attendanceRecord.updateMany({
+      where: { id, institutionId: inst },
+      data: {
+        ...(str(patch.status) ? { status: str(patch.status).toLowerCase() } : {}),
+        ...(str(patch.meeting) ? { meetingLabel: str(patch.meeting) } : {}),
+        rowVersion: { increment: 1 },
+      },
+    });
+    if (!result.count) throw domainError(404, "Attendance record not found", "NOT_FOUND");
+    return "Attendance updated";
+  }
+  if (kind === "task") {
+    const result = await prisma.requiredTask.updateMany({
+      where: { id, institutionId: inst },
+      data: {
+        ...(str(patch.requirement) ? { title: str(patch.requirement) } : {}),
+        ...(str(patch.requirement_status) ? { status: str(patch.requirement_status).toLowerCase() } : {}),
+        ...(str(patch.detail) ? { detail: str(patch.detail) } : {}),
+        rowVersion: { increment: 1 },
+      },
+    });
+    if (!result.count) throw domainError(404, "Required task not found", "NOT_FOUND");
+    return "Required task updated";
+  }
+  if (["workshopreg", "loa", "request", "ledger"].includes(kind)) {
+    const status = str(patch.approval_status) || str(patch.current_status) || str(patch.request_status) || str(patch.status);
+    if (!status) return null;
+    return domainStatus(user, domainId, status, str(patch.comments_note) || str(patch.note));
   }
   return null;
 }

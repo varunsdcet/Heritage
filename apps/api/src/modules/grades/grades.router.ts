@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { randomUUID } from "crypto";
+import { z } from "zod";
 import {
   CreateGradeItemRequest,
   GradebookResponse,
@@ -15,6 +16,9 @@ import { requireAuth, requireRoles, type AuthedRequest } from "../../middleware/
 import { gradeAwaitingApprovalError, gradeItemsInOpenApproval } from "../../lib/gradeApprovals.js";
 import { getTranscriptSummary } from "../academic/program-plan.service.js";
 import { currentStudentId } from "../me/studentAlignment.js";
+import { facultySectionIds } from "../instructor/sectionFaculty.js";
+import { weightedPercent } from "../academic/program-plan.service.js";
+import { letterForSection } from "../../lib/gradingScheme.js";
 
 export const gradesRouter: Router = Router();
 
@@ -29,19 +33,6 @@ function parseSectionId(raw: string) {
   return parsed.data;
 }
 
-function letterFor(score: number, max: number) {
-  const pct = (score / max) * 100;
-  if (pct >= 90) return "A";
-  if (pct >= 85) return "A-";
-  if (pct >= 80) return "B+";
-  if (pct >= 75) return "B";
-  if (pct >= 70) return "B-";
-  if (pct >= 65) return "C+";
-  if (pct >= 60) return "C";
-  if (pct >= 50) return "D";
-  return "F";
-}
-
 gradesRouter.get("/me", requireAuth, requireRoles("student"), async (req, res, next) => {
   try {
     const user = (req as AuthedRequest).user;
@@ -51,7 +42,7 @@ gradesRouter.get("/me", requireAuth, requireRoles("student"), async (req, res, n
     if (!student) throw Object.assign(new Error("Student not found"), { code: "NOT_FOUND", status: 404 });
 
     const enrolments = await prisma.enrolment.findMany({
-      where: { institutionId: user.institutionId, studentId: student.id, status: "enrolled" },
+      where: { institutionId: user.institutionId, studentId: student.id, status: { in: ["enrolled", "completed"] } },
       include: {
         section: { include: { course: true, assignments: { orderBy: { dueAt: "asc" } } } },
         gradeItems: {
@@ -67,7 +58,7 @@ gradesRouter.get("/me", requireAuth, requireRoles("student"), async (req, res, n
     });
     const instructorMap = new Map(instructors.map((p) => [p.id, `${p.givenName} ${p.familyName}`]));
 
-    const courses = enrolments.map((e) => {
+    const courses = await Promise.all(enrolments.map(async (e) => {
       // Published scores only; assignment shells still list so students see the gradebook structure.
       const publishedByAssignment = new Map(
         e.gradeItems.filter((g) => g.status === "published").map((g) => [g.assignmentId, g]),
@@ -89,17 +80,7 @@ gradesRouter.get("/me", requireAuth, requireRoles("student"), async (req, res, n
             feedback: g?.status === "published" ? (g.feedback ?? null) : null,
           };
         });
-      const weighted = items.reduce(
-        (acc, item) => {
-          if (item.status !== "published" || item.score == null) return acc;
-          return {
-            w: acc.w + item.weightPercent,
-            s: acc.s + (item.score / item.maxScore) * item.weightPercent,
-          };
-        },
-        { w: 0, s: 0 },
-      );
-      const currentPercent = weighted.w ? Math.round((weighted.s / weighted.w) * 1000) / 10 : null;
+      const currentPercent = weightedPercent(items.filter((item) => item.status === "published"));
       return {
         sectionId: e.sectionId,
         code: e.section.course.code,
@@ -107,10 +88,10 @@ gradesRouter.get("/me", requireAuth, requireRoles("student"), async (req, res, n
         instructorName: instructorMap.get(e.section.instructorPersonId) ?? "Instructor",
         credits: e.section.course.credits,
         currentPercent,
-        letter: currentPercent == null ? null : letterFor(currentPercent, 100),
+        letter: currentPercent == null ? null : await letterForSection(user.institutionId, e.sectionId, e.section.course.id, currentPercent, 100),
         items,
       };
-    });
+    }));
 
     const cumulativeGpa = (await getTranscriptSummary(user.institutionId, student.id)).cgpa ?? 0;
 
@@ -180,11 +161,12 @@ gradesRouter.get(
     try {
       const user = (req as AuthedRequest).user;
       const sectionId = parseSectionId(String(req.params.sectionId ?? ""));
+      const assigned = user.roles.includes("admin") ? null : await facultySectionIds(user);
       let section = await prisma.section.findFirst({
         where: {
           id: sectionId,
           institutionId: user.institutionId,
-          ...(user.roles.includes("admin") ? {} : { instructorPersonId: user.personId }),
+          ...(assigned ? { id: { in: [...assigned] } } : {}),
         },
         include: {
           course: true,
@@ -286,14 +268,16 @@ gradesRouter.post("/", requireAuth, requireRoles("instructor", "admin"), async (
   try {
     const user = (req as AuthedRequest).user;
     const body = CreateGradeItemRequest.parse(req.body);
+    const assigned = user.roles.includes("admin") ? null : await facultySectionIds(user);
     const assignment = await prisma.assignment.findFirst({
       where: {
         id: body.assignmentId,
         institutionId: user.institutionId,
         ...(user.roles.includes("admin")
           ? {}
-          : { section: { instructorPersonId: user.personId, institutionId: user.institutionId } }),
+          : { sectionId: { in: [...(assigned ?? [])] } }),
       },
+      include: { section: { select: { courseId: true } } },
     });
     if (!assignment) throw Object.assign(new Error("Assignment not found"), { code: "NOT_FOUND", status: 404 });
     const enrolment = await prisma.enrolment.findFirst({
@@ -311,7 +295,7 @@ gradesRouter.post("/", requireAuth, requireRoles("instructor", "admin"), async (
         status: 400,
       });
     }
-    const letter = letterFor(body.score, assignment.maxScore);
+    const letter = await letterForSection(user.institutionId, assignment.sectionId, assignment.section.courseId, body.score, assignment.maxScore);
     const feedback = body.feedback === undefined ? undefined : body.feedback?.trim() || null;
     const existing = await prisma.gradeItem.findFirst({
       where: { assignmentId: assignment.id, studentId: body.studentId, institutionId: user.institutionId },
@@ -378,6 +362,7 @@ gradesRouter.patch("/:id", requireAuth, requireRoles("instructor", "admin"), asy
       const user = (req as AuthedRequest).user;
       const id = parseSectionId(String(req.params.id ?? ""));
       const body = UpsertGradeRequest.parse(req.body);
+    const assigned = user.roles.includes("admin") ? null : await facultySectionIds(user);
     const existing = await prisma.gradeItem.findFirst({
       where: {
         id,
@@ -387,10 +372,11 @@ gradesRouter.patch("/:id", requireAuth, requireRoles("instructor", "admin"), asy
           : {
               assignment: {
                 institutionId: user.institutionId,
-                section: { institutionId: user.institutionId, instructorPersonId: user.personId },
+                sectionId: { in: [...(assigned ?? [])] },
               },
             }),
       },
+      include: { assignment: { include: { section: { select: { courseId: true } } } } },
     });
     if (!existing) throw Object.assign(new Error("Grade not found"), { code: "NOT_FOUND", status: 404 });
     if (existing.status === "published") {
@@ -406,7 +392,7 @@ gradesRouter.patch("/:id", requireAuth, requireRoles("instructor", "admin"), asy
         status: 400,
       });
     }
-    const letter = letterFor(body.score, existing.maxScore);
+    const letter = await letterForSection(user.institutionId, existing.assignment.sectionId, existing.assignment.section.courseId, body.score, existing.maxScore);
     const feedback = body.feedback === undefined ? undefined : body.feedback?.trim() || null;
     const updated = await prisma.$transaction(async (tx) => {
       const row = await tx.gradeItem.update({
@@ -431,6 +417,54 @@ gradesRouter.patch("/:id", requireAuth, requireRoles("instructor", "admin"), asy
   }
 });
 
+const GradeCorrectionRequest = z.object({
+  score: z.number().nonnegative(),
+  feedback: z.string().trim().max(4000).nullable().optional(),
+  reason: z.string().trim().min(5).max(1000),
+  rowVersion: z.number().int().positive(),
+});
+
+/** Published marks stay visible while a separately audited correction waits for approval. */
+gradesRouter.post("/:id/corrections", requireAuth, requireRoles("instructor", "admin"), async (req, res, next) => {
+  try {
+    const user = (req as AuthedRequest).user;
+    const id = parseSectionId(String(req.params.id ?? ""));
+    const body = GradeCorrectionRequest.parse(req.body);
+    const assigned = user.roles.includes("admin") ? null : await facultySectionIds(user);
+    const grade = await prisma.gradeItem.findFirst({
+      where: {
+        id,
+        institutionId: user.institutionId,
+        ...(assigned ? { assignment: { sectionId: { in: [...assigned] } } } : {}),
+      },
+      include: { assignment: { select: { sectionId: true, section: { select: { courseId: true } } } } },
+    });
+    if (!grade) throw Object.assign(new Error("Grade not found"), { code: "NOT_FOUND", status: 404 });
+    if (grade.status !== "published") throw Object.assign(new Error("Only a published grade needs a correction request"), { code: "CONFLICT", status: 409 });
+    if (grade.rowVersion !== body.rowVersion) throw Object.assign(new Error("Stale row_version — refresh and try again"), { code: "CONFLICT", status: 409 });
+    if (body.score > grade.maxScore) throw Object.assign(new Error("Score cannot exceed the maximum score"), { code: "VALIDATION_ERROR", status: 400 });
+    if ((await gradeItemsInOpenApproval(user.institutionId, [grade.id])).size) throw gradeAwaitingApprovalError();
+    const approval = await requireApproval({
+      institutionId: user.institutionId,
+      type: "grade.correct",
+      subjectRef: `section:${grade.assignment.sectionId}`,
+      proposedDiff: {
+        gradeItemIds: [grade.id],
+        studentIds: [grade.studentId],
+        correction: { gradeItemId: grade.id, score: body.score, letter: await letterForSection(user.institutionId, grade.assignment.sectionId, grade.assignment.section.courseId, body.score, grade.maxScore), feedback: body.feedback, reason: body.reason, expectedRowVersion: grade.rowVersion },
+      },
+      requestedBy: user.accountId,
+      requiredApproverRoles: ["admin", "registrar"],
+      requiredCount: 1,
+      correlationId: (req as AuthedRequest).correlationId,
+      source: "grade-items.correction",
+    });
+    res.status(202).json({ approvalRequestId: approval.id, status: approval.status });
+  } catch (error) {
+    next(error);
+  }
+});
+
 gradesRouter.post(
   "/:sectionId/publish",
   requireAuth,
@@ -440,6 +474,7 @@ gradesRouter.post(
       const user = (req as AuthedRequest).user;
       const sectionId = parseSectionId(String(req.params.sectionId ?? ""));
       const body = PublishGradesRequest.parse(req.body);
+      const assigned = user.roles.includes("admin") ? null : await facultySectionIds(user);
       const idempotencyKey = req.header("idempotency-key")?.trim();
       if (!idempotencyKey) {
         throw Object.assign(new Error("Idempotency-Key header is required"), {
@@ -472,11 +507,18 @@ gradesRouter.post(
         where: {
           id: sectionId,
           institutionId: user.institutionId,
-          ...(user.roles.includes("admin") ? {} : { instructorPersonId: user.personId }),
+          ...(assigned ? { id: { in: [...assigned] } } : {}),
         },
-        select: { id: true },
+        select: { id: true, assignments: { select: { weightPercent: true } } },
       });
       if (!section) throw Object.assign(new Error("Section not found"), { code: "NOT_FOUND", status: 404 });
+      const totalWeight = section.assignments.reduce((sum, assignment) => sum + Number(assignment.weightPercent), 0);
+      if (Math.abs(totalWeight - 100) > 0.001) {
+        throw Object.assign(new Error(`Assignment weights must total 100% before final marks can be published (currently ${totalWeight}%).`), {
+          code: "VALIDATION_ERROR",
+          status: 400,
+        });
+      }
       const grades = await prisma.gradeItem.findMany({
         where: {
           id: { in: body.gradeItemIds },

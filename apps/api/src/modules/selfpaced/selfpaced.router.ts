@@ -1,6 +1,7 @@
-import { Router } from "express";
+import { Router, type NextFunction, type Request, type Response } from "express";
 import { prisma } from "@myheritage/db";
 import { requireAuth, requireRoles, type AuthedRequest } from "../../middleware/auth.js";
+import { assertPermission } from "../admin/superAdmin.service.js";
 import { issueSelfpacedCertificate } from "./selfpaced.service.js";
 import {
   enrolFreeProgram,
@@ -14,6 +15,15 @@ import {
 } from "./catalogue.service.js";
 
 export const selfpacedRouter: Router = Router();
+
+const requireSelfpacedAccess = (mode: "view" | "edit") => async (req: Request, _res: Response, next: NextFunction) => {
+  try {
+    await assertPermission((req as AuthedRequest).user, "courseManagement", mode);
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
 
 selfpacedRouter.get("/programs", async (_req, res, next) => {
   try {
@@ -65,7 +75,7 @@ selfpacedRouter.post("/enrolments/paid", requireAuth, requireRoles("student"), a
   }
 });
 
-selfpacedRouter.get("/admin/programs", requireAuth, requireRoles("admin", "registrar"), async (req, res, next) => {
+selfpacedRouter.get("/admin/programs", requireAuth, requireRoles("admin", "registrar"), requireSelfpacedAccess("view"), async (req, res, next) => {
   try {
     const user = (req as AuthedRequest).user;
     res.json({ items: await listSelfpacedPrograms(user.institutionId, true) });
@@ -74,7 +84,7 @@ selfpacedRouter.get("/admin/programs", requireAuth, requireRoles("admin", "regis
   }
 });
 
-selfpacedRouter.post("/admin/programs", requireAuth, requireRoles("admin", "registrar"), async (req, res, next) => {
+selfpacedRouter.post("/admin/programs", requireAuth, requireRoles("admin", "registrar"), requireSelfpacedAccess("edit"), async (req, res, next) => {
   try {
     res.status(201).json(await saveSelfpacedProgram((req as AuthedRequest).user, req.body));
   } catch (err) {
@@ -82,7 +92,7 @@ selfpacedRouter.post("/admin/programs", requireAuth, requireRoles("admin", "regi
   }
 });
 
-selfpacedRouter.put("/admin/programs/:slug", requireAuth, requireRoles("admin", "registrar"), async (req, res, next) => {
+selfpacedRouter.put("/admin/programs/:slug", requireAuth, requireRoles("admin", "registrar"), requireSelfpacedAccess("edit"), async (req, res, next) => {
   try {
     res.json(await saveSelfpacedProgram((req as AuthedRequest).user, req.body, req.params.slug));
   } catch (err) {
@@ -90,7 +100,7 @@ selfpacedRouter.put("/admin/programs/:slug", requireAuth, requireRoles("admin", 
   }
 });
 
-selfpacedRouter.post("/admin/programs/:slug/status", requireAuth, requireRoles("admin", "registrar"), async (req, res, next) => {
+selfpacedRouter.post("/admin/programs/:slug/status", requireAuth, requireRoles("admin", "registrar"), requireSelfpacedAccess("edit"), async (req, res, next) => {
   try {
     const status = String(req.body?.status || "");
     if (!["draft", "review", "published"].includes(status)) return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Invalid status." } });
@@ -100,7 +110,7 @@ selfpacedRouter.post("/admin/programs/:slug/status", requireAuth, requireRoles("
   }
 });
 
-selfpacedRouter.post("/certificates", requireAuth, async (req, res, next) => {
+selfpacedRouter.post("/certificates", requireAuth, requireRoles("student"), async (req, res, next) => {
   try {
     const out = await issueSelfpacedCertificate((req as AuthedRequest).user, req.body);
     res.status(out.created ? 201 : 200).json(out);
@@ -109,7 +119,7 @@ selfpacedRouter.post("/certificates", requireAuth, async (req, res, next) => {
   }
 });
 
-selfpacedRouter.get("/admin/english-test-registrations", requireAuth, requireRoles("admin", "registrar"), async (req, res, next) => {
+selfpacedRouter.get("/admin/english-test-registrations", requireAuth, requireRoles("admin", "registrar"), requireSelfpacedAccess("view"), async (req, res, next) => {
   try {
     const user = (req as AuthedRequest).user;
     const rows = await prisma.sisScreenState.findMany({

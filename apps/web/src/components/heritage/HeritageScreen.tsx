@@ -77,6 +77,7 @@ type View = {
   singleton: { id: string; data: Data; updatedAt: string } | null;
   summary: Data | null;
   auditCount: number;
+  canEdit: boolean;
 };
 type AuditItem = { id: string; action: string; actor: string; at: string; note: string | null; before: Data | null; after: Data | null };
 type FileValue = { name: string; size: number; type: string; dataUrl: string };
@@ -379,8 +380,9 @@ function HeritageScreen({ screenId, onCrumbs }: { screenId: string; onCrumbs: (c
   const features = new Set([...schema.fields, ...schema.filters].filter((f) => f.kind === "feature").map((f) => f.feature));
   const hasRowSelect = schema.columns.some((c) => c.feature === "rowSelect") || schema.actions.some((a) => a.kind === "bulk") || features.has("bulk");
   const hasPhoto = schema.columns.some((c) => c.feature === "photo");
-  const rowActions = schema.actions.filter((a) => a.row);
-  const toolbar = schema.actions.filter((a) => !a.row && !["submit", "confirm", "cancel"].includes(a.kind));
+  const mutates = (a: ActionDef) => !["view", "search", "export", "cancel"].includes(a.kind);
+  const rowActions = schema.actions.filter((a) => a.row && (view.canEdit || !mutates(a)));
+  const toolbar = schema.actions.filter((a) => !a.row && !["submit", "confirm", "cancel"].includes(a.kind) && (view.canEdit || !mutates(a)));
   const formFields = schema.fields.filter((f) => f.kind !== "feature");
   const needsCtx = Boolean(schema.context && !ctx);
   const blockWrite = needsCtx && view.writeThrough;
@@ -420,8 +422,8 @@ function HeritageScreen({ screenId, onCrumbs }: { screenId: string; onCrumbs: (c
             <h2>{schema.name}</h2>
             <span className="mh-sa__muted">{view.singleton?.updatedAt ? `Last saved ${new Date(view.singleton.updatedAt).toLocaleString()}` : "Not saved yet"}</span>
           </div>
-          <FieldGrid fields={formFields} data={inline} onChange={(k, v) => setInline((d) => ({ ...d, [k]: v }))} refs={refs} rows={datalistRows} summary={view.summary} />
-          <div className="mh-sa__actions">
+          <FieldGrid fields={formFields} data={inline} onChange={(k, v) => view.canEdit && setInline((d) => ({ ...d, [k]: v }))} refs={refs} rows={datalistRows} summary={view.summary} />
+          {view.canEdit ? <div className="mh-sa__actions">
             <button type="button" className="mh-sa__btn mh-sa__btn--primary" disabled={busy || blockWrite} onClick={() => void submitForm(inline, "singleton")}>
               {schema.submitLabel}
             </button>
@@ -432,11 +434,11 @@ function HeritageScreen({ screenId, onCrumbs }: { screenId: string; onCrumbs: (c
                   {a.label}
                 </button>
               ))}
-          </div>
+          </div> : null}
         </section>
       ) : null}
 
-      {schema.mode === "form" && schema.id !== "S03" ? (
+      {schema.mode === "form" && schema.id !== "S03" && view.canEdit ? (
         <section className="mh-sa__card" id="hx-inline-form">
           <div className="mh-sa__card-head">
             <h2>{schema.name}</h2>
@@ -486,7 +488,7 @@ function HeritageScreen({ screenId, onCrumbs }: { screenId: string; onCrumbs: (c
           <div className="mh-sa__card-head">
             <h2>{schema.mode === "form" ? "Saved entries" : "Records"}</h2>
             <div className="mh-sa__card-actions hx-toolbar">
-              {submitOpener ? (
+              {submitOpener && view.canEdit ? (
                 <button type="button" className="mh-sa__btn mh-sa__btn--sm mh-sa__btn--primary" disabled={busy || blockWrite} onClick={() => setForm({ mode: "create", data: {} })}>
                   {submitOpener}
                 </button>
@@ -643,7 +645,7 @@ function HeritageScreen({ screenId, onCrumbs }: { screenId: string; onCrumbs: (c
                         </td>
                       )}
                       <td className="hx-row-actions">
-                        {(rowActions.length ? rowActions : DEFAULT_ROW_ACTIONS).map((a) => (
+                        {(rowActions.length ? rowActions : DEFAULT_ROW_ACTIONS.filter((a) => view.canEdit || !mutates(a))).map((a) => (
                           <button key={a.id + a.label} type="button" className={`mh-sa__btn mh-sa__btn--sm${a.kind === "delete" ? " mh-sa__btn--danger" : ""}`} disabled={busy} onClick={() => onRowAction(a, row)}>
                             {a.label}
                           </button>
@@ -703,14 +705,14 @@ function HeritageScreen({ screenId, onCrumbs }: { screenId: string; onCrumbs: (c
           row={detail}
           ctx={ctx}
           onClose={() => setDetail(null)}
-          onEdit={() => {
+          onEdit={view.canEdit ? () => {
             setForm({ mode: "edit", recordId: detail.id, data: { ...detail.data } });
             setDetail(null);
-          }}
-          onDelete={() => {
+          } : undefined}
+          onDelete={view.canEdit ? () => {
             askDelete(detail);
             setDetail(null);
-          }}
+          } : undefined}
         />
       ) : null}
 
@@ -1272,7 +1274,7 @@ function FieldInput({
 /* Detail / bulk / data points                                          */
 /* ------------------------------------------------------------------ */
 
-function DetailModal({ schema, view, row, ctx, onClose, onEdit, onDelete }: { schema: Schema; view: View; row: Row; ctx: string; onClose: () => void; onEdit: () => void; onDelete: () => void }) {
+function DetailModal({ schema, view, row, ctx, onClose, onEdit, onDelete }: { schema: Schema; view: View; row: Row; ctx: string; onClose: () => void; onEdit?: () => void; onDelete?: () => void }) {
   const [audit, setAudit] = useState<AuditItem[] | null>(null);
   useEffect(() => {
     const params = new URLSearchParams({ recordId: row.id });
@@ -1290,15 +1292,15 @@ function DetailModal({ schema, view, row, ctx, onClose, onEdit, onDelete }: { sc
       wide
       footer={
         <>
-          <button type="button" className="mh-sa__btn mh-sa__btn--danger" onClick={onDelete}>
+          {onDelete ? <button type="button" className="mh-sa__btn mh-sa__btn--danger" onClick={onDelete}>
             Delete
-          </button>
+          </button> : null}
           <button type="button" className="mh-sa__btn" onClick={() => window.print()}>
             Print
           </button>
-          <button type="button" className="mh-sa__btn mh-sa__btn--primary" onClick={onEdit}>
+          {onEdit ? <button type="button" className="mh-sa__btn mh-sa__btn--primary" onClick={onEdit}>
             Edit
-          </button>
+          </button> : null}
         </>
       }
     >

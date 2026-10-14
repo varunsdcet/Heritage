@@ -1,6 +1,6 @@
 import { prisma, type Prisma } from "@myheritage/db";
 
-export const GRADE_APPROVAL_TYPES = ["grade_publish", "grade.publish"];
+export const GRADE_APPROVAL_TYPES = ["grade_publish", "grade.publish", "grade.correct"];
 
 export const GRADE_AWAITING_APPROVAL_MESSAGE =
   "This grade is awaiting approval; ask the approver to decline it before editing";

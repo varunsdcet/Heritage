@@ -3,7 +3,7 @@
 import "./enrolments.css";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { SaCard, SaField, SaNotice, SuperFrame } from "@/components/superadmin/shared";
+import { SaCard, SaField, SaModal, SaNotice, SuperFrame } from "@/components/superadmin/shared";
 import { api, loadSession } from "@/lib/api";
 
 type SectionRow = {
@@ -32,6 +32,22 @@ type BulkOut = {
   results: Array<EnrolOut & { studentId: string; studentName: string; studentNumber: string; status: "enrolled" | "waitlisted" | "existing" }>;
   failures: Array<{ studentId: string; studentName?: string; studentNumber?: string; code: string; message: string }>;
   summary: { requested: number; enrolled: number; waitlisted: number; existing: number; failed: number };
+};
+type RosterStatus = "all" | "enrolled" | "waitlisted";
+type SectionRoster = {
+  section: { id: string; code: string; courseCode: string; courseTitle: string };
+  counts: { enrolled: number; waitlisted: number; total: number };
+  items: Array<{
+    enrolmentId: string;
+    studentId: string;
+    studentNumber: string;
+    givenName: string;
+    familyName: string;
+    email: string;
+    programName: string;
+    status: "enrolled" | "waitlisted";
+    enrolledAt: string;
+  }>;
 };
 
 const money = (n: number) => n.toLocaleString("en-CA", { style: "currency", currency: "CAD" });
@@ -73,6 +89,11 @@ export function EnrolmentsView() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [roster, setRoster] = useState<SectionRoster | null>(null);
+  const [rosterSectionId, setRosterSectionId] = useState("");
+  const [rosterStatus, setRosterStatus] = useState<RosterStatus>("all");
+  const [rosterBusy, setRosterBusy] = useState(false);
+  const [rosterError, setRosterError] = useState<string | null>(null);
 
   const loadSections = (token: string) =>
     api<{ items: SectionRow[] }>("/admin/sections", {}, token).then((sec) => {
@@ -134,6 +155,23 @@ export function EnrolmentsView() {
     });
   }
 
+  async function loadRoster(id: string) {
+    const s = loadSession();
+    if (!s) return;
+    setRosterSectionId(id);
+    setRosterStatus("all");
+    setRoster(null);
+    setRosterError(null);
+    setRosterBusy(true);
+    try {
+      setRoster(await api<SectionRoster>(`/admin/enrolments/section/${encodeURIComponent(id)}`, {}, s.accessToken));
+    } catch (err) {
+      setRosterError(err instanceof Error ? err.message : "Could not load section students");
+    } finally {
+      setRosterBusy(false);
+    }
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     const s = loadSession();
@@ -151,6 +189,7 @@ export function EnrolmentsView() {
       setSelectedStudentIds([]);
       setStudentFilter("");
       await loadSections(s.accessToken);
+      if (rosterSectionId === sectionId) await loadRoster(sectionId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Enrol failed");
     } finally {
@@ -317,13 +356,18 @@ export function EnrolmentsView() {
                         <Seats enrolled={s.enrolmentCount ?? 0} capacity={s.capacity} waitlisted={s.waitlistCount} waitlistEnabled={s.waitlistEnabled} />
                       </td>
                       <td className="mh-sa__col-action">
-                        {s.sectionId === sectionId ? (
-                          <span className="mh-sa__pill mh-sa__pill--ok">Selected</span>
-                        ) : (
-                          <button type="button" className="mh-sa__btn mh-sa__btn--sm" onClick={() => setSectionId(s.sectionId)}>
-                            Select
+                        <div className="en-row-actions">
+                          {s.sectionId === sectionId ? (
+                            <span className="mh-sa__pill mh-sa__pill--ok">Selected</span>
+                          ) : (
+                            <button type="button" className="mh-sa__btn mh-sa__btn--sm" onClick={() => setSectionId(s.sectionId)}>
+                              Select
+                            </button>
+                          )}
+                          <button type="button" className="mh-sa__btn mh-sa__btn--sm" onClick={() => void loadRoster(s.sectionId)}>
+                            View Students
                           </button>
-                        )}
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -339,6 +383,58 @@ export function EnrolmentsView() {
           </div>
         </SaCard>
       </div>
+      {rosterSectionId ? (
+        <SaModal
+          wide
+          title={roster ? `${roster.section.courseCode} ${roster.section.code} — Students` : "Section Students"}
+          onClose={() => {
+            setRosterSectionId("");
+            setRoster(null);
+            setRosterError(null);
+          }}
+          footer={<button type="button" className="mh-sa__btn" onClick={() => setRosterSectionId("")}>Close</button>}
+        >
+          {rosterError ? <SaNotice tone="error">{rosterError}</SaNotice> : null}
+          {rosterBusy ? <p className="mh-sa__muted">Loading enrolled and waitlisted students…</p> : null}
+          {roster ? (
+            <>
+              <p className="mh-sa__muted en-roster-course">{roster.section.courseTitle}</p>
+              <div className="en-roster-tabs" role="group" aria-label="Filter section students">
+                {([
+                  ["all", `All (${roster.counts.total})`],
+                  ["enrolled", `Enrolled (${roster.counts.enrolled})`],
+                  ["waitlisted", `Waitlisted (${roster.counts.waitlisted})`],
+                ] as Array<[RosterStatus, string]>).map(([status, label]) => (
+                  <button key={status} type="button" className={`mh-sa__btn mh-sa__btn--sm${rosterStatus === status ? " mh-sa__btn--primary" : ""}`} onClick={() => setRosterStatus(status)}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="mh-sa__table-wrap">
+                <table className="mh-sa__table en-roster-table">
+                  <thead>
+                    <tr><th>Student</th><th>Student Number</th><th>Program</th><th>Status</th><th>Added</th></tr>
+                  </thead>
+                  <tbody>
+                    {roster.items.filter((item) => rosterStatus === "all" || item.status === rosterStatus).map((item) => (
+                      <tr key={item.enrolmentId}>
+                        <td><strong>{item.givenName} {item.familyName}</strong><div className="mh-sa__sub">{item.email}</div></td>
+                        <td>{item.studentNumber}</td>
+                        <td>{item.programName || "—"}</td>
+                        <td><span className={`mh-sa__pill ${item.status === "enrolled" ? "mh-sa__pill--ok" : "mh-sa__pill--warn"}`}>{item.status === "enrolled" ? "Enrolled" : "Waitlisted"}</span></td>
+                        <td>{new Date(item.enrolledAt).toLocaleDateString("en-CA")}</td>
+                      </tr>
+                    ))}
+                    {!roster.items.some((item) => rosterStatus === "all" || item.status === rosterStatus) ? (
+                      <tr><td colSpan={5} className="mh-sa__empty-cell"><p className="mh-sa__empty">No {rosterStatus === "all" ? "enrolled or waitlisted" : rosterStatus} students in this section.</p></td></tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : null}
+        </SaModal>
+      ) : null}
     </SuperFrame>
   );
 }

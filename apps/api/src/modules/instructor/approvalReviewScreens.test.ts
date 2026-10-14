@@ -44,7 +44,7 @@ describe("buildGradeCorrectionReview", () => {
     expect(db.approvalRequest.findMany.mock.calls[0]![0].where).toMatchObject({
       institutionId,
       subjectRef: { in: ["sec-a", "section:sec-a"] },
-      type: { in: ["grade_publish", "grade.publish"] },
+      type: { in: ["grade_publish", "grade.publish", "grade.correct"] },
     });
   });
 

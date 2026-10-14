@@ -2,23 +2,50 @@ import { Router } from "express";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@myheritage/db";
-import { hashPassword, loginWithPassword, changePassword } from "@myheritage/auth";
+import { writeAuditAndOutbox } from "@myheritage/events";
+import { hashPassword, loginWithPassword, changePassword, validateInstitutionPassword } from "@myheritage/auth";
 import { LoginRequest, LoginResponse } from "@myheritage/contracts";
 import { sendMailViaHumanitix, mailConfigured } from "../../lib/mailer.js";
 import { forgetSessionRevocation, requireAuth, type AuthedRequest } from "../../middleware/auth.js";
+import { signPortalCookie } from "../../lib/portalCookie.js";
 
 export const authRouter: Router = Router();
 
 authRouter.post("/login", async (req, res, next) => {
+  let attemptedLogin = "";
   try {
     const body = LoginRequest.parse(req.body);
+    attemptedLogin = body.email.trim().toLowerCase();
     const result = await loginWithPassword({
       ...body,
       ipAddress: req.ip ?? "127.0.0.1",
       userAgent: req.header("user-agent") ?? "unknown",
     });
+    const maxAge = body.remember === false ? 12 * 60 * 60 : 30 * 24 * 60 * 60;
+    res.cookie("mh_roles", signPortalCookie(result.roles, maxAge), {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: maxAge * 1000,
+    });
     res.json(LoginResponse.parse(result));
   } catch (err) {
+    if ((err as { code?: string }).code === "UNAUTHORIZED" && attemptedLogin) {
+      const account = await accountForLoginAudit(attemptedLogin).catch(() => null);
+      if (account) {
+        await writeAuditAndOutbox(prisma, {
+          institutionId: account.institutionId,
+          actorId: account.id,
+          eventName: "Account.loginFailed",
+          purpose: "authentication",
+          before: null,
+          after: { ip: req.ip ?? "127.0.0.1", reason: "invalid_credentials" },
+          source: "auth.login",
+          correlationId: randomUUID(),
+        }).catch(() => undefined);
+      }
+    }
     next(err);
   }
 });
@@ -40,6 +67,16 @@ const ChangePasswordBody = z.object({
 
 function hashToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
+}
+
+async function accountForLoginAudit(login: string) {
+  const byEmail = await prisma.account.findFirst({ where: { email: login }, select: { id: true, institutionId: true } });
+  if (byEmail) return byEmail;
+  const student = await prisma.student.findFirst({
+    where: { studentNumber: { equals: login, mode: "insensitive" } },
+    select: { person: { select: { accounts: { select: { id: true, institutionId: true }, take: 1 } } } },
+  });
+  return student?.person.accounts[0] ?? null;
 }
 
 authRouter.post("/forgot-password", async (req, res, next) => {
@@ -70,12 +107,18 @@ authRouter.post("/forgot-password", async (req, res, next) => {
     const rawToken = randomBytes(32).toString("hex");
     const tokenHash = hashToken(rawToken);
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
-    await prisma.passwordResetToken.create({
-      data: {
-        accountId: account.id,
-        tokenHash,
-        expiresAt,
-      },
+    await prisma.$transaction(async (tx) => {
+      await tx.passwordResetToken.create({ data: { accountId: account.id, tokenHash, expiresAt } });
+      await writeAuditAndOutbox(tx, {
+        institutionId: account.institutionId,
+        actorId: account.id,
+        eventName: "Account.passwordResetRequested",
+        purpose: "authentication",
+        before: null,
+        after: { expiresAt: expiresAt.toISOString() },
+        source: "auth.password.forgot",
+        correlationId: randomUUID(),
+      });
     });
 
     const webOrigin = (process.env.WEB_ORIGIN ?? "http://localhost:3000").split(",")[0]?.trim() || "http://localhost:3000";
@@ -107,7 +150,7 @@ authRouter.post("/forgot-password", async (req, res, next) => {
     res.json({
       ok: true,
       mailed,
-      ...(process.env.NODE_ENV !== "production" || process.env.EXPOSE_RESET_TOKEN === "1"
+      ...(process.env.NODE_ENV === "test" && process.env.EXPOSE_RESET_TOKEN === "1"
         ? { resetToken: rawToken, resetUrl }
         : {}),
     });
@@ -133,6 +176,16 @@ authRouter.post("/change-password", requireAuth, async (req, res, next) => {
   }
 });
 
+authRouter.get("/session", requireAuth, (req, res) => {
+  const user = (req as AuthedRequest).user;
+  res.json({
+    accountId: user.accountId,
+    institutionId: user.institutionId,
+    personId: user.personId,
+    roles: user.roles,
+  });
+});
+
 authRouter.post("/reset-password", async (req, res, next) => {
   try {
     const body = ResetBody.parse(req.body);
@@ -143,17 +196,28 @@ authRouter.post("/reset-password", async (req, res, next) => {
       return;
     }
     const passwordHash = await hashPassword(body.password);
-    await prisma.$transaction([
-      prisma.account.update({
-        where: { id: row.accountId },
-        data: { passwordHash },
-      }),
-      prisma.passwordResetToken.update({
-        where: { id: row.id },
-        data: { usedAt: new Date() },
-      }),
-      prisma.session.deleteMany({ where: { accountId: row.accountId } }),
-    ]);
+    const account = await prisma.account.findUnique({ where: { id: row.accountId }, include: { person: true } });
+    if (!account) throw Object.assign(new Error("Account not found"), { code: "NOT_FOUND", status: 404 });
+    await validateInstitutionPassword(account.institutionId, body.password, {
+      givenName: account.person.givenName,
+      familyName: account.person.familyName,
+      login: account.email,
+    });
+    await prisma.$transaction(async (tx) => {
+      await tx.account.update({ where: { id: row.accountId }, data: { passwordHash } });
+      await tx.passwordResetToken.update({ where: { id: row.id }, data: { usedAt: new Date() } });
+      await tx.session.deleteMany({ where: { accountId: row.accountId } });
+      await writeAuditAndOutbox(tx, {
+        institutionId: account.institutionId,
+        actorId: row.accountId,
+        eventName: "Account.passwordReset",
+        purpose: "authentication",
+        before: null,
+        after: { revokedSessions: true },
+        source: "auth.password.reset",
+        correlationId: randomUUID(),
+      });
+    });
     res.json({ ok: true });
   } catch (err) {
     next(err);
@@ -180,6 +244,7 @@ authRouter.post("/logout", requireAuth, async (req, res, next) => {
         version: 1,
       },
     });
+    res.clearCookie("mh_roles", { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/" });
     res.json({ ok: true });
   } catch (err) {
     next(err);

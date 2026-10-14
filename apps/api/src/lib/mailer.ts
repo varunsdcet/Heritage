@@ -1,7 +1,5 @@
-const DEFAULT_SEND_MAIL_URL = "https://onlinemandiapp.com/Humanitix/api/send_mail";
-
 export function mailConfigured() {
-  const url = process.env.HUMANITIX_SEND_MAIL_URL || DEFAULT_SEND_MAIL_URL;
+  const url = process.env.HUMANITIX_SEND_MAIL_URL;
   return Boolean(url && url !== "off");
 }
 
@@ -18,7 +16,8 @@ export async function sendMailViaHumanitix(input: {
     throw Object.assign(new Error("Email is required"), { status: 400 });
   }
 
-  const url = process.env.HUMANITIX_SEND_MAIL_URL || DEFAULT_SEND_MAIL_URL;
+  const url = process.env.HUMANITIX_SEND_MAIL_URL;
+  if (!url) throw Object.assign(new Error("Mail is not configured"), { status: 503, code: "MAIL_OFF" });
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },

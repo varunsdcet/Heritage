@@ -211,7 +211,7 @@ export async function buildCoachFacts(user: SessionClaims, role: RoleName): Prom
         }),
       ]);
 
-    const balance = ledger.reduce((sum, e) => (e.kind === "charge" ? sum + e.amountCad : sum - e.amountCad), 0);
+    const balance = ledger.reduce((sum, e) => (e.kind === "charge" ? sum + Number(e.amountCad) : sum - Number(e.amountCad)), 0);
     const openCharges = ledger.filter((e) => e.kind === "charge" && e.status === "open").slice(0, 4);
     const nextPlan = planItems.find((item) => item.status === "not_started" || item.status === "in_progress");
     const overdueAssignments = assignments.filter((a) => a.dueAt && a.dueAt < now).slice(0, 4);
@@ -305,7 +305,7 @@ export async function buildCoachFacts(user: SessionClaims, role: RoleName): Prom
         id: `finance:${entry.id}`,
         title: entry.label,
         uri: "/student/fees",
-        text: `${entry.label}: ${moneyCad(entry.amountCad)} (${entry.status})${
+        text: `${entry.label}: ${moneyCad(Number(entry.amountCad))} (${entry.status})${
           entry.dueAt ? `, due ${campusDate(entry.dueAt, campusTimeZone)}` : ""
         }.`,
         kind: "finance" as const,

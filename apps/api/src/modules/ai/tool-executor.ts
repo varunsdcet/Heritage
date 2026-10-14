@@ -1,7 +1,9 @@
-import type { AiRequestContext, AiToolName, EnrollmentMetricsSnapshot, MissingSubmissionRow, StudentRiskAnalysis } from "@myheritage/contracts";
+import type { AiRequestContext, AiToolName, EnrollmentMetricsSnapshot, MissingSubmissionRow, SessionClaims, StudentRiskAnalysis } from "@myheritage/contracts";
 import { assertToolAllowed } from "@myheritage/ai";
 import { prisma } from "@myheritage/db";
 import { computeDegreeProgress, impactIfDropCourse } from "../academic/degree-progress.service.js";
+import { assertPermission } from "../admin/superAdmin.service.js";
+import { facultySectionIds } from "../instructor/sectionFaculty.js";
 import { listKnowledgeDocuments } from "./knowledge.service.js";
 import { getEnrollmentMetrics } from "./metrics.service.js";
 import { getMissingSubmissionsForInstructor } from "./faculty-insight.service.js";
@@ -10,6 +12,10 @@ import { getStudentSuccessSignals } from "./success.service.js";
 export async function executeAiTool(name: AiToolName, ctx: AiRequestContext, input: Record<string, unknown> = {}) {
   const tool = assertToolAllowed(name, ctx.roles);
   const institutionId = ctx.institutionId;
+
+  if (STUDENT_SCOPED_TOOLS.has(name)) {
+    await assertStudentToolAccess(ctx, requireStudentId(ctx, input));
+  }
 
   switch (name) {
     case "get_degree_progress": {
@@ -171,6 +177,72 @@ export async function executeAiTool(name: AiToolName, ctx: AiRequestContext, inp
       throw Object.assign(new Error(`Unhandled AI tool: ${_exhaustive}`), { code: "VALIDATION_ERROR", status: 400 });
     }
   }
+}
+
+const STUDENT_SCOPED_TOOLS = new Set<AiToolName>([
+  "get_degree_progress",
+  "create_degree_plan_scenario",
+  "get_transfer_credits",
+  "get_student_success_signals",
+  "get_student_profile",
+  "get_academic_record",
+  "get_degree_requirements",
+  "create_advisor_appointment",
+  "create_student_success_case",
+]);
+
+async function assertStudentToolAccess(ctx: AiRequestContext, studentId: string) {
+  const user: SessionClaims = {
+    sub: ctx.accountId,
+    accountId: ctx.accountId,
+    personId: ctx.personId,
+    institutionId: ctx.institutionId,
+    roles: ctx.roles,
+    sessionId: ctx.sessionId,
+  };
+  const target = await prisma.student.findFirst({
+    where: { id: studentId, institutionId: ctx.institutionId },
+    select: { id: true, personId: true },
+  });
+  if (!target) {
+    throw Object.assign(new Error("Student record not found"), { code: "NOT_FOUND", status: 404 });
+  }
+
+  if (ctx.roles.includes("student")) {
+    if (target.personId !== ctx.personId || ctx.activeStudentId !== target.id) {
+      throw Object.assign(new Error("Students may only access their own academic tools"), {
+        code: "FORBIDDEN",
+        status: 403,
+      });
+    }
+    return;
+  }
+
+  if (ctx.roles.includes("admin") || ctx.roles.includes("registrar")) {
+    await assertPermission(user, "studentRecords", "view");
+    return;
+  }
+
+  if (ctx.roles.includes("instructor")) {
+    const sectionIds = await facultySectionIds(user);
+    const enrolment = sectionIds.size
+      ? await prisma.enrolment.findFirst({
+          where: {
+            institutionId: ctx.institutionId,
+            studentId,
+            sectionId: { in: [...sectionIds] },
+            status: { not: "withdrawn" },
+          },
+          select: { id: true },
+        })
+      : null;
+    if (enrolment) return;
+  }
+
+  throw Object.assign(new Error("You do not have access to this student's academic data"), {
+    code: "FORBIDDEN",
+    status: 403,
+  });
 }
 
 function requireStudentId(ctx: AiRequestContext, input: Record<string, unknown>) {

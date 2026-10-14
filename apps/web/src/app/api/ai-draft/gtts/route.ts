@@ -4,6 +4,7 @@ import { join } from "path";
 import { spawn } from "child_process";
 import { NextRequest, NextResponse } from "next/server";
 import { heygenConfig, heygenSpeech, rateLimited } from "@/lib/heygenSpeech";
+import { requireWebApiSession } from "@/lib/serverRouteAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -205,6 +206,8 @@ async function googleCloudSynthesize(body: GttsBody, apiKey: string, male: boole
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await requireWebApiSession(req, ["instructor", "admin", "registrar"]);
+    if (session instanceof NextResponse) return session;
     const body = (await req.json()) as GttsBody;
     const ssml = body.input?.ssml || "";
     const text = body.input?.text || "";

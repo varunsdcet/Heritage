@@ -52,7 +52,7 @@ describe("adjustLedgerEntry write-offs", () => {
   it("routes reversing a charge through the same approval", async () => {
     db.financeLedgerEntry.findFirst.mockResolvedValue({ ...charge, status: "paid" });
     await expect(adjustLedgerEntry(user, { entryId, action: "reverse" })).resolves.toMatchObject({ pendingApproval: true });
-    expect(db.$transaction).not.toHaveBeenCalled();
+    expect(db.financeLedgerEntry.create).not.toHaveBeenCalled();
   });
 
   it("refuses to mark a charge paid without a payment", async () => {
